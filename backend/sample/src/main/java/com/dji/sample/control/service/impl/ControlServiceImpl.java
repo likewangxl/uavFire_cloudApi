@@ -13,6 +13,7 @@ import com.dji.sdk.cloudapi.control.FlyToPointRequest;
 import com.dji.sdk.cloudapi.control.PayloadAuthorityGrabRequest;
 import com.dji.sdk.cloudapi.control.TakeoffToPointRequest;
 import com.dji.sdk.cloudapi.control.api.AbstractControlService;
+import com.dji.sdk.config.version.GatewayManager;
 import com.dji.sdk.cloudapi.device.DeviceDomainEnum;
 import com.dji.sdk.cloudapi.debug.DebugMethodEnum;
 import com.dji.sdk.cloudapi.debug.api.AbstractDebugService;
@@ -167,8 +168,7 @@ public class ControlServiceImpl implements IControlService {
 
     @Override
     public HttpResultResponse takeoffToPoint(String sn, TakeoffToPointParam param) {
-        log.info("takeoffToPoint received. sn={}", sn);
-        log.debug("takeoffToPoint param. sn={}, param={}", sn, param);
+        log.info("takeoffToPoint called. sn={}, param={}", sn, param);
         try {
             checkTakeoffCondition(sn);
         } catch (RuntimeException e) {
@@ -178,11 +178,35 @@ public class ControlServiceImpl implements IControlService {
 
         param.setFlightId(UUID.randomUUID().toString());
         TakeoffToPointRequest req = mapper.convertValue(param, TakeoffToPointRequest.class);
-        log.debug("takeoffToPoint publishing. sn={}, req={}", sn, req);
+
+        // 诊断日志：记录网关注册时识别出的 GatewayTypeEnum / SDK 版本，便于排查
+        // 210003 (DEVICE_TYPE_NOT_SUPPORT) 这类问题。例如 RC Plus 2 固件若仍上报
+        // type=119（RC_PLUS），会被识别为 GatewayTypeEnum.RC 而被 SDK AOP 拦截。
+        try {
+            GatewayManager gw = SDKManager.getDeviceSDK(sn);
+            log.info("takeoffToPoint gateway info. sn={}, gatewayType={}, sdkVersion={}, droneSn={}",
+                    sn, gw.getType(), gw.getSdkVersion(), gw.getDroneSn());
+        } catch (Exception e) {
+            log.warn("takeoffToPoint cannot resolve gateway SDK info. sn={}, reason={}", sn, e.getMessage());
+        }
+
+        // 用 JSON 序列化打印真正下发到飞机的请求字段，便于和 DJI 文档比对
+        // （toString 不展示 @JsonProperty 后的命名，JSON 才是飞机真正看到的字段名）
+        try {
+            log.info("takeoffToPoint request JSON. sn={}, json={}", sn, mapper.writeValueAsString(req));
+        } catch (Exception e) {
+            log.warn("takeoffToPoint cannot serialize request to JSON. sn={}, reason={}", sn, e.getMessage());
+        }
+
+        log.info("takeoffToPoint publishing. sn={}, req={}", sn, req);
         TopicServicesResponse<ServicesReplyData> response = abstractControlService.takeoffToPoint(
                 SDKManager.getDeviceSDK(sn), req);
         ServicesReplyData reply = response.getData();
         boolean ok = reply.getResult().isSuccess();
+        // 完整打印 reply.output —— 飞机会在 output 里塞额外的 extra_error_info / status，
+        // 比如 "compass_not_calibrated" / "battery_too_low" / "home_point_not_set" 等
+        log.info("takeoffToPoint reply. sn={}, result={}, output={}",
+                sn, reply.getResult(), reply.getOutput());
         if (ok) {
             log.info("takeoffToPoint success. sn={}, flightId={}", sn, param.getFlightId());
         } else {

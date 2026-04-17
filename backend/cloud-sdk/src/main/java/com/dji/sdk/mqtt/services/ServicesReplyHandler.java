@@ -33,7 +33,9 @@ public class ServicesReplyHandler {
     @ServiceActivator(inputChannel = ChannelName.INBOUND_SERVICES_REPLY)
     public void servicesReply(Message<?> message) throws IOException {
         byte[] payload = (byte[])message.getPayload();
-        log.debug("services_reply raw payload: {}", new String(payload));
+        // 提到 INFO：飞机回 services_reply 时如果带 extra_error_info / 自定义 output，
+        // 这是排查 336002 之类"飞机端拒绝"的唯一原始证据
+        log.info("services_reply raw payload: {}", new String(payload));
 
         TopicServicesResponse<ServicesReplyReceiver> receiver = Common.getObjectMapper()
                 .readValue(payload, new TypeReference<TopicServicesResponse<ServicesReplyReceiver>>() {});

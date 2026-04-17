@@ -537,10 +537,10 @@ function sleep (ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
-const OFFICIAL_TAKEOFF_TARGET_HEIGHT = 20
-const OFFICIAL_SECURITY_TAKEOFF_HEIGHT = 20
-const OFFICIAL_TAKEOFF_MAX_SPEED = 1
-const OFFICIAL_RTH_ALTITUDE = 20
+const OFFICIAL_TAKEOFF_TARGET_HEIGHT = 30
+const OFFICIAL_SECURITY_TAKEOFF_HEIGHT = 30
+const OFFICIAL_TAKEOFF_MAX_SPEED = 5
+const OFFICIAL_RTH_ALTITUDE = 100
 
 function setActionLoading (gatewaySn: string, action?: string) {
   if (!action) {
@@ -739,9 +739,15 @@ async function handleTakeoff (device: OnlineDevice) {
     message.warning('Aircraft latitude and longitude telemetry is not ready.')
     return
   }
+  // M4T firmware rejects target==current (zero horizontal distance, 336002 with empty output).
+  // Offset target ~16 m north (latitude +0.00015°) so the drone takes off then translates briefly.
+  const TARGET_LAT_OFFSET_DEG = 0.00015
+  const targetLat = latitude + TARGET_LAT_OFFSET_DEG
+  const targetLon = longitude
   const confirmMessage = [
     `Confirm official takeoff_to_point for ${device.callsign}?`,
-    `Target: ${latitude}, ${longitude}`,
+    `Current: ${latitude}, ${longitude}`,
+    `Target: ${targetLat}, ${targetLon} (~16 m north)`,
     `Target height: ${OFFICIAL_TAKEOFF_TARGET_HEIGHT} m`,
     `Security takeoff height: ${OFFICIAL_SECURITY_TAKEOFF_HEIGHT} m`,
     'This is not a 1-2 m stick takeoff test.'
@@ -751,8 +757,8 @@ async function handleTakeoff (device: OnlineDevice) {
   }
   await withAircraftAction(device, 'takeoff', async () => {
     return await postTakeoffToPoint(device.gateway.sn, {
-      target_latitude: latitude,
-      target_longitude: longitude,
+      target_latitude: targetLat,
+      target_longitude: targetLon,
       target_height: OFFICIAL_TAKEOFF_TARGET_HEIGHT,
       security_takeoff_height: OFFICIAL_SECURITY_TAKEOFF_HEIGHT,
       max_speed: OFFICIAL_TAKEOFF_MAX_SPEED,

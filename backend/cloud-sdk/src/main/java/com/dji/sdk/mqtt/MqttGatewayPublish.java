@@ -37,8 +37,10 @@ public class MqttGatewayPublish {
 
     public void publish(String topic, int qos, CommonTopicRequest request) {
         try {
-            log.debug("send topic: {}, payload: {}", topic, request.toString());
+            // 提到 INFO：要核对真实下发 MQTT topic + JSON payload，必须拿到原始字节级别的
+            // 调用记录，否则 toString 不能还原 @JsonProperty 字段名。
             byte[] payload = Common.getObjectMapper().writeValueAsBytes(request);
+            log.info("MQTT send topic: {}, qos={}, payload: {}", topic, qos, new String(payload));
             messageGateway.publish(topic, payload, qos);
         } catch (JsonProcessingException e) {
             log.error("Failed to publish the message. {}", request.toString());
@@ -48,8 +50,8 @@ public class MqttGatewayPublish {
 
     public void publish(String topic, int qos, CommonTopicResponse response) {
         try {
-            log.debug("send topic: {}, payload: {}", topic, response.toString());
             byte[] payload = Common.getObjectMapper().writeValueAsBytes(response);
+            log.info("MQTT send topic: {}, qos={}, payload: {}", topic, qos, new String(payload));
             messageGateway.publish(topic, payload, qos);
         } catch (JsonProcessingException e) {
             log.error("Failed to publish the message. {}", response.toString());

@@ -170,8 +170,16 @@ public abstract class AbstractControlService {
      * @param gateway
      * @param request   data
      * @return  services_reply
+     *
+     * NOTE: 官方 SDK 默认 `exclude = GatewayTypeEnum.RC`，即只允许 Dock / RC2 等
+     * 类型调用。但部分 RC Plus 2 固件在 update_topo 中仍上报 type=119（RC_PLUS），
+     * 会被 GatewayTypeEnum.find 归类到 RC，从而被 AOP 抛出 210003
+     * (DEVICE_TYPE_NOT_SUPPORT)。为避免这种"识别错位但设备实际可用"的场景把命令
+     * 阻拦在 SDK 层，这里取消 RC 排除，转交设备自身判定能力——若设备真的不支持
+     * 该命令，会以 services_reply.result 返回更具语义的错误码，而不是模糊的
+     * 210003。
      */
-    @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
+    @CloudSDKVersion
     public TopicServicesResponse<ServicesReplyData> takeoffToPoint(GatewayManager gateway, TakeoffToPointRequest request) {
         return servicesPublish.publish(
                 gateway.getGatewaySn(),
