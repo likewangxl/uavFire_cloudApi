@@ -144,3 +144,8 @@ mvn -pl sample spring-boot:run
 1. 拉取仓库后先按 `RUNBOOK.md` 配置 MySQL、Redis、MQTT 和前端环境变量。
 2. 做真实飞控测试时，先观察后端 `services`、`services_reply`、`events` 和遥控器提示，不要只看前端按钮结果。
 3. 如果继续排查 DRC 断开问题，优先记录点击起飞前后的 MQTT 请求、服务回复和遥控器事件。
+
+## 调试历史索引
+
+- **2026-04-17 `takeoff_to_point` 调试会话**：详见 `WORK_RECORD.md` 第 7 节。错误码从 210003 推进到 336003，包含完整错误分析、代码改动清单、日志诊断位置、下一步建议。对应 commit `f0ef95b`、tag `v0.2.0-takeoff-coord-offset`。
+- 已知的修改 cloud-sdk 后生效流程：**必须** 先 `mvn -pl cloud-sdk clean install` 再跑 sample，否则 sample 用的是本地仓库里旧的 cloud-sdk-1.0.3.jar。
