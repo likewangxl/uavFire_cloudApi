@@ -428,7 +428,7 @@
 </template>
 
 <script lang="ts">
-import { computed, defineComponent, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   generateLineContent,
   generatePointContent,
@@ -469,6 +469,7 @@ import FlightAreaActionIcon from './flight-area/FlightAreaActionIcon.vue'
 import { EFlightAreaType } from '../types/flight-area'
 import { useFlightArea } from './flight-area/use-flight-area'
 import { useFlightAreaDroneLocationEvent } from './flight-area/use-flight-area-drone-location-event'
+import { addWaypointGcj, getPlanningStateRaw } from '/@/hooks/use-wayline-planning'
 
 export default defineComponent({
   components: {
@@ -707,6 +708,15 @@ export default defineComponent({
     onMounted(() => {
       const app = getApp()
       useGMapManageHook.globalPropertiesConfig(app)
+      rebuildPlanningOverlays()
+      if (planningState.active) {
+        bindPlanningClick()
+      }
+    })
+
+    onUnmounted(() => {
+      unbindPlanningClick()
+      clearPlanningOverlays()
     })
 
     const { getDrawFlightAreaCallback, onFlightAreaDroneLocationWs } = useFlightArea()
@@ -715,6 +725,92 @@ export default defineComponent({
     function selectFlightAreaAction ({ type, isCircle }: { type: EFlightAreaType, isCircle: boolean }) {
       draw(isCircle ? MapDoodleEnum.CIRCLE : MapDoodleEnum.POLYGON, true, type)
     }
+
+    // ---------- Wayline planning (click-to-fly) wiring ----------
+    // When planning mode is active we register a map click handler that records
+    // the clicked point as a waypoint; we also maintain AMap markers + a
+    // polyline visualising the current waypoint list.
+    const planningState = getPlanningStateRaw()
+    const planningMarkers: any[] = []
+    let planningPolyline: any = null
+    let planningClickBound = false
+
+    function onPlanningMapClick (e: any) {
+      if (!planningState.active) return
+      const lng = e?.lnglat?.getLng?.()
+      const lat = e?.lnglat?.getLat?.()
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+      addWaypointGcj(lng, lat)
+    }
+
+    function clearPlanningOverlays () {
+      const map = root?.$map
+      planningMarkers.forEach(m => map?.remove(m))
+      planningMarkers.length = 0
+      if (planningPolyline) {
+        map?.remove(planningPolyline)
+        planningPolyline = null
+      }
+    }
+
+    function rebuildPlanningOverlays () {
+      const AMap = root?.$aMap
+      const map = root?.$map
+      if (!AMap || !map) return
+      clearPlanningOverlays()
+      if (planningState.waypoints.length === 0) return
+      planningState.waypoints.forEach((wp, idx) => {
+        const marker = new AMap.Marker({
+          position: [wp.gcjLng, wp.gcjLat],
+          label: {
+            content: `<span style="color:#000;font-weight:700;padding:0 4px;">${idx + 1}</span>`,
+            direction: 'top',
+          },
+          extData: { waylinePlanningId: wp.id },
+        })
+        map.add(marker)
+        planningMarkers.push(marker)
+      })
+      if (planningState.waypoints.length >= 2) {
+        planningPolyline = new AMap.Polyline({
+          path: planningState.waypoints.map(w => [w.gcjLng, w.gcjLat]),
+          strokeColor: '#faad14',
+          strokeWeight: 3,
+          strokeStyle: 'dashed',
+        })
+        map.add(planningPolyline)
+      }
+    }
+
+    function bindPlanningClick () {
+      const map = root?.$map
+      if (!map || planningClickBound) return
+      map.on('click', onPlanningMapClick)
+      planningClickBound = true
+    }
+
+    function unbindPlanningClick () {
+      const map = root?.$map
+      if (!map || !planningClickBound) return
+      map.off('click', onPlanningMapClick)
+      planningClickBound = false
+    }
+
+    watch(() => planningState.active, (active) => {
+      if (active) {
+        // The native draw tool also claims map clicks; disable it so the two
+        // modes don't compete for the same input.
+        if (mouseMode.value) draw('off', false)
+        bindPlanningClick()
+      } else {
+        unbindPlanningClick()
+      }
+    })
+
+    watch(
+      () => planningState.waypoints.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|'),
+      () => rebuildPlanningOverlays()
+    )
 
     function getDrawCallback ({ obj }: { obj : any }) {
       if (state.isFlightArea) {

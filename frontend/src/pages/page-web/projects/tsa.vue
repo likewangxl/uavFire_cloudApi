@@ -292,6 +292,75 @@
                     Down
                   </a-button>
                 </div>
+                <div class="aircraft-action-tips" style="color: #8c8c8c; margin-top: 4px;">
+                  fly_to_point (airborne only, height ≥ 15 m). See WORK_RECORD.md §8.
+                </div>
+                <div class="aircraft-action-row">
+                  <a-button
+                    size="small"
+                    type="primary"
+                    class="aircraft-action-btn"
+                    :loading="actionLoading[device.gateway.sn] === 'flyForward'"
+                    :disabled="!canFlyToPoint(device)"
+                    @click="handleFlyForwardTest(device)">
+                    Fly Forward 20m
+                  </a-button>
+                  <a-popover
+                    trigger="click"
+                    placement="left"
+                    :visible="flyToPointFormState.visible && flyToPointFormState.gatewaySn === device.gateway.sn"
+                    @visibleChange="(v) => { if (!v) closeFlyToPointManual() }">
+                    <template #content>
+                      <div style="width: 220px;">
+                        <div style="margin-bottom: 6px; font-weight: 700;">Fly To Point (Manual)</div>
+                        <div style="margin-bottom: 4px;">Latitude</div>
+                        <a-input-number
+                          v-model:value="flyToPointFormState.latitude"
+                          :step="0.00001"
+                          style="width: 100%;" />
+                        <div style="margin: 6px 0 4px;">Longitude</div>
+                        <a-input-number
+                          v-model:value="flyToPointFormState.longitude"
+                          :step="0.00001"
+                          style="width: 100%;" />
+                        <div style="margin: 6px 0 4px;">Height (m, from takeoff)</div>
+                        <a-input-number
+                          v-model:value="flyToPointFormState.height"
+                          :min="MIN_AIRBORNE_HEIGHT_M"
+                          :step="1"
+                          style="width: 100%;" />
+                        <div style="margin: 6px 0 4px;">Max speed (m/s, 2-15)</div>
+                        <a-input-number
+                          v-model:value="flyToPointFormState.maxSpeed"
+                          :min="2"
+                          :max="15"
+                          :step="1"
+                          style="width: 100%;" />
+                        <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                          <a-button size="small" @click="closeFlyToPointManual">Cancel</a-button>
+                          <a-button size="small" type="primary" @click="submitFlyToPointManual">Send</a-button>
+                        </div>
+                      </div>
+                    </template>
+                    <a-button
+                      size="small"
+                      class="aircraft-action-btn"
+                      :loading="actionLoading[device.gateway.sn] === 'flyManual'"
+                      :disabled="!canFlyToPoint(device)"
+                      @click="openFlyToPointManual(device)">
+                      Fly To Point
+                    </a-button>
+                  </a-popover>
+                  <a-button
+                    size="small"
+                    danger
+                    class="aircraft-action-btn"
+                    :loading="actionLoading[device.gateway.sn] === 'flyStop'"
+                    :disabled="!isCurrentRemoteGateway(device)"
+                    @click="handleStopFlyToPoint(device)">
+                    Stop Fly
+                  </a-button>
+                </div>
               </div>
             </div>
           </div>
@@ -318,6 +387,8 @@ import {
   ERthMode,
   LostControlActionInCommandFLight,
   postFlightAuth,
+  postFlyToPoint,
+  deleteFlyToPoint,
   postTakeoffToPoint,
   WaylineLostControlActionInCommandFlight
 } from '/@/api/drone-control/drone'
@@ -792,6 +863,137 @@ async function handleAxisControl (device: OnlineDevice, direction: 'up' | 'hover
     direction,
     `${direction} command sent.`
   )
+}
+
+// ---------- fly_to_point (RC Plus 2 + DRC feasibility probe, see WORK_RECORD.md §8) ----------
+
+// ~20 m north of current OSD position. 0.00018° of latitude ≈ 20 m anywhere on Earth.
+const FLY_FORWARD_LAT_OFFSET_DEG = 0.00018
+// Aircraft must be airborne; reject fly_to_point below this altitude to avoid ground-state abuse.
+const MIN_AIRBORNE_HEIGHT_M = 15
+
+// Shared popover state: only one remote-controlled aircraft can have flight commands active at a
+// time, so a single reactive is sufficient even though the template lists multiple aircraft.
+const flyToPointFormState = reactive({
+  visible: false,
+  gatewaySn: '',
+  aircraftSn: '',
+  latitude: null as number | null,
+  longitude: null as number | null,
+  height: null as number | null,
+  maxSpeed: 5 as number,
+})
+
+function isAircraftAirborne (device: OnlineDevice) {
+  const osd = deviceInfo.value[device.sn]
+  if (!osd) return false
+  if (osd.mode_code === EModeCode.Disconnected) return false
+  const h = Number(osd.height)
+  return Number.isFinite(h) && h >= MIN_AIRBORNE_HEIGHT_M
+}
+
+function canFlyToPoint (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && isAircraftAirborne(device)
+}
+
+function openFlyToPointManual (device: OnlineDevice) {
+  const osd = deviceInfo.value[device.sn]
+  flyToPointFormState.gatewaySn = device.gateway.sn
+  flyToPointFormState.aircraftSn = device.sn
+  // Prefill with current OSD position as a convenience; user must edit to create real distance.
+  flyToPointFormState.latitude = osd?.latitude != null ? Number(osd.latitude) : null
+  flyToPointFormState.longitude = osd?.longitude != null ? Number(osd.longitude) : null
+  flyToPointFormState.height = osd?.height != null ? Number(osd.height) : null
+  flyToPointFormState.maxSpeed = 5
+  flyToPointFormState.visible = true
+}
+
+function closeFlyToPointManual () {
+  flyToPointFormState.visible = false
+}
+
+async function handleFlyForwardTest (device: OnlineDevice) {
+  if (!canFlyToPoint(device)) {
+    message.warning('Aircraft must be airborne (height ≥ 15 m) and DRC connected.')
+    return
+  }
+  const osd = deviceInfo.value[device.sn]
+  const latitude = Number(osd.latitude)
+  const longitude = Number(osd.longitude)
+  const height = Number(osd.height)
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(height)) {
+    message.warning('Aircraft OSD telemetry is not ready.')
+    return
+  }
+  const targetLat = latitude + FLY_FORWARD_LAT_OFFSET_DEG
+  const targetLon = longitude
+  const targetHeight = height
+  const confirmMessage = [
+    `Confirm fly_to_point (forward ~20 m test) for ${device.callsign}?`,
+    `Current: ${latitude}, ${longitude}, h=${height} m`,
+    `Target: ${targetLat}, ${targetLon}, h=${targetHeight} m`,
+    'Max speed: 5 m/s',
+    'Aircraft will translate north ~20 m at current altitude.'
+  ].join('\n')
+  if (!window.confirm(confirmMessage)) return
+  await withAircraftAction(device, 'flyForward', async () => {
+    return await postFlyToPoint(device.gateway.sn, {
+      max_speed: 5,
+      points: [{
+        latitude: targetLat,
+        longitude: targetLon,
+        height: targetHeight,
+      }]
+    })
+  }, 'fly_to_point (forward 20 m) command sent.')
+}
+
+async function submitFlyToPointManual () {
+  const device = onlineDevices.data.find(d => d.gateway.sn === flyToPointFormState.gatewaySn)
+  if (!device) {
+    message.error('Target aircraft is no longer online.')
+    closeFlyToPointManual()
+    return
+  }
+  if (!canFlyToPoint(device)) {
+    message.warning('Aircraft must be airborne (height ≥ 15 m) and DRC connected.')
+    return
+  }
+  const { latitude, longitude, height, maxSpeed } = flyToPointFormState
+  if (latitude == null || longitude == null || height == null) {
+    message.warning('Latitude / longitude / height are required.')
+    return
+  }
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    message.warning('Latitude out of range [-90, 90].')
+    return
+  }
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    message.warning('Longitude out of range [-180, 180].')
+    return
+  }
+  if (!Number.isFinite(height) || height < MIN_AIRBORNE_HEIGHT_M) {
+    message.warning(`Target height must be ≥ ${MIN_AIRBORNE_HEIGHT_M} m.`)
+    return
+  }
+  const safeMaxSpeed = Number.isFinite(maxSpeed) && maxSpeed > 0 ? Math.min(maxSpeed, 15) : 5
+  closeFlyToPointManual()
+  await withAircraftAction(device, 'flyManual', async () => {
+    return await postFlyToPoint(device.gateway.sn, {
+      max_speed: safeMaxSpeed,
+      points: [{ latitude, longitude, height }]
+    })
+  }, 'fly_to_point (manual target) command sent.')
+}
+
+async function handleStopFlyToPoint (device: OnlineDevice) {
+  if (!isCurrentRemoteGateway(device)) {
+    message.warning('Remote control is not connected.')
+    return
+  }
+  await withAircraftAction(device, 'flyStop', async () => {
+    return await deleteFlyToPoint(device.gateway.sn)
+  }, 'Stop fly_to_point command sent.')
 }
 
 onUnmounted(() => {

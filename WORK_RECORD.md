@@ -207,3 +207,144 @@ ControlServiceImpl         : takeoffToPoint reply. result={errorCode=..., errorM
 2. **RC 屏幕抓图**：下次点击起飞失败瞬间，立即对遥控器屏幕拍照，记录横幅提示文字。这是目前定位飞控拒飞原因的唯一途径。
 3. **考虑 SDK 重试去重**：当前 SDK 3 秒超时会发 3 条同样的 `takeoff_to_point`，飞机对第 2、3 条必然 336003。如果影响排查，可在 sample 层把 `retryCount` 传 0（单次发布）。
 4. **OSD 原始字段诊断**：如需确认飞机上报的卫星数、电量、飞行模式等具体字段值，可把 `OsdRouter` 中 `log.debug("OSD原始数据 [{}] keys: {}", ...)` 临时升为 `log.info`，或在 `application.yml` 打开 `logging.level.com.dji.sdk.mqtt.osd=DEBUG`。
+
+---
+
+## 8. 2026-04-17 功能扩展：点选飞行 / 航线规划 可行性摸底（M4T + RC Plus 2 + DRC）
+
+记录日期：2026-04-17（与 §7 同一日）
+
+本节目标：在没有现场测试环境时，先把 `fly_to_point` 与点选飞行/航线规划 的资料、代码、验证步骤整理清楚，落到代码与文档两处，供下次飞行直接验证。
+
+### 8.1 现有代码盘点
+
+前端（`frontend/src/api/drone-control/drone.ts`）已封装：
+
+| 函数 | 路由 | 入参 |
+| --- | --- | --- |
+| `postFlyToPoint(sn, body)` | `POST /control/api/v1/devices/{sn}/jobs/fly-to-point` | `{ max_speed, points: [{ latitude, longitude, height }] }` |
+| `deleteFlyToPoint(sn)` | `DELETE /control/api/v1/devices/{sn}/jobs/fly-to-point` | 无 |
+| `postTakeoffToPoint(sn, body)` | `POST /control/api/v1/devices/{sn}/jobs/takeoff-to-point` | 见 §7 |
+
+前端 `components/g-map/DroneControlPanel.vue`（Dock 场景使用）已经有基于 `useDroneControl().flyToPoint` 的 "点选/手动输入 lat/lng/height" Popover，但该面板只在 Dock workspace 下挂载，RC Plus 2 场景看不到。
+
+前端 `components/g-map/use-drone-control-ws-event.ts` 已经在处理 `EBizCode.FlyToPointProgress` 事件（54 行附近），WS 链路已经通。
+
+后端 `cloud-sdk/...AbstractControlService.flyToPoint` 上的 `@CloudSDKVersion` 注解**不做** `exclude = GatewayTypeEnum.RC` 过滤，换言之 SDK AOP 层不会因为网关是 RC / RC2 而拦截该命令。实际可用性最终由飞机飞控决定。
+
+### 8.2 DJI 文档 vs 实际代码差异
+
+- DJI Cloud API 1.9.0 官方文档将 `fly_to_point` 放在 Dock 场景章节下，未明确标注 RC 场景可用。
+- 但 `cloud-sdk` 与后端 sample 的实际代码允许任何网关类型调用。与 §7 里 `takeoff_to_point` 的情况一致："**SDK 允许，飞机飞控判定**"。
+- 合理推测：RC2 + DRC 下 `fly_to_point` 大概率可用（本质是 commander_flight 模式下飞控接受目标点），但需要实飞验证。
+
+### 8.3 适用前置条件
+
+调用 `fly_to_point` 前必须全部满足：
+
+- 飞机已经**空中**（由 `takeoff_to_point` 或手动起飞得来），`mode_code` 处于"在飞"状态
+- DRC WebSocket 仍处于连接状态（`remoteControlState.connected === true`）
+- 目标点与当前 OSD 位置**水平距离 ≥ 16 m**（避免重演 336002）
+- 目标高度（相对起飞点）≥ `security_takeoff_height`，推荐与当前悬停高度一致以避免额外爬升
+
+### 8.4 验证计划（下次飞行需按序完成）
+
+1. 通过 tsa.vue "Official Takeoff" 起飞，悬停 30 m，确认 OSD `height ≈ 30`。
+2. 点击新增的 "Fly Forward 20m" 测试按钮（见 §8.5），观察：
+   - 后端 `services` MQTT 发送的 JSON（`ControlServiceImpl` 日志）
+   - `services_reply.result` 与 `output`
+   - RC Plus 2 屏幕是否出现拒飞横幅
+3. 若 `result=0`，再点击 "Fly To Point (Manual)" 手动输入远距离点，验证多次调用是否稳定。
+4. 若 `result ≠ 0`，记录错误码并对照 §7 错误码表，重点留意 `210003`（SDK 层拒 → 需去掉注解） / `336xxx`（飞控拒 → 查屏幕）。
+5. 最后点 "Stop Fly To Point" 调用 `deleteFlyToPoint`，确认飞机停止平移并悬停。
+
+---
+
+## 9. 2026-04-17 功能收口：planned wayline 稳定性增强（持久化 / 恢复）
+
+记录日期：2026-04-17
+
+本节记录在 §8 第一版 `planned wayline` 原型基础上，继续做的“可恢复性”收口，目标是降低页面切换或浏览器刷新后丢失规划数据的风险。
+
+### 9.1 本轮问题判断
+
+- §8 的实现已经能在前端完成“点选航点 -> 顺序 `fly_to_point` 执行”，但所有规划数据都只保存在运行时内存中。
+- 一旦刷新页面、热更新、浏览器崩溃或用户误切页面，目标机选择、默认高度、速度、航点列表都会丢失。
+- 这类问题不会影响单次 demo 演示，但会直接影响下一次实飞排查效率，因此优先级高于继续堆新按钮。
+
+### 9.2 本轮代码改动
+
+| 文件 | 改动 |
+| --- | --- |
+| `frontend/src/types/enums.ts` | 为 `planned wayline` 增加独立本地存储键 `PlannedWaylineDraft` |
+| `frontend/src/hooks/use-wayline-planning.ts` | 新增草稿序列化 / 反序列化；在目标机选择、航点增删改、执行结束时自动持久化；模块初始化时自动恢复 |
+| `frontend/src/pages/page-web/projects/wayline.vue` | 页面挂载时优先用已恢复的 `planningState.aircraftSn` 回填目标机选择框 |
+
+### 9.3 当前行为变化
+
+- 重新进入 `wayline` 页面后，若浏览器本地已有草稿，会自动恢复：
+  - 目标飞机 SN
+  - 默认高度
+  - 最大速度
+  - 航点列表（GCJ / WGS / height）
+- 恢复后不会自动继续“执行中”状态；执行状态统一回落为 `idle`，避免页面刷新后错误地把旧任务当成仍在运行。
+- 若本地草稿损坏或 JSON 解析失败，会自动清掉坏数据，避免反复报错。
+
+### 9.4 验证计划
+
+本轮代码完成后，需重新执行：
+
+```bash
+cd frontend
+npm.cmd run build
+```
+
+若构建通过，再补一次人工验证：
+
+1. 打开 `wayline` 页面，选择飞机并添加 2-3 个航点。
+2. 刷新页面。
+3. 确认目标飞机、默认高度、最大速度、航点列表仍在。
+4. 确认页面未误显示为“正在执行”。
+
+### 9.5 本轮验证结果
+
+- 已执行：
+
+```bash
+cd frontend
+npm.cmd run build
+```
+
+- 结果：构建通过。
+- 备注：仍存在项目原有的 Sass `@import` 弃用警告、legacy JS API 警告、`::v-deep` 警告和大 chunk 警告；本轮 `planned wayline` 持久化改动未引入新的构建错误。
+- 尚未完成：浏览器侧“加点 -> 刷新 -> 自动恢复”的人工交互验证，需在下次打开页面时补做。
+
+### 8.5 本次代码改动清单
+
+| 文件 | 改动 |
+| --- | --- |
+| `frontend/src/pages/page-web/projects/tsa.vue` | 新增 3 个按钮：`Fly Forward 20m`、`Fly To Point (Manual)`、`Stop Fly To Point`；引入 `postFlyToPoint` / `deleteFlyToPoint`；新增对应 handler 与 manual 输入 Popover 的表单状态 |
+| `frontend/src/api/drone-control/drone.ts` | 已存在所需接口，无需变更 |
+
+按钮启用条件：
+
+- 三个按钮都要求 `isCurrentRemoteGateway(device) === true`（DRC 已连接）。
+- `Fly Forward 20m` 与 `Fly To Point (Manual)` 额外要求：飞机 OSD 存在，`mode_code !== Disconnected`，且 `height ≥ 15 m`（避免地面阶段误触发）。
+- `Stop Fly To Point` 只要求 DRC 连接，方便在任何状态下中断。
+- Manual 按钮点击 "发送" 前做基本数值校验（经纬度范围、height 数值型）。
+
+### 8.6 航线规划（点选航线）初步方案
+
+`/wayline` 页目前是纯 KMZ 文件管理，不是规划工具。针对 M4T + RC Plus 2 + DRC，短期内采取：
+
+1. **不走官方 wayline 任务流**（`flighttask_create/prepare/execute` 是 Dock 专属，RC2 场景预期被拒）。
+2. **自建点选航线**：在 `tsa.vue` / `workspace.vue` 上增加 "航点序列" 侧栏，用户依次点击地图增加航点；点 "开始执行" 后前端按顺序 `postFlyToPoint` → 监听 `FlyToPointProgress.reach_target` → 下一个点。
+3. 航点在前端内存即可，不进后端数据库；执行过程中可随时 `Stop Fly To Point` 中断。
+
+§8.5 的三个按钮是该方案的**第一步**（单点验证），在飞行验证通过之前不展开多点序列逻辑。
+
+### 8.7 回滚参考
+
+- 本次改动不触碰后端任何文件；前端改动限 `tsa.vue`。
+- 如发现 `fly_to_point` 在 RC2 场景被 SDK AOP 拦截（返回 `210003`），参照 §7.2 的做法处理 `AbstractControlService.flyToPoint` 上的 `@CloudSDKVersion`（当前看代码无 `exclude`，应不需要改）。
+- tsa.vue 回滚到 §7 tag 状态：`git checkout v0.2.0-takeoff-coord-offset -- frontend/src/pages/page-web/projects/tsa.vue`。

@@ -65,6 +65,7 @@ export enum ELocalStorageKey {
     UserId = 'user_id',
     Device = 'device',
     GatewayOnline = 'gateway_online',
+    PlannedWaylineDraft = 'planned_wayline_draft',
 }
 
 export enum EPhotoType {
