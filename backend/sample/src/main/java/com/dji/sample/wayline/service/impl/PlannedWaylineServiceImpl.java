@@ -2,6 +2,7 @@ package com.dji.sample.wayline.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.dji.sample.component.oss.model.OssConfiguration;
 import com.dji.sample.wayline.dao.IPlannedWaylineMapper;
 import com.dji.sample.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.dji.sample.wayline.model.dto.PublishedWaylineFileDTO;
@@ -33,6 +34,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -122,13 +124,17 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         PublishedWaylineFileDTO publishedWayline = waylineFileService.createPublishedWayline(
                 workspaceId, buildPublishedWaylineCreate(existing));
 
-        existing.setPublishedWaylineId(publishedWayline.getWaylineId());
-        existing.setStatus(STATUS_PUBLISHED);
-        existing.setUpdateTime(System.currentTimeMillis());
-        int updated = mapper.updateById(existing);
-        if (updated <= 0) {
+        try {
+            existing.setPublishedWaylineId(publishedWayline.getWaylineId());
+            existing.setStatus(STATUS_PUBLISHED);
+            existing.setUpdateTime(System.currentTimeMillis());
+            int updated = mapper.updateById(existing);
+            if (updated <= 0) {
+                throw new IllegalArgumentException("Failed to publish planned wayline.");
+            }
+        } catch (RuntimeException e) {
             rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
-            throw new IllegalArgumentException("Failed to publish planned wayline.");
+            throw e;
         }
 
         return PublishPlannedWaylineResponse.builder()
@@ -277,9 +283,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private PublishedWaylineCreateDTO buildPublishedWaylineCreate(PlannedWaylineEntity entity) {
         String filename = entity.getName() + ".kmz";
+        String objectKey = StringUtils.hasText(OssConfiguration.objectDirPrefix)
+                ? OssConfiguration.objectDirPrefix + File.separator + entity.getPlannedWaylineId() + ".kmz"
+                : entity.getPlannedWaylineId() + ".kmz";
         return PublishedWaylineCreateDTO.builder()
                 .filename(filename)
-                .objectKey("wayline/" + entity.getPlannedWaylineId() + ".kmz")
+                .objectKey(objectKey)
                 .username(entity.getCreator())
                 .content(buildPublishedKmz(entity))
                 .build();

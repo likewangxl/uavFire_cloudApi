@@ -1,6 +1,7 @@
 package com.dji.sample.wayline;
 
 import com.dji.sample.wayline.dao.IPlannedWaylineMapper;
+import com.dji.sample.component.oss.model.OssConfiguration;
 import com.dji.sample.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.dji.sample.wayline.model.dto.PublishedWaylineFileDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
@@ -366,6 +367,7 @@ class PlannedWaylineServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        OssConfiguration.objectDirPrefix = "custom-prefix";
         PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
                 .id(1)
                 .plannedWaylineId("pw-001")
@@ -410,7 +412,7 @@ class PlannedWaylineServiceTest {
         verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
         assertAll(
                 () -> assertEquals("Survey A.kmz", createCaptor.getValue().getFilename()),
-                () -> assertEquals("wayline/pw-001.kmz", createCaptor.getValue().getObjectKey()),
+                () -> assertEquals("custom-prefix/pw-001.kmz", createCaptor.getValue().getObjectKey()),
                 () -> assertEquals("alice", createCaptor.getValue().getUsername()),
                 () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/template.kml"),
                 () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/waylines.wpml"),
@@ -488,6 +490,7 @@ class PlannedWaylineServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        OssConfiguration.objectDirPrefix = "wayline";
         PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
                 .id(1)
                 .plannedWaylineId("pw-001")
@@ -519,6 +522,46 @@ class PlannedWaylineServiceTest {
                 () -> service.publish("workspace-001", "pw-001"));
 
         assertEquals("Failed to publish planned wayline.", thrown.getMessage());
+        verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-001");
+    }
+
+    @Test
+    void publishShouldCleanupCreatedFormalWaylineWhenPlannedUpdateThrows() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        OssConfiguration.objectDirPrefix = "wayline";
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .name("Survey A")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-001")
+                        .name("Survey A")
+                        .objectKey("wayline/pw-001.kmz")
+                        .build());
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenThrow(new RuntimeException("db failure"));
+        when(waylineFileService.deleteByWaylineId("workspace-001", "wayline-001")).thenReturn(true);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        RuntimeException thrown = assertThrows(RuntimeException.class,
+                () -> service.publish("workspace-001", "pw-001"));
+
+        assertEquals("db failure", thrown.getMessage());
         verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-001");
     }
 
