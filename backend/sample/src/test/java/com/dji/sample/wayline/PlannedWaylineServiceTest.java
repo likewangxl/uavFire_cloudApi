@@ -417,7 +417,9 @@ class PlannedWaylineServiceTest {
                 () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/template.kml"),
                 () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/waylines.wpml"),
                 () -> assertTrue(readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml").contains("<wpml:templateType>waypoint</wpml:templateType>")),
-                () -> assertTrue(readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml").contains("<wpml:waylineCoordinateSysParam>")));
+                () -> assertTrue(readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml").contains("<wpml:waylineCoordinateSysParam>")),
+                () -> assertTrue(readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml").contains("<name>Survey A</name>")),
+                () -> assertTrue(readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml").contains("<coordinates>120.0,30.1,80.0</coordinates>")));
         PlannedWaylineDTO reloaded = service.getOne("workspace-001", "pw-001").orElseThrow();
         assertEquals("pw-001", reloaded.getPlannedWaylineId());
         assertEquals("published", reloaded.getStatus());
@@ -563,6 +565,49 @@ class PlannedWaylineServiceTest {
 
         assertEquals("db failure", thrown.getMessage());
         verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-001");
+    }
+
+    @Test
+    void publishShouldEscapeUnsafePlannedNameInGeneratedKmz() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        OssConfiguration.objectDirPrefix = "custom-prefix";
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-unsafe")
+                .workspaceId("workspace-001")
+                .name("Unsafe <Route> & \"Alpha\"")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-unsafe")
+                        .name("Unsafe <Route> & \"Alpha\"")
+                        .objectKey("custom-prefix/pw-unsafe.kmz")
+                        .build());
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-unsafe");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+        assertAll(
+                () -> assertTrue(waylines.contains("Unsafe &lt;Route&gt; &amp; &quot;Alpha&quot;")),
+                () -> assertTrue(waylines.contains("<name>Unsafe &lt;Route&gt; &amp; &quot;Alpha&quot;</name>")),
+                () -> assertTrue(waylines.contains("<wpml:waylineCoordinateSysParam>")));
     }
 
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {

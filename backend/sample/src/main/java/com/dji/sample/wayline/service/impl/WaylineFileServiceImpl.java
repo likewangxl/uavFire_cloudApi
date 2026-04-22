@@ -34,7 +34,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -141,9 +140,15 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         WaylineFileEntity file = dtoConvertToEntity(waylineFile);
         file.setWaylineId(UUID.randomUUID().toString());
         file.setWorkspaceId(workspaceId);
-        int inserted = mapper.insert(file);
+        int inserted;
+        try {
+            inserted = mapper.insert(file);
+        } catch (RuntimeException e) {
+            cleanupUploadedObject(param.getObjectKey());
+            throw e;
+        }
         if (inserted <= 0) {
-            ossService.deleteObject(OssConfiguration.bucket, param.getObjectKey());
+            cleanupUploadedObject(param.getObjectKey());
             throw new IllegalStateException("Failed to create published wayline file.");
         }
 
@@ -238,48 +243,91 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         if (Objects.nonNull(filename) && !filename.endsWith(WAYLINE_FILE_SUFFIX)) {
             throw new RuntimeException("The file format is incorrect.");
         }
-        try (ZipInputStream unzipFile = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
-
-            ZipEntry nextEntry = unzipFile.getNextEntry();
-            while (Objects.nonNull(nextEntry)) {
-                boolean isWaylines = (KmzFileProperties.FILE_DIR_FIRST + "/" + KmzFileProperties.FILE_DIR_SECOND_TEMPLATE).equals(nextEntry.getName());
-                if (!isWaylines) {
-                    nextEntry = unzipFile.getNextEntry();
-                    continue;
-                }
-                SAXReader reader = new SAXReader();
-                Document document = reader.read(unzipFile);
-                if (!StandardCharsets.UTF_8.name().equals(document.getXMLEncoding())) {
-                    throw new RuntimeException("The file encoding format is incorrect.");
-                }
-
-                Node droneNode = document.selectSingleNode("//" + KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_INFO);
-                Node payloadNode = document.selectSingleNode("//" + KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_INFO);
-                if (Objects.isNull(droneNode) || Objects.isNull(payloadNode)) {
-                    throw new RuntimeException("The file format is incorrect.");
-                }
-
-                DeviceTypeEnum type = DeviceTypeEnum.find(Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_ENUM_VALUE)));
-                DeviceSubTypeEnum subType = DeviceSubTypeEnum.find(Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_SUB_ENUM_VALUE)));
-                DeviceTypeEnum payloadType = DeviceTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_ENUM_VALUE)));
-                DeviceSubTypeEnum payloadSubType = DeviceSubTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_SUB_ENUM_VALUE)));
-                String templateType = document.valueOf("//" + KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_TEMPLATE_TYPE);
-
-                return Optional.of(WaylineFileDTO.builder()
-                        .droneModelKey(DeviceEnum.find(DeviceDomainEnum.DRONE, type, subType).getDevice())
-                        .payloadModelKeys(List.of(DeviceEnum.find(DeviceDomainEnum.PAYLOAD, payloadType, payloadSubType).getDevice()))
-                        .objectKey(OssConfiguration.objectDirPrefix + File.separator + filename)
-                        .name(filename.substring(0, filename.lastIndexOf(WAYLINE_FILE_SUFFIX)))
-                        .sign(DigestUtils.md5DigestAsHex(content))
-                        .templateTypes(List.of(WaylineTypeEnum.find(templateType).getValue()))
-                        .favorited(Boolean.FALSE)
-                        .build());
+        try {
+            Map<String, byte[]> entries = unzipEntries(content);
+            String templatePath = KmzFileProperties.FILE_DIR_FIRST + "/" + KmzFileProperties.FILE_DIR_SECOND_TEMPLATE;
+            String waylinesPath = KmzFileProperties.FILE_DIR_FIRST + "/" + KmzFileProperties.FILE_DIR_SECOND_WAYLINES;
+            if (!entries.containsKey(templatePath) || !entries.containsKey(waylinesPath)) {
+                return Optional.empty();
             }
 
+            Document templateDocument = readXml(entries.get(templatePath));
+            Document waylinesDocument = readXml(entries.get(waylinesPath));
+
+            Node droneNode = templateDocument.selectSingleNode("//" + KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_INFO);
+            Node payloadNode = templateDocument.selectSingleNode("//" + KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_INFO);
+            if (Objects.isNull(droneNode) || Objects.isNull(payloadNode)) {
+                throw new RuntimeException("The file format is incorrect.");
+            }
+
+            Node coordinateSystemNode = waylinesDocument.selectSingleNode("//" + KmzFileProperties.TAG_WPML_PREFIX + "waylineCoordinateSysParam");
+            List<Node> placemarkNodes = waylinesDocument.selectNodes("//Placemark");
+            if (Objects.isNull(coordinateSystemNode) || placemarkNodes.isEmpty()) {
+                throw new RuntimeException("The file format is incorrect.");
+            }
+            boolean hasCoordinates = placemarkNodes.stream()
+                    .map(node -> node.selectSingleNode(".//coordinates"))
+                    .anyMatch(Objects::nonNull);
+            if (!hasCoordinates) {
+                throw new RuntimeException("The file format is incorrect.");
+            }
+
+            DeviceTypeEnum type = DeviceTypeEnum.find(Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_ENUM_VALUE)));
+            DeviceSubTypeEnum subType = DeviceSubTypeEnum.find(Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_SUB_ENUM_VALUE)));
+            DeviceTypeEnum payloadType = DeviceTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_ENUM_VALUE)));
+            DeviceSubTypeEnum payloadSubType = DeviceSubTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_SUB_ENUM_VALUE)));
+            String templateType = templateDocument.valueOf("//" + KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_TEMPLATE_TYPE);
+
+            return Optional.of(WaylineFileDTO.builder()
+                    .droneModelKey(DeviceEnum.find(DeviceDomainEnum.DRONE, type, subType).getDevice())
+                    .payloadModelKeys(List.of(DeviceEnum.find(DeviceDomainEnum.PAYLOAD, payloadType, payloadSubType).getDevice()))
+                    .objectKey(buildObjectKey(filename))
+                    .name(filename.substring(0, filename.lastIndexOf(WAYLINE_FILE_SUFFIX)))
+                    .sign(DigestUtils.md5DigestAsHex(content))
+                    .templateTypes(List.of(WaylineTypeEnum.find(templateType).getValue()))
+                    .favorited(Boolean.FALSE)
+                    .build());
         } catch (IOException | DocumentException e) {
             e.printStackTrace();
         }
         return Optional.empty();
+    }
+
+    private Map<String, byte[]> unzipEntries(byte[] content) throws IOException {
+        Map<String, byte[]> entries = new HashMap<>();
+        try (ZipInputStream unzipFile = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
+            ZipEntry nextEntry = unzipFile.getNextEntry();
+            while (Objects.nonNull(nextEntry)) {
+                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                unzipFile.transferTo(outputStream);
+                entries.put(nextEntry.getName(), outputStream.toByteArray());
+                nextEntry = unzipFile.getNextEntry();
+            }
+        }
+        return entries;
+    }
+
+    private Document readXml(byte[] xmlBytes) throws DocumentException {
+        SAXReader reader = new SAXReader();
+        Document document = reader.read(new ByteArrayInputStream(xmlBytes));
+        if (!StandardCharsets.UTF_8.name().equals(document.getXMLEncoding())) {
+            throw new RuntimeException("The file encoding format is incorrect.");
+        }
+        return document;
+    }
+
+    private String buildObjectKey(String filename) {
+        if (!StringUtils.hasText(OssConfiguration.objectDirPrefix)) {
+            return filename;
+        }
+        String prefix = OssConfiguration.objectDirPrefix.endsWith("/")
+                ? OssConfiguration.objectDirPrefix.substring(0, OssConfiguration.objectDirPrefix.length() - 1)
+                : OssConfiguration.objectDirPrefix;
+        return prefix + "/" + filename;
+    }
+
+    private void cleanupUploadedObject(String objectKey) {
+        ossService.deleteObject(OssConfiguration.bucket, objectKey);
     }
     /**
      * Convert database entity objects into wayline data transfer object.

@@ -34,7 +34,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -284,7 +283,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     private PublishedWaylineCreateDTO buildPublishedWaylineCreate(PlannedWaylineEntity entity) {
         String filename = entity.getName() + ".kmz";
         String objectKey = StringUtils.hasText(OssConfiguration.objectDirPrefix)
-                ? OssConfiguration.objectDirPrefix + File.separator + entity.getPlannedWaylineId() + ".kmz"
+                ? trimTrailingSlash(OssConfiguration.objectDirPrefix) + "/" + entity.getPlannedWaylineId() + ".kmz"
                 : entity.getPlannedWaylineId() + ".kmz";
         return PublishedWaylineCreateDTO.builder()
                 .filename(filename)
@@ -374,7 +373,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
                 + "<Document>"
-                + "<name>" + entity.getName() + "</name>"
+                + "<name>" + escapeXml(entity.getName()) + "</name>"
                 + "<wpml:waylineCoordinateSysParam>"
                 + "<wpml:coordinateMode>WGS84</wpml:coordinateMode>"
                 + "<wpml:heightMode>relativeToStartPoint</wpml:heightMode>"
@@ -384,6 +383,22 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 + "</Folder>"
                 + "</Document>"
                 + "</kml>";
+    }
+
+    private String trimTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private String escapeXml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
     private void rollbackPublishedWayline(String workspaceId, String publishedWaylineId) {
