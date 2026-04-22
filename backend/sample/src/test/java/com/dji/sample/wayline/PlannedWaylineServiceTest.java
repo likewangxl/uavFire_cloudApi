@@ -9,7 +9,6 @@ import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.impl.PlannedWaylineServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,7 +24,6 @@ class PlannedWaylineServiceTest {
 
     @Test
     void createShouldDefaultStatusToDraft() {
-        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl();
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
@@ -37,8 +35,7 @@ class PlannedWaylineServiceTest {
             inserted.set(entity);
             return 1;
         });
-        ReflectionTestUtils.setField(service, "mapper", mapper);
-        ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper);
 
         PlannedWaylineDTO dto = service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
                 .name("Survey A")
@@ -66,7 +63,6 @@ class PlannedWaylineServiceTest {
 
     @Test
     void createAndGetOneShouldPreserveWaypointOrderAndCoordinates() {
-        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl();
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
@@ -79,8 +75,7 @@ class PlannedWaylineServiceTest {
             return 1;
         });
         when(mapper.selectOne(any())).thenAnswer(invocation -> inserted.get());
-        ReflectionTestUtils.setField(service, "mapper", mapper);
-        ReflectionTestUtils.setField(service, "objectMapper", objectMapper);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper);
 
         PlannedWaylineDTO created = service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
                 .name("Survey A")
@@ -117,11 +112,9 @@ class PlannedWaylineServiceTest {
 
     @Test
     void updateShouldFailWhenRecordDoesNotExist() {
-        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.selectOne(any())).thenReturn(null);
-        ReflectionTestUtils.setField(service, "mapper", mapper);
-        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper());
 
         assertThrows(IllegalArgumentException.class, () -> service.update("workspace-001", "pw-001",
                 UpdatePlannedWaylineParam.builder()
@@ -143,11 +136,9 @@ class PlannedWaylineServiceTest {
 
     @Test
     void deleteShouldFailWhenRecordDoesNotExist() {
-        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.delete(any())).thenReturn(0);
-        ReflectionTestUtils.setField(service, "mapper", mapper);
-        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper());
 
         assertThrows(IllegalArgumentException.class, () -> service.delete("workspace-001", "pw-001"));
     }

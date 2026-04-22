@@ -7,7 +7,7 @@ import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.IPlannedWaylineService;
 import com.dji.sdk.common.HttpResultResponse;
 import com.dji.sdk.common.PaginationData;
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,11 +25,11 @@ import java.util.Objects;
 import static com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM;
 
 @RestController
+@RequiredArgsConstructor
 @RequestMapping("${url.wayline.prefix}${url.wayline.version}/workspaces")
 public class PlannedWaylineController {
 
-    @Autowired
-    private IPlannedWaylineService plannedWaylineService;
+    private final IPlannedWaylineService plannedWaylineService;
 
     @GetMapping("/{workspace_id}/planned-waylines")
     public HttpResultResponse<PaginationData<PlannedWaylineDTO>> list(HttpServletRequest request,

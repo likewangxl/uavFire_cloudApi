@@ -38,9 +38,8 @@ class PlannedWaylineControllerTest {
 
     @BeforeEach
     void setUp() {
-        PlannedWaylineController controller = new PlannedWaylineController();
         plannedWaylineService = mock(IPlannedWaylineService.class);
-        org.springframework.test.util.ReflectionTestUtils.setField(controller, "plannedWaylineService", plannedWaylineService);
+        PlannedWaylineController controller = new PlannedWaylineController(plannedWaylineService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(new ObjectMapper()))
                 .setControllerAdvice(new GlobalExceptionHandler())
