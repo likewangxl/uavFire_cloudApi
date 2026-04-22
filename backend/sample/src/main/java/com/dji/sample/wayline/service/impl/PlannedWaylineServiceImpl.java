@@ -62,7 +62,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         entity.setCreateTime(System.currentTimeMillis());
         entity.setUpdateTime(entity.getCreateTime());
         int inserted = mapper.insert(entity);
-        return inserted > 0 ? entity2Dto(entity) : null;
+        if (inserted <= 0) {
+            throw new IllegalArgumentException("Failed to create planned wayline.");
+        }
+        return entity2Dto(entity);
     }
 
     @Override

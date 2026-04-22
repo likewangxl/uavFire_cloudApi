@@ -62,6 +62,30 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void createShouldFailWhenInsertDoesNotPersist() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        when(mapper.insert(any(PlannedWaylineEntity.class))).thenReturn(0);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
+                .name("Survey A")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypoints(List.of(new PlannedWaypointDTO()
+                        .setOrder(1)
+                        .setGcjLng(120.1)
+                        .setGcjLat(30.2)
+                        .setWgsLng(120.0)
+                        .setWgsLat(30.1)
+                        .setHeight(80.0)))
+                .build()));
+    }
+
+    @Test
     void createAndGetOneShouldPreserveWaypointOrderAndCoordinates() {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);

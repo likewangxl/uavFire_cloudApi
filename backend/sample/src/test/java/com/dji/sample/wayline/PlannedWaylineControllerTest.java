@@ -98,6 +98,38 @@ class PlannedWaylineControllerTest {
     }
 
     @Test
+    void createInsertFailureShouldReturnError() throws Exception {
+        when(plannedWaylineService.create(org.mockito.ArgumentMatchers.eq("workspace-001"),
+                org.mockito.ArgumentMatchers.eq("alice"),
+                any(CreatePlannedWaylineParam.class)))
+                .thenThrow(new IllegalArgumentException("Failed to create planned wayline."));
+
+        mockMvc.perform(post("/wayline/api/v1/workspaces/workspace-001/planned-waylines")
+                        .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
+                                new CustomClaim("1", "alice", 1, "workspace-001"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{"
+                                + "\"name\":\"Survey A\","
+                                + "\"aircraftModelKey\":\"M30T\","
+                                + "\"gatewaySn\":\"GW-001\","
+                                + "\"aircraftSn\":\"AC-001\","
+                                + "\"defaultHeight\":80.0,"
+                                + "\"maxSpeed\":12.5,"
+                                + "\"waypoints\":[{"
+                                + "\"order\":1,"
+                                + "\"gcjLng\":120.1,"
+                                + "\"gcjLat\":30.2,"
+                                + "\"wgsLng\":120.0,"
+                                + "\"wgsLat\":30.1,"
+                                + "\"height\":80.0"
+                                + "}]"
+                                + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(-1))
+                .andExpect(jsonPath("$.message").value("Failed to create planned wayline."));
+    }
+
+    @Test
     void workspaceMismatchShouldBeRejected() throws Exception {
         mockMvc.perform(post("/wayline/api/v1/workspaces/workspace-001/planned-waylines")
                         .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
@@ -173,6 +205,90 @@ class PlannedWaylineControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(-1))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("waypoints")));
+
+        verifyNoInteractions(plannedWaylineService);
+    }
+
+    @Test
+    void malformedWaypointMissingOrderShouldBeRejected() throws Exception {
+        mockMvc.perform(post("/wayline/api/v1/workspaces/workspace-001/planned-waylines")
+                        .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
+                                new CustomClaim("1", "alice", 1, "workspace-001"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{"
+                                + "\"name\":\"Survey A\","
+                                + "\"aircraftModelKey\":\"M30T\","
+                                + "\"gatewaySn\":\"GW-001\","
+                                + "\"aircraftSn\":\"AC-001\","
+                                + "\"defaultHeight\":80.0,"
+                                + "\"maxSpeed\":12.5,"
+                                + "\"waypoints\":[{"
+                                + "\"gcjLng\":120.1,"
+                                + "\"gcjLat\":30.2,"
+                                + "\"wgsLng\":120.0,"
+                                + "\"wgsLat\":30.1,"
+                                + "\"height\":80.0"
+                                + "}]"
+                                + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(-1))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("order")));
+
+        verifyNoInteractions(plannedWaylineService);
+    }
+
+    @Test
+    void malformedWaypointMissingCoordinateShouldBeRejected() throws Exception {
+        mockMvc.perform(post("/wayline/api/v1/workspaces/workspace-001/planned-waylines")
+                        .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
+                                new CustomClaim("1", "alice", 1, "workspace-001"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{"
+                                + "\"name\":\"Survey A\","
+                                + "\"aircraftModelKey\":\"M30T\","
+                                + "\"gatewaySn\":\"GW-001\","
+                                + "\"aircraftSn\":\"AC-001\","
+                                + "\"defaultHeight\":80.0,"
+                                + "\"maxSpeed\":12.5,"
+                                + "\"waypoints\":[{"
+                                + "\"order\":1,"
+                                + "\"gcjLat\":30.2,"
+                                + "\"wgsLng\":120.0,"
+                                + "\"wgsLat\":30.1,"
+                                + "\"height\":80.0"
+                                + "}]"
+                                + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(-1))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("gcjLng")));
+
+        verifyNoInteractions(plannedWaylineService);
+    }
+
+    @Test
+    void malformedWaypointMissingHeightShouldBeRejected() throws Exception {
+        mockMvc.perform(post("/wayline/api/v1/workspaces/workspace-001/planned-waylines")
+                        .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
+                                new CustomClaim("1", "alice", 1, "workspace-001"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{"
+                                + "\"name\":\"Survey A\","
+                                + "\"aircraftModelKey\":\"M30T\","
+                                + "\"gatewaySn\":\"GW-001\","
+                                + "\"aircraftSn\":\"AC-001\","
+                                + "\"defaultHeight\":80.0,"
+                                + "\"maxSpeed\":12.5,"
+                                + "\"waypoints\":[{"
+                                + "\"order\":1,"
+                                + "\"gcjLng\":120.1,"
+                                + "\"gcjLat\":30.2,"
+                                + "\"wgsLng\":120.0,"
+                                + "\"wgsLat\":30.1"
+                                + "}]"
+                                + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(-1))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("height")));
 
         verifyNoInteractions(plannedWaylineService);
     }

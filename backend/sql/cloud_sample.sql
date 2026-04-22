@@ -556,7 +556,9 @@ CREATE TABLE `planned_wayline` (
   `create_time` bigint NOT NULL,
   `update_time` bigint NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `planned_wayline_id_UNIQUE` (`planned_wayline_id`)
+  UNIQUE KEY `planned_wayline_id_UNIQUE` (`planned_wayline_id`),
+  KEY `idx_planned_wayline_workspace_id_id` (`workspace_id`,`id`),
+  KEY `idx_planned_wayline_workspace_id_planned_wayline_id` (`workspace_id`,`planned_wayline_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='Planned wayline draft information.';
 
 
