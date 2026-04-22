@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -135,6 +136,68 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void updateShouldOverwriteEditableFieldsOnExistingRecord() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .name("Survey A")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("draft")
+                .publishedWaylineId("published-001")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
+            PlannedWaylineEntity updated = invocation.getArgument(0);
+            assertEquals("Survey B", updated.getName());
+            assertEquals("M300RTK", updated.getAircraftModelKey());
+            assertEquals("GW-002", updated.getGatewaySn());
+            assertEquals("AC-002", updated.getAircraftSn());
+            assertEquals(100.0, updated.getDefaultHeight(), 0.0001);
+            assertEquals(18.0, updated.getMaxSpeed(), 0.0001);
+            return 1;
+        });
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper);
+
+        PlannedWaylineDTO updated = service.update("workspace-001", "pw-001", UpdatePlannedWaylineParam.builder()
+                .name("Survey B")
+                .aircraftModelKey("M300RTK")
+                .gatewaySn("GW-002")
+                .aircraftSn("AC-002")
+                .defaultHeight(100.0)
+                .maxSpeed(18.0)
+                .waypoints(List.of(
+                        new PlannedWaypointDTO()
+                                .setOrder(1)
+                                .setGcjLng(121.1)
+                                .setGcjLat(31.2)
+                                .setWgsLng(121.0)
+                                .setWgsLat(31.1)
+                                .setHeight(100.0)))
+                .build());
+
+        assertEquals("Survey B", updated.getName());
+        assertEquals("M300RTK", updated.getAircraftModelKey());
+        assertEquals("GW-002", updated.getGatewaySn());
+        assertEquals("AC-002", updated.getAircraftSn());
+        assertEquals(100.0, updated.getDefaultHeight(), 0.0001);
+        assertEquals(18.0, updated.getMaxSpeed(), 0.0001);
+        assertEquals("draft", updated.getStatus());
+        assertEquals("published-001", updated.getPublishedWaylineId());
+        assertEquals("alice", updated.getCreator());
+    }
+
+    @Test
     void updateShouldFailWhenRecordDoesNotExist() {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.selectOne(any())).thenReturn(null);
@@ -165,5 +228,14 @@ class PlannedWaylineServiceTest {
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper());
 
         assertThrows(IllegalArgumentException.class, () -> service.delete("workspace-001", "pw-001"));
+    }
+
+    @Test
+    void deleteShouldSucceedWhenRecordExists() {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        when(mapper.delete(any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper());
+
+        assertDoesNotThrow(() -> service.delete("workspace-001", "pw-001"));
     }
 }

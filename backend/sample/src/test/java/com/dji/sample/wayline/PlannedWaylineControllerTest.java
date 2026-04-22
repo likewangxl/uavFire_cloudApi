@@ -330,6 +330,64 @@ class PlannedWaylineControllerTest {
     }
 
     @Test
+    void updatePlannedWaylineShouldOverwriteEditableFields() throws Exception {
+        when(plannedWaylineService.update(org.mockito.ArgumentMatchers.eq("workspace-001"),
+                org.mockito.ArgumentMatchers.eq("pw-001"),
+                any(UpdatePlannedWaylineParam.class)))
+                .thenReturn(PlannedWaylineDTO.builder()
+                        .plannedWaylineId("pw-001")
+                        .workspaceId("workspace-001")
+                        .name("Survey B")
+                        .aircraftModelKey("M300RTK")
+                        .gatewaySn("GW-002")
+                        .aircraftSn("AC-002")
+                        .defaultHeight(100.0)
+                        .maxSpeed(18.0)
+                        .status("draft")
+                        .waypoints(List.of(new PlannedWaypointDTO()
+                                .setOrder(1)
+                                .setGcjLng(121.1)
+                                .setGcjLat(31.2)
+                                .setWgsLng(121.0)
+                                .setWgsLat(31.1)
+                                .setHeight(100.0)))
+                        .build());
+
+        mockMvc.perform(put("/wayline/api/v1/workspaces/workspace-001/planned-waylines/pw-001")
+                        .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
+                                new CustomClaim("1", "alice", 1, "workspace-001"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{"
+                                + "\"name\":\"Survey B\","
+                                + "\"aircraftModelKey\":\"M300RTK\","
+                                + "\"gatewaySn\":\"GW-002\","
+                                + "\"aircraftSn\":\"AC-002\","
+                                + "\"defaultHeight\":100.0,"
+                                + "\"maxSpeed\":18.0,"
+                                + "\"waypoints\":[{"
+                                + "\"order\":1,"
+                                + "\"gcjLng\":121.1,"
+                                + "\"gcjLat\":31.2,"
+                                + "\"wgsLng\":121.0,"
+                                + "\"wgsLat\":31.1,"
+                                + "\"height\":100.0"
+                                + "}]"
+                                + "}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.name").value("Survey B"))
+                .andExpect(jsonPath("$.data.aircraftModelKey").value("M300RTK"))
+                .andExpect(jsonPath("$.data.gatewaySn").value("GW-002"))
+                .andExpect(jsonPath("$.data.aircraftSn").value("AC-002"))
+                .andExpect(jsonPath("$.data.defaultHeight").value(100.0))
+                .andExpect(jsonPath("$.data.maxSpeed").value(18.0));
+
+        verify(plannedWaylineService).update(org.mockito.ArgumentMatchers.eq("workspace-001"),
+                org.mockito.ArgumentMatchers.eq("pw-001"),
+                any(UpdatePlannedWaylineParam.class));
+    }
+
+    @Test
     void deleteMissingPlannedWaylineShouldReturnError() throws Exception {
         org.mockito.Mockito.doThrow(new IllegalArgumentException("Planned wayline doesn't exist."))
                 .when(plannedWaylineService).delete("workspace-001", "pw-001");
@@ -340,6 +398,18 @@ class PlannedWaylineControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(-1))
                 .andExpect(jsonPath("$.message").value("Planned wayline doesn't exist."));
+
+        verify(plannedWaylineService).delete("workspace-001", "pw-001");
+    }
+
+    @Test
+    void deletePlannedWaylineShouldRemoveWorkspaceOwnedRecord() throws Exception {
+        mockMvc.perform(delete("/wayline/api/v1/workspaces/workspace-001/planned-waylines/pw-001")
+                        .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
+                                new CustomClaim("1", "alice", 1, "workspace-001")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.message").value("success"));
 
         verify(plannedWaylineService).delete("workspace-001", "pw-001");
     }
