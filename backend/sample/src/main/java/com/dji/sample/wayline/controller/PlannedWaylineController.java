@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
+import java.util.Objects;
 
 import static com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM;
 
@@ -31,32 +32,55 @@ public class PlannedWaylineController {
     private IPlannedWaylineService plannedWaylineService;
 
     @GetMapping("/{workspace_id}/planned-waylines")
-    public HttpResultResponse<PaginationData<PlannedWaylineDTO>> list(@PathVariable("workspace_id") String workspaceId,
+    public HttpResultResponse<PaginationData<PlannedWaylineDTO>> list(HttpServletRequest request,
+                                                                     @PathVariable("workspace_id") String workspaceId,
                                                                      @RequestParam(defaultValue = "1") Long page,
                                                                      @RequestParam(name = "page_size", defaultValue = "10") Long pageSize) {
-        return HttpResultResponse.success(plannedWaylineService.getByWorkspace(workspaceId, page, pageSize));
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        return HttpResultResponse.success(plannedWaylineService.getByWorkspace(trustedWorkspaceId, page, pageSize));
     }
 
     @PostMapping("/{workspace_id}/planned-waylines")
     public HttpResultResponse<PlannedWaylineDTO> create(HttpServletRequest request,
                                                         @PathVariable("workspace_id") String workspaceId,
                                                         @Valid @RequestBody CreatePlannedWaylineParam param) {
-        CustomClaim customClaim = (CustomClaim) request.getAttribute(TOKEN_CLAIM);
-        return HttpResultResponse.success(plannedWaylineService.create(workspaceId, customClaim.getUsername(), param));
+        CustomClaim customClaim = resolveClaim(request);
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, customClaim);
+        return HttpResultResponse.success(plannedWaylineService.create(trustedWorkspaceId, customClaim.getUsername(), param));
     }
 
     @PutMapping("/{workspace_id}/planned-waylines/{id}")
     public HttpResultResponse<PlannedWaylineDTO> update(@PathVariable("workspace_id") String workspaceId,
                                                         @PathVariable("id") String id,
-                                                        @Valid @RequestBody UpdatePlannedWaylineParam param) {
-        PlannedWaylineDTO dto = plannedWaylineService.update(workspaceId, id, param);
-        return dto == null ? HttpResultResponse.error() : HttpResultResponse.success(dto);
+                                                        @Valid @RequestBody UpdatePlannedWaylineParam param,
+                                                        HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        PlannedWaylineDTO dto = plannedWaylineService.update(trustedWorkspaceId, id, param);
+        return HttpResultResponse.success(dto);
     }
 
     @DeleteMapping("/{workspace_id}/planned-waylines/{id}")
     public HttpResultResponse<Void> delete(@PathVariable("workspace_id") String workspaceId,
-                                           @PathVariable("id") String id) {
-        plannedWaylineService.delete(workspaceId, id);
+                                           @PathVariable("id") String id,
+                                           HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        plannedWaylineService.delete(trustedWorkspaceId, id);
         return HttpResultResponse.success();
     }
+
+    private CustomClaim resolveClaim(HttpServletRequest request) {
+        CustomClaim customClaim = (CustomClaim) request.getAttribute(TOKEN_CLAIM);
+        if (Objects.isNull(customClaim)) {
+            throw new IllegalArgumentException("Workspace mismatch.");
+        }
+        return customClaim;
+    }
+
+    private String resolveWorkspaceId(String workspaceId, CustomClaim customClaim) {
+        if (Objects.isNull(customClaim) || !Objects.equals(workspaceId, customClaim.getWorkspaceId())) {
+            throw new IllegalArgumentException("Workspace mismatch.");
+        }
+        return customClaim.getWorkspaceId();
+    }
+
 }

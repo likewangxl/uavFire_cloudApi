@@ -74,7 +74,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                         .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
                         .eq(PlannedWaylineEntity::getPlannedWaylineId, id));
         if (Objects.isNull(existing)) {
-            return null;
+            throw new IllegalArgumentException("Planned wayline doesn't exist.");
         }
 
         PlannedWaylineEntity replacement = dto2Entity(param);
@@ -86,15 +86,21 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         replacement.setCreator(existing.getCreator());
         replacement.setCreateTime(existing.getCreateTime());
         replacement.setUpdateTime(System.currentTimeMillis());
-        mapper.updateById(replacement);
+        int updated = mapper.updateById(replacement);
+        if (updated <= 0) {
+            throw new IllegalArgumentException("Planned wayline doesn't exist.");
+        }
         return entity2Dto(replacement);
     }
 
     @Override
     public void delete(String workspaceId, String id) {
-        mapper.delete(new LambdaQueryWrapper<PlannedWaylineEntity>()
+        int deleted = mapper.delete(new LambdaQueryWrapper<PlannedWaylineEntity>()
                 .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
                 .eq(PlannedWaylineEntity::getPlannedWaylineId, id));
+        if (deleted <= 0) {
+            throw new IllegalArgumentException("Planned wayline doesn't exist.");
+        }
     }
 
     @Override

@@ -534,10 +534,35 @@ CREATE TABLE `wayline_job` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='Wayline mission information of the dock.';
 
 
+# planned_wayline
+# ------------------------------------------------------------
+
+DROP TABLE IF EXISTS `planned_wayline`;
+
+CREATE TABLE `planned_wayline` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `planned_wayline_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'uuid',
+  `workspace_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'Which workspace the current planned wayline belongs to.',
+  `name` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'planned wayline name',
+  `aircraft_model_key` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'device product enum. format: domain-device_type-sub_type',
+  `gateway_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The gateway sn used for this planned wayline.',
+  `aircraft_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The aircraft sn used for this planned wayline.',
+  `default_height` double NOT NULL COMMENT 'default flight height',
+  `max_speed` double NOT NULL COMMENT 'maximum flight speed',
+  `waypoints_json` mediumtext CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'Serialized waypoint list.',
+  `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT 'draft' COMMENT 'draft/published/archived',
+  `published_wayline_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT 'Linked wayline file id after publish.',
+  `creator` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The name of the creator.',
+  `create_time` bigint NOT NULL,
+  `update_time` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `planned_wayline_id_UNIQUE` (`planned_wayline_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='Planned wayline draft information.';
+
+
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
-
