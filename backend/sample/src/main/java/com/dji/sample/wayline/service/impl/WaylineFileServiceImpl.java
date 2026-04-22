@@ -7,8 +7,9 @@ import com.dji.sample.component.oss.model.OssConfiguration;
 import com.dji.sample.component.oss.service.impl.OssServiceContext;
 import com.dji.sample.wayline.dao.IWaylineFileMapper;
 import com.dji.sample.wayline.model.dto.KmzFileProperties;
+import com.dji.sample.wayline.model.dto.PublishedWaylineCreateDTO;
+import com.dji.sample.wayline.model.dto.PublishedWaylineFileDTO;
 import com.dji.sample.wayline.model.dto.WaylineFileDTO;
-import com.dji.sample.wayline.model.entity.PlannedWaylineEntity;
 import com.dji.sample.wayline.model.entity.WaylineFileEntity;
 import com.dji.sample.wayline.service.IWaylineFileService;
 import com.dji.sdk.cloudapi.device.DeviceDomainEnum;
@@ -31,6 +32,8 @@ import org.springframework.util.DigestUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -115,6 +118,43 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
     }
 
     @Override
+    public PublishedWaylineFileDTO createPublishedWayline(String workspaceId, PublishedWaylineCreateDTO param) {
+        if (param == null || param.getContent() == null || param.getContent().length == 0) {
+            throw new IllegalArgumentException("Published wayline content is required.");
+        }
+
+        Optional<WaylineFileDTO> waylineFileOpt = validKmzBytes(param.getFilename(), param.getContent());
+        if (waylineFileOpt.isEmpty()) {
+            throw new RuntimeException("The file format is incorrect.");
+        }
+
+        WaylineFileDTO waylineFile = waylineFileOpt.get();
+        waylineFile.setObjectKey(param.getObjectKey());
+        waylineFile.setUsername(param.getUsername());
+
+        try {
+            ossService.putObject(OssConfiguration.bucket, param.getObjectKey(), new ByteArrayInputStream(param.getContent()));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Failed to store published wayline file.", e);
+        }
+
+        WaylineFileEntity file = dtoConvertToEntity(waylineFile);
+        file.setWaylineId(UUID.randomUUID().toString());
+        file.setWorkspaceId(workspaceId);
+        int inserted = mapper.insert(file);
+        if (inserted <= 0) {
+            ossService.deleteObject(OssConfiguration.bucket, param.getObjectKey());
+            throw new IllegalStateException("Failed to create published wayline file.");
+        }
+
+        return PublishedWaylineFileDTO.builder()
+                .waylineId(file.getWaylineId())
+                .name(file.getName())
+                .objectKey(file.getObjectKey())
+                .build();
+    }
+
+    @Override
     public Integer saveWaylineFile(String workspaceId, WaylineFileDTO metadata) {
         WaylineFileEntity file = this.dtoConvertToEntity(metadata);
         file.setWaylineId(UUID.randomUUID().toString());
@@ -133,26 +173,6 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         }
         int insertId = mapper.insert(file);
         return insertId > 0 ? file.getId() : insertId;
-    }
-
-    public String savePublishedWayline(String workspaceId, PlannedWaylineEntity plannedWayline) {
-        WaylineFileEntity file = WaylineFileEntity.builder()
-                .waylineId(UUID.randomUUID().toString())
-                .workspaceId(workspaceId)
-                .name(plannedWayline.getName())
-                .droneModelKey(plannedWayline.getAircraftModelKey())
-                .payloadModelKeys(null)
-                .favorited(Boolean.FALSE)
-                .templateTypes(String.valueOf(WaylineTypeEnum.WAYPOINT.getValue()))
-                .objectKey(buildPublishedObjectKey(plannedWayline))
-                .username(plannedWayline.getCreator())
-                .sign(DigestUtils.md5DigestAsHex(buildPublishedObjectKey(plannedWayline).getBytes(StandardCharsets.UTF_8)))
-                .build();
-        int inserted = mapper.insert(file);
-        if (inserted <= 0) {
-            throw new IllegalStateException("Failed to create published wayline file.");
-        }
-        return file.getWaylineId();
     }
 
     @Override
@@ -198,28 +218,27 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
 
     @Override
     public void importKmzFile(MultipartFile file, String workspaceId, String creator) {
-        Optional<WaylineFileDTO> waylineFileOpt = validKmzFile(file);
-        if (waylineFileOpt.isEmpty()) {
-            throw new RuntimeException("The file format is incorrect.");
-        }
-
         try {
+            byte[] content = file.getBytes();
+            Optional<WaylineFileDTO> waylineFileOpt = validKmzBytes(file.getOriginalFilename(), content);
+            if (waylineFileOpt.isEmpty()) {
+                throw new RuntimeException("The file format is incorrect.");
+            }
             WaylineFileDTO waylineFile = waylineFileOpt.get();
             waylineFile.setUsername(creator);
 
-            ossService.putObject(OssConfiguration.bucket, waylineFile.getObjectKey(), file.getInputStream());
+            ossService.putObject(OssConfiguration.bucket, waylineFile.getObjectKey(), new ByteArrayInputStream(content));
             this.saveWaylineFile(workspaceId, waylineFile);
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-    private Optional<WaylineFileDTO> validKmzFile(MultipartFile file) {
-        String filename = file.getOriginalFilename();
+    private Optional<WaylineFileDTO> validKmzBytes(String filename, byte[] content) {
         if (Objects.nonNull(filename) && !filename.endsWith(WAYLINE_FILE_SUFFIX)) {
             throw new RuntimeException("The file format is incorrect.");
         }
-        try (ZipInputStream unzipFile = new ZipInputStream(file.getInputStream(), StandardCharsets.UTF_8)) {
+        try (ZipInputStream unzipFile = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
 
             ZipEntry nextEntry = unzipFile.getNextEntry();
             while (Objects.nonNull(nextEntry)) {
@@ -251,8 +270,9 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
                         .payloadModelKeys(List.of(DeviceEnum.find(DeviceDomainEnum.PAYLOAD, payloadType, payloadSubType).getDevice()))
                         .objectKey(OssConfiguration.objectDirPrefix + File.separator + filename)
                         .name(filename.substring(0, filename.lastIndexOf(WAYLINE_FILE_SUFFIX)))
-                        .sign(DigestUtils.md5DigestAsHex(file.getInputStream()))
+                        .sign(DigestUtils.md5DigestAsHex(content))
                         .templateTypes(List.of(WaylineTypeEnum.find(templateType).getValue()))
+                        .favorited(Boolean.FALSE)
                         .build());
             }
 
@@ -312,10 +332,5 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         }
 
         return builder.build();
-    }
-
-    private String buildPublishedObjectKey(PlannedWaylineEntity plannedWayline) {
-        return OssConfiguration.objectDirPrefix + File.separator
-                + plannedWayline.getPlannedWaylineId() + KmzFileProperties.WAYLINE_FILE_SUFFIX;
     }
 }

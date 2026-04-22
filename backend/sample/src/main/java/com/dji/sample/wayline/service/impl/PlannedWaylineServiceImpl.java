@@ -3,6 +3,8 @@ package com.dji.sample.wayline.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dji.sample.wayline.dao.IPlannedWaylineMapper;
+import com.dji.sample.wayline.model.dto.PublishedWaylineCreateDTO;
+import com.dji.sample.wayline.model.dto.PublishedWaylineFileDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaypointDTO;
 import com.dji.sample.wayline.model.entity.PlannedWaylineEntity;
@@ -10,6 +12,8 @@ import com.dji.sample.wayline.model.param.CreatePlannedWaylineParam;
 import com.dji.sample.wayline.model.param.PublishPlannedWaylineResponse;
 import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.IPlannedWaylineService;
+import com.dji.sample.wayline.service.IWaylineFileService;
+import com.dji.sdk.cloudapi.device.DeviceEnum;
 import com.dji.sdk.common.Pagination;
 import com.dji.sdk.common.PaginationData;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -27,6 +31,11 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Service
 @Transactional
@@ -40,7 +49,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private final ObjectMapper objectMapper;
 
-    private final WaylineFileServiceImpl waylineFileService;
+    private final IWaylineFileService waylineFileService;
 
     @Override
     public PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize) {
@@ -101,15 +110,24 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (Objects.isNull(existing)) {
             throw new IllegalArgumentException("Planned wayline doesn't exist.");
         }
+        if (StringUtils.hasText(existing.getPublishedWaylineId())) {
+            return PublishPlannedWaylineResponse.builder()
+                    .plannedWaylineId(existing.getPlannedWaylineId())
+                    .publishedWaylineId(existing.getPublishedWaylineId())
+                    .publishedWaylineName(existing.getName())
+                    .build();
+        }
 
         validatePublishableRecord(existing);
-        String publishedWaylineId = waylineFileService.savePublishedWayline(workspaceId, existing);
+        PublishedWaylineFileDTO publishedWayline = waylineFileService.createPublishedWayline(
+                workspaceId, buildPublishedWaylineCreate(existing));
 
-        existing.setPublishedWaylineId(publishedWaylineId);
+        existing.setPublishedWaylineId(publishedWayline.getWaylineId());
         existing.setStatus(STATUS_PUBLISHED);
         existing.setUpdateTime(System.currentTimeMillis());
         int updated = mapper.updateById(existing);
         if (updated <= 0) {
+            rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
             throw new IllegalArgumentException("Failed to publish planned wayline.");
         }
 
@@ -255,6 +273,119 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private boolean isLegalLatitude(Double value) {
         return isFinite(value) && value >= -90.0 && value <= 90.0;
+    }
+
+    private PublishedWaylineCreateDTO buildPublishedWaylineCreate(PlannedWaylineEntity entity) {
+        String filename = entity.getName() + ".kmz";
+        return PublishedWaylineCreateDTO.builder()
+                .filename(filename)
+                .objectKey("wayline/" + entity.getPlannedWaylineId() + ".kmz")
+                .username(entity.getCreator())
+                .content(buildPublishedKmz(entity))
+                .build();
+    }
+
+    private byte[] buildPublishedKmz(PlannedWaylineEntity entity) {
+        DeviceEnum droneDevice = resolveDroneDevice(entity.getAircraftModelKey());
+        DeviceEnum payloadDevice = resolvePayloadDevice(droneDevice);
+        List<PlannedWaypointDTO> waypoints = readWaypoints(entity.getWaypointsJson());
+
+        try {
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
+                zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
+                zipOutputStream.write(buildTemplateKml(droneDevice, payloadDevice).getBytes(StandardCharsets.UTF_8));
+                zipOutputStream.closeEntry();
+                zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
+                zipOutputStream.write(buildWaylinesWpml(entity, waypoints).getBytes(StandardCharsets.UTF_8));
+                zipOutputStream.closeEntry();
+            }
+            return outputStream.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to generate published KMZ.", e);
+        }
+    }
+
+    private DeviceEnum resolveDroneDevice(String aircraftModelKey) {
+        try {
+            return DeviceEnum.valueOf(aircraftModelKey);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unsupported aircraft model for planned-wayline publish: " + aircraftModelKey);
+        }
+    }
+
+    private DeviceEnum resolvePayloadDevice(DeviceEnum droneDevice) {
+        switch (droneDevice) {
+            case M30:
+                return DeviceEnum.M30_CAMERA;
+            case M30T:
+                return DeviceEnum.M30T_CAMERA;
+            case M3E:
+                return DeviceEnum.M3E_CAMERA;
+            case M3T:
+                return DeviceEnum.M3T_CAMERA;
+            case M3M:
+                return DeviceEnum.M3M_CAMERA;
+            case M3D:
+                return DeviceEnum.M3D_CAMERA;
+            case M3TD:
+                return DeviceEnum.M3TD_CAMERA;
+            case M300:
+            case M350:
+                return DeviceEnum.H20T;
+            default:
+                throw new IllegalArgumentException("Unsupported aircraft model for planned-wayline publish: " + droneDevice.name());
+        }
+    }
+
+    private String buildTemplateKml(DeviceEnum droneDevice, DeviceEnum payloadDevice) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
+                + "<Document>"
+                + "<wpml:templateType>waypoint</wpml:templateType>"
+                + "<wpml:droneInfo>"
+                + "<wpml:droneEnumValue>" + droneDevice.getType().getType() + "</wpml:droneEnumValue>"
+                + "<wpml:droneSubEnumValue>" + droneDevice.getSubType().getSubType() + "</wpml:droneSubEnumValue>"
+                + "</wpml:droneInfo>"
+                + "<wpml:payloadInfo>"
+                + "<wpml:payloadEnumValue>" + payloadDevice.getType().getType() + "</wpml:payloadEnumValue>"
+                + "<wpml:payloadSubEnumValue>" + payloadDevice.getSubType().getSubType() + "</wpml:payloadSubEnumValue>"
+                + "</wpml:payloadInfo>"
+                + "</Document>"
+                + "</kml>";
+    }
+
+    private String buildWaylinesWpml(PlannedWaylineEntity entity, List<PlannedWaypointDTO> waypoints) {
+        String placemarks = waypoints.stream()
+                .map(waypoint -> "<Placemark>"
+                        + "<name>" + waypoint.getOrder() + "</name>"
+                        + "<Point><coordinates>" + waypoint.getWgsLng() + "," + waypoint.getWgsLat() + "," + waypoint.getHeight() + "</coordinates></Point>"
+                        + "</Placemark>")
+                .collect(Collectors.joining());
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
+                + "<Document>"
+                + "<name>" + entity.getName() + "</name>"
+                + "<wpml:waylineCoordinateSysParam>"
+                + "<wpml:coordinateMode>WGS84</wpml:coordinateMode>"
+                + "<wpml:heightMode>relativeToStartPoint</wpml:heightMode>"
+                + "</wpml:waylineCoordinateSysParam>"
+                + "<Folder>"
+                + placemarks
+                + "</Folder>"
+                + "</Document>"
+                + "</kml>";
+    }
+
+    private void rollbackPublishedWayline(String workspaceId, String publishedWaylineId) {
+        try {
+            boolean deleted = waylineFileService.deleteByWaylineId(workspaceId, publishedWaylineId);
+            if (!deleted) {
+                throw new IllegalStateException("Failed to rollback published wayline after planned publish error.");
+            }
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Failed to rollback published wayline after planned publish error.", e);
+        }
     }
 
     private void applyEditableFields(PlannedWaylineEntity target, UpdatePlannedWaylineParam param) {

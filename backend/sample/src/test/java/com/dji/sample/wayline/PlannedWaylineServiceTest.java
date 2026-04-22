@@ -1,6 +1,8 @@
 package com.dji.sample.wayline;
 
 import com.dji.sample.wayline.dao.IPlannedWaylineMapper;
+import com.dji.sample.wayline.model.dto.PublishedWaylineCreateDTO;
+import com.dji.sample.wayline.model.dto.PublishedWaylineFileDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaypointDTO;
 import com.dji.sample.wayline.model.entity.PlannedWaylineEntity;
@@ -8,13 +10,19 @@ import com.dji.sample.wayline.model.param.CreatePlannedWaylineParam;
 import com.dji.sample.wayline.model.param.PublishPlannedWaylineResponse;
 import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.impl.PlannedWaylineServiceImpl;
-import com.dji.sample.wayline.service.impl.WaylineFileServiceImpl;
+import com.dji.sample.wayline.service.IWaylineFileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
@@ -34,7 +43,7 @@ class PlannedWaylineServiceTest {
     void createShouldDefaultStatusToDraft() {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
-        WaylineFileServiceImpl waylineFileService = mock(WaylineFileServiceImpl.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
         AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
         when(mapper.insert(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
             PlannedWaylineEntity entity = invocation.getArgument(0);
@@ -75,7 +84,7 @@ class PlannedWaylineServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.insert(any(PlannedWaylineEntity.class))).thenReturn(0);
-        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, mock(WaylineFileServiceImpl.class));
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, mock(IWaylineFileService.class));
 
         assertThrows(IllegalArgumentException.class, () -> service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
                 .name("Survey A")
@@ -97,7 +106,7 @@ class PlannedWaylineServiceTest {
     @Test
     void createShouldRejectWaypointMissingOrderAtServiceLayer() {
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
-                mock(IPlannedWaylineMapper.class), new ObjectMapper(), mock(WaylineFileServiceImpl.class));
+                mock(IPlannedWaylineMapper.class), new ObjectMapper(), mock(IWaylineFileService.class));
 
         assertThrows(IllegalArgumentException.class, () -> service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
                 .name("Survey A")
@@ -118,7 +127,7 @@ class PlannedWaylineServiceTest {
     @Test
     void createShouldRejectBlankNameAtServiceLayer() {
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
-                mock(IPlannedWaylineMapper.class), new ObjectMapper(), mock(WaylineFileServiceImpl.class));
+                mock(IPlannedWaylineMapper.class), new ObjectMapper(), mock(IWaylineFileService.class));
 
         assertThrows(IllegalArgumentException.class, () -> service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
                 .name(" ")
@@ -141,7 +150,7 @@ class PlannedWaylineServiceTest {
     void createAndGetOneShouldPreserveWaypointOrderAndCoordinates() {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
-        WaylineFileServiceImpl waylineFileService = mock(WaylineFileServiceImpl.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
         AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
         when(mapper.insert(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
             PlannedWaylineEntity entity = invocation.getArgument(0);
@@ -191,7 +200,7 @@ class PlannedWaylineServiceTest {
     void updateShouldOverwriteEditableFieldsOnExistingRecord() {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
-        WaylineFileServiceImpl waylineFileService = mock(WaylineFileServiceImpl.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
         PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
                 .id(1)
                 .plannedWaylineId("pw-001")
@@ -274,7 +283,7 @@ class PlannedWaylineServiceTest {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.selectOne(any())).thenReturn(null);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
-                mapper, new ObjectMapper(), mock(WaylineFileServiceImpl.class));
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
 
         assertThrows(IllegalArgumentException.class, () -> service.update("workspace-001", "pw-001",
                 UpdatePlannedWaylineParam.builder()
@@ -305,7 +314,7 @@ class PlannedWaylineServiceTest {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.selectOne(any())).thenReturn(existing);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
-                mapper, new ObjectMapper(), mock(WaylineFileServiceImpl.class));
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
 
         assertThrows(IllegalArgumentException.class, () -> service.update("workspace-001", "pw-001", UpdatePlannedWaylineParam.builder()
                 .name("Survey B")
@@ -328,7 +337,7 @@ class PlannedWaylineServiceTest {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.delete(any())).thenReturn(0);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
-                mapper, new ObjectMapper(), mock(WaylineFileServiceImpl.class));
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
 
         assertThrows(IllegalArgumentException.class, () -> service.delete("workspace-001", "pw-001"));
     }
@@ -338,7 +347,7 @@ class PlannedWaylineServiceTest {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.delete(any())).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
-                mapper, new ObjectMapper(), mock(WaylineFileServiceImpl.class));
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
 
         assertDoesNotThrow(() -> service.delete("workspace-001", "pw-001"));
         ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PlannedWaylineEntity>> wrapperCaptor =
@@ -353,10 +362,10 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
-    void publishShouldCreateFormalWaylineAndMarkDraftPublished() {
+    void publishShouldCreateFormalWaylineAndMarkDraftPublished() throws IOException {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
-        WaylineFileServiceImpl waylineFileService = mock(WaylineFileServiceImpl.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
         PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
                 .id(1)
                 .plannedWaylineId("pw-001")
@@ -374,8 +383,12 @@ class PlannedWaylineServiceTest {
                 .updateTime(1000L)
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
-        when(waylineFileService.savePublishedWayline("workspace-001", existing))
-                .thenReturn("wayline-001");
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-001")
+                        .name("Survey A")
+                        .objectKey("wayline/pw-001.kmz")
+                        .build());
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
@@ -393,6 +406,16 @@ class PlannedWaylineServiceTest {
         assertAll(
                 () -> assertEquals("published", updatedCaptor.getValue().getStatus()),
                 () -> assertEquals("wayline-001", updatedCaptor.getValue().getPublishedWaylineId()));
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        assertAll(
+                () -> assertEquals("Survey A.kmz", createCaptor.getValue().getFilename()),
+                () -> assertEquals("wayline/pw-001.kmz", createCaptor.getValue().getObjectKey()),
+                () -> assertEquals("alice", createCaptor.getValue().getUsername()),
+                () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/template.kml"),
+                () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/waylines.wpml"),
+                () -> assertTrue(readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml").contains("<wpml:templateType>waypoint</wpml:templateType>")),
+                () -> assertTrue(readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml").contains("<wpml:waylineCoordinateSysParam>")));
         PlannedWaylineDTO reloaded = service.getOne("workspace-001", "pw-001").orElseThrow();
         assertEquals("pw-001", reloaded.getPlannedWaylineId());
         assertEquals("published", reloaded.getStatus());
@@ -403,7 +426,7 @@ class PlannedWaylineServiceTest {
     void publishFailureShouldKeepOriginalDraftState() {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
-        WaylineFileServiceImpl waylineFileService = mock(WaylineFileServiceImpl.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
         PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
                 .id(1)
                 .plannedWaylineId("pw-001")
@@ -421,7 +444,7 @@ class PlannedWaylineServiceTest {
                 .updateTime(1000L)
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
-        when(waylineFileService.savePublishedWayline("workspace-001", existing))
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
                 .thenThrow(new IllegalStateException("publish failed"));
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
@@ -429,6 +452,101 @@ class PlannedWaylineServiceTest {
         assertAll(
                 () -> assertEquals("draft", existing.getStatus()),
                 () -> assertNull(existing.getPublishedWaylineId()));
-        verify(mapper, org.mockito.Mockito.never()).updateById(any(PlannedWaylineEntity.class));
+        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+    }
+
+    @Test
+    void publishShouldReturnExistingPublishedWaylineWhenAlreadyPublished() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .name("Survey A")
+                .status("published")
+                .publishedWaylineId("wayline-001")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001");
+
+        assertAll(
+                () -> assertEquals("pw-001", response.getPlannedWaylineId()),
+                () -> assertEquals("wayline-001", response.getPublishedWaylineId()),
+                () -> assertEquals("Survey A", response.getPublishedWaylineName()));
+        verify(waylineFileService, never()).createPublishedWayline(any(), any(PublishedWaylineCreateDTO.class));
+        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+    }
+
+    @Test
+    void publishShouldCleanupCreatedFormalWaylineWhenPlannedUpdateFails() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .name("Survey A")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-001")
+                        .name("Survey A")
+                        .objectKey("wayline/pw-001.kmz")
+                        .build());
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(0);
+        when(waylineFileService.deleteByWaylineId("workspace-001", "wayline-001")).thenReturn(true);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> service.publish("workspace-001", "pw-001"));
+
+        assertEquals("Failed to publish planned wayline.", thrown.getMessage());
+        verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-001");
+    }
+
+    private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
+            ZipEntry entry = zipInputStream.getNextEntry();
+            while (entry != null) {
+                if (expectedEntry.equals(entry.getName())) {
+                    return;
+                }
+                entry = zipInputStream.getNextEntry();
+            }
+        }
+        throw new AssertionError("Missing zip entry: " + expectedEntry);
+    }
+
+    private static String readZipEntry(byte[] content, String entryName) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
+            ZipEntry entry = zipInputStream.getNextEntry();
+            while (entry != null) {
+                if (entryName.equals(entry.getName())) {
+                    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                    zipInputStream.transferTo(outputStream);
+                    return outputStream.toString(StandardCharsets.UTF_8);
+                }
+                entry = zipInputStream.getNextEntry();
+            }
+        }
+        throw new AssertionError("Missing zip entry: " + entryName);
     }
 }

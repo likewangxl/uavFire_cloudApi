@@ -1,5 +1,7 @@
 package com.dji.sample.wayline.service;
 
+import com.dji.sample.wayline.model.dto.PublishedWaylineCreateDTO;
+import com.dji.sample.wayline.model.dto.PublishedWaylineFileDTO;
 import com.dji.sample.wayline.model.dto.WaylineFileDTO;
 import com.dji.sdk.cloudapi.wayline.GetWaylineListRequest;
 import com.dji.sdk.cloudapi.wayline.GetWaylineListResponse;
@@ -41,6 +43,8 @@ public interface IWaylineFileService {
      * @return
      */
     URL getObjectUrl(String workspaceId, String waylineId) throws SQLException;
+
+    PublishedWaylineFileDTO createPublishedWayline(String workspaceId, PublishedWaylineCreateDTO param);
 
     /**
      * Save the basic information of the wayline file.
