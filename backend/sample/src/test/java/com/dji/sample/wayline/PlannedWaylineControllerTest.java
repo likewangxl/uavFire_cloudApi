@@ -6,6 +6,7 @@ import com.dji.sample.wayline.controller.PlannedWaylineController;
 import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaypointDTO;
 import com.dji.sample.wayline.model.param.CreatePlannedWaylineParam;
+import com.dji.sample.wayline.model.param.PublishPlannedWaylineResponse;
 import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.IPlannedWaylineService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -385,6 +386,27 @@ class PlannedWaylineControllerTest {
         verify(plannedWaylineService).update(org.mockito.ArgumentMatchers.eq("workspace-001"),
                 org.mockito.ArgumentMatchers.eq("pw-001"),
                 any(UpdatePlannedWaylineParam.class));
+    }
+
+    @Test
+    void publishPlannedWaylineShouldReturnPublishedWaylineId() throws Exception {
+        when(plannedWaylineService.publish("workspace-001", "pw-001"))
+                .thenReturn(PublishPlannedWaylineResponse.builder()
+                        .plannedWaylineId("pw-001")
+                        .publishedWaylineId("wayline-001")
+                        .publishedWaylineName("Survey A")
+                        .build());
+
+        mockMvc.perform(post("/wayline/api/v1/workspaces/workspace-001/planned-waylines/pw-001/publish")
+                        .requestAttr(com.dji.sample.component.AuthInterceptor.TOKEN_CLAIM,
+                                new CustomClaim("1", "alice", 1, "workspace-001")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.plannedWaylineId").value("pw-001"))
+                .andExpect(jsonPath("$.data.publishedWaylineId").value("wayline-001"))
+                .andExpect(jsonPath("$.data.publishedWaylineName").value("Survey A"));
+
+        verify(plannedWaylineService).publish("workspace-001", "pw-001");
     }
 
     @Test

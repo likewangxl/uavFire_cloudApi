@@ -7,6 +7,7 @@ import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaypointDTO;
 import com.dji.sample.wayline.model.entity.PlannedWaylineEntity;
 import com.dji.sample.wayline.model.param.CreatePlannedWaylineParam;
+import com.dji.sample.wayline.model.param.PublishPlannedWaylineResponse;
 import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.IPlannedWaylineService;
 import com.dji.sdk.common.Pagination;
@@ -33,10 +34,13 @@ import java.util.stream.Collectors;
 public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private static final String STATUS_DRAFT = "draft";
+    private static final String STATUS_PUBLISHED = "published";
 
     private final IPlannedWaylineMapper mapper;
 
     private final ObjectMapper objectMapper;
+
+    private final WaylineFileServiceImpl waylineFileService;
 
     @Override
     public PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize) {
@@ -86,6 +90,34 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalArgumentException("Planned wayline doesn't exist.");
         }
         return entity2Dto(existing);
+    }
+
+    @Override
+    public PublishPlannedWaylineResponse publish(String workspaceId, String id) {
+        PlannedWaylineEntity existing = mapper.selectOne(
+                new LambdaQueryWrapper<PlannedWaylineEntity>()
+                        .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
+                        .eq(PlannedWaylineEntity::getPlannedWaylineId, id));
+        if (Objects.isNull(existing)) {
+            throw new IllegalArgumentException("Planned wayline doesn't exist.");
+        }
+
+        validatePublishableRecord(existing);
+        String publishedWaylineId = waylineFileService.savePublishedWayline(workspaceId, existing);
+
+        existing.setPublishedWaylineId(publishedWaylineId);
+        existing.setStatus(STATUS_PUBLISHED);
+        existing.setUpdateTime(System.currentTimeMillis());
+        int updated = mapper.updateById(existing);
+        if (updated <= 0) {
+            throw new IllegalArgumentException("Failed to publish planned wayline.");
+        }
+
+        return PublishPlannedWaylineResponse.builder()
+                .plannedWaylineId(existing.getPlannedWaylineId())
+                .publishedWaylineId(existing.getPublishedWaylineId())
+                .publishedWaylineName(existing.getName())
+                .build();
     }
 
     @Override
@@ -183,6 +215,46 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private boolean isFinite(Double value) {
         return value != null && Double.isFinite(value);
+    }
+
+    private void validatePublishableRecord(PlannedWaylineEntity entity) {
+        if (!isFinite(entity.getDefaultHeight()) || entity.getDefaultHeight() <= 0) {
+            throw new IllegalArgumentException("Planned wayline default height is invalid.");
+        }
+        if (!isFinite(entity.getMaxSpeed()) || entity.getMaxSpeed() <= 0) {
+            throw new IllegalArgumentException("Planned wayline max speed is invalid.");
+        }
+
+        List<PlannedWaypointDTO> waypoints = readWaypoints(entity.getWaypointsJson());
+        if (CollectionUtils.isEmpty(waypoints)) {
+            throw new IllegalArgumentException("Planned wayline waypoints are required.");
+        }
+        for (int i = 0; i < waypoints.size(); i++) {
+            PlannedWaypointDTO waypoint = waypoints.get(i);
+            if (!isLegalLongitude(waypoint.getGcjLng())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] gcjLng is invalid.");
+            }
+            if (!isLegalLatitude(waypoint.getGcjLat())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] gcjLat is invalid.");
+            }
+            if (!isLegalLongitude(waypoint.getWgsLng())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] wgsLng is invalid.");
+            }
+            if (!isLegalLatitude(waypoint.getWgsLat())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] wgsLat is invalid.");
+            }
+            if (!isFinite(waypoint.getHeight()) || waypoint.getHeight() <= 0) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] height is invalid.");
+            }
+        }
+    }
+
+    private boolean isLegalLongitude(Double value) {
+        return isFinite(value) && value >= -180.0 && value <= 180.0;
+    }
+
+    private boolean isLegalLatitude(Double value) {
+        return isFinite(value) && value >= -90.0 && value <= 90.0;
     }
 
     private void applyEditableFields(PlannedWaylineEntity target, UpdatePlannedWaylineParam param) {

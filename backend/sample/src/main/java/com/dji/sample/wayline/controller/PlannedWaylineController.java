@@ -3,6 +3,7 @@ package com.dji.sample.wayline.controller;
 import com.dji.sample.common.model.CustomClaim;
 import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
 import com.dji.sample.wayline.model.param.CreatePlannedWaylineParam;
+import com.dji.sample.wayline.model.param.PublishPlannedWaylineResponse;
 import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.IPlannedWaylineService;
 import com.dji.sdk.common.HttpResultResponse;
@@ -57,6 +58,14 @@ public class PlannedWaylineController {
         String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
         PlannedWaylineDTO dto = plannedWaylineService.update(trustedWorkspaceId, id, param);
         return HttpResultResponse.success(dto);
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/publish")
+    public HttpResultResponse<PublishPlannedWaylineResponse> publish(@PathVariable("workspace_id") String workspaceId,
+                                                                     @PathVariable("id") String id,
+                                                                     HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        return HttpResultResponse.success(plannedWaylineService.publish(trustedWorkspaceId, id));
     }
 
     @DeleteMapping("/{workspace_id}/planned-waylines/{id}")
