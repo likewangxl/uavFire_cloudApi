@@ -79,20 +79,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalArgumentException("Planned wayline doesn't exist.");
         }
 
-        PlannedWaylineEntity replacement = dto2Entity(param);
-        replacement.setId(existing.getId());
-        replacement.setPlannedWaylineId(existing.getPlannedWaylineId());
-        replacement.setWorkspaceId(existing.getWorkspaceId());
-        replacement.setStatus(existing.getStatus());
-        replacement.setPublishedWaylineId(existing.getPublishedWaylineId());
-        replacement.setCreator(existing.getCreator());
-        replacement.setCreateTime(existing.getCreateTime());
-        replacement.setUpdateTime(System.currentTimeMillis());
-        int updated = mapper.updateById(replacement);
+        applyEditableFields(existing, param);
+        existing.setUpdateTime(System.currentTimeMillis());
+        int updated = mapper.updateById(existing);
         if (updated <= 0) {
             throw new IllegalArgumentException("Planned wayline doesn't exist.");
         }
-        return entity2Dto(replacement);
+        return entity2Dto(existing);
     }
 
     @Override
@@ -118,24 +111,88 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (Objects.isNull(param)) {
             throw new IllegalArgumentException("Planned wayline param is required.");
         }
-        if (!StringUtils.hasText(param.getName())) {
-            throw new IllegalArgumentException("Planned wayline name is required.");
-        }
-        if (CollectionUtils.isEmpty(param.getWaypoints())) {
-            throw new IllegalArgumentException("Planned wayline waypoints are required.");
-        }
+        validateEditableFields(param.getName(), param.getAircraftModelKey(), param.getGatewaySn(),
+                param.getAircraftSn(), param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
     }
 
     private void validateParam(UpdatePlannedWaylineParam param) {
         if (Objects.isNull(param)) {
             throw new IllegalArgumentException("Planned wayline param is required.");
         }
-        if (!StringUtils.hasText(param.getName())) {
+        validateEditableFields(param.getName(), param.getAircraftModelKey(), param.getGatewaySn(),
+                param.getAircraftSn(), param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
+    }
+
+    private void validateEditableFields(String name,
+                                        String aircraftModelKey,
+                                        String gatewaySn,
+                                        String aircraftSn,
+                                        Double defaultHeight,
+                                        Double maxSpeed,
+                                        List<PlannedWaypointDTO> waypoints) {
+        if (!StringUtils.hasText(name)) {
             throw new IllegalArgumentException("Planned wayline name is required.");
         }
-        if (CollectionUtils.isEmpty(param.getWaypoints())) {
+        if (!StringUtils.hasText(aircraftModelKey)) {
+            throw new IllegalArgumentException("Planned wayline aircraft model key is required.");
+        }
+        if (!StringUtils.hasText(gatewaySn)) {
+            throw new IllegalArgumentException("Planned wayline gateway sn is required.");
+        }
+        if (!StringUtils.hasText(aircraftSn)) {
+            throw new IllegalArgumentException("Planned wayline aircraft sn is required.");
+        }
+        if (!isFinite(defaultHeight)) {
+            throw new IllegalArgumentException("Planned wayline default height is required.");
+        }
+        if (!isFinite(maxSpeed)) {
+            throw new IllegalArgumentException("Planned wayline max speed is required.");
+        }
+        validateWaypoints(waypoints);
+    }
+
+    private void validateWaypoints(List<PlannedWaypointDTO> waypoints) {
+        if (CollectionUtils.isEmpty(waypoints)) {
             throw new IllegalArgumentException("Planned wayline waypoints are required.");
         }
+        for (int i = 0; i < waypoints.size(); i++) {
+            PlannedWaypointDTO waypoint = waypoints.get(i);
+            if (Objects.isNull(waypoint)) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] is required.");
+            }
+            if (Objects.isNull(waypoint.getOrder()) || waypoint.getOrder() < 1) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] order is required.");
+            }
+            if (!isFinite(waypoint.getGcjLng())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] gcjLng is required.");
+            }
+            if (!isFinite(waypoint.getGcjLat())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] gcjLat is required.");
+            }
+            if (!isFinite(waypoint.getWgsLng())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] wgsLng is required.");
+            }
+            if (!isFinite(waypoint.getWgsLat())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] wgsLat is required.");
+            }
+            if (!isFinite(waypoint.getHeight())) {
+                throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] height is required.");
+            }
+        }
+    }
+
+    private boolean isFinite(Double value) {
+        return value != null && Double.isFinite(value);
+    }
+
+    private void applyEditableFields(PlannedWaylineEntity target, UpdatePlannedWaylineParam param) {
+        target.setName(param.getName());
+        target.setAircraftModelKey(param.getAircraftModelKey());
+        target.setGatewaySn(param.getGatewaySn());
+        target.setAircraftSn(param.getAircraftSn());
+        target.setDefaultHeight(param.getDefaultHeight());
+        target.setMaxSpeed(param.getMaxSpeed());
+        target.setWaypointsJson(writeWaypoints(param.getWaypoints()));
     }
 
     private PlannedWaylineEntity dto2Entity(CreatePlannedWaylineParam param) {
