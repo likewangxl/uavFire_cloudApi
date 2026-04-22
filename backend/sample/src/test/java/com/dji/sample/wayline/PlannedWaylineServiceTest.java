@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -391,7 +392,7 @@ class PlannedWaylineServiceTest {
                         .name("Survey A")
                         .objectKey("wayline/pw-001.kmz")
                         .build());
-        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
         PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001");
@@ -404,8 +405,9 @@ class PlannedWaylineServiceTest {
                 () -> assertEquals("published", existing.getStatus()),
                 () -> assertEquals("wayline-001", existing.getPublishedWaylineId()));
         ArgumentCaptor<PlannedWaylineEntity> updatedCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
-        verify(mapper).updateById(updatedCaptor.capture());
+        verify(mapper).update(updatedCaptor.capture(), any());
         assertAll(
+                () -> assertEquals(1, updatedCaptor.getValue().getId()),
                 () -> assertEquals("published", updatedCaptor.getValue().getStatus()),
                 () -> assertEquals("wayline-001", updatedCaptor.getValue().getPublishedWaylineId()));
         ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
@@ -456,7 +458,7 @@ class PlannedWaylineServiceTest {
         assertAll(
                 () -> assertEquals("draft", existing.getStatus()),
                 () -> assertNull(existing.getPublishedWaylineId()));
-        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+        verify(mapper, never()).update(any(PlannedWaylineEntity.class), any());
     }
 
     @Test
@@ -484,7 +486,7 @@ class PlannedWaylineServiceTest {
                 () -> assertEquals("wayline-001", response.getPublishedWaylineId()),
                 () -> assertEquals("Survey A", response.getPublishedWaylineName()));
         verify(waylineFileService, never()).createPublishedWayline(any(), any(PublishedWaylineCreateDTO.class));
-        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+        verify(mapper, never()).update(any(PlannedWaylineEntity.class), any());
     }
 
     @Test
@@ -516,7 +518,7 @@ class PlannedWaylineServiceTest {
                         .name("Survey A")
                         .objectKey("wayline/pw-001.kmz")
                         .build());
-        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(0);
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(0);
         when(waylineFileService.deleteByWaylineId("workspace-001", "wayline-001")).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
@@ -556,7 +558,7 @@ class PlannedWaylineServiceTest {
                         .name("Survey A")
                         .objectKey("wayline/pw-001.kmz")
                         .build());
-        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenThrow(new RuntimeException("db failure"));
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenThrow(new RuntimeException("db failure"));
         when(waylineFileService.deleteByWaylineId("workspace-001", "wayline-001")).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
@@ -565,6 +567,60 @@ class PlannedWaylineServiceTest {
 
         assertEquals("db failure", thrown.getMessage());
         verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-001");
+    }
+
+    @Test
+    void publishShouldDeleteNewFormalWaylineAndReturnExistingReferenceWhenConditionalUpdateLosesRace() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        OssConfiguration.objectDirPrefix = "wayline";
+        PlannedWaylineEntity draft = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .name("Survey A")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        PlannedWaylineEntity published = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .name("Survey A")
+                .status("published")
+                .publishedWaylineId("wayline-existing")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(2000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(draft, published);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-new")
+                        .name("Survey A")
+                        .objectKey("wayline/pw-001.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(0);
+        when(waylineFileService.deleteByWaylineId("workspace-001", "wayline-new")).thenReturn(true);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001");
+
+        assertAll(
+                () -> assertEquals("pw-001", response.getPlannedWaylineId()),
+                () -> assertEquals("wayline-existing", response.getPublishedWaylineId()),
+                () -> assertEquals("Survey A", response.getPublishedWaylineName()));
+        verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-new");
+        verify(mapper).update(any(PlannedWaylineEntity.class), any());
     }
 
     @Test
@@ -596,7 +652,7 @@ class PlannedWaylineServiceTest {
                         .name("Unsafe <Route> & \"Alpha\"")
                         .objectKey("custom-prefix/pw-unsafe.kmz")
                         .build());
-        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
         service.publish("workspace-001", "pw-unsafe");

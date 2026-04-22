@@ -21,6 +21,7 @@ import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -135,6 +136,30 @@ class WaylineFileServiceImplTest {
 
         assertEquals("db insert failed", thrown.getMessage());
         verify(ossService).putObject(eq("bucket-001"), eq("wayline/pw-001.kmz"), any(ByteArrayInputStream.class));
+        verify(ossService).deleteObject("bucket-001", "wayline/pw-001.kmz");
+    }
+
+    @Test
+    void createPublishedWaylineShouldSurfaceCleanupFailureWhenInsertThrows() throws IOException {
+        WaylineFileServiceImpl service = new WaylineFileServiceImpl();
+        IWaylineFileMapper mapper = mock(IWaylineFileMapper.class);
+        OssServiceContext ossService = mock(OssServiceContext.class);
+        ReflectionTestUtils.setField(service, "mapper", mapper);
+        ReflectionTestUtils.setField(service, "ossService", ossService);
+        OssConfiguration.bucket = "bucket-001";
+        when(mapper.insert(any(WaylineFileEntity.class))).thenThrow(new RuntimeException("db insert failed"));
+        when(ossService.deleteObject(eq("bucket-001"), eq("wayline/pw-001.kmz"))).thenReturn(false);
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.createPublishedWayline("workspace-001", PublishedWaylineCreateDTO.builder()
+                        .filename("Survey A.kmz")
+                        .objectKey("wayline/pw-001.kmz")
+                        .username("alice")
+                        .content(buildMinimalKmz())
+                        .build()));
+
+        assertEquals("Failed to cleanup uploaded published wayline object.", thrown.getMessage());
+        assertInstanceOf(RuntimeException.class, thrown.getCause());
         verify(ossService).deleteObject("bucket-001", "wayline/pw-001.kmz");
     }
 

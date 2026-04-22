@@ -1,6 +1,7 @@
 package com.dji.sample.wayline.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.dji.sample.component.oss.model.OssConfiguration;
 import com.dji.sample.wayline.dao.IPlannedWaylineMapper;
@@ -123,18 +124,43 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         PublishedWaylineFileDTO publishedWayline = waylineFileService.createPublishedWayline(
                 workspaceId, buildPublishedWaylineCreate(existing));
 
+        long updateTime = System.currentTimeMillis();
+        PlannedWaylineEntity publishUpdate = PlannedWaylineEntity.builder()
+                .id(existing.getId())
+                .publishedWaylineId(publishedWayline.getWaylineId())
+                .status(STATUS_PUBLISHED)
+                .updateTime(updateTime)
+                .build();
+        int updated;
         try {
-            existing.setPublishedWaylineId(publishedWayline.getWaylineId());
-            existing.setStatus(STATUS_PUBLISHED);
-            existing.setUpdateTime(System.currentTimeMillis());
-            int updated = mapper.updateById(existing);
-            if (updated <= 0) {
-                throw new IllegalArgumentException("Failed to publish planned wayline.");
-            }
+            updated = mapper.update(publishUpdate, new LambdaUpdateWrapper<PlannedWaylineEntity>()
+                    .eq(PlannedWaylineEntity::getId, existing.getId())
+                    .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
+                    .eq(PlannedWaylineEntity::getPlannedWaylineId, id)
+                    .eq(PlannedWaylineEntity::getStatus, STATUS_DRAFT)
+                    .isNull(PlannedWaylineEntity::getPublishedWaylineId));
         } catch (RuntimeException e) {
             rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
             throw e;
         }
+        if (updated <= 0) {
+            rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
+            PlannedWaylineEntity current = mapper.selectOne(
+                    new LambdaQueryWrapper<PlannedWaylineEntity>()
+                            .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
+                            .eq(PlannedWaylineEntity::getPlannedWaylineId, id));
+            if (current != null && StringUtils.hasText(current.getPublishedWaylineId())) {
+                return PublishPlannedWaylineResponse.builder()
+                        .plannedWaylineId(current.getPlannedWaylineId())
+                        .publishedWaylineId(current.getPublishedWaylineId())
+                        .publishedWaylineName(current.getName())
+                        .build();
+            }
+            throw new IllegalArgumentException("Failed to publish planned wayline.");
+        }
+        existing.setPublishedWaylineId(publishedWayline.getWaylineId());
+        existing.setStatus(STATUS_PUBLISHED);
+        existing.setUpdateTime(updateTime);
 
         return PublishPlannedWaylineResponse.builder()
                 .plannedWaylineId(existing.getPlannedWaylineId())

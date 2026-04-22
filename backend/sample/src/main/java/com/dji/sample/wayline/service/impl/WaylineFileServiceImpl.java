@@ -327,7 +327,14 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
     }
 
     private void cleanupUploadedObject(String objectKey) {
-        ossService.deleteObject(OssConfiguration.bucket, objectKey);
+        try {
+            boolean deleted = ossService.deleteObject(OssConfiguration.bucket, objectKey);
+            if (!deleted) {
+                throw new IllegalStateException("Failed to cleanup uploaded published wayline object.");
+            }
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Failed to cleanup uploaded published wayline object.", e);
+        }
     }
     /**
      * Convert database entity objects into wayline data transfer object.
