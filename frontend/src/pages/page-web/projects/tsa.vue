@@ -3,14 +3,14 @@
     <div>
       <a-row>
         <a-col :span="1"></a-col>
-        <a-col :span="11">My Username</a-col>
+        <a-col :span="11">当前用户</a-col>
         <a-col :span="11" align="right" style="font-weight: 700">{{ username }}</a-col>
         <a-col :span="1"></a-col>
       </a-row>
     </div>
     <div class="scrollbar" :style="{ height: scorllHeight + 'px'}">
       <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #232323;">
-        <a-collapse-panel :key="EDeviceTypeName.Dock" header="Dock" style="border-bottom: 1px solid #4f4f4f;">
+        <a-collapse-panel :key="EDeviceTypeName.Dock" header="机场设备" style="border-bottom: 1px solid #4f4f4f;">
           <div v-if="onlineDocks.data.length === 0" style="height: 150px; color: white;">
             <a-empty :image="noData" :image-style="{ height: '60px' }" />
           </div>
@@ -20,7 +20,7 @@
                 <div style="float: left; padding: 0px 5px 8px 8px; width: 88%">
                   <div style="width: 80%; height: 30px; line-height: 30px; font-size: 16px;">
                     <a-tooltip :title="`${dock.gateway.callsign} - ${dock.callsign ?? 'No Drone'}`">
-                      <div class="text-hidden" style="max-width: 200px;">{{ dock.gateway.callsign }} - {{ dock.callsign ?? 'No Drone' }}</div>
+                      <div class="text-hidden" style="max-width: 200px;">{{ dock.gateway.callsign }} - {{ dock.callsign ?? '未挂载飞机' }}</div>
                     </a-tooltip>
                   </div>
                   <div class="mt5 flex-align-center flex-row flex-justify-between" style="background: #595959;">
@@ -137,7 +137,7 @@
         </a-collapse-panel>
       </a-collapse>
       <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #232323;">
-        <a-collapse-panel :key="EDeviceTypeName.Aircraft" header="Online Devices" style="border-bottom: 1px solid #4f4f4f;">
+        <a-collapse-panel :key="EDeviceTypeName.Aircraft" header="在线设备" style="border-bottom: 1px solid #4f4f4f;">
           <div v-if="onlineDevices.data.length === 0" style="height: 150px; color: white;">
             <a-empty :image="noData" :image-style="{ height: '60px' }" />
           </div>
@@ -154,8 +154,8 @@
                 <div style="float: left; padding: 5px 5px 8px 8px; width: 88%">
                   <div style="width: 100%; height: 100%;">
                     <a-tooltip>
-                      <template #title>{{ device.model ? `${device.model} - ${device.callsign}` : 'No Drone'}}</template>
-                      <span class="text-hidden" style="max-width: 200px; display: block; height: 20px;">{{ device.model ? `${device.model} - ${device.callsign}` : 'No Drone'}}</span>
+                      <template #title>{{ device.model ? `${device.model} - ${device.callsign}` : '未识别设备'}}</template>
+                      <span class="text-hidden" style="max-width: 200px; display: block; height: 20px;">{{ device.model ? `${device.model} - ${device.callsign}` : '未识别设备'}}</span>
                     </a-tooltip>
                   </div>
                   <div class="mt5" style="background: #595959;">
@@ -182,184 +182,374 @@
                 </div>
               </div>
               <div class="aircraft-osd-panel" v-if="deviceInfo[device.sn]">
-                <div class="aircraft-osd-title">Flight Status</div>
+                <div class="aircraft-osd-title">飞行状态</div>
                 <div class="aircraft-osd-grid">
                   <div class="aircraft-osd-item">
-                    <span class="label">Battery</span>
+                    <span class="label">电量</span>
                     <span class="value">{{ getBatteryPercent(device.sn) }}</span>
                   </div>
                   <div class="aircraft-osd-item">
-                    <span class="label">Height</span>
+                    <span class="label">高度</span>
                     <span class="value">{{ formatMetric(deviceInfo[device.sn].height, 'm') }}</span>
                   </div>
                   <div class="aircraft-osd-item">
-                    <span class="label">Home</span>
+                    <span class="label">返航点</span>
                     <span class="value">{{ formatMetric(deviceInfo[device.sn].home_distance, 'm') }}</span>
                   </div>
                   <div class="aircraft-osd-item">
-                    <span class="label">HS</span>
+                    <span class="label">水平速度</span>
                     <span class="value">{{ formatMetric(deviceInfo[device.sn].horizontal_speed, 'm/s') }}</span>
                   </div>
                   <div class="aircraft-osd-item">
-                    <span class="label">VS</span>
+                    <span class="label">垂直速度</span>
                     <span class="value">{{ formatMetric(deviceInfo[device.sn].vertical_speed, 'm/s') }}</span>
                   </div>
                   <div class="aircraft-osd-item">
-                    <span class="label">Wind</span>
+                    <span class="label">风速</span>
                     <span class="value">{{ formatMetric(deviceInfo[device.sn].wind_speed, 'm/s') }}</span>
                   </div>
                 </div>
               </div>
               <div class="aircraft-osd-panel" v-else>
-                <div class="aircraft-osd-title">Flight Status</div>
-                <div class="aircraft-osd-empty">Waiting for aircraft OSD data.</div>
+                <div class="aircraft-osd-title">飞行状态</div>
+                <div class="aircraft-osd-empty">等待飞机 OSD 数据...</div>
               </div>
               <div class="aircraft-action-panel">
-                <div class="aircraft-osd-title">Flight Control</div>
+                <div class="aircraft-osd-title">飞行控制</div>
                 <div class="aircraft-action-tips">
-                  {{ isCurrentRemoteGateway(device) ? 'Remote control connected. Stick presets are active.' : 'Enter remote control before sending flight commands.' }}
+                  {{ hasActiveDrcControl(device)
+                    ? '遥控链路已连接，可执行遥控和飞行指令。'
+                    : hasRemoteSession(device) && !remoteControlState.cloudControlAuthorized
+                      ? '云控会话仍在，但飞行授权已释放，请重新申请授权。'
+                      : hasRemoteSession(device)
+                      ? '云控会话仍在，但 DRC/摇杆当前不可用。'
+                      : '请先进入遥控模式，再发送官方起飞和其他飞行指令。' }}
                 </div>
-                <div class="aircraft-action-row">
-                  <a-button
-                    size="small"
-                    type="primary"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'connect'"
-                    :disabled="isCurrentRemoteGateway(device)"
-                    @click="connectRemoteControl(device)">
-                    Enter Remote
-                  </a-button>
-                  <a-button
-                    size="small"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'disconnect'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="disconnectRemoteControl()">
-                    Exit Remote
-                  </a-button>
-                  <a-button
-                    size="small"
-                    danger
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'stop'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="sendEmergencyStop(device)">
-                    Stop
-                  </a-button>
-                </div>
-                <div class="aircraft-action-row">
-                  <a-button
-                    size="small"
-                    type="primary"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'takeoff'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="handleTakeoff(device)">
-                    Official Takeoff
-                  </a-button>
-                  <a-button
-                    size="small"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'land'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="handleLanding(device)">
-                    Land
-                  </a-button>
-                </div>
-                <div class="aircraft-action-row">
-                  <a-button
-                    size="small"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'up'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="handleAxisControl(device, 'up')">
-                    Up
-                  </a-button>
-                  <a-button
-                    size="small"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'hover'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="handleAxisControl(device, 'hover')">
-                    Hover
-                  </a-button>
-                  <a-button
-                    size="small"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'down'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="handleAxisControl(device, 'down')">
-                    Down
-                  </a-button>
-                </div>
-                <div class="aircraft-action-tips" style="color: #8c8c8c; margin-top: 4px;">
-                  fly_to_point (airborne only, height ≥ 15 m). See WORK_RECORD.md §8.
-                </div>
-                <div class="aircraft-action-row">
-                  <a-button
-                    size="small"
-                    type="primary"
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'flyForward'"
-                    :disabled="!canFlyToPoint(device)"
-                    @click="handleFlyForwardTest(device)">
-                    Fly Forward 20m
-                  </a-button>
-                  <a-popover
-                    trigger="click"
-                    placement="left"
-                    :visible="flyToPointFormState.visible && flyToPointFormState.gatewaySn === device.gateway.sn"
-                    @visibleChange="(v) => { if (!v) closeFlyToPointManual() }">
-                    <template #content>
-                      <div style="width: 220px;">
-                        <div style="margin-bottom: 6px; font-weight: 700;">Fly To Point (Manual)</div>
-                        <div style="margin-bottom: 4px;">Latitude</div>
-                        <a-input-number
-                          v-model:value="flyToPointFormState.latitude"
-                          :step="0.00001"
-                          style="width: 100%;" />
-                        <div style="margin: 6px 0 4px;">Longitude</div>
-                        <a-input-number
-                          v-model:value="flyToPointFormState.longitude"
-                          :step="0.00001"
-                          style="width: 100%;" />
-                        <div style="margin: 6px 0 4px;">Height (m, from takeoff)</div>
-                        <a-input-number
-                          v-model:value="flyToPointFormState.height"
-                          :min="MIN_AIRBORNE_HEIGHT_M"
-                          :step="1"
-                          style="width: 100%;" />
-                        <div style="margin: 6px 0 4px;">Max speed (m/s, 2-15)</div>
-                        <a-input-number
-                          v-model:value="flyToPointFormState.maxSpeed"
-                          :min="2"
-                          :max="15"
-                          :step="1"
-                          style="width: 100%;" />
-                        <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
-                          <a-button size="small" @click="closeFlyToPointManual">Cancel</a-button>
-                          <a-button size="small" type="primary" @click="submitFlyToPointManual">Send</a-button>
-                        </div>
-                      </div>
-                    </template>
+                <div class="aircraft-action-section">
+                  <div class="aircraft-action-section-title">远程控制</div>
+                  <div class="aircraft-action-grid aircraft-action-grid--2">
                     <a-button
                       size="small"
+                      type="primary"
+                      class="aircraft-action-btn aircraft-action-btn--primary"
+                      :loading="actionLoading[device.gateway.sn] === 'connect'"
+                      :disabled="hasRemoteSession(device) && remoteControlState.cloudControlAuthorized"
+                      @click="connectRemoteControl(device)">
+                      {{ hasRemoteSession(device) && !remoteControlState.cloudControlAuthorized ? '重新申请授权' : '申请遥控' }}
+                    </a-button>
+                    <a-button
+                      size="small"
+                      class="aircraft-action-btn"
+                      :loading="actionLoading[device.gateway.sn] === 'disconnect'"
+                      :disabled="!hasRemoteSession(device)"
+                      @click="disconnectRemoteControl('user_click_exit')">
+                      退出遥控
+                    </a-button>
+                  </div>
+                </div>
+
+                <div class="aircraft-action-section">
+                  <div class="aircraft-action-section-title">基础飞行</div>
+                  <div class="aircraft-action-grid aircraft-action-grid--3">
+                    <a-button
+                      size="small"
+                      type="primary"
+                      class="aircraft-action-btn aircraft-action-btn--primary"
+                      :loading="actionLoading[device.gateway.sn] === 'takeoff'"
+                      :disabled="!canOfficialTakeoff(device)"
+                      @click="handleTakeoff(device)">
+                      起飞
+                    </a-button>
+                    <a-button
+                      size="small"
+                      class="aircraft-action-btn"
+                      :loading="actionLoading[device.gateway.sn] === 'land'"
+                      :disabled="!hasActiveDrcControl(device)"
+                      @click="handleLanding(device)">
+                      降落
+                    </a-button>
+                    <a-button
+                      size="small"
+                      class="aircraft-action-btn"
+                      :loading="actionLoading[device.gateway.sn] === 'hover'"
+                      :disabled="!hasActiveDrcControl(device)"
+                      @click="handleAxisControl(device, 'hover')">
+                      悬停
+                    </a-button>
+                  </div>
+                </div>
+
+                <div class="aircraft-action-section">
+                  <div class="aircraft-action-section-title">位移控制</div>
+                  <div class="aircraft-action-grid aircraft-action-grid--3">
+                    <a-popover
+                      trigger="click"
+                      placement="left"
+                      :visible="axisDistanceFormState.visible && axisDistanceFormState.gatewaySn === device.gateway.sn && axisDistanceFormState.direction === 'up'"
+                      @visibleChange="(v) => { if (!v) closeAxisDistanceControl() }">
+                      <template #content>
+                        <div style="width: 220px;">
+                          <div style="margin-bottom: 6px; font-weight: 700;">上升距离</div>
+                          <div style="margin-bottom: 4px;">距离（米）</div>
+                          <a-input-number
+                            v-model:value="axisDistanceFormState.distanceMeters"
+                            :min="AXIS_DISTANCE_MIN_METERS"
+                            :max="AXIS_DISTANCE_MAX_METERS"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                            <a-button size="small" @click="closeAxisDistanceControl">取消</a-button>
+                            <a-button size="small" type="primary" @click="submitAxisDistanceControl">发送</a-button>
+                          </div>
+                        </div>
+                      </template>
+                      <a-button
+                        size="small"
+                        class="aircraft-action-btn"
+                        :loading="actionLoading[device.gateway.sn] === 'up'"
+                        :disabled="!hasActiveDrcControl(device)"
+                        @click="openAxisDistanceControl(device, 'up')">
+                        <span class="aircraft-action-btn-inner"><ArrowUpOutlined /><span>上升</span></span>
+                      </a-button>
+                    </a-popover>
+                    <a-popover
+                      trigger="click"
+                      placement="left"
+                      :visible="axisDistanceFormState.visible && axisDistanceFormState.gatewaySn === device.gateway.sn && axisDistanceFormState.direction === 'north'"
+                      @visibleChange="(v) => { if (!v) closeAxisDistanceControl() }">
+                      <template #content>
+                        <div style="width: 220px;">
+                          <div style="margin-bottom: 6px; font-weight: 700;">向前移动距离</div>
+                          <div style="margin-bottom: 4px;">距离（米）</div>
+                          <a-input-number
+                            v-model:value="axisDistanceFormState.distanceMeters"
+                            :min="AXIS_DISTANCE_MIN_METERS"
+                            :max="AXIS_DISTANCE_MAX_METERS"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                            <a-button size="small" @click="closeAxisDistanceControl">取消</a-button>
+                            <a-button size="small" type="primary" @click="submitAxisDistanceControl">发送</a-button>
+                          </div>
+                        </div>
+                      </template>
+                      <a-button
+                        size="small"
+                        class="aircraft-action-btn"
+                        :loading="actionLoading[device.gateway.sn] === 'north'"
+                        :disabled="!hasActiveDrcControl(device)"
+                        @click="openAxisDistanceControl(device, 'north')">
+                        <span class="aircraft-action-btn-inner"><UpOutlined /><span>向前</span></span>
+                      </a-button>
+                    </a-popover>
+                    <a-popover
+                      trigger="click"
+                      placement="left"
+                      :visible="axisDistanceFormState.visible && axisDistanceFormState.gatewaySn === device.gateway.sn && axisDistanceFormState.direction === 'down'"
+                      @visibleChange="(v) => { if (!v) closeAxisDistanceControl() }">
+                      <template #content>
+                        <div style="width: 220px;">
+                          <div style="margin-bottom: 6px; font-weight: 700;">下降距离</div>
+                          <div style="margin-bottom: 4px;">距离（米）</div>
+                          <a-input-number
+                            v-model:value="axisDistanceFormState.distanceMeters"
+                            :min="AXIS_DISTANCE_MIN_METERS"
+                            :max="AXIS_DISTANCE_MAX_METERS"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                            <a-button size="small" @click="closeAxisDistanceControl">取消</a-button>
+                            <a-button size="small" type="primary" @click="submitAxisDistanceControl">发送</a-button>
+                          </div>
+                        </div>
+                      </template>
+                      <a-button
+                        size="small"
+                        class="aircraft-action-btn"
+                        :loading="actionLoading[device.gateway.sn] === 'down'"
+                        :disabled="!hasActiveDrcControl(device)"
+                        @click="openAxisDistanceControl(device, 'down')">
+                        <span class="aircraft-action-btn-inner"><ArrowDownOutlined /><span>下降</span></span>
+                      </a-button>
+                    </a-popover>
+                    <a-popover
+                      trigger="click"
+                      placement="left"
+                      :visible="axisDistanceFormState.visible && axisDistanceFormState.gatewaySn === device.gateway.sn && axisDistanceFormState.direction === 'west'"
+                      @visibleChange="(v) => { if (!v) closeAxisDistanceControl() }">
+                      <template #content>
+                        <div style="width: 220px;">
+                          <div style="margin-bottom: 6px; font-weight: 700;">向左移动距离</div>
+                          <div style="margin-bottom: 4px;">距离（米）</div>
+                          <a-input-number
+                            v-model:value="axisDistanceFormState.distanceMeters"
+                            :min="AXIS_DISTANCE_MIN_METERS"
+                            :max="AXIS_DISTANCE_MAX_METERS"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                            <a-button size="small" @click="closeAxisDistanceControl">取消</a-button>
+                            <a-button size="small" type="primary" @click="submitAxisDistanceControl">发送</a-button>
+                          </div>
+                        </div>
+                      </template>
+                      <a-button
+                        size="small"
+                        class="aircraft-action-btn"
+                        :loading="actionLoading[device.gateway.sn] === 'west'"
+                        :disabled="!hasActiveDrcControl(device)"
+                        @click="openAxisDistanceControl(device, 'west')">
+                        <span class="aircraft-action-btn-inner"><LeftOutlined /><span>向左</span></span>
+                      </a-button>
+                    </a-popover>
+                    <a-popover
+                      trigger="click"
+                      placement="left"
+                      :visible="axisDistanceFormState.visible && axisDistanceFormState.gatewaySn === device.gateway.sn && axisDistanceFormState.direction === 'south'"
+                      @visibleChange="(v) => { if (!v) closeAxisDistanceControl() }">
+                      <template #content>
+                        <div style="width: 220px;">
+                          <div style="margin-bottom: 6px; font-weight: 700;">向后移动距离</div>
+                          <div style="margin-bottom: 4px;">距离（米）</div>
+                          <a-input-number
+                            v-model:value="axisDistanceFormState.distanceMeters"
+                            :min="AXIS_DISTANCE_MIN_METERS"
+                            :max="AXIS_DISTANCE_MAX_METERS"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                            <a-button size="small" @click="closeAxisDistanceControl">取消</a-button>
+                            <a-button size="small" type="primary" @click="submitAxisDistanceControl">发送</a-button>
+                          </div>
+                        </div>
+                      </template>
+                      <a-button
+                        size="small"
+                        class="aircraft-action-btn"
+                        :loading="actionLoading[device.gateway.sn] === 'south'"
+                        :disabled="!hasActiveDrcControl(device)"
+                        @click="openAxisDistanceControl(device, 'south')">
+                        <span class="aircraft-action-btn-inner"><DownOutlined /><span>向后</span></span>
+                      </a-button>
+                    </a-popover>
+                    <a-popover
+                      trigger="click"
+                      placement="left"
+                      :visible="axisDistanceFormState.visible && axisDistanceFormState.gatewaySn === device.gateway.sn && axisDistanceFormState.direction === 'east'"
+                      @visibleChange="(v) => { if (!v) closeAxisDistanceControl() }">
+                      <template #content>
+                        <div style="width: 220px;">
+                          <div style="margin-bottom: 6px; font-weight: 700;">向右移动距离</div>
+                          <div style="margin-bottom: 4px;">距离（米）</div>
+                          <a-input-number
+                            v-model:value="axisDistanceFormState.distanceMeters"
+                            :min="AXIS_DISTANCE_MIN_METERS"
+                            :max="AXIS_DISTANCE_MAX_METERS"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                            <a-button size="small" @click="closeAxisDistanceControl">取消</a-button>
+                            <a-button size="small" type="primary" @click="submitAxisDistanceControl">发送</a-button>
+                          </div>
+                        </div>
+                      </template>
+                      <a-button
+                        size="small"
+                        class="aircraft-action-btn"
+                        :loading="actionLoading[device.gateway.sn] === 'east'"
+                        :disabled="!hasActiveDrcControl(device)"
+                        @click="openAxisDistanceControl(device, 'east')">
+                        <span class="aircraft-action-btn-inner"><RightOutlined /><span>向右</span></span>
+                      </a-button>
+                    </a-popover>
+                  </div>
+                </div>
+
+                <div class="aircraft-action-section">
+                  <div class="aircraft-action-section-title">任务控制</div>
+                  <div class="aircraft-action-grid aircraft-action-grid--2">
+                    <a-button
+                      size="small"
+                      danger
+                      class="aircraft-action-btn aircraft-action-btn--danger aircraft-action-btn--danger-strong"
+                      :loading="actionLoading[device.gateway.sn] === 'stop'"
+                      :disabled="!hasActiveDrcControl(device)"
+                      @click="sendEmergencyStop(device)">
+                      急停
+                    </a-button>
+                    <a-button
+                      size="small"
+                      danger
+                      class="aircraft-action-btn aircraft-action-btn--danger aircraft-action-btn--danger-strong"
+                      :loading="actionLoading[device.gateway.sn] === 'flyStop'"
+                      :disabled="!hasActiveDrcControl(device)"
+                      @click="handleStopFlyToPoint(device)">
+                      停止飞行
+                    </a-button>
+                    <a-button
+                      size="small"
+                      danger
+                      class="aircraft-action-btn aircraft-action-btn--danger"
+                      :loading="actionLoading[device.gateway.sn] === 'returnHome'"
+                      :disabled="!canReturnHome(device)"
+                      @click="handleReturnHome(device)">
+                      返航
+                    </a-button>
+                    <a-button
+                      size="small"
+                      class="aircraft-action-btn"
+                      :loading="actionLoading[device.gateway.sn] === 'cancelReturnHome'"
+                      :disabled="!hasActiveDrcControl(device)"
+                      @click="handleCancelReturnHome(device)">
+                      取消返航
+                    </a-button>
+                    <a-popover
+                      trigger="click"
+                      placement="left"
+                      :visible="flyToPointFormState.visible && flyToPointFormState.gatewaySn === device.gateway.sn"
+                      @visibleChange="(v) => { if (!v) closeFlyToPointManual() }">
+                      <template #content>
+                        <div style="width: 220px;">
+                          <div style="margin-bottom: 6px; font-weight: 700;">手动飞向目标点</div>
+                          <div style="margin-bottom: 4px;">纬度</div>
+                          <a-input-number
+                            v-model:value="flyToPointFormState.latitude"
+                            :step="0.00001"
+                            style="width: 100%;" />
+                          <div style="margin: 6px 0 4px;">经度</div>
+                          <a-input-number
+                            v-model:value="flyToPointFormState.longitude"
+                            :step="0.00001"
+                            style="width: 100%;" />
+                          <div style="margin: 6px 0 4px;">高度（米，相对起飞点）</div>
+                          <a-input-number
+                            v-model:value="flyToPointFormState.height"
+                            :min="MIN_AIRBORNE_HEIGHT_M"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin: 6px 0 4px;">最大速度（米/秒，2-15）</div>
+                          <a-input-number
+                            v-model:value="flyToPointFormState.maxSpeed"
+                            :min="2"
+                            :max="15"
+                            :step="1"
+                            style="width: 100%;" />
+                          <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;">
+                            <a-button size="small" @click="closeFlyToPointManual">取消</a-button>
+                            <a-button size="small" type="primary" @click="submitFlyToPointManual">发送</a-button>
+                          </div>
+                        </div>
+                      </template>
+                      <a-button
+                        size="small"
                       class="aircraft-action-btn"
                       :loading="actionLoading[device.gateway.sn] === 'flyManual'"
                       :disabled="!canFlyToPoint(device)"
                       @click="openFlyToPointManual(device)">
-                      Fly To Point
+                      飞向目标点
                     </a-button>
                   </a-popover>
-                  <a-button
-                    size="small"
-                    danger
-                    class="aircraft-action-btn"
-                    :loading="actionLoading[device.gateway.sn] === 'flyStop'"
-                    :disabled="!isCurrentRemoteGateway(device)"
-                    @click="handleStopFlyToPoint(device)">
-                    Stop Fly
-                  </a-button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -371,26 +561,40 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { EDeviceTypeName, ELocalStorageKey, EBizCode } from '/@/types'
 import noData from '/@/assets/icons/no-data.png'
 import rc from '/@/assets/icons/rc.png'
 import { OnlineDevice, EModeCode, OSDVisible, EDockModeCode, DeviceOsd, DrcStateEnum } from '/@/types/device'
 import { useMyStore } from '/@/store'
 import { getDeviceTopo, getUnreadDeviceHms, updateDeviceHms } from '/@/api/manage'
-import { RocketOutlined, EyeInvisibleOutlined, EyeOutlined, RobotOutlined, DoubleRightOutlined } from '@ant-design/icons-vue'
-import { EHmsLevel } from '/@/types/enums'
-import { message } from 'ant-design-vue'
 import {
-  ECommanderFlightMode,
-  ECommanderModeLostAction,
-  ERthMode,
-  LostControlActionInCommandFLight,
+  RocketOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
+  RobotOutlined,
+  DoubleRightOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+  LeftOutlined,
+  RightOutlined,
+  UpOutlined,
+  DownOutlined,
+} from '@ant-design/icons-vue'
+import { EHmsLevel } from '/@/types/enums'
+import { message, Modal } from 'ant-design-vue'
+import {
   postFlightAuth,
   postFlyToPoint,
   deleteFlyToPoint,
+  postReturnHome,
+  postReturnHomeCancel,
   postTakeoffToPoint,
-  WaylineLostControlActionInCommandFlight
+  LostControlActionInCommandFLight,
+  WaylineLostControlActionInCommandFlight,
+  ERthMode,
+  ECommanderModeLostAction,
+  ECommanderFlightMode,
 } from '/@/api/drone-control/drone'
 import { postDrc, postDrcEnter, postDrcExit } from '/@/api/drc'
 import { UranusMqtt } from '/@/mqtt'
@@ -398,7 +602,40 @@ import { DRC_METHOD } from '/@/types/drc'
 import { useMqtt, DeviceTopicInfo } from '/@/components/g-map/use-mqtt'
 import { useManualControl, KeyCode } from '/@/components/g-map/use-manual-control'
 import EventBus from '/@/event-bus/'
-import { DrcStatusNotifyMessage } from '/@/types/drone-control'
+import {
+  CloudControlAuthMessage,
+  FlyToPointMessage,
+  TakeoffToPointMessage,
+  DrcModeExitNotifyMessage,
+  DrcStatusNotifyMessage,
+} from '/@/types/drone-control'
+import {
+  DRC_DISCONNECT_GRACE_MS,
+  getDrcMqttDisconnectDecision
+} from './drc-connection-policy.mjs'
+import {
+  CLOUD_CONTROL_AUTH_RELEASE_GRACE_MS,
+  getCloudControlAuthTransitionDecision
+} from './remote-control-auth-transition-policy.mjs'
+import { getRemoteReconnectDecision } from './remote-control-reconnect-policy.mjs'
+import {
+  DRC_LINK_STATE,
+  getDrcWsEventDecision
+} from './drc-ws-event-policy.mjs'
+import { getCloudControlAuthState } from './cloud-control-auth-policy.mjs'
+import { buildRemoteSessionDisconnectAudit } from './remote-session-debug.mjs'
+import {
+  AXIS_DISTANCE_MIN_METERS,
+  AXIS_DISTANCE_MAX_METERS,
+  getVerticalCommandDurationMs
+} from './axis-displacement-policy.mjs'
+import {
+  OFFICIAL_TAKEOFF_TARGET_HEIGHT,
+  OFFICIAL_TAKEOFF_STAGE2_STABILIZATION_MS,
+  buildOfficialTakeoffPlan,
+  isOfficialTakeoffProgressFailureStatus,
+  isOfficialTakeoffProgressSuccessStatus,
+} from './official-takeoff-flow.mjs'
 
 const store = useMyStore()
 const username = ref(localStorage.getItem(ELocalStorageKey.Username))
@@ -415,11 +652,32 @@ const onlineDocks = reactive({
   data: [] as OnlineDevice[]
 })
 const actionLoading = reactive({} as Record<string, string>)
+const officialTakeoffFlow = reactive({
+  gatewaySn: '',
+  aircraftSn: '',
+  phase: 'idle' as 'idle' | 'climbing_stage1' | 'arming_stage2_south' | 'flying_stage2_south' | 'flying_stage2_north' | 'completed' | 'failed',
+  originLatitude: null as number | null,
+  originLongitude: null as number | null,
+  originAbsoluteHeight: null as number | null,
+  startedAt: 0,
+})
 const remoteControlState = reactive({
   gatewaySn: '',
   aircraftSn: '',
   connected: false,
+  cloudControlAuthorized: false,
+  drcLinkState: DRC_LINK_STATE.DISCONNECT,
+  joystickAvailable: false,
   mqttClient: null as UranusMqtt | null
+})
+const drcDisconnectState = reactive({
+  pending: false,
+  timer: null as ReturnType<typeof setTimeout> | null,
+})
+const authReleaseState = reactive({
+  pending: false,
+  reconnecting: false,
+  timer: null as ReturnType<typeof setTimeout> | null,
 })
 const remoteTopicInfo = reactive<DeviceTopicInfo>({
   sn: '',
@@ -429,7 +687,12 @@ const remoteTopicInfo = reactive<DeviceTopicInfo>({
 
 const deviceInfo = computed(() => store.state.deviceState.deviceInfo)
 const dockInfo = computed(() => store.state.deviceState.dockInfo)
-const isRemoteControlConnected = computed(() => remoteControlState.connected)
+const isRemoteControlConnected = computed(() => (
+  remoteControlState.connected &&
+  remoteControlState.cloudControlAuthorized &&
+  remoteControlState.drcLinkState === DRC_LINK_STATE.CONNECT &&
+  remoteControlState.joystickAvailable
+))
 const mqttHooks = useMqtt(remoteTopicInfo)
 const {
   handleKeyup,
@@ -443,15 +706,131 @@ const hmsInfo = computed({
   }
 })
 
-// Handle server-side DRC disconnect notification (e.g., after autonomous mode
-// starts or the dock forcibly exits DRC) and reset UI state automatically.
+// DJI official docs separate cloud authorization, DRC link state, and joystick
+// validity. These events must not directly destroy the whole cloud-control
+// session unless the transport itself actually breaks.
 function onDroneControlWsEvent (payload: any) {
-  if (!payload || payload.biz_code !== EBizCode.DrcStatusNotify) return
-  const data = payload.data as DrcStatusNotifyMessage
-  // result carries the drc_state: 0 = DISCONNECT
-  if (data?.result === DrcStateEnum.DISCONNECT && remoteControlState.connected) {
-    message.warning('Remote control disconnected by the aircraft.')
-    destroyRemoteControlClient()
+  if (!payload) return
+  if (payload.biz_code === EBizCode.TakeoffToPointProgress) {
+    const data = payload.data as TakeoffToPointMessage
+    if (data?.sn !== officialTakeoffFlow.gatewaySn) return
+    if (officialTakeoffFlow.phase !== 'climbing_stage1') return
+    if (isOfficialTakeoffProgressFailureStatus(data?.status)) {
+      resetOfficialTakeoffFlow()
+      message.warning(`官方起飞第一阶段失败：${data?.message || data?.status || '未知错误'}`)
+      return
+    }
+    if (!isOfficialTakeoffProgressSuccessStatus(data?.status)) {
+      return
+    }
+    const device = onlineDevices.data.find(d => d.gateway.sn === officialTakeoffFlow.gatewaySn)
+    if (!device) {
+      resetOfficialTakeoffFlow()
+      message.warning('官方起飞第二阶段未执行：目标飞机已离线。')
+      return
+    }
+    scheduleOfficialTakeoffStage2South(device)
+    return
+  }
+  if (payload.biz_code === EBizCode.FlyToPointProgress) {
+    const data = payload.data as FlyToPointMessage
+    if (data?.sn !== officialTakeoffFlow.gatewaySn) return
+    if (officialTakeoffFlow.phase !== 'flying_stage2_south' && officialTakeoffFlow.phase !== 'flying_stage2_north') return
+    if (isOfficialTakeoffProgressFailureStatus(data?.status)) {
+      resetOfficialTakeoffFlow()
+      message.warning(`官方起飞后续航段失败：${data?.message || data?.status || '未知错误'}`)
+      return
+    }
+    if (!isOfficialTakeoffProgressSuccessStatus(data?.status)) {
+      return
+    }
+    const device = onlineDevices.data.find(d => d.gateway.sn === officialTakeoffFlow.gatewaySn)
+    if (!device) {
+      resetOfficialTakeoffFlow()
+      message.warning('官方起飞后续航段未完成：目标飞机已离线。')
+      return
+    }
+    if (officialTakeoffFlow.phase === 'flying_stage2_south') {
+      dispatchOfficialTakeoffStage2North(device).catch(() => {})
+      return
+    }
+    resetOfficialTakeoffFlow()
+    message.success('官方起飞流程完成：已返回起点。')
+    return
+  }
+  if (payload.biz_code === EBizCode.CloudControlAuthUpdate) {
+    const sn = payload.data?.sn
+    if (sn !== remoteControlState.gatewaySn) return
+    const authData = payload.data?.host as CloudControlAuthMessage | undefined
+    const nextAuthState = getCloudControlAuthState(authData)
+    const transition = getCloudControlAuthTransitionDecision({
+      currentAuthorized: remoteControlState.cloudControlAuthorized,
+      nextAuthorized: nextAuthState.authorized,
+      remoteConnected: remoteControlState.connected,
+      reconnecting: authReleaseState.reconnecting,
+      officialTakeoffLocked: false,
+    })
+
+    if (transition.notice === 'defer_release') {
+      scheduleCloudControlReleaseNotice()
+      return
+    }
+
+    const authChanged = remoteControlState.cloudControlAuthorized !== transition.nextAuthorized
+    remoteControlState.cloudControlAuthorized = transition.nextAuthorized
+
+    if (transition.nextAuthorized) {
+      const recoveredFromPending = authReleaseState.pending
+      clearPendingCloudControlReleaseNotice()
+      finishCloudControlReconnectAttempt()
+      if (authChanged || recoveredFromPending) {
+        message.success('云控授权已恢复。')
+      }
+      return
+    }
+
+    clearPendingCloudControlReleaseNotice()
+    finishCloudControlReconnectAttempt()
+    if (authChanged) {
+      message.warning('云控授权已释放，请重新申请授权。')
+    }
+    return
+  }
+  if (!remoteControlState.connected) return
+  if (payload.biz_code === EBizCode.JoystickInvalidNotify) {
+    const data = payload.data as DrcModeExitNotifyMessage
+    const decision = getDrcWsEventDecision({
+      bizCode: payload.biz_code,
+      remoteConnected: remoteControlState.connected,
+      result: data?.result,
+      officialTakeoffLocked: false,
+    })
+    if (decision.updateJoystickAvailable != null) {
+      remoteControlState.joystickAvailable = decision.updateJoystickAvailable
+    }
+    message.info(data?.message || '摇杆控制当前不可用。')
+    return
+  }
+  if (payload.biz_code === EBizCode.DrcStatusNotify) {
+    const data = payload.data as DrcStatusNotifyMessage
+    const decision = getDrcWsEventDecision({
+      bizCode: payload.biz_code,
+      remoteConnected: remoteControlState.connected,
+      drcState: data?.drcState,
+      result: data?.result,
+      officialTakeoffLocked: false,
+    })
+    if (decision.updateDrcLinkState != null) {
+      remoteControlState.drcLinkState = decision.updateDrcLinkState
+    }
+    if (decision.updateJoystickAvailable != null) {
+      remoteControlState.joystickAvailable = decision.updateJoystickAvailable
+    }
+    if (data?.drcState === DrcStateEnum.DISCONNECT) {
+      message.warning(data.message || 'DRC 链路未连接，已暂停摇杆控制。')
+    } else if (data?.drcState === DrcStateEnum.CONNECTED) {
+      message.success('DRC 链路已连接。')
+    }
   }
 }
 
@@ -608,10 +987,173 @@ function sleep (ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms))
 }
 
-const OFFICIAL_TAKEOFF_TARGET_HEIGHT = 30
-const OFFICIAL_SECURITY_TAKEOFF_HEIGHT = 30
-const OFFICIAL_TAKEOFF_MAX_SPEED = 5
-const OFFICIAL_RTH_ALTITUDE = 100
+function canOfficialTakeoff (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device)
+}
+
+function clearPendingDrcDisconnectNotice () {
+  if (drcDisconnectState.timer) {
+    clearTimeout(drcDisconnectState.timer)
+    drcDisconnectState.timer = null
+  }
+  drcDisconnectState.pending = false
+}
+
+function clearPendingCloudControlReleaseNotice () {
+  if (authReleaseState.timer) {
+    clearTimeout(authReleaseState.timer)
+    authReleaseState.timer = null
+  }
+  authReleaseState.pending = false
+}
+
+function finishCloudControlReconnectAttempt () {
+  authReleaseState.reconnecting = false
+}
+
+function scheduleDrcDisconnect (mqttClient: UranusMqtt) {
+  if (drcDisconnectState.pending) return
+  drcDisconnectState.pending = true
+  message.warning(`遥控链路波动，等待 ${DRC_DISCONNECT_GRACE_MS / 1000} 秒内自动恢复...`)
+  drcDisconnectState.timer = setTimeout(() => {
+    drcDisconnectState.timer = null
+    if (!remoteControlState.connected || remoteControlState.mqttClient !== mqttClient) {
+      drcDisconnectState.pending = false
+      return
+    }
+    drcDisconnectState.pending = false
+    message.warning('遥控链路已断开。')
+    destroyRemoteControlClient()
+  }, DRC_DISCONNECT_GRACE_MS)
+}
+
+function scheduleCloudControlReleaseNotice () {
+  if (authReleaseState.pending) return
+  authReleaseState.pending = true
+  message.warning(`云控授权波动，等待 ${CLOUD_CONTROL_AUTH_RELEASE_GRACE_MS / 1000} 秒内自动恢复...`)
+  authReleaseState.timer = setTimeout(() => {
+    authReleaseState.timer = null
+    authReleaseState.pending = false
+    authReleaseState.reconnecting = false
+    if (!remoteControlState.connected) {
+      return
+    }
+    remoteControlState.cloudControlAuthorized = false
+    message.warning('云控授权已释放，请重新申请授权。')
+  }, CLOUD_CONTROL_AUTH_RELEASE_GRACE_MS)
+}
+
+function renderTsaModalSummary (
+  items: Array<{ label: string, value: string }>,
+  className = 'tsa-modal-summary'
+) {
+  return h('div', { class: className },
+    items.map((item) => h('div', { class: 'tsa-modal-summary-item' }, [
+      h('div', { class: 'tsa-modal-summary-label' }, item.label),
+      h('div', { class: 'tsa-modal-summary-value' }, item.value),
+    ]))
+  )
+}
+
+function renderTsaModalBlock (
+  className: string,
+  title: string,
+  items: string[]
+) {
+  if (items.length === 0) {
+    return null
+  }
+
+  return h('div', { class: className }, [
+    h('div', { class: `${className}__title` }, title),
+    h('div', { class: `${className}__body` }, items.map((item) => h('div', { class: `${className}__item` }, item))),
+  ])
+}
+
+function renderTsaModalContent (options: {
+  summary: Array<{ label: string, value: string }>
+  notice: string[]
+  warning: string[]
+  subtitle?: string
+  summaryClass?: string
+  noticeClass?: string
+  warningClass?: string
+}) {
+  const summaryClass = options.summaryClass ?? 'tsa-modal-summary'
+  const noticeClass = options.noticeClass ?? 'tsa-modal-notice'
+  const warningClass = options.warningClass ?? 'tsa-modal-warning'
+  const children = [] as any[]
+  if (options.subtitle) {
+    children.push(h('div', { class: 'tsa-modal-subtitle' }, options.subtitle))
+  }
+  if (options.summary.length > 0) {
+    children.push(renderTsaModalSummary(options.summary, summaryClass))
+  }
+  const noticeBlock = renderTsaModalBlock(noticeClass, '执行说明', options.notice)
+  const warningBlock = renderTsaModalBlock(warningClass, '风险提示', options.warning)
+
+  if (noticeBlock) {
+    children.push(noticeBlock)
+  }
+  if (warningBlock) {
+    children.push(warningBlock)
+  }
+
+  return h('div', { class: 'tsa-modal-content' }, children)
+}
+
+function confirmTsaModal (options: {
+  title: string
+  gatewaySn?: string
+  action?: string
+  subtitle?: string
+  summary?: Array<{ label: string, value: string }>
+  notice?: string[]
+  warning?: string[]
+  okText?: string
+  cancelText?: string
+  tone?: 'confirm' | 'warning' | 'danger'
+}) {
+  return new Promise<boolean>((resolve) => {
+    const gatewaySn = options.gatewaySn
+    const action = options.action
+    if (gatewaySn && action && actionLoading[gatewaySn] === action) {
+      resolve(false)
+      return
+    }
+    if (gatewaySn && action) {
+      setActionLoading(gatewaySn, action)
+    }
+
+    const clearPendingAction = () => {
+      if (gatewaySn && actionLoading[gatewaySn] === action) {
+        setActionLoading(gatewaySn)
+      }
+    }
+
+    Modal.confirm({
+      className: `tsa-modal-skin tsa-modal-skin--${options.tone ?? 'confirm'}`,
+      width: 720,
+      title: options.title,
+      content: renderTsaModalContent({
+        subtitle: options.subtitle,
+        summary: options.summary ?? [],
+        notice: options.notice ?? [],
+        warning: options.warning ?? [],
+      }),
+      okText: options.okText ?? '确定',
+      cancelText: options.cancelText ?? '取消',
+      onOk () {
+        clearPendingAction()
+        resolve(true)
+      },
+      onCancel () {
+        clearPendingAction()
+        resolve(false)
+      },
+    })
+  })
+}
 
 function setActionLoading (gatewaySn: string, action?: string) {
   if (!action) {
@@ -625,17 +1167,31 @@ function isGatewayControllable (device: OnlineDevice) {
   return Boolean(deviceInfo.value[device.sn] && deviceInfo.value[device.sn].mode_code !== EModeCode.Disconnected)
 }
 
-function isCurrentRemoteGateway (device: OnlineDevice) {
+function hasRemoteSession (device: OnlineDevice) {
   return remoteControlState.connected && remoteControlState.gatewaySn === device.gateway.sn
 }
 
+function hasActiveDrcControl (device: OnlineDevice) {
+  return hasRemoteSession(device) && isRemoteControlConnected.value
+}
+
+function isCurrentRemoteGateway (device: OnlineDevice) {
+  return hasActiveDrcControl(device)
+}
+
 function destroyRemoteControlClient () {
+  clearPendingDrcDisconnectNotice()
+  clearPendingCloudControlReleaseNotice()
+  finishCloudControlReconnectAttempt()
   resetControlState()
   remoteControlState.mqttClient?.destroyed()
   remoteControlState.mqttClient = null
   remoteControlState.gatewaySn = ''
   remoteControlState.aircraftSn = ''
   remoteControlState.connected = false
+  remoteControlState.cloudControlAuthorized = false
+  remoteControlState.drcLinkState = DRC_LINK_STATE.DISCONNECT
+  remoteControlState.joystickAvailable = false
   remoteTopicInfo.sn = ''
   remoteTopicInfo.pubTopic = ''
   remoteTopicInfo.subTopic = ''
@@ -643,24 +1199,42 @@ function destroyRemoteControlClient () {
   store.commit('SET_CLIENT_ID', '')
 }
 
+function logRemoteSessionDisconnect (source: string) {
+  const audit = buildRemoteSessionDisconnectAudit({
+    source,
+    gatewaySn: remoteControlState.gatewaySn,
+    aircraftSn: remoteControlState.aircraftSn,
+    clientId: store.state.clientId,
+    officialTakeoffPhase: 'idle',
+    cloudControlAuthorized: remoteControlState.cloudControlAuthorized,
+    drcLinkState: remoteControlState.drcLinkState,
+    joystickAvailable: remoteControlState.joystickAvailable,
+  })
+  console.info('[RemoteSessionDisconnect]', audit)
+}
+
 async function withAircraftAction (
   device: OnlineDevice,
   action: string,
   task: () => Promise<any>,
-  successText: string
+  successText: string,
+  options: { successTiming?: 'after_success' | 'immediate' } = {}
 ) {
   if (!isGatewayControllable(device)) {
-    message.warning('Aircraft is offline or telemetry is not ready.')
+    message.warning('飞机离线，或遥测数据尚未就绪。')
     return
   }
   setActionLoading(device.gateway.sn, action)
   try {
+    if (options.successTiming === 'immediate') {
+      message.success(successText)
+    }
     const res = await task()
-    if (res.code === 0) {
+    if (res.code === 0 && options.successTiming !== 'immediate') {
       message.success(successText)
     }
   } catch (error: any) {
-    message.error(error?.message || 'Flight command failed.')
+    message.error(error?.message || '飞行指令执行失败。')
   } finally {
     setActionLoading(device.gateway.sn)
   }
@@ -668,77 +1242,108 @@ async function withAircraftAction (
 
 async function connectRemoteControl (device: OnlineDevice) {
   if (!isGatewayControllable(device)) {
-    message.warning('Aircraft is offline or telemetry is not ready.')
+    message.warning('飞机离线，或遥测数据尚未就绪。')
     return false
   }
-  if (isCurrentRemoteGateway(device)) {
+  if (hasRemoteSession(device) && remoteControlState.cloudControlAuthorized) {
     return true
   }
-  if (remoteControlState.connected) {
-    await disconnectRemoteControl()
+  const reconnectDecision = getRemoteReconnectDecision({
+    remoteConnected: remoteControlState.connected,
+    currentGatewaySn: remoteControlState.gatewaySn,
+    targetGatewaySn: device.gateway.sn,
+  })
+  if (reconnectDecision === 'disconnect_before_connect') {
+    await disconnectRemoteControl('reconnect_before_new_enter')
   }
 
   setActionLoading(device.gateway.sn, 'connect')
   try {
-    const authRes = await postDrc({})
-    if (authRes.code !== 0) {
+    let mqttClient = remoteControlState.mqttClient
+    let clientId = store.state.clientId
+
+    if (reconnectDecision !== 'reuse_existing_session') {
+      const authRes = await postDrc({})
+      if (authRes.code !== 0) {
+        return false
+      }
+      const { address, client_id, username, password } = authRes.data
+      clientId = client_id
+      mqttClient = new UranusMqtt(address, {
+        clientId: client_id,
+        username,
+        password,
+      })
+      mqttClient.initMqtt()
+      await mqttClient.waitForConnected()
+      store.commit('SET_MQTT_STATE', mqttClient)
+      store.commit('SET_CLIENT_ID', client_id)
+    } else if (!mqttClient || !clientId) {
       return false
     }
-    const { address, client_id, username, password } = authRes.data
-    const mqttClient = new UranusMqtt(address, {
-      clientId: client_id,
-      username,
-      password,
-    })
-    mqttClient.initMqtt()
-    await mqttClient.waitForConnected()
-    store.commit('SET_MQTT_STATE', mqttClient)
-    store.commit('SET_CLIENT_ID', client_id)
 
+    authReleaseState.reconnecting = true
     const enterRes = await postDrcEnter({
-      client_id,
+      client_id: clientId,
       gateway_sn: device.gateway.sn,
     })
     if (enterRes.code !== 0) {
-      mqttClient.destroyed()
-      store.commit('SET_MQTT_STATE', null)
-      store.commit('SET_CLIENT_ID', '')
+      finishCloudControlReconnectAttempt()
+      if (reconnectDecision !== 'reuse_existing_session' && mqttClient) {
+        mqttClient.destroyed()
+        store.commit('SET_MQTT_STATE', null)
+        store.commit('SET_CLIENT_ID', '')
+      }
       return false
     }
 
     remoteControlState.gatewaySn = device.gateway.sn
     remoteControlState.aircraftSn = device.sn
     remoteControlState.connected = true
+    remoteControlState.cloudControlAuthorized = true
+    remoteControlState.drcLinkState = DRC_LINK_STATE.CONNECT
+    remoteControlState.joystickAvailable = true
     remoteControlState.mqttClient = mqttClient
     remoteTopicInfo.sn = device.gateway.sn
     remoteTopicInfo.pubTopic = enterRes.data.pub?.[0] || ''
     remoteTopicInfo.subTopic = enterRes.data.sub?.[0] || ''
 
     // Monitor for unexpected MQTT disconnects and reset UI state automatically.
-    mqttClient.on('onStatus', (statusOptions: any) => {
-      if (
-        (statusOptions.status === 'close' || statusOptions.status === 'error') &&
-        remoteControlState.connected &&
-        remoteControlState.mqttClient === mqttClient
-      ) {
-        message.warning('Remote control connection lost.')
-        destroyRemoteControlClient()
-      }
-    })
+    if (reconnectDecision !== 'reuse_existing_session' && mqttClient) {
+      mqttClient.on('onStatus', (statusOptions: any) => {
+        const decision = getDrcMqttDisconnectDecision({
+          status: statusOptions?.status,
+          remoteConnected: remoteControlState.connected,
+          sameClient: remoteControlState.mqttClient === mqttClient,
+          officialTakeoffLocked: false,
+        })
+        if (decision === 'clear_pending_disconnect') {
+          if (drcDisconnectState.pending) {
+            clearPendingDrcDisconnectNotice()
+            message.success('遥控链路已恢复。')
+          }
+          return
+        }
+        if (decision === 'defer_disconnect') {
+          scheduleDrcDisconnect(mqttClient)
+        }
+      })
+    }
 
     const authResult = await postFlightAuth(device.gateway.sn)
     if (authResult.code !== 0) {
-      message.warning('Remote control entered, but flight authority was not granted.')
+      message.warning('已进入遥控模式，但未成功获取飞行控制权。')
     } else {
-      message.success('Remote control is ready.')
+      message.success('遥控模式已就绪。')
     }
     return true
   } finally {
+    finishCloudControlReconnectAttempt()
     setActionLoading(device.gateway.sn)
   }
 }
 
-async function disconnectRemoteControl () {
+async function disconnectRemoteControl (source = 'unknown') {
   if (!remoteControlState.connected) {
     return
   }
@@ -746,6 +1351,7 @@ async function disconnectRemoteControl () {
   setActionLoading(gatewaySn, 'disconnect')
   try {
     const clientId = store.state.clientId
+    logRemoteSessionDisconnect(source)
     if (clientId) {
       await postDrcExit({
         client_id: clientId,
@@ -753,7 +1359,7 @@ async function disconnectRemoteControl () {
       })
     }
     destroyRemoteControlClient()
-    message.success('Remote control disconnected.')
+    message.success('已退出遥控模式。')
   } finally {
     setActionLoading(gatewaySn)
   }
@@ -761,19 +1367,31 @@ async function disconnectRemoteControl () {
 
 async function holdVerticalControl (device: OnlineDevice, key: KeyCode, durationMs: number, action: string, successText: string) {
   await withAircraftAction(device, action, async () => {
-    if (!isCurrentRemoteGateway(device) || !remoteTopicInfo.pubTopic) {
-      throw new Error('Remote control is not connected.')
+    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
+      throw new Error('遥控链路未连接。')
     }
     handleKeyup(key)
     await sleep(durationMs)
     resetControlState()
     return { code: 0 }
-  }, successText)
+  }, successText, { successTiming: 'immediate' })
+}
+
+async function holdDirectionalControl (device: OnlineDevice, key: KeyCode, durationMs: number, action: string, successText: string) {
+  await withAircraftAction(device, action, async () => {
+    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
+      throw new Error('遥控链路未连接。')
+    }
+    handleKeyup(key)
+    await sleep(durationMs)
+    resetControlState()
+    return { code: 0 }
+  }, successText, { successTiming: 'immediate' })
 }
 
 async function publishHover (device: OnlineDevice) {
   await withAircraftAction(device, 'hover', async () => {
-    if (!isCurrentRemoteGateway(device) || !remoteTopicInfo.pubTopic) {
+    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
       throw new Error('Remote control is not connected.')
     }
     resetControlState()
@@ -789,66 +1407,180 @@ async function publishHover (device: OnlineDevice) {
       }
     }, { qos: 0 })
     return { code: 0 }
-  }, 'Hover command sent.')
+  }, '悬停指令已发送。')
 }
 
 async function sendEmergencyStop (device: OnlineDevice) {
   await withAircraftAction(device, 'stop', async () => {
-    if (!isCurrentRemoteGateway(device) || !remoteTopicInfo.pubTopic) {
-      throw new Error('Remote control is not connected.')
+    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
+      throw new Error('遥控链路未连接。')
     }
     triggerEmergencyStop()
     return { code: 0 }
-  }, 'Emergency stop command sent.')
+  }, '急停指令已发送。')
+}
+
+function resetOfficialTakeoffFlow () {
+  officialTakeoffFlow.gatewaySn = ''
+  officialTakeoffFlow.aircraftSn = ''
+  officialTakeoffFlow.phase = 'idle'
+  officialTakeoffFlow.originLatitude = null
+  officialTakeoffFlow.originLongitude = null
+  officialTakeoffFlow.originAbsoluteHeight = null
+  officialTakeoffFlow.startedAt = 0
+}
+
+async function failOfficialTakeoff (reason: string) {
+  try {
+    const device = onlineDevices.data.find(d => d.gateway.sn === officialTakeoffFlow.gatewaySn)
+    if (device && hasRemoteSession(device)) {
+      await publishHover(device)
+    }
+  } catch {
+    // Keep the original failure reason; hover is best-effort only.
+  }
+  officialTakeoffFlow.phase = 'failed'
+  message.warning(reason)
+}
+
+function scheduleOfficialTakeoffStage2South (device: OnlineDevice) {
+  officialTakeoffFlow.phase = 'arming_stage2_south'
+  window.setTimeout(() => {
+    if (officialTakeoffFlow.phase !== 'arming_stage2_south' || officialTakeoffFlow.gatewaySn !== device.gateway.sn) {
+      return
+    }
+    dispatchOfficialTakeoffStage2South(device).catch((error: any) => {
+      resetOfficialTakeoffFlow()
+      message.warning(error?.message || '官方起飞第二阶段未执行：发送向南航段失败。')
+    })
+  }, OFFICIAL_TAKEOFF_STAGE2_STABILIZATION_MS)
+}
+
+async function dispatchOfficialTakeoffStage2South (device: OnlineDevice) {
+  const plan = buildOfficialTakeoffPlan({
+    latitude: officialTakeoffFlow.originLatitude,
+    longitude: officialTakeoffFlow.originLongitude,
+    absoluteHeight: officialTakeoffFlow.originAbsoluteHeight,
+  })
+  officialTakeoffFlow.phase = 'flying_stage2_south'
+  await withAircraftAction(device, 'takeoff', async () => {
+    return await postFlyToPoint(device.gateway.sn, {
+      max_speed: plan.stage2South.maxSpeed,
+      points: [{
+        latitude: plan.stage2South.targetLatitude,
+        longitude: plan.stage2South.targetLongitude,
+        height: plan.stage2South.targetHeight,
+      }]
+    })
+  }, '官方起飞第二阶段已发送：向南约 200 米。')
+}
+
+async function dispatchOfficialTakeoffStage2North (device: OnlineDevice) {
+  const plan = buildOfficialTakeoffPlan({
+    latitude: officialTakeoffFlow.originLatitude,
+    longitude: officialTakeoffFlow.originLongitude,
+    absoluteHeight: officialTakeoffFlow.originAbsoluteHeight,
+  })
+  officialTakeoffFlow.phase = 'flying_stage2_north'
+  await withAircraftAction(device, 'takeoff', async () => {
+    return await postFlyToPoint(device.gateway.sn, {
+      max_speed: plan.stage2North.maxSpeed,
+      points: [{
+        latitude: plan.stage2North.targetLatitude,
+        longitude: plan.stage2North.targetLongitude,
+        height: plan.stage2North.targetHeight,
+      }]
+    })
+  }, '官方起飞第三阶段已发送：向北返回起点。')
 }
 
 async function handleTakeoff (device: OnlineDevice) {
   const osd = deviceInfo.value[device.sn]
   const latitude = Number(osd?.latitude)
   const longitude = Number(osd?.longitude)
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude === 0 || longitude === 0) {
-    message.warning('Aircraft latitude and longitude telemetry is not ready.')
+  const absoluteHeight = Number(osd?.height)
+  if (!isGatewayControllable(device)) {
+    message.warning('飞机离线，或遥测数据尚未就绪。')
     return
   }
-  // M4T firmware rejects target==current (zero horizontal distance, 336002 with empty output).
-  // Offset target ~16 m north (latitude +0.00015°) so the drone takes off then translates briefly.
-  const TARGET_LAT_OFFSET_DEG = 0.00015
-  const targetLat = latitude + TARGET_LAT_OFFSET_DEG
-  const targetLon = longitude
-  const confirmMessage = [
-    `Confirm official takeoff_to_point for ${device.callsign}?`,
-    `Current: ${latitude}, ${longitude}`,
-    `Target: ${targetLat}, ${targetLon} (~16 m north)`,
-    `Target height: ${OFFICIAL_TAKEOFF_TARGET_HEIGHT} m`,
-    `Security takeoff height: ${OFFICIAL_SECURITY_TAKEOFF_HEIGHT} m`,
-    'This is not a 1-2 m stick takeoff test.'
-  ].join('\n')
-  if (!window.confirm(confirmMessage)) {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude === 0 || longitude === 0 || !Number.isFinite(absoluteHeight)) {
+    message.warning('飞机经纬度或高度遥测尚未就绪。')
     return
   }
+  const plan = buildOfficialTakeoffPlan({
+    latitude,
+    longitude,
+    absoluteHeight,
+  })
+  const confirmed = await confirmTsaModal({
+    title: `确认对 ${device.callsign} 执行官方起飞吗？`,
+    gatewaySn: device.gateway.sn,
+    action: 'takeoff',
+    subtitle: `${device.callsign} · 当前 DRC 会话保持中`,
+    summary: [
+      { label: '当前位置', value: `${latitude}, ${longitude}` },
+      { label: '目标高度', value: `${OFFICIAL_TAKEOFF_TARGET_HEIGHT} m` },
+      { label: '阶段 1 目标点', value: `${plan.stage1.targetLatitude}, ${plan.stage1.targetLongitude}` },
+      { label: '阶段 2 高度', value: `${plan.stage2South.targetHeight} m (abs)` },
+    ],
+    notice: [
+      `第一阶段：调用 takeoff_to_point，爬升到 ${OFFICIAL_TAKEOFF_TARGET_HEIGHT} 米并进入悬停。`,
+      `第二阶段：先自动向南约 200 米，再自动向北约 200 米返回，保持 ${OFFICIAL_TAKEOFF_TARGET_HEIGHT} 米高度。`,
+    ],
+    warning: [
+      '该命令会先执行官方起飞，再进入 fly_to_point 航段。',
+    ],
+    okText: '开始起飞',
+    tone: 'confirm',
+  })
+  if (!confirmed) return
   await withAircraftAction(device, 'takeoff', async () => {
+    officialTakeoffFlow.gatewaySn = device.gateway.sn
+    officialTakeoffFlow.aircraftSn = device.sn
+    officialTakeoffFlow.phase = 'climbing_stage1'
+    officialTakeoffFlow.originLatitude = latitude
+    officialTakeoffFlow.originLongitude = longitude
+    officialTakeoffFlow.originAbsoluteHeight = absoluteHeight
+    officialTakeoffFlow.startedAt = Date.now()
     return await postTakeoffToPoint(device.gateway.sn, {
-      target_latitude: targetLat,
-      target_longitude: targetLon,
-      target_height: OFFICIAL_TAKEOFF_TARGET_HEIGHT,
-      security_takeoff_height: OFFICIAL_SECURITY_TAKEOFF_HEIGHT,
-      max_speed: OFFICIAL_TAKEOFF_MAX_SPEED,
-      rc_lost_action: LostControlActionInCommandFLight.HOVER,
+      target_latitude: plan.stage1.targetLatitude,
+      target_longitude: plan.stage1.targetLongitude,
+      target_height: plan.stage1.targetHeight,
+      security_takeoff_height: plan.stage1.securityTakeoffHeight,
+      max_speed: plan.stage1.maxSpeed,
+      rc_lost_action: LostControlActionInCommandFLight.RETURN_HOME,
+      rth_altitude: 100,
       exit_wayline_when_rc_lost: WaylineLostControlActionInCommandFlight.EXEC_LOST_ACTION,
       rth_mode: ERthMode.SETTING,
-      rth_altitude: OFFICIAL_RTH_ALTITUDE,
-      commander_mode_lost_action: ECommanderModeLostAction.EXEC_LOST_ACTION,
+      commander_mode_lost_action: ECommanderModeLostAction.CONTINUE,
       commander_flight_mode: ECommanderFlightMode.SETTING,
-      commander_flight_height: OFFICIAL_TAKEOFF_TARGET_HEIGHT
+      commander_flight_height: plan.stage1.commanderFlightHeight,
     })
-  }, 'Official takeoff_to_point command sent.')
+  }, '官方起飞第一阶段已开始：等待 takeoff_to_point 完成。')
 }
 
 async function handleLanding (device: OnlineDevice) {
-  if (!window.confirm(`Confirm remote landing preset for ${device.callsign}?`)) {
-    return
-  }
-  await holdVerticalControl(device, KeyCode.ARROW_DOWN, 2200, 'land', 'Landing stick preset sent.')
+  const confirmed = await confirmTsaModal({
+    title: `确认对 ${device.callsign} 执行遥控降落预设吗？`,
+    gatewaySn: device.gateway.sn,
+    action: 'land',
+    subtitle: `${device.callsign} · 当前 DRC 会话保持中`,
+    summary: [
+      { label: '目标设备', value: device.callsign },
+      { label: '控制动作', value: '遥控降落预设' },
+    ],
+    notice: [
+      '将向下持续发送降落摇杆指令 2200 毫秒。',
+      '该操作保持现有 DRC 连接，不会断开遥控链路。',
+    ],
+    warning: [
+      '确认后飞机会执行降落预设，请确保当前区域适合降落。',
+    ],
+    okText: '继续降落',
+    tone: 'warning',
+  })
+  if (!confirmed) return
+  await holdVerticalControl(device, KeyCode.ARROW_DOWN, 2200, 'land', '降落摇杆预设已发送。')
 }
 
 async function handleAxisControl (device: OnlineDevice, direction: 'up' | 'hover' | 'down') {
@@ -861,7 +1593,7 @@ async function handleAxisControl (device: OnlineDevice, direction: 'up' | 'hover
     direction === 'up' ? KeyCode.ARROW_UP : KeyCode.ARROW_DOWN,
     800,
     direction,
-    `${direction} command sent.`
+    `${direction === 'up' ? '上升' : '下降'}指令已发送。`
   )
 }
 
@@ -869,8 +1601,8 @@ async function handleAxisControl (device: OnlineDevice, direction: 'up' | 'hover
 
 // ~20 m north of current OSD position. 0.00018° of latitude ≈ 20 m anywhere on Earth.
 const FLY_FORWARD_LAT_OFFSET_DEG = 0.00018
-// Aircraft must be airborne; reject fly_to_point below this altitude to avoid ground-state abuse.
-const MIN_AIRBORNE_HEIGHT_M = 15
+// Aircraft must be visibly airborne before allowing autonomous displacement commands.
+const MIN_AIRBORNE_HEIGHT_M = 3
 
 // Shared popover state: only one remote-controlled aircraft can have flight commands active at a
 // time, so a single reactive is sufficient even though the template lists multiple aircraft.
@@ -884,6 +1616,14 @@ const flyToPointFormState = reactive({
   maxSpeed: 5 as number,
 })
 
+const axisDistanceFormState = reactive({
+  visible: false,
+  gatewaySn: '',
+  aircraftSn: '',
+  direction: 'up' as 'up' | 'down' | 'west' | 'east' | 'north' | 'south',
+  distanceMeters: 5 as number,
+})
+
 function isAircraftAirborne (device: OnlineDevice) {
   const osd = deviceInfo.value[device.sn]
   if (!osd) return false
@@ -894,6 +1634,77 @@ function isAircraftAirborne (device: OnlineDevice) {
 
 function canFlyToPoint (device: OnlineDevice) {
   return isCurrentRemoteGateway(device) && isAircraftAirborne(device)
+}
+
+function canReturnHome (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && isAircraftAirborne(device)
+}
+
+async function handleReturnHome (device: OnlineDevice) {
+  if (!canReturnHome(device)) {
+    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已连接 DRC。`)
+    return
+  }
+  const osd = deviceInfo.value[device.sn]
+  const height = Number(osd?.height)
+  const homeDistance = Number(osd?.home_distance)
+  const battery = osd?.battery?.capacity_percent
+  const confirmed = await confirmTsaModal({
+    title: `确认让 ${device.callsign} 执行返航吗？`,
+    gatewaySn: device.gateway.sn,
+    action: 'returnHome',
+    subtitle: `${device.callsign} · 自主返航动作`,
+    summary: [
+      { label: '当前高度', value: Number.isFinite(height) ? `${height} 米` : '--' },
+      { label: '返航点距离', value: Number.isFinite(homeDistance) ? `${homeDistance} 米` : '--' },
+      { label: '当前电量', value: battery != null && battery !== '' ? `${battery}%` : '--' },
+    ],
+    notice: [
+      '返航过程中飞机可能会先调整高度，再返回返航点。',
+    ],
+    warning: [
+      '确认后将发送返航指令，飞机会按照当前安全策略自主返回。',
+    ],
+    okText: '确认返航',
+    tone: 'danger',
+  })
+  if (!confirmed) {
+    return
+  }
+  await withAircraftAction(device, 'returnHome', async () => {
+    return await postReturnHome(device.gateway.sn)
+  }, '返航指令已发送。')
+}
+
+async function handleCancelReturnHome (device: OnlineDevice) {
+  if (!isCurrentRemoteGateway(device)) {
+    message.warning('遥控链路未连接。')
+    return
+  }
+  const confirmed = await confirmTsaModal({
+    title: `确认取消 ${device.callsign} 的返航吗？`,
+    gatewaySn: device.gateway.sn,
+    action: 'cancelReturnHome',
+    subtitle: `${device.callsign} · 中止返航`,
+    summary: [
+      { label: '目标设备', value: device.callsign },
+      { label: '控制动作', value: '取消返航' },
+    ],
+    notice: [
+      '将停止当前返航流程，并恢复可用的人工控制。',
+    ],
+    warning: [
+      '仅在确实需要中止返航时执行。',
+    ],
+    okText: '确认取消',
+    tone: 'warning',
+  })
+  if (!confirmed) {
+    return
+  }
+  await withAircraftAction(device, 'cancelReturnHome', async () => {
+    return await postReturnHomeCancel(device.gateway.sn)
+  }, '取消返航指令已发送。')
 }
 
 function openFlyToPointManual (device: OnlineDevice) {
@@ -912,9 +1723,83 @@ function closeFlyToPointManual () {
   flyToPointFormState.visible = false
 }
 
+function getAxisDirectionLabel (direction: 'up' | 'down' | 'west' | 'east' | 'north' | 'south') {
+  switch (direction) {
+    case 'up': return '上升'
+    case 'down': return '下降'
+    case 'west': return '向左'
+    case 'east': return '向右'
+    case 'north': return '向前'
+    case 'south': return '向后'
+  }
+}
+
+function openAxisDistanceControl (device: OnlineDevice, direction: 'up' | 'down' | 'west' | 'east' | 'north' | 'south') {
+  axisDistanceFormState.gatewaySn = device.gateway.sn
+  axisDistanceFormState.aircraftSn = device.sn
+  axisDistanceFormState.direction = direction
+  axisDistanceFormState.distanceMeters = 5
+  axisDistanceFormState.visible = true
+}
+
+function closeAxisDistanceControl () {
+  axisDistanceFormState.visible = false
+}
+
+async function submitAxisDistanceControl () {
+  const device = onlineDevices.data.find(d => d.gateway.sn === axisDistanceFormState.gatewaySn)
+  if (!device) {
+    message.error('目标飞机已离线。')
+    closeAxisDistanceControl()
+    return
+  }
+  const meters = Number(axisDistanceFormState.distanceMeters)
+  if (!Number.isFinite(meters) || meters < AXIS_DISTANCE_MIN_METERS || meters > AXIS_DISTANCE_MAX_METERS) {
+    message.warning(`距离必须在 ${AXIS_DISTANCE_MIN_METERS}-${AXIS_DISTANCE_MAX_METERS} 米之间。`)
+    return
+  }
+  const direction = axisDistanceFormState.direction
+  closeAxisDistanceControl()
+
+  if (direction === 'up' || direction === 'down') {
+    if (!hasActiveDrcControl(device)) {
+      message.warning('遥控链路未连接。')
+      return
+    }
+    await holdVerticalControl(
+      device,
+      direction === 'up' ? KeyCode.ARROW_UP : KeyCode.ARROW_DOWN,
+      getVerticalCommandDurationMs(meters),
+      direction,
+      `${getAxisDirectionLabel(direction)} ${meters} 米指令已发送。`
+    )
+    return
+  }
+
+  if (!hasActiveDrcControl(device)) {
+    message.warning('遥控链路未连接。')
+    return
+  }
+  const key =
+    direction === 'north'
+      ? KeyCode.KEY_W
+      : direction === 'south'
+        ? KeyCode.KEY_S
+        : direction === 'west'
+          ? KeyCode.KEY_A
+          : KeyCode.KEY_D
+  await holdDirectionalControl(
+    device,
+    key,
+    getVerticalCommandDurationMs(meters),
+    direction,
+    `${getAxisDirectionLabel(direction)} ${meters} 米指令已发送。`
+  )
+}
+
 async function handleFlyForwardTest (device: OnlineDevice) {
   if (!canFlyToPoint(device)) {
-    message.warning('Aircraft must be airborne (height ≥ 15 m) and DRC connected.')
+    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已连接 DRC。`)
     return
   }
   const osd = deviceInfo.value[device.sn]
@@ -922,20 +1807,32 @@ async function handleFlyForwardTest (device: OnlineDevice) {
   const longitude = Number(osd.longitude)
   const height = Number(osd.height)
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || !Number.isFinite(height)) {
-    message.warning('Aircraft OSD telemetry is not ready.')
+    message.warning('飞机 OSD 遥测尚未就绪。')
     return
   }
   const targetLat = latitude + FLY_FORWARD_LAT_OFFSET_DEG
   const targetLon = longitude
   const targetHeight = height
-  const confirmMessage = [
-    `Confirm fly_to_point (forward ~20 m test) for ${device.callsign}?`,
-    `Current: ${latitude}, ${longitude}, h=${height} m`,
-    `Target: ${targetLat}, ${targetLon}, h=${targetHeight} m`,
-    'Max speed: 5 m/s',
-    'Aircraft will translate north ~20 m at current altitude.'
-  ].join('\n')
-  if (!window.confirm(confirmMessage)) return
+  const confirmed = await confirmTsaModal({
+    title: `确认对 ${device.callsign} 执行 fly_to_point 前飞约 20 米测试吗？`,
+    gatewaySn: device.gateway.sn,
+    action: 'flyForward',
+    subtitle: `${device.callsign} · fly_to_point 测试动作`,
+    summary: [
+      { label: '当前位置', value: `${latitude}, ${longitude}, 高度=${height} 米` },
+      { label: '目标位置', value: `${targetLat}, ${targetLon}, 高度=${targetHeight} 米` },
+      { label: '最大速度', value: '5 米/秒' },
+    ],
+    notice: [
+      '飞机将以当前高度向北平移约 20 米。',
+    ],
+    warning: [
+      '这是一个前飞测试动作，请确认前方空间和高度余量充足。',
+    ],
+    okText: '发送测试',
+    tone: 'confirm',
+  })
+  if (!confirmed) return
   await withAircraftAction(device, 'flyForward', async () => {
     return await postFlyToPoint(device.gateway.sn, {
       max_speed: 5,
@@ -945,35 +1842,35 @@ async function handleFlyForwardTest (device: OnlineDevice) {
         height: targetHeight,
       }]
     })
-  }, 'fly_to_point (forward 20 m) command sent.')
+  }, '前飞 20 米指令已发送。')
 }
 
 async function submitFlyToPointManual () {
   const device = onlineDevices.data.find(d => d.gateway.sn === flyToPointFormState.gatewaySn)
   if (!device) {
-    message.error('Target aircraft is no longer online.')
+    message.error('目标飞机已离线。')
     closeFlyToPointManual()
     return
   }
   if (!canFlyToPoint(device)) {
-    message.warning('Aircraft must be airborne (height ≥ 15 m) and DRC connected.')
+    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已连接 DRC。`)
     return
   }
   const { latitude, longitude, height, maxSpeed } = flyToPointFormState
   if (latitude == null || longitude == null || height == null) {
-    message.warning('Latitude / longitude / height are required.')
+    message.warning('纬度、经度和高度均为必填项。')
     return
   }
   if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
-    message.warning('Latitude out of range [-90, 90].')
+    message.warning('纬度超出范围 [-90, 90]。')
     return
   }
   if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
-    message.warning('Longitude out of range [-180, 180].')
+    message.warning('经度超出范围 [-180, 180]。')
     return
   }
   if (!Number.isFinite(height) || height < MIN_AIRBORNE_HEIGHT_M) {
-    message.warning(`Target height must be ≥ ${MIN_AIRBORNE_HEIGHT_M} m.`)
+    message.warning(`目标高度必须不低于 ${MIN_AIRBORNE_HEIGHT_M} 米。`)
     return
   }
   const safeMaxSpeed = Number.isFinite(maxSpeed) && maxSpeed > 0 ? Math.min(maxSpeed, 15) : 5
@@ -983,21 +1880,22 @@ async function submitFlyToPointManual () {
       max_speed: safeMaxSpeed,
       points: [{ latitude, longitude, height }]
     })
-  }, 'fly_to_point (manual target) command sent.')
+  }, '手动目标点指令已发送。')
 }
 
 async function handleStopFlyToPoint (device: OnlineDevice) {
   if (!isCurrentRemoteGateway(device)) {
-    message.warning('Remote control is not connected.')
+    message.warning('遥控链路未连接。')
     return
   }
   await withAircraftAction(device, 'flyStop', async () => {
     return await deleteFlyToPoint(device.gateway.sn)
-  }, 'Stop fly_to_point command sent.')
+  }, '停止飞向目标点指令已发送。')
 }
 
 onUnmounted(() => {
   EventBus.off('droneControlWs', onDroneControlWsEvent)
+  resetOfficialTakeoffFlow()
   destroyRemoteControlClient()
 })
 
@@ -1063,10 +1961,12 @@ onUnmounted(() => {
 }
 .aircraft-card {
   background: #3c3c3c;
-  width: 250px;
+  width: 100%;
+  max-width: 292px;
   margin-bottom: 12px;
   border-radius: 2px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 .aircraft-osd-panel,
 .aircraft-action-panel {
@@ -1107,20 +2007,105 @@ onUnmounted(() => {
   line-height: 18px;
 }
 .aircraft-action-tips {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   color: #faad14;
   line-height: 16px;
 }
-.aircraft-action-row {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 6px;
+.aircraft-action-section {
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(72, 72, 72, 0.55), rgba(42, 42, 42, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
-.aircraft-action-row:last-child {
+.aircraft-action-section:last-child {
   margin-bottom: 0;
 }
+.aircraft-action-section-title {
+  margin-bottom: 4px;
+  color: #f5f5f5;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.aircraft-action-grid {
+  display: grid;
+  gap: 6px;
+}
+.aircraft-action-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.aircraft-action-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
 .aircraft-action-btn {
-  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+.aircraft-action-panel :deep(.ant-btn) {
+  white-space: normal;
+  height: 38px;
+  padding: 0 6px;
+  font-size: 14px;
+  border-radius: 8px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #3a3a3a;
+  color: #f0f0f0;
+  font-weight: 600;
+  box-shadow: none;
+  transition: all 0.2s ease;
+}
+.aircraft-action-panel :deep(.ant-btn:hover:not([disabled])),
+.aircraft-action-panel :deep(.ant-btn:focus:not([disabled])) {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.18);
+  background: #464646;
+}
+.aircraft-action-panel :deep(.ant-btn[disabled]) {
+  color: rgba(255, 255, 255, 0.38);
+  background: #353535;
+  border-color: rgba(255, 255, 255, 0.05);
+}
+.aircraft-action-btn-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  font-size: inherit;
+  line-height: 1.2;
+}
+.aircraft-action-btn-inner > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aircraft-action-panel :deep(.ant-btn-primary),
+.aircraft-action-btn--primary {
+  border-color: #1f7a4f !important;
+  background: linear-gradient(180deg, #2aa165, #1d7c4d) !important;
+  color: #f7fff9 !important;
+}
+.aircraft-action-panel :deep(.ant-btn-primary:hover:not([disabled])),
+.aircraft-action-panel :deep(.ant-btn-primary:focus:not([disabled])) {
+  border-color: #31b472 !important;
+  background: linear-gradient(180deg, #31b472, #238c59) !important;
+}
+.aircraft-action-panel :deep(.ant-btn-dangerous),
+.aircraft-action-btn--danger {
+  border-color: rgba(255, 115, 64, 0.76) !important;
+  background: linear-gradient(180deg, #ff7a45, #ef5b2a) !important;
+  color: #fff7f2 !important;
+}
+.aircraft-action-btn--danger-strong {
+  border-color: rgba(255, 78, 53, 0.9) !important;
+  background: linear-gradient(180deg, #ff5a36, #ff2d20) !important;
+  color: #fff8f6 !important;
+  box-shadow: 0 0 0 1px rgba(255, 96, 64, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+.aircraft-action-panel :deep(.ant-popover-open) {
+  width: 100%;
 }
 .disable {
   cursor: not-allowed;
@@ -1178,6 +2163,210 @@ onUnmounted(() => {
     transform: translateX(-100%);
     -webkit-transform: translateX(-100%);
   }
+}
+
+.tsa-modal-skin .ant-modal-content {
+  border: 1px solid #d9e4ef;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
+  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+
+.tsa-modal-skin .ant-modal-header {
+  margin-bottom: 0;
+  padding: 18px 22px 10px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: transparent;
+}
+
+.tsa-modal-skin .ant-modal-title,
+.tsa-modal-skin .ant-modal-confirm-title {
+  color: #102033;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tsa-modal-skin .ant-modal-body,
+.tsa-modal-skin .ant-modal-confirm-body {
+  padding: 18px 22px 20px;
+}
+
+.tsa-modal-skin .ant-modal-confirm-content {
+  margin-top: 0;
+  color: #314155;
+}
+
+.tsa-modal-skin .ant-modal-confirm-btns {
+  margin-top: 14px;
+}
+
+.tsa-modal-skin .ant-modal-confirm-btns .ant-btn-primary {
+  border-color: #16794c;
+  background: linear-gradient(180deg, #2ea567 0%, #1e7e51 100%);
+  color: #f7fff9;
+}
+
+.tsa-modal-skin .ant-modal-confirm-btns .ant-btn-primary:hover,
+.tsa-modal-skin .ant-modal-confirm-btns .ant-btn-primary:focus {
+  border-color: #31b776;
+  background: linear-gradient(180deg, #31b776 0%, #22895a 100%);
+  color: #ffffff;
+}
+
+.tsa-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: #274055;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.tsa-modal-subtitle {
+  color: #62748a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.tsa-modal-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .tsa-modal-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tsa-modal-summary-item,
+.tsa-modal-notice,
+.tsa-modal-warning {
+  border-radius: 12px;
+  border: 1px solid #dce6f1;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.tsa-modal-summary-item {
+  padding: 10px 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.tsa-modal-summary-label {
+  color: #6b7f95;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tsa-modal-summary-value {
+  margin-top: 4px;
+  color: #102033;
+  font-size: 14px;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.tsa-modal-notice,
+.tsa-modal-warning {
+  padding: 12px 14px;
+}
+
+.tsa-modal-notice {
+  border-color: rgba(47, 128, 237, 0.24);
+  background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+}
+
+.tsa-modal-warning {
+  border-color: rgba(245, 166, 35, 0.28);
+  background: linear-gradient(180deg, #fffaf2 0%, #fff3e3 100%);
+}
+
+.tsa-modal-notice__title,
+.tsa-modal-warning__title {
+  margin-bottom: 8px;
+  color: #1e2f43;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tsa-modal-notice__body,
+.tsa-modal-warning__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tsa-modal-notice__item,
+.tsa-modal-warning__item {
+  position: relative;
+  padding-left: 14px;
+  color: #314155;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.tsa-modal-notice__item::before,
+.tsa-modal-warning__item::before {
+  position: absolute;
+  left: 0;
+  top: 0.65em;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  content: '';
+  transform: translateY(-50%);
+}
+
+.tsa-modal-notice__item::before {
+  background: #2f80ed;
+}
+
+.tsa-modal-warning__item::before {
+  background: #f5a623;
+}
+
+.tsa-modal-skin--confirm .ant-modal-confirm-btns .ant-btn-primary {
+  border-color: #1677ff;
+  background: linear-gradient(180deg, #2f8cff 0%, #1668dc 100%);
+  color: #f8fbff;
+}
+
+.tsa-modal-skin--confirm .ant-modal-confirm-btns .ant-btn-primary:hover,
+.tsa-modal-skin--confirm .ant-modal-confirm-btns .ant-btn-primary:focus {
+  border-color: #3f96ff;
+  background: linear-gradient(180deg, #3f96ff 0%, #1b73e8 100%);
+  color: #ffffff;
+}
+
+.tsa-modal-skin--warning .ant-modal-confirm-btns .ant-btn-primary {
+  border-color: #d48806;
+  background: linear-gradient(180deg, #ffb648 0%, #f59e0b 100%);
+  color: #3f2a00;
+}
+
+.tsa-modal-skin--warning .ant-modal-confirm-btns .ant-btn-primary:hover,
+.tsa-modal-skin--warning .ant-modal-confirm-btns .ant-btn-primary:focus {
+  border-color: #e8a52c;
+  background: linear-gradient(180deg, #ffc15c 0%, #f7a91f 100%);
+  color: #3f2a00;
+}
+
+.tsa-modal-skin--danger .ant-modal-confirm-btns .ant-btn-primary {
+  border-color: #cf1322;
+  background: linear-gradient(180deg, #ff7875 0%, #ef4444 100%);
+  color: #fff8f8;
+}
+
+.tsa-modal-skin--danger .ant-modal-confirm-btns .ant-btn-primary:hover,
+.tsa-modal-skin--danger .ant-modal-confirm-btns .ant-btn-primary:focus {
+  border-color: #f06060;
+  background: linear-gradient(180deg, #ff8b88 0%, #f25454 100%);
+  color: #ffffff;
 }
 
 </style>

@@ -11,10 +11,13 @@ import com.dji.sample.manage.service.IDeviceRedisService;
 import com.dji.sample.manage.service.IDeviceService;
 import com.dji.sdk.cloudapi.control.FlyToPointRequest;
 import com.dji.sdk.cloudapi.control.PayloadAuthorityGrabRequest;
+import com.dji.sdk.cloudapi.control.Point;
 import com.dji.sdk.cloudapi.control.TakeoffToPointRequest;
 import com.dji.sdk.cloudapi.control.api.AbstractControlService;
 import com.dji.sdk.config.version.GatewayManager;
 import com.dji.sdk.cloudapi.device.DeviceDomainEnum;
+import com.dji.sdk.cloudapi.device.OsdDockDrone;
+import com.dji.sdk.cloudapi.device.OsdRcDrone;
 import com.dji.sdk.cloudapi.debug.DebugMethodEnum;
 import com.dji.sdk.cloudapi.debug.api.AbstractDebugService;
 import com.dji.sdk.cloudapi.device.DockModeCodeEnum;
@@ -32,8 +35,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -44,6 +51,8 @@ import java.util.UUID;
 @Service
 @Slf4j
 public class ControlServiceImpl implements IControlService {
+
+    static final float LEGACY_HEIGHT_THRESHOLD_M = 120.0f;
 
     @Autowired
     private IWebSocketMessageService webSocketMessageService;
@@ -82,12 +91,21 @@ public class ControlServiceImpl implements IControlService {
 
     @Override
     public HttpResultResponse controlDockDebug(String sn, RemoteDebugMethodEnum controlMethodEnum, RemoteDebugParam param) {
+        log.info("controlDockDebug called. sn={}, method={}, param={}", sn, controlMethodEnum.getMethod(), param);
         DebugMethodEnum methodEnum = controlMethodEnum.getDebugMethodEnum();
         RemoteDebugHandler data = checkDebugCondition(sn, param, controlMethodEnum);
 
         boolean isExist = deviceRedisService.checkDeviceOnline(sn);
         if (!isExist) {
             return HttpResultResponse.error("The dock is offline.");
+        }
+        try {
+            GatewayManager gw = SDKManager.getDeviceSDK(sn);
+            log.info("controlDockDebug gateway info. sn={}, method={}, gatewayType={}, sdkVersion={}, droneSn={}",
+                    sn, controlMethodEnum.getMethod(), gw.getType(), gw.getSdkVersion(), gw.getDroneSn());
+        } catch (Exception e) {
+            log.warn("controlDockDebug cannot resolve gateway SDK info. sn={}, method={}, reason={}",
+                    sn, controlMethodEnum.getMethod(), e.getMessage());
         }
         TopicServicesResponse response;
         switch (controlMethodEnum) {
@@ -102,6 +120,8 @@ public class ControlServiceImpl implements IControlService {
                         Objects.nonNull(methodEnum.getClazz()) ? mapper.convertValue(data, methodEnum.getClazz()) : null);
         }
         ServicesReplyData serviceReply = (ServicesReplyData) response.getData();
+        log.info("controlDockDebug reply. sn={}, method={}, result={}, output={}",
+                sn, controlMethodEnum.getMethod(), serviceReply.getResult(), serviceReply.getOutput());
         if (!serviceReply.getResult().isSuccess()) {
             return HttpResultResponse.error(serviceReply.getResult());
         }
@@ -116,35 +136,169 @@ public class ControlServiceImpl implements IControlService {
         }
 
         DroneModeCodeEnum deviceMode = deviceService.getDeviceMode(dockOpt.get().getChildDeviceSn());
-        if (DroneModeCodeEnum.MANUAL != deviceMode) {
+        if (!canFlyToPointInMode(deviceMode)) {
             throw new RuntimeException("The current state of the drone does not support this function, please try again later.");
         }
 
-        HttpResultResponse result = seizeAuthority(dockSn, DroneAuthorityEnum.FLIGHT, null);
+        // The stage-1 -> stage-2 handoff can already be holding flight
+        // authority. Forcing a new grab in that window may time out before the
+        // actual fly_to_point command is published, so use the normal authority
+        // check here and only grab when the cache says it is needed.
+        HttpResultResponse result = seizeAuthority(dockSn, DroneAuthorityEnum.FLIGHT, null, false);
         if (HttpResultResponse.CODE_SUCCESS != result.getCode()) {
             throw new IllegalArgumentException(result.getMessage());
         }
     }
 
+    private boolean canFlyToPointInMode(DroneModeCodeEnum deviceMode) {
+        return DroneModeCodeEnum.MANUAL == deviceMode
+                || DroneModeCodeEnum.VIRTUAL_JOYSTICK == deviceMode
+                || DroneModeCodeEnum.LIVE_FLIGHT_CONTROLS == deviceMode
+                || DroneModeCodeEnum.TAKEOFF_FINISHED == deviceMode
+                || DroneModeCodeEnum.TAKEOFF_AUTO == deviceMode;
+    }
+
+    static Float normalizeLegacyTakeoffTargetHeight(Double targetHeight, Float absoluteHeight, Float commanderFlightHeight) {
+        if (targetHeight == null) {
+            return null;
+        }
+        float target = targetHeight.floatValue();
+        if (absoluteHeight == null || commanderFlightHeight == null || target > LEGACY_HEIGHT_THRESHOLD_M) {
+            return target;
+        }
+        if (Math.abs(target - commanderFlightHeight) > 0.001f) {
+            return target;
+        }
+        return absoluteHeight + commanderFlightHeight;
+    }
+
+    static List<Point> normalizeLegacyFlyToPointHeights(List<Point> points, Float absoluteHeight) {
+        if (points == null || absoluteHeight == null) {
+            return points;
+        }
+        List<Point> normalized = new ArrayList<>(points.size());
+        for (Point point : points) {
+            if (point == null || point.getHeight() == null || point.getHeight() > LEGACY_HEIGHT_THRESHOLD_M) {
+                normalized.add(point);
+                continue;
+            }
+            normalized.add(new Point()
+                    .setLatitude(point.getLatitude())
+                    .setLongitude(point.getLongitude())
+                    .setHeight(absoluteHeight + point.getHeight()));
+        }
+        return normalized;
+    }
+
+    private Optional<Float> resolveAircraftAbsoluteHeight(String gatewaySn) {
+        Set<String> candidateSns = new LinkedHashSet<>();
+        candidateSns.add(gatewaySn);
+        deviceRedisService.getDeviceOnline(gatewaySn).ifPresent(device -> {
+            if (device.getChildDeviceSn() != null && !device.getChildDeviceSn().isEmpty()) {
+                candidateSns.add(device.getChildDeviceSn());
+            }
+        });
+        deviceService.getDeviceBySn(gatewaySn).ifPresent(device -> {
+            if (device.getChildDeviceSn() != null && !device.getChildDeviceSn().isEmpty()) {
+                candidateSns.add(device.getChildDeviceSn());
+            }
+            if (device.getParentSn() != null && !device.getParentSn().isEmpty()) {
+                candidateSns.add(device.getParentSn());
+            }
+        });
+
+        for (String candidateSn : candidateSns) {
+            Optional<Float> absoluteHeight = deviceRedisService.getDeviceOsd(candidateSn, OsdRcDrone.class)
+                    .map(OsdRcDrone::getHeight)
+                    .or(() -> deviceRedisService.getDeviceOsd(candidateSn, OsdDockDrone.class)
+                            .map(OsdDockDrone::getHeight));
+            if (absoluteHeight.isPresent()) {
+                log.info("resolveAircraftAbsoluteHeight matched. gatewaySn={}, candidateSn={}, absoluteHeight={}",
+                        gatewaySn, candidateSn, absoluteHeight.get());
+                return absoluteHeight;
+            }
+        }
+
+        log.warn("resolveAircraftAbsoluteHeight missing height. gatewaySn={}, candidates={}", gatewaySn, candidateSns);
+        return Optional.empty();
+    }
+
     @Override
     public HttpResultResponse flyToPoint(String sn, FlyToPointParam param) {
-        checkFlyToCondition(sn);
+        log.info("flyToPoint called. sn={}, param={}", sn, param);
+        try {
+            Optional<DeviceDTO> dockOpt = deviceRedisService.getDeviceOnline(sn);
+            if (dockOpt.isPresent()) {
+                DroneModeCodeEnum mode = deviceService.getDeviceMode(dockOpt.get().getChildDeviceSn());
+                log.info("flyToPoint current mode. sn={}, childSn={}, mode={}",
+                        sn, dockOpt.get().getChildDeviceSn(), mode);
+            }
+        } catch (Exception e) {
+            log.warn("flyToPoint cannot resolve current mode. sn={}, reason={}", sn, e.getMessage());
+        }
+        try {
+            checkFlyToCondition(sn);
+        } catch (RuntimeException e) {
+            log.warn("flyToPoint precheck failed. sn={}, reason={}", sn, e.getMessage());
+            throw e;
+        }
+
+        resolveAircraftAbsoluteHeight(sn).ifPresent(absoluteHeight -> {
+            List<Point> normalizedPoints = normalizeLegacyFlyToPointHeights(param.getPoints(), absoluteHeight);
+            if (normalizedPoints != param.getPoints()) {
+                log.warn("flyToPoint normalized legacy relative heights to ellipsoid heights. sn={}, absoluteHeight={}, before={}, after={}",
+                        sn, absoluteHeight, param.getPoints(), normalizedPoints);
+                param.setPoints(normalizedPoints);
+            }
+        });
 
         param.setFlyToId(UUID.randomUUID().toString());
+        FlyToPointRequest req = mapper.convertValue(param, FlyToPointRequest.class);
+
+        try {
+            GatewayManager gw = SDKManager.getDeviceSDK(sn);
+            log.info("flyToPoint gateway info. sn={}, gatewayType={}, sdkVersion={}, droneSn={}",
+                    sn, gw.getType(), gw.getSdkVersion(), gw.getDroneSn());
+        } catch (Exception e) {
+            log.warn("flyToPoint cannot resolve gateway SDK info. sn={}, reason={}", sn, e.getMessage());
+        }
+
+        try {
+            log.info("flyToPoint request JSON. sn={}, json={}", sn, mapper.writeValueAsString(req));
+        } catch (Exception e) {
+            log.warn("flyToPoint cannot serialize request to JSON. sn={}, reason={}", sn, e.getMessage());
+        }
+
+        log.info("flyToPoint publishing. sn={}, req={}", sn, req);
         TopicServicesResponse<ServicesReplyData> response = abstractControlService.flyToPoint(
-                SDKManager.getDeviceSDK(sn), mapper.convertValue(param, FlyToPointRequest.class));
+                SDKManager.getDeviceSDK(sn), req);
         ServicesReplyData reply = response.getData();
-        return reply.getResult().isSuccess() ?
+        boolean ok = reply.getResult().isSuccess();
+        log.info("flyToPoint reply. sn={}, result={}, output={}", sn, reply.getResult(), reply.getOutput());
+        if (ok) {
+            log.info("flyToPoint success. sn={}, flyToId={}", sn, param.getFlyToId());
+        } else {
+            log.warn("flyToPoint failed. sn={}, result={}, output={}", sn, reply.getResult(), reply.getOutput());
+        }
+        return ok ?
                 HttpResultResponse.success()
                 : HttpResultResponse.error("Flying to the target point failed. " + reply.getResult());
     }
 
     @Override
     public HttpResultResponse flyToPointStop(String sn) {
+        log.info("flyToPointStop called. sn={}", sn);
         TopicServicesResponse<ServicesReplyData> response = abstractControlService.flyToPointStop(SDKManager.getDeviceSDK(sn));
         ServicesReplyData reply = response.getData();
+        boolean ok = reply.getResult().isSuccess();
+        log.info("flyToPointStop reply. sn={}, result={}, output={}", sn, reply.getResult(), reply.getOutput());
+        if (ok) {
+            log.info("flyToPointStop success. sn={}", sn);
+        } else {
+            log.warn("flyToPointStop failed. sn={}, result={}, output={}", sn, reply.getResult(), reply.getOutput());
+        }
 
-        return reply.getResult().isSuccess() ?
+        return ok ?
                 HttpResultResponse.success()
                 : HttpResultResponse.error("The drone flying to the target point failed to stop. " + reply.getResult());
     }
@@ -175,6 +329,17 @@ public class ControlServiceImpl implements IControlService {
             log.warn("takeoffToPoint precheck failed. sn={}, reason={}", sn, e.getMessage());
             throw e;
         }
+
+        resolveAircraftAbsoluteHeight(sn).ifPresent(absoluteHeight -> {
+            Float normalizedTargetHeight = normalizeLegacyTakeoffTargetHeight(
+                    param.getTargetHeight(), absoluteHeight, param.getCommanderFlightHeight());
+            if (normalizedTargetHeight != null
+                    && Math.abs(normalizedTargetHeight - param.getTargetHeight().floatValue()) > 0.001f) {
+                log.warn("takeoffToPoint normalized legacy target_height to ellipsoid height. sn={}, absoluteHeight={}, beforeTargetHeight={}, commanderFlightHeight={}, afterTargetHeight={}",
+                        sn, absoluteHeight, param.getTargetHeight(), param.getCommanderFlightHeight(), normalizedTargetHeight);
+                param.setTargetHeight((double) normalizedTargetHeight);
+            }
+        });
 
         param.setFlightId(UUID.randomUUID().toString());
         TakeoffToPointRequest req = mapper.convertValue(param, TakeoffToPointRequest.class);
@@ -219,21 +384,30 @@ public class ControlServiceImpl implements IControlService {
 
     @Override
     public HttpResultResponse seizeAuthority(String sn, DroneAuthorityEnum authority, DronePayloadParam param) {
+        return seizeAuthority(sn, authority, param, false);
+    }
+
+    @Override
+    public HttpResultResponse seizeAuthority(String sn, DroneAuthorityEnum authority, DronePayloadParam param, boolean force) {
         TopicServicesResponse<ServicesReplyData> response;
-        log.info("Seize authority start. sn={}, authority={}", sn, authority);
+        log.info("Seize authority start. sn={}, authority={}, force={}", sn, authority, force);
         switch (authority) {
             case FLIGHT:
-                boolean hasFlightAuthority = deviceService.checkAuthorityFlight(sn);
-                log.info("Flight authority current state. sn={}, hasFlightAuthority={}", sn, hasFlightAuthority);
-                if (hasFlightAuthority) {
-                    log.info("Flight authority already held. sn={}", sn);
-                    return HttpResultResponse.success();
+                if (!force) {
+                    boolean hasFlightAuthority = deviceService.checkAuthorityFlight(sn);
+                    log.info("Flight authority current state. sn={}, hasFlightAuthority={}", sn, hasFlightAuthority);
+                    if (hasFlightAuthority) {
+                        log.info("Flight authority already held. sn={}", sn);
+                        return HttpResultResponse.success();
+                    }
+                } else {
+                    log.info("Flight authority force-grab, skipping cached checkAuthorityFlight. sn={}", sn);
                 }
-                log.info("Publishing flight_authority_grab. sn={}", sn);
+                log.info("Publishing flight_authority_grab. sn={}, force={}", sn, force);
                 response = abstractControlService.flightAuthorityGrab(SDKManager.getDeviceSDK(sn));
                 break;
             case PAYLOAD:
-                if (checkPayloadAuthority(sn, param.getPayloadIndex())) {
+                if (!force && checkPayloadAuthority(sn, param.getPayloadIndex())) {
                     return HttpResultResponse.success();
                 }
                 response = abstractControlService.payloadAuthorityGrab(SDKManager.getDeviceSDK(sn),
