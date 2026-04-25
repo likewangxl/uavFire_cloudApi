@@ -1,0 +1,125 @@
+import threading
+from typing import Callable, Dict, Optional, Tuple, TYPE_CHECKING
+
+from app.models.task import TaskRecord
+from app.video.source import VideoSource
+
+if TYPE_CHECKING:
+    from app.services.continuous_runner import ContinuousTaskRunner
+
+
+SourceFactory = Callable[[TaskRecord], Tuple[Optional[VideoSource], Optional[VideoSource]]]
+
+
+class _Worker:
+    __slots__ = ("thread", "stop_event")
+
+    def __init__(self, thread: threading.Thread, stop_event: threading.Event) -> None:
+        self.thread = thread
+        self.stop_event = stop_event
+
+
+class ContinuousTaskSupervisor:
+    """Owns one background thread per task that drives a ContinuousTaskRunner.
+
+    `start(task_id, visible_source, thermal_source)` spawns a thread; `stop`
+    signals the stop event and joins. Designed for cooperative shutdown — the
+    runner checks `stop_predicate()` between ticks and at loop top.
+    """
+
+    def __init__(
+        self,
+        runner: "ContinuousTaskRunner",
+        thread_factory: Optional[Callable[..., threading.Thread]] = None,
+        join_timeout_s: float = 5.0,
+    ) -> None:
+        self._runner = runner
+        self._thread_factory = thread_factory or _default_thread_factory
+        self._join_timeout_s = float(join_timeout_s)
+        self._workers: Dict[str, _Worker] = {}
+        self._lock = threading.RLock()
+
+    def start(
+        self,
+        task_id: str,
+        visible_source: Optional[VideoSource],
+        thermal_source: Optional[VideoSource],
+    ) -> None:
+        with self._lock:
+            existing = self._workers.get(task_id)
+            if existing is not None and existing.thread.is_alive():
+                return
+            stop_event = threading.Event()
+
+            def _target():
+                self._runner.run(
+                    task_id=task_id,
+                    visible_source=visible_source,
+                    thermal_source=thermal_source,
+                    stop_predicate=stop_event.is_set,
+                )
+
+            thread = self._thread_factory(
+                target=_target,
+                name=f"continuous-runner-{task_id}",
+                daemon=True,
+            )
+            self._workers[task_id] = _Worker(thread=thread, stop_event=stop_event)
+            thread.start()
+
+    def stop(self, task_id: str) -> bool:
+        with self._lock:
+            worker = self._workers.pop(task_id, None)
+        if worker is None:
+            return False
+        worker.stop_event.set()
+        worker.thread.join(timeout=self._join_timeout_s)
+        return not worker.thread.is_alive()
+
+    def is_running(self, task_id: str) -> bool:
+        with self._lock:
+            worker = self._workers.get(task_id)
+        return worker is not None and worker.thread.is_alive()
+
+    def shutdown(self) -> None:
+        with self._lock:
+            task_ids = list(self._workers.keys())
+        for task_id in task_ids:
+            self.stop(task_id)
+
+
+def _default_thread_factory(target, name, daemon):
+    return threading.Thread(target=target, name=name, daemon=daemon)
+
+
+def opencv_source_factory_from_task(task: TaskRecord) -> Tuple[Optional[VideoSource], Optional[VideoSource]]:
+    """Default factory: build OpenCvVideoSource from task URL fields.
+
+    URLs that are empty or look like placeholders ("visible", "thermal") yield
+    `None` so the runner can degrade to a single channel.
+    """
+    from app.video.source import OpenCvVideoSource
+
+    visible = (
+        OpenCvVideoSource(url=task.visible_stream_url, channel="visible")
+        if _looks_like_real_url(task.visible_stream_url)
+        else None
+    )
+    thermal = (
+        OpenCvVideoSource(url=task.thermal_stream_url, channel="thermal")
+        if _looks_like_real_url(task.thermal_stream_url)
+        else None
+    )
+    return visible, thermal
+
+
+def _looks_like_real_url(value: str) -> bool:
+    if not value:
+        return False
+    lowered = value.lower()
+    if lowered in {"visible", "thermal"}:
+        return False
+    return any(
+        lowered.startswith(scheme)
+        for scheme in ("rtsp://", "rtmp://", "http://", "https://", "file://", "/")
+    )
