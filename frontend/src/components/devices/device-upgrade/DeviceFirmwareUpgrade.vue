@@ -19,7 +19,7 @@
 </template>
 
 <script lang="ts" setup>
-import { defineProps, defineEmits, ref, watch, computed } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { Device, DeviceFirmwareStatusEnum, DeviceFirmwareStatus, DeviceFirmwareStatusColor } from '/@/types/device'
 
 const props = defineProps<{

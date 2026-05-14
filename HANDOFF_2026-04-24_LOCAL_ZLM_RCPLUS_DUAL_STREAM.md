@@ -7,7 +7,7 @@
 > 3. “真双流”当前仍卡在热成像第二路导出；但驾驶舱已补上可见光主通道真实播放器，不再只是状态页
 >
 > 【2026-04-25 勘误】下面这几条与仓库当前实际状态不符，已列在 §十 勘误：
-> - IP 切换到 `172.20.10.7` 已被回滚，仓库当前统一在 `192.168.0.12`（本机 wifi）
+> - IP 切换到 `172.20.10.7` 已被回滚，仓库当前统一在 `192.168.50.254`（本机 wifi）
 > - `leadership-cockpit.vue` 使用的是 `ZLMRTCClient.Endpoint`（WebRTC 信令），不是 `jswebrtc.Player`
 > - §四.2 / §四.3 关于"驾驶舱没有接真实播放器、不播放视频"的描述不成立，播放器已经接上并在 live tab 渲染 `<video>`
 
@@ -102,7 +102,7 @@ curl -I http://127.0.0.1:58925/
 旧现象：
 
 - RC Plus logcat 持续报：
-  - `java.net.UnknownServiceException: CLEARTEXT communication to 192.168.0.12 not permitted by network security policy`
+  - `java.net.UnknownServiceException: CLEARTEXT communication to 192.168.50.254 not permitted by network security policy`
 
 已修：
 
@@ -507,18 +507,18 @@ JAVA_HOME=/usr/local/opt/openjdk@17 ./gradlew :app:assembleDebug
 
 ### §一.1 / §二.1 / §八 - IP 统一到 `172.20.10.7`
 
-**事实更正**：该 IP 切换已经被回滚。仓库当前的真实统一基准是 `192.168.0.12`（Mac 当前 wifi 接口 en0），具体见：
+**事实更正**：该 IP 切换已经被回滚。仓库当前的真实统一基准是 `192.168.50.254`（Mac 当前 wifi 接口 en0），具体见：
 
-- `backend/sample/src/main/resources/application.yml`（MQTT host、pilot2 web-entry、livestream.playback.webrtc-host、RTMP、GB28181、WHIP 全部为 `192.168.0.12`）
-- `frontend/src/api/http/config.ts` + `frontend/env/.env`（baseURL / websocketURL / rtmpURL 全部为 `192.168.0.12`）
-- `rcplus-msdk-agent/gradle.properties`（`agentBackendBaseUrl` / `agentMediaHost` 为 `192.168.0.12`）
-- `deployment/zlmediakit/.env`、`deployment/zlmediakit/config/config.ini`（`ZLM_PUBLIC_HOST` / `externIP` 为 `192.168.0.12`）
+- `backend/sample/src/main/resources/application.yml`（MQTT host、pilot2 web-entry、livestream.playback.webrtc-host、RTMP、GB28181、WHIP 全部为 `192.168.50.254`）
+- `frontend/src/api/http/config.ts` + `frontend/env/.env`（baseURL / websocketURL / rtmpURL 全部为 `192.168.50.254`）
+- `rcplus-msdk-agent/gradle.properties`（`agentBackendBaseUrl` / `agentMediaHost` 为 `192.168.50.254`）
+- `deployment/zlmediakit/.env`、`deployment/zlmediakit/config/config.ini`（`ZLM_PUBLIC_HOST` / `externIP` 为 `192.168.50.254`）
 
-三方推流 / 信令路径在 `192.168.0.12` 上依然完整对齐：
+三方推流 / 信令路径在 `192.168.50.254` 上依然完整对齐：
 
-- Agent RTMP publish：`rtmp://192.168.0.12:1935/live/{droneSn}-0`
-- Backend 兜底播放地址：`webrtc://192.168.0.12:58925/live/{droneSn}-0`
-- 驾驶舱向 ZLM 发的信令：`http://192.168.0.12:58925/index/api/webrtc?app=live&stream={droneSn}-0&type=play`
+- Agent RTMP publish：`rtmp://192.168.50.254:1935/live/{droneSn}-0`
+- Backend 兜底播放地址：`webrtc://192.168.50.254:58925/live/{droneSn}-0`
+- 驾驶舱向 ZLM 发的信令：`http://192.168.50.254:58925/index/api/webrtc?app=live&stream={droneSn}-0&type=play`
 
 所以"链路 URL 不对齐"不是可见光出画失败的成因，**下一位不要再花时间在 IP 切换上**。
 

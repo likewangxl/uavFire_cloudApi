@@ -1,6 +1,9 @@
 package com.dji.sample.wayline.model.param;
 
 import com.dji.sample.wayline.model.dto.PlannedWaypointDTO;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,19 +27,28 @@ public class UpdatePlannedWaylineParam {
     private String name;
 
     @NotBlank
-    private String aircraftModelKey;
+    @JsonAlias({"aircraftModelKey", "aircraft_model_key", "droneModelKey", "drone_model_key"})
+    @JsonSetter(nulls = Nulls.SKIP)
+    @Builder.Default
+    private String aircraftModelKey = "M30T";
 
-    @NotBlank
+    @JsonAlias({"gatewaySn", "gateway_sn"})
     private String gatewaySn;
 
-    @NotBlank
+    @JsonAlias({"aircraftSn", "aircraft_sn"})
     private String aircraftSn;
 
     @NotNull
-    private Double defaultHeight;
+    @JsonAlias({"defaultHeight", "default_height"})
+    @JsonSetter(nulls = Nulls.SKIP)
+    @Builder.Default
+    private Double defaultHeight = 30.0;
 
     @NotNull
-    private Double maxSpeed;
+    @JsonAlias({"maxSpeed", "max_speed"})
+    @JsonSetter(nulls = Nulls.SKIP)
+    @Builder.Default
+    private Double maxSpeed = 5.0;
 
     @NotEmpty
     @Valid

@@ -66,6 +66,8 @@ public class SDKControlService extends AbstractControlService {
                 ResultNotifyDTO.builder().sn(dockSn)
                         .message(eventsReceiver.getResult().toString())
                         .result(eventsReceiver.getResult().getCode())
+                        .status(eventsReceiver.getStatus() == null ? null : eventsReceiver.getStatus().getStatus())
+                        .flightId(eventsReceiver.getFlyToId())
                         .build());
         return new TopicEventsResponse<MqttReply>().setData(MqttReply.success());
     }
@@ -81,11 +83,27 @@ public class SDKControlService extends AbstractControlService {
         }
 
         TakeoffToPointProgress eventsReceiver = request.getData();
+        try {
+            log.info("takeoffToPointProgress received. gatewaySn={}, flightId={}, result={}, status={}, remainingDistance={}, remainingTime={}, wayPointIndex={}, plannedPathPoints={}",
+                    dockSn,
+                    eventsReceiver.getFlightId(),
+                    eventsReceiver.getResult(),
+                    eventsReceiver.getStatus() == null ? null : eventsReceiver.getStatus().getStatus(),
+                    eventsReceiver.getRemainingDistance(),
+                    eventsReceiver.getRemainingTime(),
+                    eventsReceiver.getWayPointIndex(),
+                    mapper.writeValueAsString(eventsReceiver.getPlannedPathPoints()));
+        } catch (Exception e) {
+            log.warn("takeoffToPointProgress logging failed. gatewaySn={}, flightId={}, error={}",
+                    dockSn, eventsReceiver.getFlightId(), e.getMessage());
+        }
         webSocketMessageService.sendBatch(deviceOpt.get().getWorkspaceId(), UserTypeEnum.WEB.getVal(),
                 BizCodeEnum.TAKE_OFF_TO_POINT_PROGRESS.getCode(),
                 ResultNotifyDTO.builder().sn(dockSn)
                         .message(eventsReceiver.getResult().toString())
                         .result(eventsReceiver.getResult().getCode())
+                        .status(eventsReceiver.getStatus() == null ? null : eventsReceiver.getStatus().getStatus())
+                        .flightId(eventsReceiver.getFlightId())
                         .build());
 
         return new TopicEventsResponse<MqttReply>().setData(MqttReply.success());
@@ -105,13 +123,16 @@ public class SDKControlService extends AbstractControlService {
         DrcStatusNotify eventsReceiver = request.getData();
         log.info("DRC status notify received. gatewaySn={}, result={}, state={}",
                 dockSn, eventsReceiver.getResult(), eventsReceiver.getDrcState());
-        if (DrcStatusErrorEnum.SUCCESS != eventsReceiver.getResult()) {
-            webSocketMessageService.sendBatch(
-                    deviceOpt.get().getWorkspaceId(), UserTypeEnum.WEB.getVal(), BizCodeEnum.DRC_STATUS_NOTIFY.getCode(),
-                    ResultNotifyDTO.builder().sn(dockSn)
-                            .message(eventsReceiver.getResult().getMessage())
-                            .result(eventsReceiver.getResult().getCode()).build());
-        }
+        Integer drcState = eventsReceiver.getDrcState() == null
+                ? null
+                : eventsReceiver.getDrcState().getState();
+        webSocketMessageService.sendBatch(
+                deviceOpt.get().getWorkspaceId(), UserTypeEnum.WEB.getVal(), BizCodeEnum.DRC_STATUS_NOTIFY.getCode(),
+                ResultNotifyDTO.builder().sn(dockSn)
+                        .message(eventsReceiver.getResult().getMessage())
+                        .result(eventsReceiver.getResult().getCode())
+                        .drcState(drcState)
+                        .build());
         return new TopicEventsResponse<MqttReply>().setData(MqttReply.success());
     }
 

@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class RootController {
 
-    @Value("${pilot2.web-entry:http://192.168.50.10:8080/pilot-login}")
+    @Value("${pilot2.web-entry:http://192.168.50.254:8080/pilot-login}")
     private String webEntry;
 
     @GetMapping("/")

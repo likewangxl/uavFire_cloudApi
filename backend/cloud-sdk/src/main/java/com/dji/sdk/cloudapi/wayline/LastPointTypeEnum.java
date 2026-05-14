@@ -17,6 +17,8 @@ public enum LastPointTypeEnum {
 
     NOT_OVER_THE_HOME_POINT(1),
 
+    UNKNOWN(65535),
+
     ;
 
     private final int type;

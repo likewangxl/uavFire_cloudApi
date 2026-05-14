@@ -16,4 +16,8 @@ public class PublishPlannedWaylineResponse {
     private String publishedWaylineId;
 
     private String publishedWaylineName;
+
+    private String publisher;
+
+    private Long publishTime;
 }

@@ -119,6 +119,14 @@ public class SDKWaylineService extends AbstractWaylineService {
         return new TopicEventsResponse<>();
     }
 
+    public TopicEventsResponse<MqttReply> returnHomeInfo(TopicEventsRequest<ReturnHomeInfo> request, MessageHeaders headers) {
+        log.info("returnHomeInfo event received. gateway={}, flightId={}, lastPointType={}",
+                request.getGateway(),
+                request.getData().getFlightId(),
+                request.getData().getLastPointType());
+        return new TopicEventsResponse<>();
+    }
+
     @Transactional(isolation = Isolation.READ_UNCOMMITTED)
     @Override
     public TopicRequestsResponse<MqttReply<FlighttaskResourceGetResponse>> flighttaskResourceGet(TopicRequestsRequest<FlighttaskResourceGetRequest> response, MessageHeaders headers) {

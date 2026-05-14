@@ -6,6 +6,7 @@ import com.dji.sample.control.model.enums.RemoteDebugMethodEnum;
 import com.dji.sample.control.model.param.*;
 import com.dji.sample.control.service.IControlService;
 import com.dji.sample.manage.model.dto.DeviceDTO;
+import com.dji.sample.manage.model.enums.DeviceFirmwareStatusEnum;
 import com.dji.sample.manage.service.IDevicePayloadService;
 import com.dji.sample.manage.service.IDeviceRedisService;
 import com.dji.sample.manage.service.IDeviceService;
@@ -129,10 +130,14 @@ public class ControlServiceImpl implements IControlService {
     }
 
     private void checkFlyToCondition(String dockSn) {
-        // TODO 设备固件版本不兼容情况
         Optional<DeviceDTO> dockOpt = deviceRedisService.getDeviceOnline(dockSn);
         if (dockOpt.isEmpty()) {
             throw new RuntimeException("The dock is offline, please restart the dock.");
+        }
+        DeviceFirmwareStatusEnum firmwareStatus = dockOpt.get().getFirmwareStatus();
+        if (DeviceFirmwareStatusEnum.CONSISTENT_UPGRADE == firmwareStatus
+                || DeviceFirmwareStatusEnum.UPGRADING == firmwareStatus) {
+            throw new RuntimeException("The device firmware is incompatible or upgrading, please update firmware before flight.");
         }
 
         DroneModeCodeEnum deviceMode = deviceService.getDeviceMode(dockOpt.get().getChildDeviceSn());

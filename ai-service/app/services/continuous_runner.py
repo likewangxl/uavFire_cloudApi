@@ -62,10 +62,12 @@ class ContinuousTaskRunner:
             if visible_packet is not None
             else thermal_packet.source_ts
         )
+        analysis_channel = _resolve_analysis_channel(visible_packet, thermal_packet)
         event = self._fusion_service.combine(
             visible_score=visible_score,
             thermal_score=thermal_score,
             source_ts=source_ts,
+            analysis_channel=analysis_channel,
         )
         return self._registry.record_detection_event(task_id, event)
 
@@ -108,3 +110,14 @@ class ContinuousTaskRunner:
             return source.read()
         except Exception:
             return None
+
+
+def _resolve_analysis_channel(
+    visible_packet: Optional[FramePacket],
+    thermal_packet: Optional[FramePacket],
+) -> str:
+    if visible_packet is not None and thermal_packet is not None:
+        return "dual"
+    if thermal_packet is not None:
+        return "thermal"
+    return "visible"

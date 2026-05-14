@@ -48,4 +48,5 @@ public interface ILiveStreamService {
      * @return
      */
     HttpResultResponse liveLensChange(LiveTypeDTO liveParam);
+
 }

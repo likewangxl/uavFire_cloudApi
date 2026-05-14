@@ -69,7 +69,7 @@
 <script lang="ts" setup>
 import { CloseOutlined, RobotFilled, CheckOutlined, ApiOutlined, CheckCircleTwoTone, SyncOutlined, ExclamationCircleTwoTone } from '@ant-design/icons-vue'
 import Title from '/@/components/workspace/Title.vue'
-import { defineEmits, onMounted, ref, defineProps, computed } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { getBindingDevices } from '/@/api/manage'
 import { EDeviceTypeName, ELocalStorageKey } from '/@/types'
 import { IPage } from '/@/api/http/type'

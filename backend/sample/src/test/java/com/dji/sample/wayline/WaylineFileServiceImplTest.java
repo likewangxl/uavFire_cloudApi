@@ -7,6 +7,7 @@ import com.dji.sample.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.dji.sample.wayline.model.dto.PublishedWaylineFileDTO;
 import com.dji.sample.wayline.model.entity.WaylineFileEntity;
 import com.dji.sample.wayline.service.impl.WaylineFileServiceImpl;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -14,6 +15,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipEntry;
@@ -33,6 +38,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class WaylineFileServiceImplTest {
+
+    @BeforeEach
+    void resetOssConfiguration() {
+        OssConfiguration.enable = true;
+    }
 
     @Test
     void createPublishedWaylineShouldUploadValidKmzAndPersistFormalRow() throws IOException {
@@ -73,6 +83,48 @@ class WaylineFileServiceImplTest {
         assertAll(
                 () -> assertTrue(readZipEntry(buildMinimalKmz(), "wpmz/template.kml").contains("<wpml:templateType>waypoint</wpml:templateType>")),
                 () -> assertTrue(readZipEntry(buildMinimalKmz(), "wpmz/waylines.wpml").contains("<wpml:waylineCoordinateSysParam/>")));
+    }
+
+    @Test
+    void createPublishedWaylineShouldUseLocalStorageWhenOssIsDisabled() throws Exception {
+        WaylineFileServiceImpl service = new WaylineFileServiceImpl();
+        IWaylineFileMapper mapper = mock(IWaylineFileMapper.class);
+        OssServiceContext ossService = mock(OssServiceContext.class);
+        ReflectionTestUtils.setField(service, "mapper", mapper);
+        ReflectionTestUtils.setField(service, "ossService", ossService);
+        Path localRoot = Files.createTempDirectory("planned-wayline-local-oss");
+        ReflectionTestUtils.setField(service, "localObjectStorageRoot", localRoot);
+        OssConfiguration.enable = false;
+        OssConfiguration.bucket = "bucket-001";
+        OssConfiguration.objectDirPrefix = "wayline";
+
+        when(mapper.insert(any(WaylineFileEntity.class))).thenAnswer(invocation -> {
+            WaylineFileEntity entity = invocation.getArgument(0);
+            entity.setId(1);
+            return 1;
+        });
+
+        PublishedWaylineFileDTO result = service.createPublishedWayline("workspace-001", PublishedWaylineCreateDTO.builder()
+                .filename("Survey A.kmz")
+                .objectKey("wayline/pw-local.kmz")
+                .username("alice")
+                .content(buildMinimalKmz())
+                .build());
+
+        assertEquals("wayline/pw-local.kmz", result.getObjectKey());
+        Path storedFile = localRoot.resolve("bucket-001").resolve("wayline/pw-local.kmz");
+        assertTrue(Files.exists(storedFile));
+        verify(ossService, never()).putObject(any(), any(), any(ByteArrayInputStream.class));
+
+        ArgumentCaptor<WaylineFileEntity> entityCaptor = ArgumentCaptor.forClass(WaylineFileEntity.class);
+        verify(mapper).insert(entityCaptor.capture());
+        when(mapper.selectOne(any())).thenReturn(entityCaptor.getValue());
+        URL url = service.getObjectUrl("workspace-001", result.getWaylineId());
+        assertEquals(storedFile.toUri().toURL(), url);
+        try (InputStream input = service.getObject("bucket-001", "wayline/pw-local.kmz")) {
+            assertTrue(input.readAllBytes().length > 0);
+        }
+        assertTrue(service.deleteByObjectKey("bucket-001", "wayline/pw-local.kmz"));
     }
 
     @Test

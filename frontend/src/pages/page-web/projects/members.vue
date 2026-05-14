@@ -18,10 +18,10 @@
       <template #action="{ record }">
         <div class="editable-row-operations">
           <span v-if="editableData[record.user_id]">
-            <a-tooltip title="Confirm changes">
+            <a-tooltip title="确认修改">
               <span @click="save(record)" style="color: #28d445;"><CheckOutlined /></span>
             </a-tooltip>
-            <a-tooltip title="Modification canceled">
+            <a-tooltip title="取消修改">
               <span @click="() => delete editableData[record.user_id]" class="ml15" style="color: #e70102;"><CloseOutlined /></span>
             </a-tooltip>
           </span>
@@ -57,13 +57,13 @@ interface MemberData {
   member: Member[]
 }
 const columns = [
-  { title: 'Account', dataIndex: 'username', width: 150, sorter: (a: Member, b: Member) => a.username.localeCompare(b.username), className: 'titleStyle' },
-  { title: 'User Type', dataIndex: 'user_type', width: 150, className: 'titleStyle' },
-  { title: 'Workspace Name', dataIndex: 'workspace_name', width: 150, className: 'titleStyle' },
-  { title: 'Mqtt Username', dataIndex: 'mqtt_username', width: 150, className: 'titleStyle', slots: { customRender: 'mqtt_username' } },
-  { title: 'Mqtt Password', dataIndex: 'mqtt_password', width: 150, className: 'titleStyle', slots: { customRender: 'mqtt_password' } },
-  { title: 'Joined', dataIndex: 'create_time', width: 150, sorter: (a: Member, b: Member) => a.create_time.localeCompare(b.create_time), className: 'titleStyle' },
-  { title: 'Action', dataIndex: 'action', width: 100, className: 'titleStyle', slots: { customRender: 'action' } },
+  { title: '账号', dataIndex: 'username', width: 150, sorter: (a: Member, b: Member) => a.username.localeCompare(b.username), className: 'titleStyle' },
+  { title: '用户类型', dataIndex: 'user_type', width: 150, className: 'titleStyle' },
+  { title: '工作空间', dataIndex: 'workspace_name', width: 150, className: 'titleStyle' },
+  { title: 'MQTT 用户名', dataIndex: 'mqtt_username', width: 150, className: 'titleStyle', slots: { customRender: 'mqtt_username' } },
+  { title: 'MQTT 密码', dataIndex: 'mqtt_password', width: 150, className: 'titleStyle', slots: { customRender: 'mqtt_password' } },
+  { title: '加入时间', dataIndex: 'create_time', width: 150, sorter: (a: Member, b: Member) => a.create_time.localeCompare(b.create_time), className: 'titleStyle' },
+  { title: '操作', dataIndex: 'action', width: 100, className: 'titleStyle', slots: { customRender: 'action' } },
 ]
 
 const data = reactive<MemberData>({

@@ -19,6 +19,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -79,6 +80,40 @@ class PlannedWaylineServiceTest {
         assertEquals("alice", dto.getCreator());
         assertNotNull(inserted.get());
         assertEquals("draft", inserted.get().getStatus());
+    }
+
+    @Test
+    void createShouldStoreDjiSafeNameForUnsafeCopyName() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
+        when(mapper.insert(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
+            PlannedWaylineEntity entity = invocation.getArgument(0);
+            entity.setId(1);
+            inserted.set(entity);
+            return 1;
+        });
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, objectMapper, mock(IWaylineFileService.class));
+
+        PlannedWaylineDTO dto = service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
+                .name("规划航线 2026/5/9 15:02:17 副本")
+                .aircraftModelKey("M30T")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypoints(List.of(new PlannedWaypointDTO()
+                        .setOrder(1)
+                        .setGcjLng(120.1)
+                        .setGcjLat(30.2)
+                        .setWgsLng(120.0)
+                        .setWgsLat(30.1)
+                        .setHeight(80.0)))
+                .build());
+
+        assertAll(
+                () -> assertEquals("规划航线 2026-5-9 15-02-17 副本", dto.getName()),
+                () -> assertEquals("规划航线 2026-5-9 15-02-17 副本", inserted.get().getName()),
+                () -> assertTrue(dto.getName().matches("^[^<>:\\\"/|?*._\\\\]+$")));
     }
 
     @Test
@@ -149,6 +184,45 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void createShouldAllowPlanningWithoutSelectedAircraft() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
+        when(mapper.insert(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
+            PlannedWaylineEntity entity = invocation.getArgument(0);
+            entity.setId(1);
+            entity.setCreateTime(1000L);
+            entity.setUpdateTime(1000L);
+            inserted.set(entity);
+            return 1;
+        });
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, objectMapper, mock(IWaylineFileService.class));
+
+        PlannedWaylineDTO dto = service.create("workspace-001", "alice", CreatePlannedWaylineParam.builder()
+                .name("Survey A")
+                .aircraftModelKey("M30T")
+                .gatewaySn("")
+                .aircraftSn("")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypoints(List.of(new PlannedWaypointDTO()
+                        .setOrder(1)
+                        .setGcjLng(120.1)
+                        .setGcjLat(30.2)
+                        .setWgsLng(120.0)
+                        .setWgsLat(30.1)
+                        .setHeight(80.0)))
+                .build());
+
+        assertAll(
+                () -> assertEquals("draft", dto.getStatus()),
+                () -> assertEquals("", inserted.get().getGatewaySn()),
+                () -> assertEquals("", inserted.get().getAircraftSn()));
+    }
+
+
+    @Test
     void createAndGetOneShouldPreserveWaypointOrderAndCoordinates() {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
@@ -215,7 +289,6 @@ class PlannedWaylineServiceTest {
                 .maxSpeed(12.5)
                 .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
                 .status("draft")
-                .publishedWaylineId("published-001")
                 .creator("alice")
                 .createTime(1000L)
                 .updateTime(1000L)
@@ -257,7 +330,7 @@ class PlannedWaylineServiceTest {
         assertEquals(100.0, updated.getDefaultHeight(), 0.0001);
         assertEquals(18.0, updated.getMaxSpeed(), 0.0001);
         assertEquals("draft", updated.getStatus());
-        assertEquals("published-001", updated.getPublishedWaylineId());
+        assertNull(updated.getPublishedWaylineId());
         assertEquals("alice", updated.getCreator());
         ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PlannedWaylineEntity>> selectCaptor =
                 ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
@@ -275,9 +348,45 @@ class PlannedWaylineServiceTest {
                 () -> assertEquals("pw-001", updatedCaptor.getValue().getPlannedWaylineId()),
                 () -> assertEquals("workspace-001", updatedCaptor.getValue().getWorkspaceId()),
                 () -> assertEquals("draft", updatedCaptor.getValue().getStatus()),
-                () -> assertEquals("published-001", updatedCaptor.getValue().getPublishedWaylineId()),
+                () -> assertNull(updatedCaptor.getValue().getPublishedWaylineId()),
                 () -> assertEquals("alice", updatedCaptor.getValue().getCreator()),
                 () -> assertTrue(updatedCaptor.getValue().getUpdateTime() >= updatedCaptor.getValue().getCreateTime()));
+    }
+
+    @Test
+    void updateShouldRejectPublishedRecord() {
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .status("published")
+                .publishedWaylineId("wayline-001")
+                .build();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        when(mapper.selectOne(any())).thenReturn(existing);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> service.update("workspace-001", "pw-001", UpdatePlannedWaylineParam.builder()
+                        .name("Survey B")
+                        .aircraftModelKey("M300RTK")
+                        .gatewaySn("GW-002")
+                        .aircraftSn("AC-002")
+                        .defaultHeight(100.0)
+                        .maxSpeed(18.0)
+                        .waypoints(List.of(new PlannedWaypointDTO()
+                                .setOrder(1)
+                                .setGcjLng(121.1)
+                                .setGcjLat(31.2)
+                                .setWgsLng(121.0)
+                                .setWgsLat(31.1)
+                                .setHeight(100.0)))
+                        .build()));
+
+        assertEquals("Published planned wayline cannot be updated. Save as a new planned wayline instead.",
+                thrown.getMessage());
+        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
     }
 
     @Test
@@ -395,21 +504,27 @@ class PlannedWaylineServiceTest {
         when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
-        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001");
+        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001", "bob");
 
         assertAll(
                 () -> assertNotNull(response),
                 () -> assertEquals("pw-001", response.getPlannedWaylineId()),
                 () -> assertEquals("wayline-001", response.getPublishedWaylineId()),
                 () -> assertEquals("Survey A", response.getPublishedWaylineName()),
+                () -> assertEquals("bob", response.getPublisher()),
+                () -> assertTrue(response.getPublishTime() >= 1000L),
                 () -> assertEquals("published", existing.getStatus()),
-                () -> assertEquals("wayline-001", existing.getPublishedWaylineId()));
+                () -> assertEquals("wayline-001", existing.getPublishedWaylineId()),
+                () -> assertEquals("bob", existing.getPublisher()),
+                () -> assertTrue(existing.getPublishTime() >= 1000L));
         ArgumentCaptor<PlannedWaylineEntity> updatedCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
         verify(mapper).update(updatedCaptor.capture(), any());
         assertAll(
                 () -> assertEquals(1, updatedCaptor.getValue().getId()),
                 () -> assertEquals("published", updatedCaptor.getValue().getStatus()),
-                () -> assertEquals("wayline-001", updatedCaptor.getValue().getPublishedWaylineId()));
+                () -> assertEquals("wayline-001", updatedCaptor.getValue().getPublishedWaylineId()),
+                () -> assertEquals("bob", updatedCaptor.getValue().getPublisher()),
+                () -> assertTrue(updatedCaptor.getValue().getPublishTime() >= 1000L));
         ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
         verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
         assertAll(
@@ -426,6 +541,290 @@ class PlannedWaylineServiceTest {
         assertEquals("pw-001", reloaded.getPlannedWaylineId());
         assertEquals("published", reloaded.getStatus());
         assertEquals("wayline-001", reloaded.getPublishedWaylineId());
+        assertEquals("bob", reloaded.getPublisher());
+        assertTrue(reloaded.getPublishTime() >= 1000L);
+    }
+
+    @Test
+    void generateFileShouldCreateKmzAndMarkFileGenerated() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        OssConfiguration.objectDirPrefix = "wayline";
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .name("Survey A")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-001")
+                        .name("Survey A")
+                        .objectKey("wayline/pw-001.kmz")
+                        .build());
+        when(waylineFileService.getWaylineByWaylineId("workspace-001", "wayline-001"))
+                .thenReturn(java.util.Optional.of(new com.dji.sdk.cloudapi.wayline.GetWaylineListResponse()
+                        .setId("wayline-001")
+                        .setObjectKey("wayline/pw-001.kmz")
+                        .setSign("md5-001")));
+        when(waylineFileService.getObjectUrl("workspace-001", "wayline-001"))
+                .thenReturn(new URL("http://example.test/wayline/pw-001.kmz"));
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        PlannedWaylineDTO generated = service.generateFile("workspace-001", "pw-001", "bob");
+
+        assertAll(
+                () -> assertEquals("file_generated", generated.getStatus()),
+                () -> assertEquals("wayline-001", generated.getPublishedWaylineId()),
+                () -> assertEquals("wayline/pw-001.kmz", generated.getKmzObjectKey()),
+                () -> assertEquals("md5-001", generated.getKmzMd5()),
+                () -> assertEquals("http://example.test/wayline/pw-001.kmz", generated.getKmzUrl()),
+                () -> assertTrue(generated.getFileGeneratedTime() >= 1000L),
+                () -> assertEquals("bob", generated.getPublisher()));
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        assertAll(
+                () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/template.kml"),
+                () -> assertZipContains(createCaptor.getValue().getContent(), "wpmz/waylines.wpml"));
+        ArgumentCaptor<PlannedWaylineEntity> updateCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
+        verify(mapper).update(updateCaptor.capture(), any());
+        assertAll(
+                () -> assertEquals("file_generated", updateCaptor.getValue().getStatus()),
+                () -> assertEquals("wayline-001", updateCaptor.getValue().getPublishedWaylineId()),
+                () -> assertEquals("md5-001", updateCaptor.getValue().getKmzMd5()),
+                () -> assertEquals("http://example.test/wayline/pw-001.kmz", updateCaptor.getValue().getKmzUrl()));
+    }
+
+    @Test
+    void generateFileShouldSanitizeDjiUnsafeWaylineNameInKmz() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        OssConfiguration.objectDirPrefix = "wayline";
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-unsafe")
+                .workspaceId("workspace-001")
+                .name("规划航线 2026/5/9 15:02:17")
+                .aircraftModelKey("M30T")
+                .gatewaySn("GW-001")
+                .aircraftSn("AC-001")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-unsafe")
+                        .name("规划航线 2026-5-9 15-02-17")
+                        .objectKey("wayline/pw-unsafe.kmz")
+                        .build());
+        when(waylineFileService.getWaylineByWaylineId("workspace-001", "wayline-unsafe"))
+                .thenReturn(java.util.Optional.of(new com.dji.sdk.cloudapi.wayline.GetWaylineListResponse()
+                        .setId("wayline-unsafe")
+                        .setObjectKey("wayline/pw-unsafe.kmz")
+                        .setSign("md5-unsafe")));
+        when(waylineFileService.getObjectUrl("workspace-001", "wayline-unsafe"))
+                .thenReturn(new URL("http://example.test/wayline/pw-unsafe.kmz"));
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.generateFile("workspace-001", "pw-unsafe", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+        assertAll(
+                () -> assertEquals("规划航线 2026-5-9 15-02-17.kmz", createCaptor.getValue().getFilename()),
+                () -> assertTrue(waylines.contains("<name>规划航线 2026-5-9 15-02-17</name>")),
+                () -> assertTrue(waylines.matches("(?s).*<name>[^<>:\\\"/|?*._\\\\]+</name>.*")));
+    }
+
+    @Test
+    void generateFileShouldRegenerateExistingUnsafeNamedPublishedFile() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-copy")
+                .workspaceId("workspace-001")
+                .name("规划航线 2026/5/9 15:02:17 副本")
+                .aircraftModelKey("M30T")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("file_generated")
+                .publishedWaylineId("old-wayline")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.deleteByWaylineId("workspace-001", "old-wayline")).thenReturn(true);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("new-wayline")
+                        .name("规划航线 2026-5-9 15-02-17 副本")
+                        .objectKey("wayline/pw-copy.kmz")
+                        .build());
+        when(waylineFileService.getWaylineByWaylineId("workspace-001", "new-wayline"))
+                .thenReturn(java.util.Optional.of(new com.dji.sdk.cloudapi.wayline.GetWaylineListResponse()
+                        .setId("new-wayline")
+                        .setObjectKey("wayline/pw-copy.kmz")
+                        .setSign("md5-copy")));
+        when(waylineFileService.getObjectUrl("workspace-001", "new-wayline"))
+                .thenReturn(new URL("http://example.test/wayline/pw-copy.kmz"));
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        PlannedWaylineDTO generated = service.generateFile("workspace-001", "pw-copy", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).deleteByWaylineId("workspace-001", "old-wayline");
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        ArgumentCaptor<PlannedWaylineEntity> updateCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
+        verify(mapper).update(updateCaptor.capture(), any());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+        assertAll(
+                () -> assertEquals("new-wayline", generated.getPublishedWaylineId()),
+                () -> assertEquals("规划航线 2026-5-9 15-02-17 副本", generated.getName()),
+                () -> assertEquals("规划航线 2026-5-9 15-02-17 副本.kmz", createCaptor.getValue().getFilename()),
+                () -> assertTrue(waylines.contains("<name>规划航线 2026-5-9 15-02-17 副本</name>")),
+                () -> assertEquals("规划航线 2026-5-9 15-02-17 副本", updateCaptor.getValue().getName()));
+    }
+
+    @Test
+    void generateFileShouldRegenerateExistingUnsafeWaylineFileName() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-safe-record")
+                .workspaceId("workspace-001")
+                .name("规划航线 2026-5-9 15-02-17 副本")
+                .aircraftModelKey("M30T")
+                .defaultHeight(80.0)
+                .maxSpeed(12.5)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":120.1,\"gcjLat\":30.2,\"wgsLng\":120.0,\"wgsLat\":30.1,\"height\":80.0}]")
+                .status("file_generated")
+                .publishedWaylineId("old-unsafe-file")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.getWaylineByWaylineId("workspace-001", "old-unsafe-file"))
+                .thenReturn(java.util.Optional.of(new com.dji.sdk.cloudapi.wayline.GetWaylineListResponse()
+                        .setId("old-unsafe-file")
+                        .setName("规划航线 2026/5/9 15:02:17 副本")
+                        .setObjectKey("wayline/old.kmz")
+                        .setSign("md5-old")));
+        when(waylineFileService.deleteByWaylineId("workspace-001", "old-unsafe-file")).thenReturn(true);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("new-safe-file")
+                        .name("规划航线 2026-5-9 15-02-17 副本")
+                        .objectKey("wayline/pw-safe-record.kmz")
+                        .build());
+        when(waylineFileService.getWaylineByWaylineId("workspace-001", "new-safe-file"))
+                .thenReturn(java.util.Optional.of(new com.dji.sdk.cloudapi.wayline.GetWaylineListResponse()
+                        .setId("new-safe-file")
+                        .setName("规划航线 2026-5-9 15-02-17 副本")
+                        .setObjectKey("wayline/pw-safe-record.kmz")
+                        .setSign("md5-new")));
+        when(waylineFileService.getObjectUrl("workspace-001", "new-safe-file"))
+                .thenReturn(new URL("http://example.test/wayline/pw-safe-record.kmz"));
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        PlannedWaylineDTO generated = service.generateFile("workspace-001", "pw-safe-record", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).deleteByWaylineId("workspace-001", "old-unsafe-file");
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+        assertAll(
+                () -> assertEquals("new-safe-file", generated.getPublishedWaylineId()),
+                () -> assertEquals("规划航线 2026-5-9 15-02-17 副本.kmz", createCaptor.getValue().getFilename()),
+                () -> assertTrue(waylines.contains("<name>规划航线 2026-5-9 15-02-17 副本</name>")));
+    }
+
+    @Test
+    void prepareTaskShouldRequireGeneratedFile() {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        when(mapper.selectOne(any())).thenReturn(PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .status("draft")
+                .build());
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+        com.dji.sample.wayline.model.param.PreparePlannedWaylineTaskParam param =
+                new com.dji.sample.wayline.model.param.PreparePlannedWaylineTaskParam();
+        param.setDockSn("DOCK-001");
+
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> service.prepareTask("workspace-001", "pw-001", "alice", param));
+
+        assertEquals("Generate the planned wayline file before preparing the flight task.", thrown.getMessage());
+        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+    }
+
+    @Test
+    void prepareTaskShouldAssignFlightIdAndPublishingStatus() {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        when(mapper.selectOne(any())).thenReturn(PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("pw-001")
+                .workspaceId("workspace-001")
+                .status("file_generated")
+                .publishedWaylineId("wayline-001")
+                .build());
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+        com.dji.sample.wayline.model.param.PreparePlannedWaylineTaskParam param =
+                new com.dji.sample.wayline.model.param.PreparePlannedWaylineTaskParam();
+        param.setDockSn("DOCK-001");
+        param.setDroneSn("DRONE-001");
+
+        PlannedWaylineDTO prepared = service.prepareTask("workspace-001", "pw-001", "alice", param);
+
+        assertAll(
+                () -> assertEquals("publishing", prepared.getStatus()),
+                () -> assertEquals("publishing", prepared.getTaskStatus()),
+                () -> assertNotNull(prepared.getFlightId()),
+                () -> assertEquals("DOCK-001", prepared.getDockSn()),
+                () -> assertEquals("DRONE-001", prepared.getDroneSn()),
+                () -> assertEquals("alice", prepared.getPublisher()),
+                () -> assertTrue(prepared.getPublishTime() > 0));
+        ArgumentCaptor<PlannedWaylineEntity> updateCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
+        verify(mapper).updateById(updateCaptor.capture());
+        assertAll(
+                () -> assertEquals("publishing", updateCaptor.getValue().getStatus()),
+                () -> assertEquals("publishing", updateCaptor.getValue().getTaskStatus()),
+                () -> assertNotNull(updateCaptor.getValue().getFlightId()));
     }
 
     @Test
@@ -454,7 +853,7 @@ class PlannedWaylineServiceTest {
                 .thenThrow(new IllegalStateException("publish failed"));
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
-        assertThrows(IllegalStateException.class, () -> service.publish("workspace-001", "pw-001"));
+        assertThrows(IllegalStateException.class, () -> service.publish("workspace-001", "pw-001", "alice"));
         assertAll(
                 () -> assertEquals("draft", existing.getStatus()),
                 () -> assertNull(existing.getPublishedWaylineId()));
@@ -479,7 +878,7 @@ class PlannedWaylineServiceTest {
         when(mapper.selectOne(any())).thenReturn(existing);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
-        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001");
+        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001", "alice");
 
         assertAll(
                 () -> assertEquals("pw-001", response.getPlannedWaylineId()),
@@ -523,7 +922,7 @@ class PlannedWaylineServiceTest {
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
         IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
-                () -> service.publish("workspace-001", "pw-001"));
+                () -> service.publish("workspace-001", "pw-001", "alice"));
 
         assertEquals("Failed to publish planned wayline.", thrown.getMessage());
         verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-001");
@@ -563,7 +962,7 @@ class PlannedWaylineServiceTest {
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
         RuntimeException thrown = assertThrows(RuntimeException.class,
-                () -> service.publish("workspace-001", "pw-001"));
+                () -> service.publish("workspace-001", "pw-001", "alice"));
 
         assertEquals("db failure", thrown.getMessage());
         verify(waylineFileService).deleteByWaylineId("workspace-001", "wayline-001");
@@ -613,7 +1012,7 @@ class PlannedWaylineServiceTest {
         when(waylineFileService.deleteByWaylineId("workspace-001", "wayline-new")).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
-        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001");
+        PublishPlannedWaylineResponse response = service.publish("workspace-001", "pw-001", "alice");
 
         assertAll(
                 () -> assertEquals("pw-001", response.getPlannedWaylineId()),
@@ -624,7 +1023,7 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
-    void publishShouldEscapeUnsafePlannedNameInGeneratedKmz() throws IOException {
+    void publishShouldEscapeAndSanitizeUnsafePlannedNameInGeneratedKmz() throws IOException {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
@@ -655,14 +1054,14 @@ class PlannedWaylineServiceTest {
         when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
 
-        service.publish("workspace-001", "pw-unsafe");
+        service.publish("workspace-001", "pw-unsafe", "alice");
 
         ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
         verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
         String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
         assertAll(
-                () -> assertTrue(waylines.contains("Unsafe &lt;Route&gt; &amp; &quot;Alpha&quot;")),
-                () -> assertTrue(waylines.contains("<name>Unsafe &lt;Route&gt; &amp; &quot;Alpha&quot;</name>")),
+                () -> assertTrue(waylines.contains("Unsafe -Route- &amp; -Alpha")),
+                () -> assertTrue(waylines.contains("<name>Unsafe -Route- &amp; -Alpha</name>")),
                 () -> assertTrue(waylines.contains("<wpml:waylineCoordinateSysParam>")));
     }
 

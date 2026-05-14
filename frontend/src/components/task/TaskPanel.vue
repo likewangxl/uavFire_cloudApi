@@ -1,8 +1,8 @@
 <template>
-  <div class="header">Task Plan Library</div>
+  <div class="header">火情巡检任务库</div>
   <div class="plan-panel-wrapper">
     <a-table class="plan-table" :columns="columns" :data-source="plansData.data" row-key="job_id"
-      :pagination="paginationProp" :scroll="{ x: '100%', y: 600 }" @change="refreshData">
+      :pagination="paginationProp" :scroll="{ x: '100%', y: 600 }" :locale="tableLocale" @change="refreshData">
       <!-- 执行时间 -->
       <template #duration="{ record }">
         <div class="flex-row" style="white-space: pre-wrap">
@@ -53,7 +53,7 @@
             {{ formatMediaTaskStatus(record).number }}
             <a-tooltip v-if="formatMediaTaskStatus(record).status === MediaStatus.ToUpload" placement="bottom" arrow-point-at-center >
               <template #title>
-              <div>Upload now</div>
+              <div>立即上传</div>
               </template>
               <UploadOutlined class="ml5" :style="{color: commonColor.BLUE, fontSize: '16px' }"  @click="onUploadMediaFileNow(record.job_id)"/>
             </a-tooltip>
@@ -65,30 +65,30 @@
         <div class="action-area">
           <a-popconfirm
             v-if="record.status === TaskStatus.Wait"
-            title="Are you sure you want to delete flight task?"
-            ok-text="Yes"
-            cancel-text="No"
+            title="确认删除该巡检任务？"
+            ok-text="确认"
+            cancel-text="取消"
             @confirm="onDeleteTask(record.job_id)"
           >
-            <a-button type="primary" size="small">Delete</a-button>
+            <a-button type="primary" size="small">删除</a-button>
           </a-popconfirm>
           <a-popconfirm
             v-if="record.status === TaskStatus.Carrying"
-            title="Are you sure you want to suspend?"
-            ok-text="Yes"
-            cancel-text="No"
+            title="确认暂停该巡检任务？"
+            ok-text="确认"
+            cancel-text="取消"
             @confirm="onSuspendTask(record.job_id)"
           >
-            <a-button type="primary" size="small">Suspend</a-button>
+            <a-button type="primary" size="small">暂停</a-button>
           </a-popconfirm>
           <a-popconfirm
             v-if="record.status === TaskStatus.Paused"
-            title="Are you sure you want to resume?"
-            ok-text="Yes"
-            cancel-text="No"
+            title="确认恢复该巡检任务？"
+            ok-text="确认"
+            cancel-text="取消"
             @confirm="onResumeTask(record.job_id)"
           >
-            <a-button type="primary" size="small">Resume</a-button>
+            <a-button type="primary" size="small">恢复</a-button>
           </a-popconfirm>
         </div>
       </template>
@@ -126,68 +126,85 @@ const paginationProp = reactive({
   showSizeChanger: true,
   pageSize: 50,
   current: 1,
-  total: 0
+  total: 0,
+  showTotal: (total: number) => `共 ${total} 条`,
+  locale: {
+    items_per_page: '条/页',
+    jump_to: '跳至',
+    jump_to_confirm: '确定',
+    page: '页',
+    prev_page: '上一页',
+    next_page: '下一页',
+    prev_5: '向前 5 页',
+    next_5: '向后 5 页',
+    prev_3: '向前 3 页',
+    next_3: '向后 3 页'
+  }
 })
+
+const tableLocale = {
+  emptyText: '暂无巡检任务'
+}
 
 const columns = [
   {
-    title: 'Planned/Actual Time',
+    title: '计划/实际时间',
     dataIndex: 'duration',
     width: 200,
     slots: { customRender: 'duration' },
   },
   {
-    title: 'Status',
+    title: '状态',
     key: 'status',
     width: 150,
     slots: { customRender: 'status' }
   },
   {
-    title: 'Plan Name',
+    title: '计划名称',
     dataIndex: 'job_name',
     width: 100,
   },
   {
-    title: 'Type',
+    title: '巡检类型',
     dataIndex: 'taskType',
     width: 100,
     slots: { customRender: 'taskType' },
   },
   {
-    title: 'Flight Route Name',
+    title: '巡检航线',
     dataIndex: 'file_name',
     width: 100,
   },
   {
-    title: 'Dock Name',
+    title: '机场名称',
     dataIndex: 'dock_name',
     width: 100,
     ellipsis: true
   },
   {
-    title: 'RTH Altitude Relative to Dock (m)',
+    title: '返航高度（米）',
     dataIndex: 'rth_altitude',
     width: 120,
   },
   {
-    title: 'Lost Action',
+    title: '失控动作',
     dataIndex: 'out_of_control_action',
     width: 120,
     slots: { customRender: 'lostAction' },
   },
   {
-    title: 'Creator',
+    title: '创建人',
     dataIndex: 'username',
     width: 120,
   },
   {
-    title: 'Media File Upload',
+    title: '媒体文件上传',
     key: 'media_upload',
     width: 160,
     slots: { customRender: 'media_upload' }
   },
   {
-    title: 'Action',
+    title: '操作',
     width: 120,
     slots: { customRender: 'action' }
   }
@@ -285,7 +302,7 @@ async function onDeleteTask (jobId: string) {
     job_id: jobId
   })
   if (code === 0) {
-    message.success('Deleted successfully')
+    message.success('删除成功')
     getPlans()
   }
 }
@@ -297,7 +314,7 @@ async function onSuspendTask (jobId: string) {
     status: UpdateTaskStatus.Suspend
   })
   if (code === 0) {
-    message.success('Suspended successfully')
+    message.success('暂停成功')
     getPlans()
   }
 }
@@ -309,7 +326,7 @@ async function onResumeTask (jobId: string) {
     status: UpdateTaskStatus.Resume
   })
   if (code === 0) {
-    message.success('Resumed successfully')
+    message.success('恢复成功')
     getPlans()
   }
 }
@@ -318,7 +335,7 @@ async function onResumeTask (jobId: string) {
 async function onUploadMediaFileNow (jobId: string) {
   const { code } = await uploadMediaFileNow(workspaceId, jobId)
   if (code === 0) {
-    message.success('Upload Media File successfully')
+    message.success('已开始优先上传媒体文件')
     getPlans()
   }
 }
@@ -334,11 +351,9 @@ async function onUploadMediaFileNow (jobId: string) {
   }
   .action-area {
 
-    &::v-deep {
-      .ant-btn {
-        margin-right: 10px;
-        margin-bottom: 10px;
-      }
+    :deep(.ant-btn) {
+      margin-right: 10px;
+      margin-bottom: 10px;
     }
   }
 

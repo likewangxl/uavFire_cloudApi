@@ -1,0 +1,1 @@
+"""Visible-light detection primitives."""

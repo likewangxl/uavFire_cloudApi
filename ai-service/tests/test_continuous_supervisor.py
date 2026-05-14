@@ -287,6 +287,7 @@ class _BlockingVideoSource:
         self.opened = True
 
     def read(self):
+        time.sleep(0.01)
         with self._lock:
             if not self._packets:
                 return None

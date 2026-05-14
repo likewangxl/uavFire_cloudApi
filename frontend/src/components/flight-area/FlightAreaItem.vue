@@ -27,7 +27,7 @@
 </template>
 
 <script lang="ts" setup>
-import { defineProps, reactive, defineEmits, computed } from 'vue'
+import { reactive, computed } from 'vue'
 import { GetFlightArea, changeFlightAreaStatus } from '../../api/flight-area'
 import FlightAreaIcon from './FlightAreaIcon.vue'
 import { formatDateTime } from '../../utils/time'

@@ -10,7 +10,7 @@
 </template>
 
 <script lang="ts" setup>
-import { defineProps, defineEmits, ref, computed } from 'vue'
+import { ref, computed } from 'vue'
 import FlightAreaItem from './FlightAreaItem.vue'
 import { GetFlightArea } from '/@/api/flight-area'
 

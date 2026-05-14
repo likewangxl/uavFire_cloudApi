@@ -1,20 +1,20 @@
 <template>
   <div class="create-plan-wrapper">
     <div class="header">
-      Create Plan
+      新建巡检计划
     </div>
     <div class="content">
       <a-form ref="valueRef" layout="horizontal" :hideRequiredMark="true" :rules="rules" :model="planBody" labelAlign="left">
-        <a-form-item label="Plan Name" name="name" :labelCol="{span: 23}">
-          <a-input style="background: black;"  placeholder="Please enter plan name" v-model:value="planBody.name"/>
+        <a-form-item label="计划名称" name="name" :labelCol="{span: 23}">
+          <a-input style="background: black;"  placeholder="请输入计划名称" v-model:value="planBody.name"/>
         </a-form-item>
         <!-- 航线 -->
-        <a-form-item label="Flight Route" :wrapperCol="{offset: 7}" name="file_id">
+        <a-form-item label="巡检航线" :wrapperCol="{offset: 7}" name="file_id">
           <router-link
             :to="{name: 'select-plan'}"
             @click="selectRoute"
           >
-          Select Route
+          选择航线
           </router-link>
         </a-form-item>
         <a-form-item v-if="planBody.file_id" style="margin-top: -15px;">
@@ -37,16 +37,16 @@
               </span>
             </div>
             <div class="mt5 ml10" style="color: hsla(0,0%,100%,0.35);">
-              <span class="mr10">Update at {{ new Date(wayline.update_time).toLocaleString() }}</span>
+              <span class="mr10">更新时间 {{ new Date(wayline.update_time).toLocaleString() }}</span>
             </div>
           </div>
         </a-form-item>
         <!-- 设备 -->
-        <a-form-item label="Device" :wrapperCol="{offset: 10}" v-model:value="planBody.dock_sn" name="dock_sn">
+        <a-form-item label="执行设备" :wrapperCol="{offset: 10}" v-model:value="planBody.dock_sn" name="dock_sn">
           <router-link
             :to="{name: 'select-plan'}"
             @click="selectDevice"
-          >Select Device</router-link>
+          >选择设备</router-link>
         </a-form-item>
         <a-form-item v-if="planBody.dock_sn" style="margin-top: -15px;">
           <div class="panel" style="padding-top: 5px;">
@@ -57,12 +57,12 @@
             </div>
             <div class="ml10 mt5" style="color: hsla(0,0%,100%,0.65);">
               <span><RocketOutlined /></span>
-              <span class="ml5">{{ dock.children?.nickname ?? 'No drone' }}</span>
+              <span class="ml5">{{ dock.children?.nickname ?? '暂无飞行器' }}</span>
             </div>
           </div>
         </a-form-item>
         <!-- 任务类型 -->
-        <a-form-item label="Plan Timer" class="plan-timer-form-item">
+        <a-form-item label="巡检类型" class="plan-timer-form-item">
           <div style="white-space: nowrap;">
             <a-radio-group v-model:value="planBody.task_type" button-style="solid">
               <a-radio-button v-for="type in TaskTypeOptions" :value="type.value" :key="type.value">{{ type.label }}</a-radio-button>
@@ -70,24 +70,24 @@
           </div>
         </a-form-item>
         <!-- execute date -->
-        <a-form-item label="Date" v-if="planBody.task_type === TaskType.Timed || planBody.task_type === TaskType.Condition" name="select_execute_date" :labelCol="{span: 23}">
+        <a-form-item label="执行日期" v-if="planBody.task_type === TaskType.Timed || planBody.task_type === TaskType.Condition" name="select_execute_date" :labelCol="{span: 23}">
           <a-range-picker
             v-model:value="planBody.select_execute_date"
             :disabledDate="(current: Moment) => current < moment().subtract(1, 'days')"
             format="YYYY-MM-DD"
-            :placeholder="['Start Time', 'End Time']"
+            :placeholder="['开始日期', '结束日期']"
             style="width: 100%;"
           />
         </a-form-item>
         <!-- execute time -->
-        <a-form-item label="Time" v-if="planBody.task_type === TaskType.Timed || planBody.task_type === TaskType.Condition"
+        <a-form-item label="执行时间" v-if="planBody.task_type === TaskType.Timed || planBody.task_type === TaskType.Condition"
           name="select_execute_time" ref="select_execute_time" :labelCol="{span: 23}" :autoLink="false">
           <div class="mb10 flex-row flex-align-center flex-justify-around" v-for="n in planBody.select_time_number" :key="n">
             <a-time-picker
               v-model:value="planBody.select_time[n - 1][0]"
               format="HH:mm:ss"
               show-time
-              placeholder="Start Time"
+              placeholder="开始时间"
               :style="planBody.task_type === TaskType.Condition ? 'width: 40%' : 'width: 82%'"
               @change="() => $refs.select_execute_time.onFieldChange()"
             />
@@ -97,7 +97,7 @@
                 v-model:value="planBody.select_time[n - 1][1]"
                 format="HH:mm:ss"
                 show-time
-                placeholder="End Time"
+                placeholder="结束时间"
                 style="width: 40%;"
               />
             </template>
@@ -109,24 +109,24 @@
         </a-form-item>
         <template v-if="planBody.task_type === TaskType.Condition">
           <!-- battery capacity -->
-          <a-form-item label="Start task when battery level reaches" :labelCol="{span: 23}" name="min_battery_capacity">
+          <a-form-item label="飞行器电量达到后启动" :labelCol="{span: 23}" name="min_battery_capacity">
             <a-input-number class="width-100" v-model:value="planBody.min_battery_capacity" :min="50" :max="100"
             :formatter="(value: number) => `${value}%`" :parser="(value: string) => value.replace('%', '')">
             </a-input-number>
           </a-form-item>
           <!-- storage capacity -->
-          <a-form-item label="Start task when storage level reaches (MB)" :labelCol="{span: 23}" name="storage_capacity">
+          <a-form-item label="机场/飞行器剩余存储不低于（MB）" :labelCol="{span: 23}" name="storage_capacity">
             <a-input-number v-model:value="planBody.min_storage_capacity" class="width-100">
             </a-input-number>
           </a-form-item>
         </template>
         <!-- RTH Altitude Relative to Dock -->
-        <a-form-item label="RTH Altitude Relative to Dock (m)" :labelCol="{span: 23}" name="rth_altitude">
+        <a-form-item label="返航高度（相对机场，米）" :labelCol="{span: 23}" name="rth_altitude">
           <a-input-number v-model:value="planBody.rth_altitude" :min="20" :max="1500" class="width-100" required>
           </a-input-number>
         </a-form-item>
-        <!-- Lost Action -->
-        <a-form-item label="Lost Action" :labelCol="{span: 23}" name="out_of_control_action">
+        <!-- 失控动作 -->
+        <a-form-item label="失控动作" :labelCol="{span: 23}" name="out_of_control_action">
           <div style="white-space: nowrap;">
             <a-radio-group v-model:value="planBody.out_of_control_action" button-style="solid">
               <a-radio-button v-for="action in OutOfControlActionOptions" :value="action.value" :key="action.value">
@@ -137,9 +137,9 @@
         </a-form-item>
         <a-form-item class="width-100" style="margin-bottom: 40px;">
           <div class="footer">
-            <a-button class="mr10" style="background: #3c3c3c;" @click="closePlan">Cancel
+            <a-button class="mr10" style="background: #3c3c3c;" @click="closePlan">取消
             </a-button>
-            <a-button type="primary" @click="onSubmit" :disabled="disabled">OK
+            <a-button type="primary" @click="onSubmit" :disabled="disabled">确定
             </a-button>
           </div>
         </a-form-item>
@@ -203,27 +203,27 @@ const drawerVisible = ref(false)
 const valueRef = ref()
 const rules = {
   name: [
-    { required: true, message: 'Please enter plan name.' },
-    { max: 20, message: 'Length should be 1 to 20' }
+    { required: true, message: '请输入计划名称' },
+    { max: 20, message: '计划名称长度不能超过 20 个字符' }
   ],
-  file_id: [{ required: true, message: 'Select Route' }],
-  dock_sn: [{ required: true, message: 'Select Device' }],
+  file_id: [{ required: true, message: '请选择巡检航线' }],
+  dock_sn: [{ required: true, message: '请选择执行设备' }],
   select_execute_time: [{
     validator: async (rule: RuleObject, value: Moment[]) => {
       validEndTime()
       validStartTime()
       if (planBody.select_time.length < planBody.select_time_number) {
-        throw new Error('Select time')
+        throw new Error('请选择执行时间')
       }
       validOverlapped()
     }
   }],
-  select_execute_date: [{ required: true, message: 'Select date' }],
+  select_execute_date: [{ required: true, message: '请选择执行日期' }],
   rth_altitude: [
     {
       validator: async (rule: RuleObject, value: string) => {
         if (!/^[0-9]{1,}$/.test(value)) {
-          throw new Error('RTH Altitude Require number')
+          throw new Error('返航高度必须为数字')
         }
       },
     }
@@ -232,18 +232,18 @@ const rules = {
     {
       validator: async (rule: RuleObject, value: any) => {
         if (TaskType.Condition === planBody.task_type && !value) {
-          throw new Error('Please enter battery capacity')
+          throw new Error('请输入电量阈值')
         }
       },
     }
   ],
-  out_of_control_action: [{ required: true, message: 'Select Lost Action' }],
+  out_of_control_action: [{ required: true, message: '请选择失控动作' }],
 }
 
 function validStartTime (): Error | void {
   for (let i = 0; i < planBody.select_time.length; i++) {
     if (!planBody.select_time[i][0]) {
-      throw new Error('Select start time')
+      throw new Error('请选择开始时间')
     }
   }
 }
@@ -251,10 +251,10 @@ function validEndTime (): Error | void {
   if (TaskType.Condition !== planBody.task_type) return
   for (let i = 0; i < planBody.select_time.length; i++) {
     if (!planBody.select_time[i][1]) {
-      throw new Error('Select end time')
+      throw new Error('请选择结束时间')
     }
     if (planBody.select_time[i][0] && planBody.select_time[i][1].isSameOrBefore(planBody.select_time[i][0])) {
-      throw new Error('End time should be later than start time')
+      throw new Error('结束时间必须晚于开始时间')
     }
   }
 }
@@ -264,7 +264,7 @@ function validOverlapped (): Error | void {
   arr.sort((a, b) => a[0].unix() - b[0].unix())
   arr.forEach((v, i, arr) => {
     if (i > 0 && v[0] < arr[i - 1][1]) {
-      throw new Error('Overlapping time periods.')
+      throw new Error('执行时间段不能重叠')
     }
   })
 }

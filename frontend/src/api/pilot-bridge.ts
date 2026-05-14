@@ -205,7 +205,7 @@ export default {
   /**
    *
    * @returns
-   * type: liveshare type， 0：unknown, 1:agora, 2:rtmp, 3:rtsp, 4:gb28181
+   * type: liveshare type，0：unknown, 2：rtmp, 3：rtsp, 4：gb28181
    */
   getLiveshareConfig (): string {
     return returnString(window.djiBridge.liveshareGetConfig())
@@ -279,7 +279,7 @@ export default {
     window.djiBridge.onStopPlatform = () => {
       // Avoid clearing the shared web login state when Pilot stops the platform.
       // The current project stores Pilot and Web auth in the same localStorage keys.
-      console.info('Pilot platform stopped.')
+      console.info('Pilot 平台已停止。')
     }
   }
 }

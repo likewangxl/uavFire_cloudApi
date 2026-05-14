@@ -4,7 +4,7 @@
       <article class="shell-card hero-title">
         <p class="eyebrow">Emergency Leadership Cockpit</p>
         <h1>智能集群大载重无人机灭火系统</h1>
-        <p class="hero-subtitle">陕西省森林消防应急指挥中心领导驾驶舱</p>
+        <p class="hero-subtitle">陕西省森林消防应急指挥中心驾驶舱</p>
       </article>
 
       <article class="shell-card hero-brief">
@@ -107,16 +107,32 @@
         </article>
       </div>
 
-      <article class="shell-card panel-card map-panel">
+      <article class="shell-card panel-card map-panel" :class="{ 'live-mode': activeVisualTab === 'live' }">
         <header class="panel-header map-header">
           <div>
-            <h3>森林火场综合态势图</h3>
-            <p>领导视角聚焦火势范围、保护圈、力量投向、受威胁对象和处置效果。</p>
+            <h3>{{ activeVisualTab === 'map' ? '森林火场综合态势图' : '森林火场直播画面' }}</h3>
+            <p>{{ activeVisualTab === 'map' ? '领导视角聚焦火势范围、保护圈、力量投向、受威胁对象和处置效果。' : '保留当前直播 HUD，并将直播状态、机组、清晰度和飞行模式集中展示在驾驶舱。' }}</p>
           </div>
-          <span class="status-pill safe">空地协同封控中</span>
+          <div class="map-header-actions">
+            <div class="visual-tabs">
+              <button
+                v-for="tab in visualTabs"
+                :key="tab.key"
+                class="visual-tab"
+                :class="{ active: activeVisualTab === tab.key }"
+                type="button"
+                @click="activeVisualTab = tab.key"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+            <span class="status-pill" :class="activeVisualTab === 'live' ? dualStreamPillClass : 'safe'">
+              {{ activeVisualTab === 'live' ? livestreamStatusPill : '空地协同封控中' }}
+            </span>
+          </div>
         </header>
 
-        <div class="map-stage">
+        <div v-if="activeVisualTab === 'map'" class="map-stage">
           <div class="mountain mountain-one"></div>
           <div class="mountain mountain-two"></div>
           <div class="mountain mountain-three"></div>
@@ -139,7 +155,94 @@
           </div>
         </div>
 
-        <div class="map-kpi-grid">
+        <div v-else class="livestream-stage dual-stream-stage">
+          <div class="dual-stream-shell">
+            <div class="dual-stream-stage-head">
+              <span class="section-meta">RC Plus Dual-Stream Runtime</span>
+              <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
+            </div>
+
+            <div class="dual-stream-player-stage">
+              <div ref="primaryPlayerShell" class="dual-stream-player primary"></div>
+
+              <div v-if="!livePaneState.primary.url" class="dual-stream-overlay">
+                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
+                <div class="stream-value">{{ primaryPaneMeta.status }}</div>
+                <p>{{ primaryPaneMeta.unavailableHint }}</p>
+              </div>
+              <div v-else-if="primaryPlayerState.loading" class="dual-stream-overlay">
+                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
+                <div class="stream-value">播放器加载中</div>
+                <p>{{ livePaneState.primary.url }}</p>
+              </div>
+              <div v-else-if="primaryPlayerState.error" class="dual-stream-overlay error">
+                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
+                <div class="stream-value">播放失败</div>
+                <p>{{ primaryPlayerState.error }}</p>
+              </div>
+              <div v-if="focusSwitching" class="dual-stream-switch-overlay">
+                <span class="dual-stream-switch-spinner"></span>
+                <strong>{{ focusSwitchLabel }}</strong>
+                <small>正在切换直播画面</small>
+              </div>
+
+              <div class="live-badge" :class="{ idle: !primaryPlayerState.playing }">
+                <span class="live-dot"></span>{{ primaryPaneMeta.badge }}
+              </div>
+
+              <div class="dual-stream-hud">
+                <span
+                  v-for="item in liveHudItems"
+                  :key="item"
+                  class="dual-stream-hud-chip"
+                >
+                  {{ item }}
+                </span>
+              </div>
+
+              <button
+                class="dual-stream-preview"
+                :class="{ clickable: livePaneState.preview.clickable && !focusSwitching, switching: focusSwitching }"
+                type="button"
+                :disabled="!livePaneState.preview.clickable || focusSwitching"
+                @click="handlePreviewSwap"
+              >
+                <div ref="previewPlayerShell" class="dual-stream-player preview"></div>
+
+                <div v-if="!livePaneState.preview.url" class="dual-stream-preview-overlay placeholder">
+                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
+                  <strong v-if="previewPaneMeta.status">{{ previewPaneMeta.status }}</strong>
+                  <small>{{ previewPaneMeta.helper }}</small>
+                </div>
+                <div v-else-if="previewPlayerState.loading" class="dual-stream-preview-overlay">
+                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
+                  <strong>加载中</strong>
+                  <small>{{ previewPaneMeta.helper }}</small>
+                </div>
+                <div v-else-if="previewPlayerState.error" class="dual-stream-preview-overlay error">
+                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
+                  <strong>播放失败</strong>
+                  <small>{{ previewPlayerState.error }}</small>
+                </div>
+
+                <div
+                  v-if="livePaneState.preview.url && !previewPlayerState.loading && !previewPlayerState.error"
+                  class="dual-stream-preview-label"
+                >
+                  <span>{{ previewPaneMeta.title }}</span>
+                  <small>{{ previewPaneMeta.helper }}</small>
+                </div>
+              </button>
+            </div>
+
+            <div class="dual-stream-reason" v-if="dualStreamSummary.reason">
+              <span class="section-meta">当前约束</span>
+              <p>{{ dualStreamSummary.reason }}</p>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="activeVisualTab === 'map'" class="map-kpi-grid">
           <section
             v-for="item in mapKpis"
             :key="item.label"
@@ -155,14 +258,56 @@
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>力量与保障资源</h3>
-              <p>面向连续作战场景，突出力量、药剂、电池与补能保障状态。</p>
+              <h3>重点告警与处置状态</h3>
+              <p>只保留对决策有价值的高等级告警和处置结果。</p>
             </div>
           </header>
 
+          <div class="ai-risk-alert-header">
+            <div>
+              <span class="section-meta">AI Fire Recognition</span>
+              <h4>AI 风险识别记录</h4>
+            </div>
+            <span class="status-pill" :class="aiRiskPillClass">{{ aiRiskPillText }}</span>
+          </div>
+
+          <div v-if="aiRiskState.error" class="ai-risk-empty error">
+            {{ aiRiskState.error }}
+          </div>
+          <div v-else-if="recentAiRiskEvents.length === 0" class="ai-risk-empty">
+            暂无 AI 识别记录
+          </div>
+          <div v-else class="info-list ai-risk-alert-list">
+            <section
+              v-for="event in recentAiRiskEvents"
+              :key="`${event.sourceTs || 'no-ts'}-${event.analysisChannel || 'unknown'}-${event.fusionScore || 0}`"
+              class="info-card ai-risk-card"
+              :class="aiRiskCardClass(event)"
+            >
+              <div class="ai-risk-card-top">
+                <div>
+                  <strong>{{ formatAiEventTime(event.sourceTs) }}</strong>
+                  <span>{{ formatAiChannel(event.analysisChannel) }}</span>
+                </div>
+                <span class="status-pill" :class="aiRiskLevelClass(event.riskLevel)">
+                  {{ event.riskLevel || 'UNKNOWN' }}
+                </span>
+              </div>
+              <div class="ai-risk-scores">
+                <span>可见光分数 {{ formatAiScore(event.visibleScore) }}</span>
+                <span>融合分数 {{ formatAiScore(event.fusionScore) }}</span>
+              </div>
+              <div class="ai-risk-review" :class="aiReviewStatusClass(event.reviewStatus)">
+                {{ formatAiReviewStatus(event.reviewStatus) }}
+              </div>
+            </section>
+          </div>
+
+          <div class="alert-divider"></div>
+
           <div class="info-list">
             <section
-              v-for="item in resourceItems"
+              v-for="item in alertItems"
               :key="item.title"
               class="info-card"
             >
@@ -183,14 +328,14 @@
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>重点告警与处置状态</h3>
-              <p>只保留对决策有价值的高等级告警和处置结果。</p>
+              <h3>力量与保障资源</h3>
+              <p>面向连续作战场景，突出力量、药剂、电池与补能保障状态。</p>
             </div>
           </header>
 
           <div class="info-list">
             <section
-              v-for="item in alertItems"
+              v-for="item in resourceItems"
               :key="item.title"
               class="info-card"
             >
@@ -251,6 +396,18 @@
 </template>
 
 <script lang="ts" setup>
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import {
+  getDualStreamGroup,
+  getDualStreamTaskEvents,
+  requestDualStreamFocus,
+  type DualStreamEvent,
+  type DualStreamGroup
+} from '/@/api/manage'
+import { buildLivePaneState, swapPrimaryPreference } from './leadership-cockpit-live-layout.mjs'
+
+const AI_EVENT_TASK_ID = 'manual-ai-001'
+
 const summaryCards = [
   { label: '受控火场面积', value: '68%', note: '较 30 分钟前提升 14%' },
   { label: '受威胁群众点位', value: '2', note: '均已完成提前疏散' },
@@ -311,6 +468,523 @@ const mapKpis = [
   { label: '封控圈完整度', value: '91%' },
   { label: '预计稳控时间', value: '23 分钟' }
 ]
+
+const visualTabs = [
+  { key: 'map', label: '态势图' },
+  { key: 'live', label: '直播画面' }
+] as const
+
+const activeVisualTab = ref<typeof visualTabs[number]['key']>('map')
+const primaryPlayerShell = ref<HTMLElement | null>(null)
+const previewPlayerShell = ref<HTMLElement | null>(null)
+const primaryPreference = ref<'visible' | 'thermal'>('visible')
+const focusSwitching = ref(false)
+const focusSwitchAction = ref<'focus-visible' | 'focus-thermal' | null>(null)
+
+const dualStreamState = reactive({
+  loading: false,
+  error: '',
+  group: null as DualStreamGroup | null
+})
+
+const aiRiskState = reactive({
+  loading: false,
+  error: '',
+  events: [] as DualStreamEvent[]
+})
+
+const primaryPlayerState = reactive({
+  loading: false,
+  playing: false,
+  error: ''
+})
+
+const previewPlayerState = reactive({
+  loading: false,
+  playing: false,
+  error: ''
+})
+
+type PlayerRuntimeState = typeof primaryPlayerState
+
+let dualStreamTimer: number | undefined
+let aiRiskEventTimer: number | undefined
+let livePlayerRetryTimer: number | undefined
+let primaryPlayer: any = null
+let previewPlayer: any = null
+let zlmClientLoader: Promise<any> | null = null
+
+const loadZlmRtcClient = (streamUrl: string) => {
+  const existing = (window as any).ZLMRTCClient
+  if (existing) {
+    return Promise.resolve(existing)
+  }
+  if (zlmClientLoader) {
+    return zlmClientLoader
+  }
+
+  const scriptBaseUrl = new URL(streamUrl.replace(/^webrtc:\/\//, 'http://'))
+  const scriptUrl = `${scriptBaseUrl.protocol}//${scriptBaseUrl.host}/ZLMRTCClient.js`
+
+  zlmClientLoader = new Promise((resolve, reject) => {
+    const script = document.createElement('script')
+    script.src = scriptUrl
+    script.async = true
+    script.onload = () => resolve((window as any).ZLMRTCClient)
+    script.onerror = () => reject(new Error(`failed-to-load-zlmrtc-client:${scriptUrl}`))
+    document.head.appendChild(script)
+  })
+
+  return zlmClientLoader
+}
+
+const buildZlmRtcApiUrl = (streamUrl: string) => {
+  const url = new URL(streamUrl.replace(/^webrtc:\/\//, 'http://'))
+  const segments = url.pathname.split('/').filter(Boolean)
+  if (segments.length < 2) {
+    throw new Error(`invalid-zlm-stream-url:${streamUrl}`)
+  }
+
+  const app = segments[segments.length - 2]
+  const stream = segments[segments.length - 1]
+  return `${url.protocol}//${url.host}/index/api/webrtc?app=${encodeURIComponent(app)}&stream=${encodeURIComponent(stream)}&type=play`
+}
+
+const resetPlayerState = (state: PlayerRuntimeState) => {
+  state.loading = false
+  state.playing = false
+  state.error = ''
+}
+
+const destroyPlayerInstance = (
+  player: any,
+  state: PlayerRuntimeState,
+  shell: HTMLElement | null
+) => {
+  if (player?.close) {
+    player.close()
+  } else if (player?.destroy) {
+    player.destroy()
+  }
+  resetPlayerState(state)
+  if (shell) {
+    shell.innerHTML = ''
+  }
+  return null
+}
+
+const applyFullFrameStyles = (video: HTMLVideoElement) => {
+  Object.assign(video.style, {
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain',
+    objectPosition: '50% 50%',
+    transform: ''
+  })
+}
+
+const mountPlayerInstance = async (
+  url: string,
+  shell: HTMLElement | null,
+  state: PlayerRuntimeState
+) => {
+  if (!url || activeVisualTab.value !== 'live') {
+    resetPlayerState(state)
+    if (shell) {
+      shell.innerHTML = ''
+    }
+    return null
+  }
+
+  await nextTick()
+  const mountPoint = shell
+  if (!mountPoint) {
+    state.loading = false
+    state.playing = false
+    state.error = 'player-shell-unavailable'
+    return null
+  }
+
+  const video = document.createElement('video')
+  video.autoplay = true
+  video.muted = true
+  video.playsInline = true
+  video.controls = false
+  video.className = 'dual-stream-video'
+  Object.assign(video.style, {
+    display: 'block',
+    width: '100%',
+    height: '100%',
+    minHeight: '100%',
+    objectFit: 'contain',
+    background: '#02070d'
+  })
+  applyFullFrameStyles(video)
+  mountPoint.appendChild(video)
+
+  state.loading = true
+  try {
+    const apiUrl = buildZlmRtcApiUrl(url)
+    const ZLMRTCClient = await loadZlmRtcClient(url)
+
+    const markPlaying = () => {
+      state.loading = false
+      state.playing = true
+      state.error = ''
+    }
+
+    video.addEventListener('loadeddata', markPlaying, { once: true })
+    video.addEventListener('playing', markPlaying, { once: true })
+    video.addEventListener('error', () => {
+      state.loading = false
+      state.playing = false
+      state.error = 'zlm-video-element-error'
+    }, { once: true })
+
+    const endpoint = new ZLMRTCClient.Endpoint({
+      element: video,
+      zlmsdpUrl: apiUrl,
+      recvOnly: true,
+      useCamera: false,
+      audioEnable: false,
+      videoEnable: true
+    })
+
+    endpoint.on?.(ZLMRTCClient.Events.WEBRTC_ON_CONNECTION_STATE_CHANGE, (connectionState: string) => {
+      if (connectionState === 'connected') {
+        markPlaying()
+        return
+      }
+      if (connectionState === 'failed' || connectionState === 'disconnected' || connectionState === 'closed') {
+        state.loading = false
+        state.playing = false
+        state.error = `zlm-connection-${connectionState}`
+      }
+    })
+
+    endpoint.on?.(ZLMRTCClient.Events.WEBRTC_OFFER_ANWSER_EXCHANGE_FAILED, (payload: any) => {
+      state.loading = false
+      state.playing = false
+      state.error = payload?.msg || payload?.message || 'zlm-offer-answer-exchange-failed'
+    })
+    return endpoint
+  } catch (error: any) {
+    state.loading = false
+    state.playing = false
+    state.error = error?.message || String(error)
+    return null
+  }
+}
+
+const destroyAllPlayers = () => {
+  primaryPlayer = destroyPlayerInstance(primaryPlayer, primaryPlayerState, primaryPlayerShell.value)
+  previewPlayer = destroyPlayerInstance(previewPlayer, previewPlayerState, previewPlayerShell.value)
+  if (livePlayerRetryTimer != null) {
+    window.clearTimeout(livePlayerRetryTimer)
+    livePlayerRetryTimer = undefined
+  }
+}
+
+const syncLivePlayers = async () => {
+  if (livePlayerRetryTimer != null) {
+    window.clearTimeout(livePlayerRetryTimer)
+    livePlayerRetryTimer = undefined
+  }
+  primaryPlayer = destroyPlayerInstance(primaryPlayer, primaryPlayerState, primaryPlayerShell.value)
+  previewPlayer = destroyPlayerInstance(previewPlayer, previewPlayerState, previewPlayerShell.value)
+
+  if (activeVisualTab.value !== 'live') {
+    return
+  }
+
+  if (!primaryPlayerShell.value || !previewPlayerShell.value) {
+    livePlayerRetryTimer = window.setTimeout(() => {
+      syncLivePlayers()
+    }, 120)
+    return
+  }
+
+  primaryPlayer = await mountPlayerInstance(
+    livePaneState.value.primary.url,
+    primaryPlayerShell.value,
+    primaryPlayerState
+  )
+
+  previewPlayer = await mountPlayerInstance(
+    livePaneState.value.preview.url,
+    previewPlayerShell.value,
+    previewPlayerState
+  )
+}
+
+const loadDualStreamState = async () => {
+  dualStreamState.loading = true
+  try {
+    const response = await getDualStreamGroup('RC_PLUS_LOCAL')
+    dualStreamState.group = response.data ?? null
+    dualStreamState.error = ''
+  } catch (error: any) {
+    dualStreamState.error = error?.message || 'dual-stream-state-unavailable'
+  } finally {
+    dualStreamState.loading = false
+  }
+}
+
+const loadAiRiskEvents = async () => {
+  aiRiskState.loading = true
+  try {
+    const response = await getDualStreamTaskEvents(AI_EVENT_TASK_ID)
+    aiRiskState.events = response.data ?? []
+    aiRiskState.error = ''
+  } catch (error: any) {
+    aiRiskState.error = error?.message || 'ai-risk-events-unavailable'
+  } finally {
+    aiRiskState.loading = false
+  }
+}
+
+const wait = (durationMs: number) => new Promise(resolve => {
+  window.setTimeout(resolve, durationMs)
+})
+
+const waitForFocusCommandApplied = async (action: 'focus-visible' | 'focus-thermal') => {
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    await loadDualStreamState()
+    const group = dualStreamState.group
+    const lastCommandAction = group?.lastCommandAction
+    const lastCommandStatus = group?.lastCommandStatus
+    if (lastCommandAction === action && lastCommandStatus?.toLowerCase() === 'applied') {
+      return true
+    }
+    if (lastCommandAction === action && lastCommandStatus?.toLowerCase() === 'failed') {
+      dualStreamState.error = `${action}-failed`
+      return false
+    }
+    await wait(500)
+  }
+  dualStreamState.error = `${action}-not-applied`
+  return false
+}
+
+const ensureThermalPreviewMode = async () => {
+  // Pilot2 and the web cockpit share the same RC Plus liveview source.
+  // Do not auto-switch RC Plus to thermal/PIP just to populate the web preview.
+}
+
+onMounted(() => {
+  loadDualStreamState()
+  loadAiRiskEvents()
+  dualStreamTimer = window.setInterval(loadDualStreamState, 5000)
+  aiRiskEventTimer = window.setInterval(loadAiRiskEvents, 2000)
+})
+
+onBeforeUnmount(() => {
+  if (dualStreamTimer != null) {
+    window.clearInterval(dualStreamTimer)
+  }
+  if (aiRiskEventTimer != null) {
+    window.clearInterval(aiRiskEventTimer)
+  }
+  destroyAllPlayers()
+})
+
+const dualStreamSummary = computed(() => {
+  const group = dualStreamState.group
+  return {
+    droneSn: group?.droneSn || 'RC_PLUS_LOCAL',
+    session: group?.sessionState || (dualStreamState.loading ? 'LOADING' : 'UNKNOWN'),
+    connection: group?.connectionState || 'UNKNOWN',
+    mode: group?.currentMode || 'IDLE',
+    visible: group?.visibleState || 'idle',
+    thermal: group?.thermalState || 'idle',
+    playbackStatus: group?.playbackStatus || '待媒体地址接入',
+    rawVisiblePlayUrl: group?.visiblePlayUrl || '',
+    rawThermalPlayUrl: group?.thermalPlayUrl || '',
+    visiblePlayUrl: group?.visiblePlayUrl || '未提供',
+    thermalPlayUrl: group?.thermalPlayUrl || '未提供',
+    reason: group?.statusReason || dualStreamState.error || '',
+    playbackHint: group?.visiblePlayUrl
+      ? '驾驶舱已拿到可见光 WebRTC 地址，当前主画面直接从本机 ZLMediaKit 拉流。'
+      : '驾驶舱当前只读取 RC Plus runtime 状态；新链路 Web 播放地址尚未由 backend/agent 提供。',
+    capability: group == null
+      ? '待探测'
+      : `visible ${group.visibleSupported ? 'yes' : 'no'} / thermal ${group.thermalSupported ? 'yes' : 'no'}`,
+    lastCommand: group?.lastCommandAction
+      ? `${group.lastCommandAction} / ${group.lastCommandStatus || 'pending'}`
+      : '无'
+  }
+})
+
+const dualStreamPillText = computed(() => {
+  if (dualStreamState.loading) return '状态同步中'
+  if (dualStreamState.error) return '状态查询异常'
+  if (dualStreamSummary.value.visible === 'running') return 'Visible 主通道在线'
+  if (dualStreamSummary.value.session === 'RUNNING') return '双流会话运行中'
+  return '等待 RC Plus 运行态'
+})
+
+const dualStreamPillClass = computed(() => {
+  if (dualStreamState.error) return 'danger'
+  if (dualStreamSummary.value.visible === 'running') return 'safe'
+  return 'default'
+})
+
+const livestreamStatusPill = computed(() => dualStreamPillText.value)
+
+const livePaneState = computed(() => buildLivePaneState({
+  visiblePlayUrl: dualStreamSummary.value.rawVisiblePlayUrl,
+  thermalPlayUrl: dualStreamSummary.value.rawThermalPlayUrl,
+  primaryPreference: primaryPreference.value,
+  allowSharedThermalPreview: true
+}))
+
+const primaryPaneMeta = computed(() => {
+  const isThermal = livePaneState.value.primary.kind.startsWith('thermal')
+  return {
+    title: isThermal ? '红外主画面' : '可见光主画面',
+    badge: isThermal ? '红外主画面' : '可见光主画面',
+    status: isThermal ? dualStreamSummary.value.thermal : dualStreamSummary.value.visible,
+    unavailableHint: isThermal
+      ? '红外独立播放地址尚未提供，当前无法切为主画面。'
+      : dualStreamSummary.value.playbackHint
+  }
+})
+
+const previewPaneMeta = computed(() => {
+  const isThermal = livePaneState.value.preview.kind.startsWith('thermal')
+  const isPlaceholder = livePaneState.value.preview.kind.endsWith('placeholder')
+  const isClickableThermalPlaceholder = isThermal && isPlaceholder && livePaneState.value.preview.clickable
+  return {
+    title: isThermal ? '红外画面' : '可见光画面',
+    status: isClickableThermalPlaceholder
+      ? ''
+      : (isThermal ? '红外画面' : dualStreamSummary.value.visible),
+    helper: livePaneState.value.preview.clickable
+      ? (isThermal ? '点击切换为红外画面' : '点击切换为可见光画面')
+      : (isPlaceholder ? '切换入口暂不可用' : '点击切换为主画面')
+  }
+})
+
+const liveHudItems = computed(() => [
+  dualStreamSummary.value.droneSn,
+  `模式 ${dualStreamSummary.value.mode}`,
+  `主通道 ${primaryPaneMeta.value.status}`,
+  `播放 ${dualStreamSummary.value.playbackStatus}`
+])
+
+const focusSwitchLabel = computed(() => (
+  focusSwitchAction.value === 'focus-thermal' ? '红外画面加载中' : '可见光画面加载中'
+))
+
+const recentAiRiskEvents = computed(() => aiRiskState.events.slice(-10).reverse())
+
+const aiRiskPillText = computed(() => {
+  if (aiRiskState.loading && aiRiskState.events.length === 0) return '同步中'
+  if (aiRiskState.error) return '读取异常'
+  return `${recentAiRiskEvents.value.length} 条记录`
+})
+
+const aiRiskPillClass = computed(() => {
+  if (aiRiskState.error) return 'danger'
+  return recentAiRiskEvents.value.some(event => ['MEDIUM', 'HIGH'].includes((event.riskLevel || '').toUpperCase()))
+    ? 'danger'
+    : 'default'
+})
+
+const formatAiScore = (score?: number) => {
+  if (typeof score !== 'number' || Number.isNaN(score)) {
+    return '--'
+  }
+  return score.toFixed(3)
+}
+
+const formatAiEventTime = (sourceTs?: number) => {
+  if (!sourceTs) {
+    return '--:--:--'
+  }
+  const timestamp = sourceTs > 10_000_000_000 ? sourceTs : sourceTs * 1000
+  return new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+const formatAiChannel = (channel?: string) => {
+  if (channel === 'thermal') return '红外复核'
+  if (channel === 'visible') return '可见光识别'
+  if (channel === 'dual') return '双通道融合'
+  return '未知通道'
+}
+
+const formatAiReviewStatus = (status?: string) => {
+  if (status === 'VISIBLE_SUSPECTED') return 'VISIBLE_SUSPECTED 可见光疑似'
+  if (status === 'THERMAL_CONFIRMED') return 'THERMAL_CONFIRMED 红外确认'
+  if (status === 'THERMAL_REJECTED') return 'THERMAL_REJECTED 红外驳回'
+  return status || '未进入复核流程'
+}
+
+const aiRiskLevelClass = (riskLevel?: string) => {
+  const normalized = (riskLevel || '').toUpperCase()
+  if (normalized === 'HIGH' || normalized === 'MEDIUM') return 'danger'
+  if (normalized === 'LOW') return 'default'
+  return 'safe'
+}
+
+const aiReviewStatusClass = (status?: string) => {
+  if (status === 'THERMAL_CONFIRMED' || status === 'VISIBLE_SUSPECTED') return 'danger'
+  if (status === 'THERMAL_REJECTED') return 'safe'
+  return 'default'
+}
+
+const aiRiskCardClass = (event: DualStreamEvent) => {
+  const riskLevel = (event.riskLevel || '').toUpperCase()
+  if (event.reviewStatus === 'THERMAL_CONFIRMED' || riskLevel === 'HIGH' || riskLevel === 'MEDIUM') {
+    return 'attention'
+  }
+  if (event.reviewStatus === 'THERMAL_REJECTED') {
+    return 'resolved'
+  }
+  return ''
+}
+
+const handlePreviewSwap = async () => {
+  if (!livePaneState.value.preview.clickable || focusSwitching.value) {
+    return
+  }
+  const action = livePaneState.value.preview.focusAction || (
+    swapPrimaryPreference(primaryPreference.value) === 'thermal' ? 'focus-thermal' : 'focus-visible'
+  )
+  focusSwitching.value = true
+  focusSwitchAction.value = action
+  try {
+    await requestDualStreamFocus(dualStreamSummary.value.droneSn, action)
+    const focusApplied = await waitForFocusCommandApplied(action)
+    if (!focusApplied) {
+      return
+    }
+    primaryPreference.value = action === 'focus-thermal' ? 'thermal' : 'visible'
+    await loadDualStreamState()
+  } catch (error: any) {
+    dualStreamState.error = error?.message || `${action}-request-failed`
+  } finally {
+    focusSwitching.value = false
+    focusSwitchAction.value = null
+  }
+}
+
+watch(
+  [
+    activeVisualTab,
+    () => livePaneState.value.primary.kind,
+    () => livePaneState.value.primary.url,
+    () => livePaneState.value.primary.crop,
+    () => livePaneState.value.preview.kind,
+    () => livePaneState.value.preview.url,
+    () => livePaneState.value.preview.crop
+  ],
+  () => {
+    syncLivePlayers()
+    ensureThermalPreviewMode()
+  },
+  { immediate: true }
+)
 
 const resourceItems = [
   {
@@ -450,7 +1124,8 @@ const focusItems = [
 .panel-header h3,
 .footer-card h3,
 .decision-card h4,
-.info-card h4 {
+.info-card h4,
+.ai-risk-alert-header h4 {
   margin: 0;
 }
 
@@ -480,6 +1155,114 @@ const focusItems = [
   color: #8fa6c1;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.ai-risk-alert-header,
+.ai-risk-card-top,
+.ai-risk-scores {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-risk-alert-header {
+  margin-bottom: 12px;
+}
+
+.ai-risk-alert-header h4 {
+  margin-top: 4px;
+  color: #f0f6ff;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.ai-risk-alert-list {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  margin-bottom: 12px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ai-risk-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ai-risk-card.attention {
+  border-color: rgba(255, 97, 114, 0.34);
+  background: rgba(255, 97, 114, 0.08);
+}
+
+.ai-risk-card.resolved {
+  border-color: rgba(66, 226, 157, 0.24);
+  background: rgba(66, 226, 157, 0.06);
+}
+
+.ai-risk-card-top strong {
+  display: block;
+  color: #f0f6ff;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ai-risk-card-top span,
+.ai-risk-scores span,
+.ai-risk-review,
+.ai-risk-empty {
+  color: #8fa6c1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-risk-scores {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.ai-risk-review {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: rgba(103, 184, 255, 0.1);
+  color: #cfe7ff;
+}
+
+.ai-risk-review.danger {
+  background: rgba(255, 97, 114, 0.12);
+  color: #ffe1e6;
+}
+
+.ai-risk-review.safe {
+  background: rgba(66, 226, 157, 0.12);
+  color: #e4fff3;
+}
+
+.ai-risk-empty {
+  padding: 12px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px dashed rgba(113, 179, 255, 0.16);
+}
+
+.ai-risk-empty.error {
+  color: #ffe1e6;
+  border-color: rgba(255, 97, 114, 0.28);
+  background: rgba(255, 97, 114, 0.08);
+}
+
+.alert-divider {
+  height: 1px;
+  margin: 2px 0 12px;
+  background: linear-gradient(90deg, rgba(113, 179, 255, 0.2), transparent);
 }
 
 .hero-brief {
@@ -611,11 +1394,54 @@ const focusItems = [
   grid-template-rows: auto minmax(420px, 1fr) auto;
 }
 
+.map-panel.live-mode {
+  grid-template-rows: auto auto auto;
+}
+
 .map-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
+}
+
+.map-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.visual-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px 16px 10px 10px;
+  background: rgba(7, 18, 33, 0.62);
+  border: 1px solid rgba(113, 179, 255, 0.14);
+}
+
+.visual-tab {
+  appearance: none;
+  border: 0;
+  border-radius: 12px 12px 8px 8px;
+  padding: 9px 16px;
+  background: rgba(26, 59, 92, 0.88);
+  color: #8fc8ff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.visual-tab.active {
+  background: linear-gradient(180deg, #3296ff 0%, #2174d9 100%);
+  color: #ffffff;
+  box-shadow: 0 10px 18px rgba(37, 116, 217, 0.24);
+}
+
+.visual-tab:hover {
+  transform: translateY(-1px);
 }
 
 .map-stage {
@@ -638,6 +1464,298 @@ const focusItems = [
     linear-gradient(90deg, rgba(113, 179, 255, 0.07) 1px, transparent 1px);
   background-size: 72px 72px;
   opacity: 0.42;
+}
+
+.livestream-stage {
+  min-height: 0;
+  overflow: visible;
+}
+
+.dual-stream-stage {
+  display: block;
+}
+
+.dual-stream-shell {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+}
+
+.dual-stream-stage-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.dual-stream-player-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at top left, rgba(69, 221, 255, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(16, 34, 56, 0.9), rgba(6, 16, 28, 0.96));
+  border: 1px solid rgba(69, 221, 255, 0.16);
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.dual-stream-player {
+  height: 100%;
+}
+
+.dual-stream-player.primary {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+.dual-stream-player.preview {
+  position: absolute;
+  inset: 0;
+  min-height: 100%;
+}
+
+.dual-stream-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  object-fit: contain;
+  background: #02070d;
+}
+
+.dual-stream-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 22px;
+  background:
+    linear-gradient(180deg, rgba(5, 14, 24, 0.28) 0%, rgba(5, 14, 24, 0.88) 100%);
+}
+
+.dual-stream-overlay.error {
+  background:
+    linear-gradient(180deg, rgba(47, 10, 17, 0.38) 0%, rgba(25, 8, 11, 0.92) 100%);
+}
+
+.live-badge {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(8, 22, 38, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f7fbff;
+  font-size: 13px;
+  font-weight: 700;
+  z-index: 3;
+}
+
+.live-badge.idle {
+  background: rgba(8, 22, 38, 0.62);
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #ff6172;
+  box-shadow: 0 0 12px rgba(255, 97, 114, 0.72);
+}
+
+.stream-label {
+  color: #8fa6c1;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.stream-value {
+  margin: 18px 0 10px;
+  font-size: 38px;
+  line-height: 1.05;
+  font-weight: 700;
+}
+
+.dual-stream-reason p {
+  margin: 0;
+  color: #8fa6c1;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.dual-stream-hud {
+  position: absolute;
+  left: 18px;
+  top: 72px;
+  right: 240px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  z-index: 3;
+}
+
+.dual-stream-hud-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(8, 22, 38, 0.9);
+  border: 1px solid rgba(95, 165, 255, 0.22);
+  color: #f3f8ff;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.dual-stream-preview {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 210px;
+  height: 132px;
+  padding: 0;
+  border: 2px solid rgba(95, 165, 255, 0.32);
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(6, 16, 28, 0.88);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+  cursor: default;
+  z-index: 4;
+}
+
+.dual-stream-preview.clickable {
+  cursor: pointer;
+  border-color: rgba(95, 165, 255, 0.58);
+}
+
+.dual-stream-preview.switching {
+  cursor: wait;
+}
+
+.dual-stream-preview:disabled {
+  opacity: 1;
+}
+
+.dual-stream-switch-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(3, 10, 18, 0.68);
+  color: #f5f9ff;
+  text-align: center;
+  backdrop-filter: blur(2px);
+}
+
+.dual-stream-switch-overlay strong {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.dual-stream-switch-overlay small {
+  color: #b7c7d9;
+  font-size: 12px;
+}
+
+.dual-stream-switch-spinner {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(143, 200, 255, 0.28);
+  border-top-color: #8fc8ff;
+  animation: dual-stream-spin 0.8s linear infinite;
+}
+
+@keyframes dual-stream-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.dual-stream-preview-overlay,
+.dual-stream-preview-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.dual-stream-preview-overlay {
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(5, 14, 24, 0.2) 0%, rgba(5, 14, 24, 0.92) 100%);
+  color: #f4f8ff;
+}
+
+.dual-stream-preview-overlay.error {
+  background: linear-gradient(180deg, rgba(47, 10, 17, 0.32) 0%, rgba(25, 8, 11, 0.92) 100%);
+}
+
+.dual-stream-preview-overlay.placeholder {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(255, 122, 122, 0.16), transparent 35%),
+    linear-gradient(180deg, rgba(38, 25, 28, 0.65) 0%, rgba(15, 12, 16, 0.96) 100%);
+  border: 1px solid rgba(255, 122, 122, 0.14);
+}
+
+.dual-stream-preview-overlay strong {
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.dual-stream-preview-overlay.placeholder strong {
+  color: #fff0f0;
+}
+
+.dual-stream-preview-overlay small,
+.dual-stream-preview-label small {
+  color: #b7c7d9;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.preview-title {
+  color: #9fb4ca;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dual-stream-preview-label {
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: linear-gradient(180deg, rgba(5, 14, 24, 0) 0%, rgba(5, 14, 24, 0.92) 100%);
+  color: #ffffff;
+  text-align: left;
+  pointer-events: none;
+}
+
+.dual-stream-reason {
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .mountain,
@@ -853,6 +1971,21 @@ const focusItems = [
   .map-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .map-header-actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dual-stream-preview {
+    width: 172px;
+    height: 108px;
+  }
+
+  .dual-stream-hud {
+    top: 68px;
+    right: 188px;
   }
 }
 </style>

@@ -3,6 +3,7 @@ package com.dji.sample.wayline.controller;
 import com.dji.sample.common.model.CustomClaim;
 import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
 import com.dji.sample.wayline.model.param.CreatePlannedWaylineParam;
+import com.dji.sample.wayline.model.param.PreparePlannedWaylineTaskParam;
 import com.dji.sample.wayline.model.param.PublishPlannedWaylineResponse;
 import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.IPlannedWaylineService;
@@ -41,6 +42,16 @@ public class PlannedWaylineController {
         return HttpResultResponse.success(plannedWaylineService.getByWorkspace(trustedWorkspaceId, page, pageSize));
     }
 
+    @GetMapping("/{workspace_id}/planned-waylines/{id}")
+    public HttpResultResponse<PlannedWaylineDTO> get(@PathVariable("workspace_id") String workspaceId,
+                                                     @PathVariable("id") String id,
+                                                     HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        PlannedWaylineDTO dto = plannedWaylineService.getOne(trustedWorkspaceId, id)
+                .orElseThrow(() -> new IllegalArgumentException("Planned wayline doesn't exist."));
+        return HttpResultResponse.success(dto);
+    }
+
     @PostMapping("/{workspace_id}/planned-waylines")
     public HttpResultResponse<PlannedWaylineDTO> create(HttpServletRequest request,
                                                         @PathVariable("workspace_id") String workspaceId,
@@ -64,8 +75,44 @@ public class PlannedWaylineController {
     public HttpResultResponse<PublishPlannedWaylineResponse> publish(@PathVariable("workspace_id") String workspaceId,
                                                                      @PathVariable("id") String id,
                                                                      HttpServletRequest request) {
+        CustomClaim customClaim = resolveClaim(request);
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, customClaim);
+        return HttpResultResponse.success(plannedWaylineService.publish(trustedWorkspaceId, id, customClaim.getUsername()));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/generate-file")
+    public HttpResultResponse<PlannedWaylineDTO> generateFile(@PathVariable("workspace_id") String workspaceId,
+                                                              @PathVariable("id") String id,
+                                                              HttpServletRequest request) {
+        CustomClaim customClaim = resolveClaim(request);
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, customClaim);
+        return HttpResultResponse.success(plannedWaylineService.generateFile(trustedWorkspaceId, id, customClaim.getUsername()));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/prepare")
+    public HttpResultResponse<PlannedWaylineDTO> prepare(@PathVariable("workspace_id") String workspaceId,
+                                                         @PathVariable("id") String id,
+                                                         @Valid @RequestBody PreparePlannedWaylineTaskParam param,
+                                                         HttpServletRequest request) {
+        CustomClaim customClaim = resolveClaim(request);
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, customClaim);
+        return HttpResultResponse.success(plannedWaylineService.prepareTask(trustedWorkspaceId, id, customClaim.getUsername(), param));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/execute")
+    public HttpResultResponse<PlannedWaylineDTO> execute(@PathVariable("workspace_id") String workspaceId,
+                                                         @PathVariable("id") String id,
+                                                         HttpServletRequest request) {
         String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
-        return HttpResultResponse.success(plannedWaylineService.publish(trustedWorkspaceId, id));
+        return HttpResultResponse.success(plannedWaylineService.executeTask(trustedWorkspaceId, id));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/cancel")
+    public HttpResultResponse<PlannedWaylineDTO> cancel(@PathVariable("workspace_id") String workspaceId,
+                                                        @PathVariable("id") String id,
+                                                        HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        return HttpResultResponse.success(plannedWaylineService.cancelTask(trustedWorkspaceId, id));
     }
 
     @DeleteMapping("/{workspace_id}/planned-waylines/{id}")

@@ -7,8 +7,6 @@ package com.dji.sample.manage.model.enums;
  */
 public enum LiveUrlTypeEnum {
 
-    AGORA(0),
-
     RTMP(1),
 
     RTSP(2),
@@ -24,9 +22,6 @@ public enum LiveUrlTypeEnum {
     }
 
     public static LiveUrlTypeEnum find(Integer val) {
-        if (AGORA.val == val) {
-            return AGORA;
-        }
         if (RTMP.val == val) {
             return RTMP;
         }

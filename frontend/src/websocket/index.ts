@@ -1,6 +1,5 @@
-import { message } from 'ant-design-vue'
+import EventEmitter from 'eventemitter3'
 import ReconnectingWebSocket from 'reconnecting-websocket'
-import { EBizCode } from '../types'
 
 interface WebSocketOptions {
   data: any
@@ -17,21 +16,17 @@ export interface CommonHostWs<T> {
   host: T
 }
 
-/**
- * ConnectWebSocket 类
- * TODO: 优化messageHandler: EventEmitter。暂时传入回调函数
- */
 class ConnectWebSocket {
   _url: string
   _socket: ReconnectingWebSocket | null
   _hasInit: boolean
-  _messageHandler: MessageHandler | null
+  _events: EventEmitter
 
   constructor (url: string) {
     this._url = url
     this._socket = null
     this._hasInit = false
-    this._messageHandler = null
+    this._events = new EventEmitter()
   }
 
   initSocket () {
@@ -70,12 +65,12 @@ class ConnectWebSocket {
   }
 
   registerMessageHandler (messageHandler: MessageHandler) {
-    this._messageHandler = messageHandler
+    this._events.on('message', messageHandler)
   }
 
   _onMessage (msg: MessageEvent) {
     const data = JSON.parse(msg.data)
-    this._messageHandler && this._messageHandler(data)
+    this._events.emit('message', data)
     // console.log('接受消息', message)
   }
 
@@ -84,6 +79,7 @@ class ConnectWebSocket {
   }
 
   close () {
+    this._events.removeAllListeners()
     this._socket?.close()
   }
 }

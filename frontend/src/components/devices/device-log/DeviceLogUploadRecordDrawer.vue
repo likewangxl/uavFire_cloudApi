@@ -81,7 +81,7 @@
 </template>
 
 <script lang="ts" setup>
-import { watchEffect, reactive, ref, defineProps, defineEmits } from 'vue'
+import { watchEffect, reactive, ref } from 'vue'
 import { ColumnProps, TableState } from 'ant-design-vue/lib/table/interface'
 import { IPage } from '/@/api/http/type'
 import { Device, DOMAIN, DEVICE_NAME } from '/@/types/device'

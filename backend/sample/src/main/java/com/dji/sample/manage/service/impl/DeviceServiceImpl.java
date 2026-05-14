@@ -627,8 +627,11 @@ public class DeviceServiceImpl implements IDeviceService {
 
     @Override
     public DroneModeCodeEnum getDeviceMode(String deviceSn) {
-        return deviceRedisService.getDeviceOsd(deviceSn, OsdDockDrone.class)
-                .map(OsdDockDrone::getModeCode).orElse(DroneModeCodeEnum.DISCONNECTED);
+        return deviceRedisService.getDeviceOsd(deviceSn, OsdRcDrone.class)
+                .map(OsdRcDrone::getModeCode)
+                .orElseGet(() -> deviceRedisService.getDeviceOsd(deviceSn, OsdDockDrone.class)
+                        .map(OsdDockDrone::getModeCode)
+                        .orElse(DroneModeCodeEnum.DISCONNECTED));
     }
 
     @Override

@@ -3,7 +3,6 @@ import { ERouterName } from '/@/types/index'
 import CreatePlan from '/@/components/task/CreatePlan.vue'
 import WaylinePanel from '/@/pages/page-web/projects/wayline.vue'
 import DockPanel from '/@/pages/page-web/projects/dock.vue'
-import LiveAgora from '/@/components/livestream-agora.vue'
 import LiveOthers from '/@/components/livestream-others.vue'
 
 const routes: Array<RouteRecordRaw> = [
@@ -65,7 +64,6 @@ const routes: Array<RouteRecordRaw> = [
             path: ERouterName.LIVING,
             name: ERouterName.LIVING,
             components: {
-              LiveAgora,
               LiveOthers
             }
           }

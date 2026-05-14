@@ -15,20 +15,20 @@
             <div style="height: 50%;">
               <CloudSyncOutlined v-if="thingState === EStatusValue.CONNECTED" style="color: #75c5f6" />
               <SyncOutlined spin v-else/>
-              <span style="color: #737373; margin-left: 3px;">{{ thingState }}</span>
+              <span style="color: #737373; margin-left: 3px;">{{ getStatusLabel(thingState) }}</span>
             </div>
             <a-drawer  placement="right" v-model:visible="drawerVisible" width="340px">
               <div class="mb10 flex-row flex-justify-center flex-align-center">
-                <p class="fz14" style="font-weight: 100;">Module State</p>
+                <p class="fz14" style="font-weight: 100;">模块状态</p>
               </div>
               <div class= "width-100 mb10 flex-align-start" v-for="m in modules" :key="m.name" style="height: 30px;">
 
                 <div class="ml5" style="float: left; color: #000000;">{{m.name}}：</div>
                 <div class="ml10" style="float: right; margin-bottom: 8px;">
-                  <span :key="m.state" :class="m.state.value === EStatusValue.CONNECTED ? 'green' : 'red'">{{ m.state.value }}&nbsp;</span>
+                  <span :key="m.state" :class="m.state.value === EStatusValue.CONNECTED ? 'green' : 'red'">{{ getStatusLabel(m.state.value) }}&nbsp;</span>
                   <a-button-group >
-                  <a-button class="ml5" type="primary" size="small" @click.stop="moduleInstall(m)">install</a-button>
-                  <a-button class="ml5 mr5" type="danger" size="small" @click.stop="moduleUninstall(m)">uninstall</a-button>
+                  <a-button class="ml5" type="primary" size="small" @click.stop="moduleInstall(m)">安装</a-button>
+                  <a-button class="ml5 mr5" type="danger" size="small" @click.stop="moduleUninstall(m)">卸载</a-button>
                   </a-button-group>
                 </div>
                 <a-divider />
@@ -42,26 +42,26 @@
 
         <a-button id="exitBtn" class="fz18" @click="confirmAgain"
         style="width: 10vw; height: 10vh; position: fixed; bottom: 13vh; left: 15vw; background-color: #e6e6e6; color: red; border: 0;"
-        type="primary">Exit
+        type="primary">退出
         </a-button>
         <a-modal v-model:visible="exitVisible" width="300px" :closable="false">
           <template #footer>
-            <a-button type="text" style="width: 48%; float: left;" @click="onBack">Cancel</a-button>
-            <a-button type="text" style="width: 48%;" @click="onExit">Exit</a-button>
+            <a-button type="text" style="width: 48%; float: left;" @click="onBack">取消</a-button>
+            <a-button type="text" style="width: 48%;" @click="onExit">退出</a-button>
           </template>
-          <p>Data will not be synchronized between DJI Pilot and this server after exiting.</p>
+          <p>退出后，DJI Pilot 与该服务器之间的数据将不再同步。</p>
         </a-modal>
       </div>
     </a-layout-sider>
     <a-layout-content class="right flex-column">
       <div class="mb5">
-        <span class="ml5" style="color: #939393;">Serial Number</span>
+        <span class="ml5" style="color: #939393;">序列号</span>
       </div>
       <div class="fz16" style="background-color: white; border-radius: 4px;">
         <a-row style="border-bottom: 1px solid #f4f8f9; height: 45px;" align="middle">
           <a-col :span="1"></a-col>
             <a-col :span="9">
-            Remote Control Sn
+            遥控器序列号
             </a-col>
           <a-col :span="13" class="flex-align-end flex-column">
             <span style="color: #737373">{{ device.data.gateway_sn }}</span>
@@ -69,24 +69,24 @@
         </a-row>
         <a-row style="border-bottom: 1px solid #f4f8f9; height: 45px;" align="middle" v-if="device.data.online_status && device.data.sn">
           <a-col :span="1"></a-col>
-          <a-col :span="9">Aircraft Sn</a-col>
+          <a-col :span="9">飞行器序列号</a-col>
           <a-col :span="13" class="flex-align-end flex-column" >
             <span style="color: #737373">{{ device.data.sn }}</span>
           </a-col>
         </a-row>
       </div>
       <div class="mt5 mb5">
-        <span class="ml5" style="color: #939393;">Settings</span>
+        <span class="ml5" style="color: #939393;">设置</span>
       </div>
       <div class="fz16" style="background-color: white; border-radius: 4px;">
         <a-row v-if="device.data.online_status && device.data.sn" style="border-bottom: 1px solid #f4f8f9; height: 45px;" align="middle" @click="bindingDevice">
           <a-col :span="1"></a-col>
           <a-col :span="11">
-            Device Binding
+            设备绑定
           </a-col>
           <a-col :span="10" style="text-align: right">
-            <span v-if="device.data.bound_status" style="color: #737373">Aircraft bound</span>
-            <span v-else style="color: #737373">Aircraft not bound</span>
+            <span v-if="device.data.bound_status" style="color: #737373">飞行器已绑定</span>
+            <span v-else style="color: #737373">飞行器未绑定</span>
           </a-col>
           <a-col :span="2" class="flex-align-center flex-column" >
             <RightOutlined style="color: #8894a0; font-size: 20px;" />
@@ -95,7 +95,7 @@
         <a-row style="border-bottom: 1px solid #f4f8f9; height: 45px;" align="middle" @click="onMediaSetting">
           <a-col :span="1"></a-col>
           <a-col :span="21">
-            Media File Upload
+            媒体文件上传
           </a-col>
           <a-col :span="2" class="flex-align-center flex-column" >
             <RightOutlined style="color: #8894a0; font-size: 20px;" />
@@ -103,14 +103,14 @@
         </a-row>
         <a-row style="border-bottom: 1px solid #f4f8f9; height: 45px;" align="middle" @click="onLiveshareSetting">
           <a-col :span="1"></a-col>
-          <a-col :span="21">Livestream Manually</a-col>
+          <a-col :span="21">手动直播</a-col>
           <a-col :span="2" class="flex-align-center flex-column">
             <RightOutlined style="color: #8894a0; font-size: 20px;" />
           </a-col>
         </a-row>
         <a-row style="border-bottom: 1px solid #f4f8f9; height: 45px;" align="middle" @click="onOpen3rdApp">
           <a-col :span="1"></a-col>
-          <a-col :span="21">Open 3rd Party APP</a-col>
+          <a-col :span="21">打开第三方 APP</a-col>
           <a-col :span="2" class="flex-align-center flex-column">
             <RightOutlined style="color: #8894a0; font-size: 20px;" />
           </a-col>
@@ -205,7 +205,7 @@ function installThingComponent (mqttAddr: string, mqttUsername: string, mqttPass
 
   const tryInstallThing = () => {
     if (currentIndex >= hostCandidates.length) {
-      console.error('Cloud thing connect failed. All mqtt host candidates were exhausted.', hostCandidates)
+      console.error('Cloud Thing 连接失败，所有 MQTT 主机候选地址均已尝试。', hostCandidates)
       thingState.value = EStatusValue.DISCONNECT
       refreshStatus()
       return
@@ -218,16 +218,16 @@ function installThingComponent (mqttAddr: string, mqttUsername: string, mqttPass
       connectCallback: 'connectCallback'
     }
     components.set(EComponentName.Thing, param)
-    console.info('Trying to install cloud thing component.', param)
+    console.info('尝试安装 Cloud Thing 组件。', param)
 
     const loadResult = apiPilot.loadComponent(EComponentName.Thing, param)
-    console.info('Cloud thing loadComponent result:', loadResult)
+    console.info('Cloud Thing loadComponent 结果：', loadResult)
     refreshStatus()
 
     thingConnectCheckTimer = setTimeout(() => {
       const isConnected = apiPilot.thingGetConnectState()
       const currentConfig = apiPilot.thingGetConfigs()
-      console.info('Cloud thing connect check.', {
+      console.info('Cloud Thing 连接检查：', {
         host: param.host,
         isConnected,
         currentConfig
@@ -247,38 +247,51 @@ function installThingComponent (mqttAddr: string, mqttUsername: string, mqttPass
 }
 
 const modules = [{
-  name: 'Cloud',
+  name: '云端',
   state: thingState,
   module: EComponentName.Thing
 }, {
-  name: 'Api',
+  name: '接口',
   state: apiState,
   module: EComponentName.Api
 }, {
-  name: 'Live',
+  name: '直播',
   state: liveState,
   module: EComponentName.Liveshare
 }, {
-  name: 'Ws',
+  name: 'WebSocket',
   state: wsState,
   module: EComponentName.Ws
 }, {
-  name: 'Map',
+  name: '地图',
   state: mapState,
   module: EComponentName.Map
 }, {
-  name: 'Tsa',
+  name: 'TSA',
   state: tsaState,
   module: EComponentName.Tsa
 }, {
-  name: 'Media',
+  name: '媒体',
   state: mediaState,
   module: EComponentName.Media
 }, {
-  name: 'Wayline',
+  name: '航线',
   state: waylineState,
   module: EComponentName.Mission
 }]
+
+function getStatusLabel (status: string) {
+  switch (status) {
+    case EStatusValue.CONNECTED:
+      return '已连接'
+    case EStatusValue.DISCONNECT:
+      return '未连接'
+    case EStatusValue.LIVING:
+      return '直播中'
+    default:
+      return status
+  }
+}
 
 const store = useMyStore()
 
@@ -288,7 +301,7 @@ const messageHandler = async (payload: any) => {
   }
   switch (payload.biz_code) {
     case EBizCode.DeviceOnline: {
-      console.info('online: ', payload)
+      console.info('设备上线：', payload)
       if (payload.data.sn === device.data.gateway_sn) {
         localStorage.setItem(ELocalStorageKey.GatewayOnline, gatewayState.value.toString())
         break
@@ -301,7 +314,7 @@ const messageHandler = async (payload: any) => {
       break
     }
     case EBizCode.DeviceOffline: {
-      console.info('offline: ', payload)
+      console.info('设备离线：', payload)
       if (payload.data.sn === device.data.sn) {
         device.data.online_status = payload.data.online_status
         localStorage.setItem(ELocalStorageKey.Device, JSON.stringify(device.data))
@@ -335,7 +348,7 @@ onMounted(() => {
   }
   device.data.gateway_sn = apiPilot.getRemoteControllerSN()
   if (device.data.gateway_sn === EStatusValue.DISCONNECT.toString()) {
-    message.warn('Data is not available, please restart the remote control.')
+    message.warn('当前数据不可用，请重启遥控器。')
     return
   }
 
@@ -454,7 +467,7 @@ const onOpen3rdApp = () => {
   if (isInstalled) {
     window.open('https://www.dji.com')
   } else {
-    message.error(packageName + ' is not installed.')
+    message.error(packageName + ' 未安装。')
   }
 }
 
@@ -513,7 +526,7 @@ function moduleInstall (m: any) {
   switch (m.module) {
     case EComponentName.Thing:
       param = apiPilot.thingGetConfigs()
-      console.info('Cloud thing current config before reinstall:', param)
+      console.info('重新安装前的 Cloud Thing 当前配置：', param)
       installThingComponent(param.host, param.username, param.password)
       return
     case EComponentName.Api: {
@@ -550,7 +563,7 @@ function moduleUninstall (m: any) {
   if (m.module === EComponentName.Thing) {
     clearThingConnectCheckTimer()
   }
-  message.info('uninstall ' + m.module)
+  message.info('已卸载 ' + m.module)
   apiPilot.unloadComponent(m.module)
   refreshStatus()
 }
@@ -579,7 +592,7 @@ function getDeviceInfo () {
 </script>
 
 <style lang="scss" scoped>
-@import '/@/styles/index.scss';
+@use '/@/styles/index.scss';
 .page {
   display: flex;
   position: absolute;

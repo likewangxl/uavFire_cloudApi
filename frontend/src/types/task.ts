@@ -8,9 +8,9 @@ export enum TaskType {
 }
 
 export const TaskTypeMap = {
-  [TaskType.Immediate]: 'Immediate',
-  [TaskType.Timed]: 'Timed',
-  [TaskType.Condition]: 'Continuous',
+  [TaskType.Immediate]: '立即巡检',
+  [TaskType.Timed]: '定时巡检',
+  [TaskType.Condition]: '条件巡检',
 }
 
 export const TaskTypeOptions = [
@@ -27,9 +27,9 @@ export enum OutOfControlAction {
 }
 
 export const OutOfControlActionMap = {
-  [OutOfControlAction.ReturnToHome]: 'Return to Home',
-  [OutOfControlAction.Hover]: 'Hover',
-  [OutOfControlAction.Land]: 'Land',
+  [OutOfControlAction.ReturnToHome]: '返航',
+  [OutOfControlAction.Hover]: '悬停',
+  [OutOfControlAction.Land]: '降落',
 }
 
 export const OutOfControlActionOptions = [
@@ -49,12 +49,12 @@ export enum TaskStatus {
 }
 
 export const TaskStatusMap = {
-  [TaskStatus.Wait]: 'To be performed',
-  [TaskStatus.Carrying]: 'In progress',
-  [TaskStatus.Success]: 'Task completed',
-  [TaskStatus.CanCel]: 'Task canceled',
-  [TaskStatus.Fail]: 'Task failed',
-  [TaskStatus.Paused]: 'Paused',
+  [TaskStatus.Wait]: '待执行',
+  [TaskStatus.Carrying]: '巡检中',
+  [TaskStatus.Success]: '已完成',
+  [TaskStatus.CanCel]: '已取消',
+  [TaskStatus.Fail]: '执行失败',
+  [TaskStatus.Paused]: '已暂停',
 
 }
 
@@ -117,10 +117,10 @@ export enum MediaStatus { // 媒体上传进度
 }
 
 export const MediaStatusMap = {
-  [MediaStatus.ToUpload]: 'Waiting to upload',
-  [MediaStatus.Uploading]: 'Uploading…',
-  [MediaStatus.Success]: 'Uploaded',
-  [MediaStatus.Empty]: 'No media files',
+  [MediaStatus.ToUpload]: '待上传',
+  [MediaStatus.Uploading]: '上传中',
+  [MediaStatus.Success]: '已上传',
+  [MediaStatus.Empty]: '无媒体文件',
 }
 
 export const MediaStatusColorMap = {

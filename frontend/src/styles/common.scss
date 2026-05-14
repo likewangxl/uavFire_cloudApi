@@ -1,4 +1,6 @@
 
+@use './variables.scss' as *;
+
 html, body, #app, #my-app {
   height: 100%;
   overflow: hidden;

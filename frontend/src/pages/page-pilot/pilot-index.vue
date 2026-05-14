@@ -1,17 +1,13 @@
 <template>
   <div class="login flex-column flex-justify-center flex-align-center m0 b0">
-    <a-image
-      style="width: 17vw; height: 10vw; margin-bottom: 50px"
-      :src="djiLogo"
-    />
-    <p class="logo fz35 pb50">Pilot Cloud API Demo</p>
+    <p class="logo fz35 pb50">Pilot 云端 API 示例</p>
     <a-form
       layout="inline"
       :model="formState"
       class="flex-row flex-justify-center flex-align-center"
     >
       <a-form-item>
-        <a-input v-model:value="formState.username" placeholder="Username">
+        <a-input v-model:value="formState.username" placeholder="用户名">
           <template #prefix
             ><UserOutlined style="color: rgba(0, 0, 0, 0.25)"
           /></template>
@@ -21,7 +17,7 @@
         <a-input
           v-model:value="formState.password"
           type="password"
-          placeholder="Password"
+          placeholder="密码"
         >
           <template #prefix
             ><LockOutlined style="color: rgba(0, 0, 0, 0.25)"
@@ -36,7 +32,7 @@
           :disabled="formState.user === '' || formState.password === ''"
           @click="onSubmit"
         >
-          Login
+          登录
         </a-button>
       </a-form-item>
     </a-form>
@@ -52,7 +48,6 @@ import apiPilot from '/@/api/pilot-bridge'
 import { getRoot } from '/@/root'
 import { EComponentName, ELocalStorageKey, ERouterName, EUserType } from '/@/types'
 import { UserOutlined, LockOutlined } from '@ant-design/icons-vue'
-import djiLogo from '/@/assets/icons/dji_logo.png'
 
 const formState: UnwrapRef<LoginBody> = reactive({
   username: 'pilot',
@@ -66,7 +61,7 @@ onMounted(async () => {
     return
   }
 
-  apiPilot.setPlatformMessage('Cloud Api Platform', '', '')
+  apiPilot.setPlatformMessage('云端 API 平台', '', '')
 
   const token = localStorage.getItem(ELocalStorageKey.Token)
   if (token) {
@@ -78,7 +73,7 @@ onMounted(async () => {
         })
         const jsres = apiPilot.loadComponent(EComponentName.Api, apiPilot.getComponentParam(EComponentName.Api))
         if (!jsres) {
-          message.error('Failed to load api module.')
+          message.error('加载 API 模块失败。')
           return
         }
         apiPilot.setToken(res.data.access_token)
@@ -94,10 +89,10 @@ const onSubmit = async (e: any) => {
   await login(formState)
     .then(res => {
       if (!isVerified.value) {
-        message.error('Please verify the license firstly.')
+        message.error('请先完成 License 校验。')
         return
       }
-      console.log('login res:', res)
+      console.log('登录结果：', res)
       if (res.code === 0) {
         apiPilot.setComponentParam(EComponentName.Api, {
           host: CURRENT_CONFIG.baseURL,
@@ -107,14 +102,14 @@ const onSubmit = async (e: any) => {
           EComponentName.Api,
           apiPilot.getComponentParam(EComponentName.Api)
         )
-        console.log('load api module res:', jsres)
+        console.log('加载 API 模块结果：', jsres)
         apiPilot.setToken(res.data.access_token)
         localStorage.setItem(ELocalStorageKey.Token, res.data.access_token)
         localStorage.setItem(ELocalStorageKey.WorkspaceId, res.data.workspace_id)
         localStorage.setItem(ELocalStorageKey.UserId, res.data.user_id)
         localStorage.setItem(ELocalStorageKey.Username, res.data.username)
         localStorage.setItem(ELocalStorageKey.Flag, EUserType.Pilot.toString())
-        message.success('Login Success')
+        message.success('登录成功')
         getRoot().$router.push(ERouterName.PILOT_HOME)
       }
     })
@@ -127,15 +122,15 @@ function verifyLicense () {
   isVerified.value = apiPilot.platformVerifyLicense(CURRENT_CONFIG.appId, CURRENT_CONFIG.appKey, CURRENT_CONFIG.appLicense) &&
     apiPilot.isPlatformVerifySuccess()
   if (isVerified.value) {
-    message.success('The license verification is successful.')
+    message.success('License 校验成功。')
   } else {
-    message.error('Filed to verify the license. Please check license whether the license is correct, or apply again.')
+    message.error('License 校验失败，请检查 License 是否正确，或重新申请。')
   }
 }
 </script>
 
 <style lang="scss" scoped>
-@import '/@/styles/index.scss';
+@use '/@/styles/index.scss';
 .login {
   // background-color: $dark-highlight;
   height: 100vh;

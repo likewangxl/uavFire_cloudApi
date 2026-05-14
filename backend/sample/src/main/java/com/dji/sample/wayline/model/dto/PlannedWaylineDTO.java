@@ -39,7 +39,35 @@ public class PlannedWaylineDTO {
 
     private String publishedWaylineId;
 
+    private String kmzUrl;
+
+    private String kmzMd5;
+
+    private String kmzObjectKey;
+
+    private Long fileGeneratedTime;
+
+    private String flightId;
+
+    private String dockSn;
+
+    private String droneSn;
+
+    private String taskStatus;
+
+    private String taskStatusReason;
+
+    private Integer taskProgress;
+
+    private Long preparedTime;
+
+    private Long executedTime;
+
     private String creator;
+
+    private String publisher;
+
+    private Long publishTime;
 
     private Long createTime;
 

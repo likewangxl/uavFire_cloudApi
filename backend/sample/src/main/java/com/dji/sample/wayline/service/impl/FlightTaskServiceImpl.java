@@ -31,6 +31,8 @@ import com.dji.sdk.common.SDKManager;
 import com.dji.sdk.mqtt.MqttReply;
 import com.dji.sdk.mqtt.events.TopicEventsRequest;
 import com.dji.sdk.mqtt.events.TopicEventsResponse;
+import com.dji.sdk.mqtt.requests.TopicRequestsRequest;
+import com.dji.sdk.mqtt.requests.TopicRequestsResponse;
 import com.dji.sdk.mqtt.services.ServicesReplyData;
 import com.dji.sdk.mqtt.services.TopicServicesResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -127,6 +129,15 @@ public class FlightTaskServiceImpl extends AbstractWaylineService implements IFl
                 RedisOpsUtils.zRemove(RedisConst.WAYLINE_JOB_TIMED_EXECUTE, jobIdValue);
             }
         }
+    }
+
+    public TopicEventsResponse<MqttReply> returnHomeInfo(TopicEventsRequest<ReturnHomeInfo> request, MessageHeaders headers) {
+        log.info("flightTask returnHomeInfo event received. gateway={}, flightId={}, lastPointType={}, plannedPathPoints={}",
+                request.getGateway(),
+                request.getData().getFlightId(),
+                request.getData().getLastPointType(),
+                request.getData().getPlannedPathPoints());
+        return new TopicEventsResponse<>();
     }
 
     @Scheduled(initialDelay = 10, fixedRate = 5, timeUnit = TimeUnit.SECONDS)

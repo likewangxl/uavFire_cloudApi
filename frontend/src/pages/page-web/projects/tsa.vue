@@ -960,10 +960,6 @@ function openLivestreamOthers () {
   store.commit('SET_LIVESTREAM_OTHERS_VISIBLE', true)
 }
 
-function openLivestreamAgora () {
-  store.commit('SET_LIVESTREAM_AGORA_VISIBLE', true)
-}
-
 function getBatteryPercent (sn: string) {
   const osd = deviceInfo.value[sn]
   if (!osd?.battery) {

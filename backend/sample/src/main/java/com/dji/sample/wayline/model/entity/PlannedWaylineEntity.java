@@ -55,8 +55,50 @@ public class PlannedWaylineEntity implements Serializable {
     @TableField("published_wayline_id")
     private String publishedWaylineId;
 
+    @TableField("kmz_url")
+    private String kmzUrl;
+
+    @TableField("kmz_md5")
+    private String kmzMd5;
+
+    @TableField("kmz_object_key")
+    private String kmzObjectKey;
+
+    @TableField("file_generated_time")
+    private Long fileGeneratedTime;
+
+    @TableField("flight_id")
+    private String flightId;
+
+    @TableField("dock_sn")
+    private String dockSn;
+
+    @TableField("drone_sn")
+    private String droneSn;
+
+    @TableField("task_status")
+    private String taskStatus;
+
+    @TableField("task_status_reason")
+    private String taskStatusReason;
+
+    @TableField("task_progress")
+    private Integer taskProgress;
+
+    @TableField("prepared_time")
+    private Long preparedTime;
+
+    @TableField("executed_time")
+    private Long executedTime;
+
     @TableField("creator")
     private String creator;
+
+    @TableField("publisher")
+    private String publisher;
+
+    @TableField("publish_time")
+    private Long publishTime;
 
     @TableField(value = "create_time", fill = FieldFill.INSERT)
     private Long createTime;

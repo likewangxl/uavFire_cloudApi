@@ -148,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { DeviceInfoType } from '/@/types/device'
 import { useMyStore } from '/@/store'
 import { cloneDeep } from 'lodash'

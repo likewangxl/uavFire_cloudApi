@@ -10,6 +10,53 @@ import PkgConfig from 'vite-plugin-package-config'
 import viteSvgIcons from 'vite-plugin-svg-icons'
 import { viteVConsole } from 'vite-plugin-vconsole'
 
+function manualChunks (id: string) {
+  if (!id.includes('node_modules')) {
+    return
+  }
+
+  if (id.includes('@ant-design/icons-svg')) {
+    const iconMatch = id.match(/icons-svg\/(?:es|lib)\/asn\/([^/.]+)/)
+    const iconGroup = iconMatch ? iconMatch[1].charAt(0).toLowerCase() : 'core'
+    return `vendor-ant-icons-${iconGroup}`
+  }
+
+  if (id.includes('@ant-design/icons-vue')) {
+    return 'vendor-ant-icons'
+  }
+
+  if (id.includes('ant-design-vue')) {
+    const componentMatch = id.match(/ant-design-vue\/(?:es|lib)\/([^/]+)/)
+    return componentMatch ? `vendor-ant-${componentMatch[1]}` : 'vendor-ant-design'
+  }
+
+  if (id.includes('mqtt') || id.includes('reconnecting-websocket') || id.includes('eventemitter3')) {
+    return 'vendor-realtime'
+  }
+
+  if (id.includes('vue') || id.includes('@vue')) {
+    return 'vendor-vue'
+  }
+
+  if (id.includes('@amap')) {
+    return 'vendor-map'
+  }
+
+  if (id.includes('moment')) {
+    return 'vendor-moment'
+  }
+
+  if (id.includes('lodash')) {
+    return 'vendor-lodash'
+  }
+
+  if (id.includes('axios') || id.includes('query-string')) {
+    return 'vendor-http'
+  }
+
+  return 'vendor'
+}
+
 // https://vitejs.dev/config/
 export default ({ command, mode }: ConfigEnv): UserConfigExport => defineConfig({
   plugins: [
@@ -26,15 +73,16 @@ export default ({ command, mode }: ConfigEnv): UserConfigExport => defineConfig(
       // 指定symbolId格式
       symbolId: 'icon-[dir]-[name]',
     }),
-    viteVConsole({
-      entry: path.resolve(__dirname, './src/main.ts'), // 入口文件
-      localEnabled: command === 'serve', // serve开发环境下
-      // enabled: command !== 'serve' || mode === 'test', // 打包环境下/发布测试包,
-      config: { // vconsole 配置项
-        maxLogNumber: 1000,
-        theme: 'light'
-      }
-    }),
+    ...(command === 'serve'
+      ? [viteVConsole({
+          entry: path.resolve(__dirname, './src/main.ts'),
+          localEnabled: true,
+          config: {
+            maxLogNumber: 1000,
+            theme: 'light'
+          }
+        })]
+      : []),
     PkgConfig(),
     OptimizationPersist()
     // [svgBuilder('./src/assets/icons/')] // All svg under src/icons/svg/ have been imported here, no need to import separately
@@ -56,15 +104,18 @@ export default ({ command, mode }: ConfigEnv): UserConfigExport => defineConfig(
   css: {
     preprocessorOptions: {
       scss: {
-        // example : additionalData: `@import "./src/design/styles/variables";`
-        // dont need include file extend .scss
-        additionalData: '@import "./src/styles/variables";'
+        additionalData: '@use "./src/styles/variables" as *;'
       },
     }
   },
   base: '/',
   build: {
     target: ['es2015'], // 最低支持 es2015
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks
+      }
+    }
   }
 })

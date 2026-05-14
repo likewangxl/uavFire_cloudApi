@@ -13,7 +13,8 @@
 </template>
 
 <script lang="ts" setup>
-import { defineProps, defineEmits, ref, Ref, watchEffect } from 'vue'
+import { ref, watchEffect } from 'vue'
+import type { Ref } from 'vue'
 import { Device, DeviceFirmwareStatusEnum, DeviceFirmwareStatus, DeviceFirmwareTypeEnum } from '/@/types/device'
 import { getDeviceUpgradeInfo, GetDeviceUpgradeInfoRsp, DeviceUpgradeBody } from '/@/api/device-upgrade'
 

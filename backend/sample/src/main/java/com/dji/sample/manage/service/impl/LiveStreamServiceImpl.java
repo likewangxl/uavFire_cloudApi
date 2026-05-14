@@ -12,9 +12,12 @@ import com.dji.sdk.common.SDKManager;
 import com.dji.sdk.mqtt.services.ServicesReplyData;
 import com.dji.sdk.mqtt.services.TopicServicesResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,6 +46,12 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
 
     @Autowired
     private AbstractLivestreamService abstractLivestreamService;
+
+    @Value("${livestream.playback.webrtc-host:}")
+    private String webrtcPlaybackHost;
+
+    @Value("${livestream.playback.webrtc-port:#{null}}")
+    private Integer webrtcPlaybackPort;
 
     @Override
     public List<CapacityDeviceDTO> getLiveCapacity(String workspaceId) {
@@ -76,7 +85,7 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
         ILivestreamUrl url = LiveStreamProperty.get(liveParam.getUrlType());
         url = setExt(liveParam.getUrlType(), url, liveParam.getVideoId());
 
-        TopicServicesResponse<ServicesReplyData<String>> response = abstractLivestreamService.liveStartPush(
+        TopicServicesResponse<ServicesReplyData<LiveStartPushResponse>> response = abstractLivestreamService.liveStartPush(
                 SDKManager.getDeviceSDK(responseResult.getData().getDeviceSn()),
                 new LiveStartPushRequest()
                         .setUrl(url)
@@ -91,10 +100,8 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
         LiveDTO live = new LiveDTO();
 
         switch (liveParam.getUrlType()) {
-            case AGORA:
-                break;
             case RTMP:
-                live.setUrl(url.toString().replace("rtmp", "webrtc"));
+                live.setUrl(buildRtmpPlaybackUrl((LivestreamRtmpUrl) url));
                 break;
             case GB28181:
                 LivestreamGb28181Url gb28181 = (LivestreamGb28181Url) url;
@@ -108,7 +115,10 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
                         .toString());
                 break;
             case RTSP:
-                live.setUrl(response.getData().getOutput());
+                LiveStartPushResponse rtspOut = response.getData().getOutput();
+                if (rtspOut != null && rtspOut.getUrl() != null) {
+                    live.setUrl(rtspOut.getUrl());
+                }
                 break;
             case WHIP:
                 live.setUrl(url.toString().replace("whip", "whep"));
@@ -212,9 +222,6 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
      */
     private ILivestreamUrl setExt(UrlTypeEnum type, ILivestreamUrl url, VideoId videoId) {
         switch (type) {
-            case AGORA:
-                LivestreamAgoraUrl agoraUrl = (LivestreamAgoraUrl) url.clone();
-                return agoraUrl.setSn(videoId.getDroneSn());
             case RTMP:
                 LivestreamRtmpUrl rtmpUrl = (LivestreamRtmpUrl) url.clone();
                 return rtmpUrl.setUrl(rtmpUrl.getUrl() + videoId.getDroneSn() + "-" + videoId.getPayloadIndex().toString());
@@ -229,5 +236,24 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
                 return whipUrl.setUrl(whipUrl.getUrl() + videoId.getDroneSn() + "-" + videoId.getPayloadIndex().toString());
         }
         return url;
+    }
+
+    private String buildRtmpPlaybackUrl(LivestreamRtmpUrl rtmpUrl) {
+        URI source = URI.create(rtmpUrl.getUrl());
+        String host = StringUtils.hasText(webrtcPlaybackHost) ? webrtcPlaybackHost : source.getHost();
+
+        StringBuilder playbackUrl = new StringBuilder()
+                .append("webrtc://")
+                .append(host)
+                .append(source.getPath());
+
+        Optional.ofNullable(webrtcPlaybackPort)
+                .filter(value -> value > 0)
+                .ifPresent(port -> playbackUrl.insert("webrtc://".length() + host.length(), ":" + port));
+
+        if (StringUtils.hasText(source.getQuery())) {
+            playbackUrl.append("?").append(source.getQuery());
+        }
+        return playbackUrl.toString();
     }
 }

@@ -5,6 +5,12 @@ module.exports = {
     es2021: true,
     node: true
   },
+  globals: {
+    defineProps: 'readonly',
+    defineEmits: 'readonly',
+    defineExpose: 'readonly',
+    withDefaults: 'readonly'
+  },
   extends: ['standard', 'plugin:vue/vue3-essential'],
   parserOptions: {
     ecmaVersion: 12,

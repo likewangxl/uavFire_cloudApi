@@ -18,6 +18,11 @@ export interface FlyToPointMessage {
   sn: string,
   result: number,
   message: string,
+  // DJI FlyToStatusEnum string (e.g. wayline_progress / wayline_ok / task_finish).
+  // Optional because older backends / non-progress flows do not populate it.
+  status?: string,
+  // fly_to_id echoed from the aircraft progress event
+  flightId?: string,
 }
 
 // 一键起飞结果
@@ -25,6 +30,12 @@ export interface TakeoffToPointMessage {
   sn: string,
   result: number,
   message: string,
+  // DJI TakeoffStatusEnum string (e.g. task_ready / wayline_progress /
+  // wayline_ok / task_finish). wayline_ok / task_finish = aircraft hovering
+  // at commander_flight_height and safe to receive the next command.
+  status?: string,
+  // flight_id echoed from the aircraft progress event
+  flightId?: string,
 }
 
 // 设备端退出drc模式
@@ -38,7 +49,14 @@ export interface DrcModeExitNotifyMessage {
 export interface DrcStatusNotifyMessage {
   sn: string,
   result: number,
+  drcState?: number,
   message: string,
+}
+
+export interface CloudControlAuthMessage {
+  sn: string,
+  authorized: boolean,
+  controlKeys: string[],
 }
 
 export const WaylineLostControlActionInCommandFlightOptions = [

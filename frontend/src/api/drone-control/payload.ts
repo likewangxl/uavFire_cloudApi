@@ -16,7 +16,6 @@ export async function postPayloadAuth (sn: string, body: PostPayloadAuthBody): P
   return resp.data
 }
 
-// TODO: 画面拖动控制
 export enum PayloadCommandsEnum {
   CameraModeSwitch = 'camera_mode_switch',
   CameraPhotoTake = 'camera_photo_take',

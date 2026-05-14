@@ -18,7 +18,7 @@ spring:
     druid:
       type: com.alibaba.druid.pool.DruidDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://192.168.50.83:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true
+      url: jdbc:mysql://localhost:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true
       username: g_byzt
       password: g_byzt
       initial-size: 10
@@ -54,7 +54,7 @@ mqtt:
   # BASIC parameters are required.
   BASIC:
     protocol: MQTT # @see com.dji.sample.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.50.10
+    host: 192.168.3.218
     port: 1883
     username: JavaServer
     password: 123456
@@ -63,9 +63,9 @@ mqtt:
     path:
   DRC:
     protocol: WS # @see com.dji.sample.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.50.10
+    host: 192.168.3.218
     port: 8083
-    path:
+    path: /mqtt
     username: JavaServer
     password: 123456
 
@@ -145,7 +145,7 @@ logging:
     name: logs/cloud-api-sample.log
 
 pilot2:
-  web-entry: http://192.168.50.10:8080/pilot-login
+  web-entry: http://192.168.3.218:8080/pilot-login
 
 ntp:
   server:
@@ -163,16 +163,13 @@ cloud-server:
   base-url: http://127.0.0.1:8200
 
 livestream:
+  playback:
+    webrtc-host: 192.168.3.218
+    webrtc-port: 58925
   url:
-    # It is recommended to use a program to create Token. https://github.com/AgoraIO/Tools/blob/master/DynamicKey/AgoraDynamicKey/java/src/main/java/io/agora/media/RtcTokenBuilder2.java
-    agora:
-      channel: Please enter the agora channel.
-      token: Please enter the agora temporary token.
-      uid:  654321
-
     # RTMP  Note: This IP is the address of the streaming server. If you want to see livestream on web page, you need to convert the RTMP stream to WebRTC stream.
     rtmp:
-      url: rtmp://192.168.50.10/live/  # Example: 'rtmp://192.168.1.1/live/'
+      url: rtmp://192.168.3.218/live/  # Example: 'rtmp://192.168.1.1/live/'
     rtsp:
       username: test
       password: test
@@ -180,7 +177,7 @@ livestream:
 
     # GB28181 Note:If you don't know what these parameters mean, you can go to Pilot2 and select the GB28181 page in the cloud platform. Where the parameters same as these parameters.
     gb28181:
-      serverIP: 192.168.50.10
+      serverIP: 192.168.3.218
       serverPort: 10001
       serverID: 1001
       agentID: 2001
@@ -190,4 +187,4 @@ livestream:
 
     # Webrtc: Only supports using whip standard
     whip:
-      url: http://192.168.50.10:1985/rtc/v1/whip/?app=live&stream=  #  Example：http://192.168.1.1:1985/rtc/v1/whip/?app=live&stream=
+      url: http://192.168.3.218:1985/rtc/v1/whip/?app=live&stream=  #  Example：http://192.168.1.1:1985/rtc/v1/whip/?app=live&stream=

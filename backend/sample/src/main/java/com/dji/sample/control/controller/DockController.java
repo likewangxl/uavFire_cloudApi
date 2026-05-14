@@ -47,11 +47,12 @@ public class DockController {
     }
 
     @PostMapping("/{sn}/authority/flight")
-    public HttpResultResponse seizeFlightAuthority(@PathVariable String sn) {
-        log.info("Flight authority request received. sn={}", sn);
-        HttpResultResponse response = controlService.seizeAuthority(sn, DroneAuthorityEnum.FLIGHT, null);
-        log.info("Flight authority request completed. sn={}, code={}, message={}",
-                sn, response.getCode(), response.getMessage());
+    public HttpResultResponse seizeFlightAuthority(@PathVariable String sn,
+                                                   @RequestParam(name = "force", required = false, defaultValue = "false") boolean force) {
+        log.info("Flight authority request received. sn={}, force={}", sn, force);
+        HttpResultResponse response = controlService.seizeAuthority(sn, DroneAuthorityEnum.FLIGHT, null, force);
+        log.info("Flight authority request completed. sn={}, force={}, code={}, message={}",
+                sn, force, response.getCode(), response.getMessage());
         return response;
     }
 

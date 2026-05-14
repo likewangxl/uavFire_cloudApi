@@ -8,11 +8,11 @@
       autoplay
       class="mt20"
     ></video>
-    <p class="fz24">Live streaming source selection</p>
+    <p class="fz24">直播源选择</p>
 
     <div class="flex-row flex-justify-center flex-align-center mt10">
       <template v-if="liveState && isDockLive">
-        <span class="mr10">Lens:</span>
+        <span class="mr10">镜头：</span>
         <a-radio-group v-model:value="lensSelected" button-style="solid">
           <a-radio-button v-for="lens in lensList" :key="lens" :value="lens">{{lens}}</a-radio-button>
         </a-radio-group>
@@ -20,7 +20,7 @@
       <template v-else>
       <a-select
         style="width: 150px"
-        placeholder="Select Live Type"
+        placeholder="选择直播类型"
         @select="onLiveTypeSelect"
         v-model:value="livetypeSelected"
       >
@@ -35,7 +35,7 @@
       <a-select
         class="ml10"
         style="width:150px"
-        placeholder="Select Drone"
+        placeholder="选择飞行器"
         v-model:value="droneSelected"
       >
         <a-select-option
@@ -49,7 +49,7 @@
       <a-select
         class="ml10"
         style="width:150px"
-        placeholder="Select Camera"
+        placeholder="选择相机"
         v-model:value="cameraSelected"
       >
         <a-select-option
@@ -63,7 +63,7 @@
       <!-- <a-select
         class="ml10"
         style="width:150px"
-        placeholder="Select Lens"
+        placeholder="选择镜头"
         v-model:value="videoSelected"
       >
         <a-select-option
@@ -78,7 +78,7 @@
       <a-select
         class="ml10"
         style="width:150px"
-        placeholder="Select Clarity"
+        placeholder="选择清晰度"
         @select="onClaritySelect"
         v-model:value="claritySelected"
       >
@@ -92,23 +92,23 @@
     </div>
     <div class="mt20">
       <p class="fz10" v-if="livetypeSelected == 2">
-        Please use VLC media player to play the RTSP livestream !!!
+        请使用 VLC 播放器播放 RTSP 直播流。
       </p>
       <p class="fz10" v-if="livetypeSelected == 2">
-        RTSP Parameter:{{ rtspData }}
+        RTSP 参数：{{ rtspData }}
       </p>
     </div>
     <div class="mt10 flex-row flex-justify-center flex-align-center">
-      <a-button v-if="liveState && isDockLive" type="primary" large @click="onSwitch">Switch Lens</a-button>
-      <a-button v-else type="primary" large @click="onStart">Play</a-button>
+      <a-button v-if="liveState && isDockLive" type="primary" large @click="onSwitch">切换镜头</a-button>
+      <a-button v-else type="primary" large @click="onStart">开始播放</a-button>
       <a-button class="ml20" type="primary" large @click="onStop"
-        >Stop</a-button
+        >停止播放</a-button
       >
       <a-button class="ml20" type="primary" large @click="onUpdateQuality"
-        >Update Clarity</a-button
+        >更新清晰度</a-button
       >
       <a-button v-if="!liveState || !isDockLive" class="ml20" type="primary" large @click="onRefresh"
-        >Refresh Live Capacity</a-button
+        >刷新直播能力</a-button
       >
     </div>
   </div>
@@ -152,23 +152,23 @@ const liveTypeList: SelectOption[] = [
 const clarityList: SelectOption[] = [
   {
     value: 0,
-    label: 'Adaptive'
+    label: '自适应'
   },
   {
     value: 1,
-    label: 'Smooth'
+    label: '流畅'
   },
   {
     value: 2,
-    label: 'Standard'
+    label: '标准'
   },
   {
     value: 3,
-    label: 'HD'
+    label: '高清'
   },
   {
     value: 4,
-    label: 'Super Clear'
+    label: '超清'
   }
 ]
 
@@ -200,14 +200,14 @@ const onRefresh = async () => {
   videoSelected.value = null
   await getLiveCapacity({})
     .then(res => {
-      console.log(res)
+      console.log('获取直播能力结果：', res)
       if (res.code === 0) {
         if (res.data === null) {
-          console.warn('warning: get live capacity is null!!!')
+          console.warn('警告：获取直播能力为空。')
           return
         }
         const resData: Array<[]> = res.data
-        console.log('live_capacity:', resData)
+        console.log('直播能力：', resData)
         livestreamSource.value = resData
 
         const temp: Array<SelectOption> = []
@@ -230,7 +230,7 @@ onMounted(() => {
 })
 const onStart = async () => {
   console.log(
-    'Param:',
+    '参数：',
     livetypeSelected.value,
     droneSelected.value,
     cameraSelected.value,
@@ -244,7 +244,7 @@ const onStart = async () => {
     cameraSelected.value == null ||
     claritySelected.value == null
   ) {
-    message.warn('waring: not select live para!!!')
+    message.warn('警告：请选择直播参数！')
     return
   }
   videoId.value =
@@ -270,7 +270,7 @@ const onStart = async () => {
       break
     }
     default:
-      console.warn('warning: live type is not correct!!!')
+      console.warn('警告：直播类型不正确。')
       break
   }
   await startLivestream({
@@ -288,31 +288,31 @@ const onStart = async () => {
         const videoElement = videowebrtc.value
         // gb28181,it will fail if not wait.
         message.loading({
-          content: 'Loding...',
+          content: '加载中...',
           duration: 4,
           onClose () {
             const player = new jswebrtc.Player(url, {
               video: videoElement,
               autoplay: true,
               onPlay: (obj: any) => {
-                console.log('start play livestream')
+                console.log('开始播放直播')
               }
             })
           }
         })
       } else if (livetypeSelected.value === 2) {
-        console.log(res)
-        rtspData.value = 'url:' + res.data.url
+        console.log('RTSP 直播结果：', res)
+        rtspData.value = '地址：' + res.data.url
       } else if (livetypeSelected.value === 1) {
         const url = res.data.url
         const videoElement = videowebrtc.value
-        console.log('start live:', url)
+        console.log('开始直播：', url)
         console.log(videoElement)
         const player = new jswebrtc.Player(url, {
           video: videoElement,
           autoplay: true,
           onPlay: (obj: any) => {
-            console.log('start play livestream')
+            console.log('开始播放直播')
           }
         })
       } else if (livetypeSelected.value === 4) {
@@ -337,14 +337,14 @@ const onStop = () => {
       message.success(res.message)
       liveState.value = false
       lensSelected.value = undefined
-      console.log('stop play livestream')
+      console.log('已停止直播播放')
     }
   })
 }
 
 const onUpdateQuality = () => {
   if (!liveState.value) {
-    message.info('Please turn on the livestream first.')
+    message.info('请先开启直播。')
     return
   }
   setLivestreamQuality({
@@ -352,7 +352,7 @@ const onUpdateQuality = () => {
     video_quality: claritySelected.value
   }).then(res => {
     if (res.code === 0) {
-      message.success('Set the clarity to ' + clarityList[claritySelected.value].label)
+      message.success('清晰度已设置为 ' + clarityList[claritySelected.value].label)
     }
   })
 }
@@ -409,7 +409,7 @@ const onClaritySelect = (val: any) => {
 }
 const onSwitch = () => {
   if (lensSelected.value === undefined || lensSelected.value === nonSwitchable) {
-    message.info('The ' + nonSwitchable + ' lens cannot be switched, please select the lens to be switched.', 8)
+    message.info(nonSwitchable + ' 镜头不可切换，请选择可切换的镜头。', 8)
     return
   }
   changeLivestreamLens({
@@ -417,7 +417,7 @@ const onSwitch = () => {
     video_type: lensSelected.value
   }).then(res => {
     if (res.code === 0) {
-      message.success('Switching live camera successfully.')
+      message.success('直播镜头切换成功。')
     }
   })
 }
@@ -437,5 +437,5 @@ const playWebrtc = (videoElement: HTMLMediaElement, url: string) => {
 </script>
 
 <style lang="scss" scoped>
-@import '/@/styles/index.scss';
+@use '/@/styles/index.scss';
 </style>

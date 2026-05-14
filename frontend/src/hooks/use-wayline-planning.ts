@@ -15,7 +15,13 @@ import EventBus from '/@/event-bus/'
 import { postFlyToPoint, deleteFlyToPoint } from '/@/api/drone-control/drone'
 import { EBizCode, ELocalStorageKey } from '/@/types'
 import { FlyToPointMessage } from '/@/types/drone-control'
-import { gcj02towgs84 } from '/@/vendors/coordtransform'
+import type {
+  CreatePlannedWaylineBody,
+  PlannedWaypoint as PlannedWaypointBody,
+  PlannedWaylineRecord,
+  UpdatePlannedWaylineBody,
+} from '/@/types/wayline'
+import { gcj02towgs84, wgs84togcj02 } from '/@/vendors/coordtransform'
 import rootStore from '/@/store'
 import { uuidv4 } from '/@/utils/uuid'
 
@@ -44,6 +50,7 @@ const DEFAULT_REACH_RADIUS_M = 3
 const DEFAULT_REACH_STABLE_MS = 1500
 const DEFAULT_HEIGHT_M = 30
 const DEFAULT_MAX_SPEED = 5
+const DEFAULT_AIRCRAFT_MODEL_KEY = 'M30T'
 const WAYPOINT_EXECUTION_TIMEOUT_MS = 90_000
 const MIN_WAYPOINT_SPACING_M = 16
 const PLANNING_DRAFT_VERSION = 1
@@ -53,9 +60,13 @@ const state = reactive({
   executing: false,
   execState: PlanningExecState.IDLE,
   waypoints: [] as PlannedWaypoint[],
+  previewWaypoints: [] as PlannedWaypoint[],
+  previewTitle: '',
   currentIndex: -1,
   gatewaySn: '',
   aircraftSn: '',
+  editingPlannedWaylineId: '',
+  aircraftModelKey: '',
   defaultHeight: DEFAULT_HEIGHT_M,
   maxSpeed: DEFAULT_MAX_SPEED,
   statusText: '',
@@ -72,6 +83,7 @@ interface PersistedPlanningDraft {
   version: number
   gatewaySn: string
   aircraftSn: string
+  aircraftModelKey?: string
   defaultHeight: number
   maxSpeed: number
   waypoints: PlannedWaypoint[]
@@ -82,6 +94,7 @@ function buildPersistedDraft (): PersistedPlanningDraft {
     version: PLANNING_DRAFT_VERSION,
     gatewaySn: state.gatewaySn,
     aircraftSn: state.aircraftSn,
+    aircraftModelKey: state.aircraftModelKey,
     defaultHeight: state.defaultHeight,
     maxSpeed: state.maxSpeed,
     waypoints: state.waypoints.map(wp => ({ ...wp })),
@@ -91,7 +104,7 @@ function buildPersistedDraft (): PersistedPlanningDraft {
 function persistDraft () {
   if (typeof window === 'undefined') return
   try {
-    const hasDraft = state.gatewaySn || state.aircraftSn || state.waypoints.length > 0
+    const hasDraft = state.gatewaySn || state.aircraftSn || state.aircraftModelKey || state.waypoints.length > 0
     if (!hasDraft) {
       window.localStorage.removeItem(ELocalStorageKey.PlannedWaylineDraft)
       return
@@ -129,6 +142,8 @@ function restoreDraft () {
 
     state.gatewaySn = typeof parsed.gatewaySn === 'string' ? parsed.gatewaySn : ''
     state.aircraftSn = typeof parsed.aircraftSn === 'string' ? parsed.aircraftSn : ''
+    state.aircraftModelKey = typeof parsed.aircraftModelKey === 'string' ? parsed.aircraftModelKey : ''
+    state.editingPlannedWaylineId = ''
     state.defaultHeight = Number.isFinite(Number(parsed.defaultHeight)) ? Number(parsed.defaultHeight) : DEFAULT_HEIGHT_M
     state.maxSpeed = Number.isFinite(Number(parsed.maxSpeed)) ? Number(parsed.maxSpeed) : DEFAULT_MAX_SPEED
     state.waypoints = restoredWaypoints
@@ -170,6 +185,55 @@ function distanceMeters (lng1: number, lat1: number, lng2: number, lat2: number)
   return 2 * earthRadiusM * Math.asin(Math.min(1, Math.sqrt(a)))
 }
 
+function finiteNumber (value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : null
+}
+
+function normalizePositiveNumber (value: unknown, fallback: number): number {
+  const numberValue = finiteNumber(value)
+  return numberValue !== null && numberValue > 0 ? numberValue : fallback
+}
+
+function normalizePlannedWaypoint (wp: PlannedWaypoint): PlannedWaypoint {
+  const raw = wp as PlannedWaypoint & {
+    lng?: number | string
+    lat?: number | string
+    longitude?: number | string
+    latitude?: number | string
+  }
+  let gcjLng = finiteNumber(raw.gcjLng ?? raw.lng ?? raw.longitude)
+  let gcjLat = finiteNumber(raw.gcjLat ?? raw.lat ?? raw.latitude)
+  let wgsLng = finiteNumber(raw.wgsLng)
+  let wgsLat = finiteNumber(raw.wgsLat)
+
+  if ((!Number.isFinite(gcjLng) || !Number.isFinite(gcjLat)) && Number.isFinite(wgsLng) && Number.isFinite(wgsLat)) {
+    const [convertedGcjLng, convertedGcjLat] = wgs84togcj02(wgsLng, wgsLat) as [number, number]
+    gcjLng = finiteNumber(convertedGcjLng)
+    gcjLat = finiteNumber(convertedGcjLat)
+  }
+
+  if ((!Number.isFinite(wgsLng) || !Number.isFinite(wgsLat)) && Number.isFinite(gcjLng) && Number.isFinite(gcjLat)) {
+    const [convertedWgsLng, convertedWgsLat] = gcj02towgs84(gcjLng, gcjLat) as [number, number]
+    wgsLng = finiteNumber(convertedWgsLng)
+    wgsLat = finiteNumber(convertedWgsLat)
+  }
+
+  if (!Number.isFinite(gcjLng) || !Number.isFinite(gcjLat) || !Number.isFinite(wgsLng) || !Number.isFinite(wgsLat)) {
+    throw new Error('Invalid waypoint coordinates.')
+  }
+
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : uuidv4(),
+    gcjLng: gcjLng as number,
+    gcjLat: gcjLat as number,
+    wgsLng: wgsLng as number,
+    wgsLat: wgsLat as number,
+    height: normalizePositiveNumber(raw.height, normalizePositiveNumber(state.defaultHeight, DEFAULT_HEIGHT_M)),
+  }
+}
+
 function currentAircraftOsd () {
   return rootStore.state.deviceState.deviceInfo[state.aircraftSn]
 }
@@ -198,6 +262,11 @@ export function setTargetAircraft (gatewaySn: string, aircraftSn: string) {
   persistDraft()
 }
 
+export function setEditingPlannedWayline (id: string) {
+  state.editingPlannedWaylineId = id
+  persistDraft()
+}
+
 export function startPlanning (gatewaySn: string, aircraftSn: string) {
   if (state.executing) {
     message.warning('Stop execution before editing the waypoint list.')
@@ -205,6 +274,7 @@ export function startPlanning (gatewaySn: string, aircraftSn: string) {
   }
   state.gatewaySn = gatewaySn
   state.aircraftSn = aircraftSn
+  clearPlannedWaylinePreview()
   state.active = true
   state.statusText = 'Planning mode: click on the map to add waypoints.'
   persistDraft()
@@ -226,6 +296,11 @@ export function clearWaypoints () {
   state.waypoints = []
   state.currentIndex = -1
   persistDraft()
+}
+
+export function clearPlannedWaylinePreview () {
+  state.previewWaypoints = []
+  state.previewTitle = ''
 }
 
 export function addWaypointGcj (gcjLng: number, gcjLat: number, height?: number): PlannedWaypoint | null {
@@ -284,6 +359,97 @@ export function updateWaypointHeight (id: string, height: number) {
     wp.height = height
     persistDraft()
   }
+}
+
+function buildPlannedWaypointBody (wp: PlannedWaypoint, idx: number): PlannedWaypointBody {
+  return {
+    order: idx + 1,
+    gcjLng: wp.gcjLng,
+    gcjLat: wp.gcjLat,
+    wgsLng: wp.wgsLng,
+    wgsLat: wp.wgsLat,
+    height: wp.height,
+  }
+}
+
+export function buildPlannedWaylineBody (name: string, aircraftModelKey?: string): CreatePlannedWaylineBody | UpdatePlannedWaylineBody {
+  const modelKey = aircraftModelKey || state.aircraftModelKey || DEFAULT_AIRCRAFT_MODEL_KEY
+  state.aircraftModelKey = modelKey
+  state.defaultHeight = normalizePositiveNumber(state.defaultHeight, DEFAULT_HEIGHT_M)
+  state.maxSpeed = normalizePositiveNumber(state.maxSpeed, DEFAULT_MAX_SPEED)
+  state.waypoints = state.waypoints.map(wp => normalizePlannedWaypoint(wp))
+  persistDraft()
+  return {
+    name,
+    aircraftModelKey: modelKey,
+    gatewaySn: state.gatewaySn,
+    aircraftSn: state.aircraftSn,
+    defaultHeight: normalizePositiveNumber(state.defaultHeight, DEFAULT_HEIGHT_M),
+    maxSpeed: normalizePositiveNumber(state.maxSpeed, DEFAULT_MAX_SPEED),
+    waypoints: state.waypoints.map((wp, idx) => buildPlannedWaypointBody(normalizePlannedWaypoint(wp), idx)),
+  }
+}
+
+export function loadPlannedWayline (record: PlannedWaylineRecord) {
+  resetExecutionInternal()
+  clearPlannedWaylinePreview()
+  state.active = false
+  state.executing = false
+  state.execState = PlanningExecState.IDLE
+  state.currentIndex = -1
+  state.editingPlannedWaylineId = record.plannedWaylineId
+  state.aircraftModelKey = record.aircraftModelKey
+  state.gatewaySn = record.gatewaySn
+  state.aircraftSn = record.aircraftSn
+  state.defaultHeight = Number.isFinite(Number(record.defaultHeight)) ? Number(record.defaultHeight) : DEFAULT_HEIGHT_M
+  state.maxSpeed = Number.isFinite(Number(record.maxSpeed)) ? Number(record.maxSpeed) : DEFAULT_MAX_SPEED
+  state.waypoints = record.waypoints.map(wp => ({
+    id: uuidv4(),
+    gcjLng: Number(wp.gcjLng),
+    gcjLat: Number(wp.gcjLat),
+    wgsLng: Number(wp.wgsLng),
+    wgsLat: Number(wp.wgsLat),
+    height: Number(wp.height),
+  }))
+  state.statusText = `Loaded planned wayline "${record.name}" (${record.status}).`
+  state.lastError = ''
+  persistDraft()
+}
+
+export function previewPlannedWayline (record: PlannedWaylineRecord) {
+  if (!record || !Array.isArray(record.waypoints)) return
+  if (state.executing || state.active) {
+    return
+  }
+  state.previewWaypoints = record.waypoints.map(wp => ({
+    id: uuidv4(),
+    gcjLng: Number(wp.gcjLng),
+    gcjLat: Number(wp.gcjLat),
+    wgsLng: Number(wp.wgsLng),
+    wgsLat: Number(wp.wgsLat),
+    height: Number(wp.height),
+  }))
+  state.previewTitle = record.name || ''
+  state.statusText = record.name ? `预览规划航线“${record.name}”。` : '预览规划航线。'
+}
+
+export function resetPlanningDraft () {
+  resetExecutionInternal()
+  state.active = false
+  state.executing = false
+  state.execState = PlanningExecState.IDLE
+  state.currentIndex = -1
+  state.editingPlannedWaylineId = ''
+  state.aircraftModelKey = ''
+  state.gatewaySn = ''
+  state.aircraftSn = ''
+  state.waypoints = []
+  clearPlannedWaylinePreview()
+  state.defaultHeight = DEFAULT_HEIGHT_M
+  state.maxSpeed = DEFAULT_MAX_SPEED
+  state.statusText = ''
+  state.lastError = ''
+  persistDraft()
 }
 
 function abortExecution (reason: 'error' | 'stopped' | 'done') {

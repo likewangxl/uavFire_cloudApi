@@ -33,7 +33,8 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, defineProps, PropType, reactive } from 'vue'
+import { computed, reactive } from 'vue'
+import type { PropType } from 'vue'
 import { useMyStore } from '/@/store'
 import { DropEvent, mapLayer } from '/@/types/mapLayer'
 import { getLayerTreeKey } from '/@/utils/layer-tree'

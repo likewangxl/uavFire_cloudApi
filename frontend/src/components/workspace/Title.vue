@@ -10,7 +10,6 @@
 </template>
 
 <script lang="ts" setup>
-import { defineProps } from 'vue'
 import DividerLine from '/@/components/workspace/DividerLine.vue'
 
 const props = defineProps < {

@@ -1,4 +1,5 @@
 from app.inference.visible.detector import (
+    ColorFireVisibleDetector,
     StubVisibleDetector,
     YoloVisibleDetector,
 )
@@ -129,6 +130,46 @@ def test_yolo_detector_caches_model_across_invocations():
     detector.detect(packet)
 
     assert invocations["count"] == 1
+
+
+def test_color_fire_detector_scores_orange_red_pixel_ratio():
+    detector = ColorFireVisibleDetector(
+        red_min=180,
+        green_min=80,
+        blue_max=80,
+        saturation_ratio=0.25,
+        array_factory=lambda frame: frame,
+    )
+    packet = FramePacket(
+        source_ts=1,
+        channel="visible",
+        frame=[
+            [[0, 120, 255], [0, 130, 240]],
+            [[255, 0, 0], [0, 0, 0]],
+        ],
+    )
+
+    assert detector.detect(packet) == 1.0
+
+
+def test_color_fire_detector_returns_zero_when_no_fire_colored_pixels():
+    detector = ColorFireVisibleDetector(
+        red_min=180,
+        green_min=80,
+        blue_max=80,
+        saturation_ratio=0.25,
+        array_factory=lambda frame: frame,
+    )
+    packet = FramePacket(
+        source_ts=1,
+        channel="visible",
+        frame=[
+            [[255, 0, 0], [255, 255, 255]],
+            [[0, 255, 0], [0, 0, 0]],
+        ],
+    )
+
+    assert detector.detect(packet) == 0.0
 
 
 class _FakeYolo:

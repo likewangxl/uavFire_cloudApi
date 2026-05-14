@@ -1,0 +1,17 @@
+services:
+  zlmediakit:
+    image: ${ZLM_DOCKER_IMAGE:-zlmediakit/zlmediakit:master}
+    container_name: uavfire-zlmediakit
+    restart: unless-stopped
+    ports:
+      - "${ZLM_RTMP_PORT:-1935}:1935"
+      - "${ZLM_HTTP_PORT:-58925}:80"
+      - "${ZLM_HTTPS_PORT:-8443}:443"
+      - "${ZLM_RTSP_PORT:-8554}:554"
+      - "${ZLM_WEBRTC_TCP_PORT:-8000}:8000"
+      - "${ZLM_WEBRTC_UDP_PORT:-10000}:10000/udp"
+      - "${ZLM_STUN_UDP_PORT:-8000}:8000/udp"
+      - "${ZLM_RTP_PROXY_PORT:-9000}:9000/udp"
+    volumes:
+      - ./config:/opt/media/conf
+      - ./data:/opt/media/www

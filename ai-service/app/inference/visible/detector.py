@@ -22,6 +22,46 @@ class StubVisibleDetector:
         return self._score
 
 
+class ColorFireVisibleDetector:
+    """Heuristic detector for fire-colored regions in BGR/RGB-like frames.
+
+    OpenCV frames are BGR by default. The heuristic looks for orange/red
+    pixels, then maps the matching-pixel ratio to [0, 1]. It is deliberately
+    simple and deterministic so it can serve as a no-model local smoke test.
+    """
+
+    def __init__(
+        self,
+        red_min: int = 180,
+        green_min: int = 80,
+        blue_max: int = 120,
+        saturation_ratio: float = 0.03,
+        array_factory: Optional[Callable[[Any], Any]] = None,
+    ) -> None:
+        self._red_min = int(red_min)
+        self._green_min = int(green_min)
+        self._blue_max = int(blue_max)
+        self._saturation_ratio = float(saturation_ratio)
+        self._array_factory = array_factory
+
+    def detect(self, frame: FramePacket) -> float:
+        if frame.channel != "visible" or frame.frame is None:
+            return 0.0
+        array_factory = self._array_factory or _default_array_factory()
+        arr = array_factory(frame.frame)
+        fire_ratio, total = _fire_colored_ratio(
+            arr,
+            red_min=self._red_min,
+            green_min=self._green_min,
+            blue_max=self._blue_max,
+        )
+        if total <= 0:
+            return 0.0
+        if self._saturation_ratio <= 0:
+            return 1.0 if fire_ratio > 0 else 0.0
+        return round(min(fire_ratio / self._saturation_ratio, 1.0), 3)
+
+
 class YoloVisibleDetector:
     """YOLO-backed fire/smoke detector for the visible channel.
 
@@ -65,6 +105,49 @@ def _default_model_factory() -> Callable[[str], Any]:
     from ultralytics import YOLO
 
     return lambda path: YOLO(path)
+
+
+def _default_array_factory() -> Callable[[Any], Any]:
+    import numpy as np
+
+    return lambda frame: np.asarray(frame)
+
+
+def _fire_colored_ratio(
+    frame_array: Any,
+    red_min: int,
+    green_min: int,
+    blue_max: int,
+) -> tuple[float, int]:
+    shape = getattr(frame_array, "shape", None)
+    if shape is not None and len(shape) >= 3:
+        total = int(shape[0]) * int(shape[1])
+        if total <= 0:
+            return 0.0, 0
+        blue = frame_array[..., 0]
+        green = frame_array[..., 1]
+        red = frame_array[..., 2]
+        mask = (red >= red_min) & (green >= green_min) & (blue <= blue_max) & (red >= green)
+        return float(mask.sum()) / total, total
+
+    pixels = []
+    try:
+        rows = list(frame_array)
+        for row in rows:
+            pixels.extend(list(row))
+    except TypeError:
+        return 0.0, 0
+    if not pixels:
+        return 0.0, 0
+    hot = 0
+    for pixel in pixels:
+        try:
+            blue, green, red = pixel[0], pixel[1], pixel[2]
+        except (TypeError, IndexError):
+            continue
+        if red >= red_min and green >= green_min and blue <= blue_max and red >= green:
+            hot += 1
+    return hot / len(pixels), len(pixels)
 
 
 def _peak_target_confidence(

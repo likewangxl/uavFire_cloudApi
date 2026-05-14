@@ -14,7 +14,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, defineEmits } from 'vue'
+import { ref } from 'vue'
 import { EFlightAreaType } from '../../types/flight-area'
 import FlightAreaIcon from './FlightAreaIcon.vue'
 

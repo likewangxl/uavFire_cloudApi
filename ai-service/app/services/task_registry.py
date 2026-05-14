@@ -106,6 +106,7 @@ class TaskRegistry:
             source_ts=event.source_ts,
             fusion_score=event.fusion_score,
             risk_level=event.risk_level,
+            analysis_channel=event.analysis_channel,
         )
         self._events[task_id].append(record)
         if self._backend_client is not None:
@@ -118,6 +119,7 @@ class TaskRegistry:
                     "thermal_score": event.thermal_score,
                     "fusion_score": event.fusion_score,
                     "risk_level": event.risk_level,
+                    "analysis_channel": event.analysis_channel,
                 },
             )
         return record
@@ -127,10 +129,55 @@ class TaskRegistry:
         return list(self._events.get(task_id, []))
 
 
+def _build_visible_detector(settings: Settings):
+    if settings.visible_yolo_model_path:
+        from app.inference.visible.detector import YoloVisibleDetector
+
+        return YoloVisibleDetector(
+            model_path=settings.visible_yolo_model_path,
+            target_class_names=[
+                name.strip() for name in settings.visible_target_classes.split(",") if name.strip()
+            ],
+            confidence_floor=settings.visible_confidence_floor,
+        )
+    if settings.visible_detector_mode.lower() == "stub":
+        from app.inference.visible.detector import StubVisibleDetector
+
+        return StubVisibleDetector()
+    from app.inference.visible.detector import ColorFireVisibleDetector
+
+    return ColorFireVisibleDetector(
+        saturation_ratio=settings.visible_fire_saturation_ratio,
+    )
+
+
+def _build_thermal_analyzer(settings: Settings):
+    if settings.use_continuous_runner:
+        from app.inference.thermal.analyzer import HotSpotThermalAnalyzer
+
+        return HotSpotThermalAnalyzer(
+            intensity_threshold=settings.thermal_intensity_threshold,
+            saturation_ratio=settings.thermal_saturation_ratio,
+        )
+    from app.inference.thermal.analyzer import StubThermalAnalyzer
+
+    return StubThermalAnalyzer()
+
+
+def _build_backend_client(settings: Settings) -> Optional[BackendClient]:
+    if not settings.backend_base_url:
+        return None
+    return BackendClient(
+        base_url=settings.backend_base_url,
+        access_token=settings.backend_access_token,
+        username=settings.backend_username,
+        password=settings.backend_password,
+        login_flag=settings.backend_login_flag,
+    )
+
+
 def build_registry() -> TaskRegistry:
     from app.fusion.service import DualStreamFusionService
-    from app.inference.thermal.analyzer import StubThermalAnalyzer
-    from app.inference.visible.detector import StubVisibleDetector
     from app.services.continuous_runner import ContinuousTaskRunner
     from app.services.continuous_supervisor import (
         ContinuousTaskSupervisor,
@@ -143,7 +190,7 @@ def build_registry() -> TaskRegistry:
     )
 
     settings = Settings()
-    backend_client = BackendClient(settings.backend_base_url) if settings.backend_base_url else None
+    backend_client = _build_backend_client(settings)
     registry = TaskRegistry(backend_client=backend_client)
     fusion = DualStreamFusionService()
     registry.bind_runner(
@@ -159,8 +206,8 @@ def build_registry() -> TaskRegistry:
             ContinuousTaskSupervisor(
                 runner=ContinuousTaskRunner(
                     registry=registry,
-                    visible_detector=StubVisibleDetector(),
-                    thermal_analyzer=StubThermalAnalyzer(),
+                    visible_detector=_build_visible_detector(settings),
+                    thermal_analyzer=_build_thermal_analyzer(settings),
                     fusion_service=fusion,
                 ),
             ),

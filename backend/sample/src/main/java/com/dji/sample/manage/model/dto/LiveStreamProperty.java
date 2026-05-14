@@ -17,8 +17,6 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class LiveStreamProperty {
 
-    private static LivestreamAgoraUrl agora;
-
     private static LivestreamRtmpUrl rtmp;
 
     private static LivestreamRtspUrl rtsp;
@@ -26,10 +24,6 @@ public class LiveStreamProperty {
     private static LivestreamGb28181Url gb28181;
 
     private static LivestreamWhipUrl whip;
-
-    public void setAgora(LivestreamAgoraUrl agora) {
-        LiveStreamProperty.agora = agora;
-    }
 
     public void setRtmp(LivestreamRtmpUrl rtmp) {
         LiveStreamProperty.rtmp = rtmp;
@@ -49,8 +43,6 @@ public class LiveStreamProperty {
 
     public static ILivestreamUrl get(UrlTypeEnum type) {
         switch (type) {
-            case AGORA:
-                return agora;
             case RTMP:
                 return rtmp;
             case RTSP:

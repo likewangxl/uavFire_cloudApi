@@ -505,8 +505,7 @@ export interface DeviceHms {
   domain: number
 }
 
-// TODO: 设备拓扑管理优化
-// 设备osd信息
+// 设备拓扑聚合后的 OSD 信息。
 export interface DeviceInfoType {
   gateway: GatewayOsd, // 遥控器
   dock: DockOsd, // 机场

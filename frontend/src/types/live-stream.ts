@@ -39,16 +39,14 @@ export enum EVideoPublishType {
 }
 
 export enum ELiveTypeValue {
-    Unknown,
-    Agora,
-    RTMP,
-    RTSP,
-    GB28181
+    Unknown = 0,
+    RTMP = 2,
+    RTSP = 3,
+    GB28181 = 4
 }
 
 export enum ELiveTypeName {
     Unknown = 'Unknown',
-    Agora = 'Agora',
     RTMP = 'RTMP',
     RTSP = 'RTSP',
     GB28181 = 'GB28181'

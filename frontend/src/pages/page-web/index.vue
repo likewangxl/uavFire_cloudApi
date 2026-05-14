@@ -1,18 +1,14 @@
 <template>
   <div
     class="login flex-column flex-justify-center flex-align-center m0 b0">
-    <a-image
-      style="width: 17vw; height: 10vw; margin-bottom: 50px"
-      :src="djiLogo"
-    />
-    <p class="fz35 pb50" style="color: #2d8cf0">Cloud API Demo</p>
+    <p class="fz35 pb50" style="color: #2d8cf0">云端管理平台</p>
     <a-form
       layout="inline"
       :model="formState"
       class="flex-row flex-justify-center flex-align-center"
     >
       <a-form-item>
-        <a-input v-model:value="formState.username" placeholder="Username">
+        <a-input v-model:value="formState.username" placeholder="请输入账号">
           <template #prefix
             ><UserOutlined style="color: rgba(0, 0, 0, 0.25)"
           /></template>
@@ -22,7 +18,7 @@
         <a-input
           v-model:value="formState.password"
           type="password"
-          placeholder="Password"
+          placeholder="请输入密码"
         >
           <template #prefix
             ><LockOutlined style="color: rgba(0, 0, 0, 0.25)"
@@ -37,7 +33,7 @@
           :disabled="loginBtnDisabled"
           @click="onSubmit"
         >
-          Login
+          登录
         </a-button>
       </a-form-item>
     </a-form>
@@ -46,7 +42,6 @@
 </template>
 
 <script lang="ts" setup>
-import djiLogo from '/@/assets/icons/dji_logo.png'
 import { LockOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { reactive, computed, UnwrapRef } from 'vue'
@@ -81,7 +76,7 @@ const onSubmit = async (e: any) => {
 </script>
 
 <style lang="scss" scoped>
-@import '/@/styles/index.scss';
+@use '/@/styles/index.scss';
 .login {
   background-color: $dark-highlight;
   height: 100vh;

@@ -37,6 +37,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.util.*;
@@ -54,6 +57,8 @@ import static com.dji.sample.wayline.model.dto.KmzFileProperties.WAYLINE_FILE_SU
 @Service
 @Transactional
 public class WaylineFileServiceImpl implements IWaylineFileService {
+
+    private Path localObjectStorageRoot = Paths.get(System.getProperty("user.dir"), "target", "local-oss");
 
     @Autowired
     private IWaylineFileMapper mapper;
@@ -113,6 +118,13 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         if (waylineOpt.isEmpty()) {
             throw new SQLException(waylineId + " does not exist.");
         }
+        if (!OssConfiguration.enable) {
+            try {
+                return resolveLocalObjectPath(OssConfiguration.bucket, waylineOpt.get().getObjectKey()).toUri().toURL();
+            } catch (IOException e) {
+                throw new SQLException("Failed to get local wayline file URL.", e);
+            }
+        }
         return ossService.getObjectUrl(OssConfiguration.bucket, waylineOpt.get().getObjectKey());
     }
 
@@ -132,8 +144,12 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         waylineFile.setUsername(param.getUsername());
 
         try {
-            ossService.putObject(OssConfiguration.bucket, param.getObjectKey(), new ByteArrayInputStream(param.getContent()));
-        } catch (RuntimeException e) {
+            if (OssConfiguration.enable) {
+                ossService.putObject(OssConfiguration.bucket, param.getObjectKey(), new ByteArrayInputStream(param.getContent()));
+            } else {
+                putLocalObject(OssConfiguration.bucket, param.getObjectKey(), param.getContent());
+            }
+        } catch (RuntimeException | IOException e) {
             throw new IllegalStateException("Failed to store published wayline file.", e);
         }
 
@@ -157,6 +173,13 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
                 .name(file.getName())
                 .objectKey(file.getObjectKey())
                 .build();
+    }
+
+    public InputStream getObject(String bucket, String objectKey) throws IOException {
+        if (OssConfiguration.enable) {
+            return ossService.getObject(bucket, objectKey);
+        }
+        return Files.newInputStream(resolveLocalObjectPath(bucket, objectKey));
     }
 
     @Override
@@ -218,7 +241,7 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         if (!isDel) {
             return false;
         }
-        return ossService.deleteObject(OssConfiguration.bucket, wayline.getObjectKey());
+        return deleteByObjectKey(OssConfiguration.bucket, wayline.getObjectKey());
     }
 
     @Override
@@ -326,9 +349,36 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
         return prefix + "/" + filename;
     }
 
+    public boolean deleteByObjectKey(String bucket, String objectKey) {
+        if (OssConfiguration.enable) {
+            return ossService.deleteObject(bucket, objectKey);
+        }
+        try {
+            return Files.deleteIfExists(resolveLocalObjectPath(bucket, objectKey));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private void putLocalObject(String bucket, String objectKey, byte[] content) throws IOException {
+        Path target = resolveLocalObjectPath(bucket, objectKey);
+        Files.createDirectories(target.getParent());
+        Files.write(target, content);
+    }
+
+    private Path resolveLocalObjectPath(String bucket, String objectKey) throws IOException {
+        String safeBucket = StringUtils.hasText(bucket) ? bucket : "local";
+        Path root = localObjectStorageRoot.resolve(safeBucket).normalize();
+        Path target = root.resolve(objectKey).normalize();
+        if (!target.startsWith(root)) {
+            throw new IOException("Illegal object key.");
+        }
+        return target;
+    }
+
     private void cleanupUploadedObject(String objectKey) {
         try {
-            boolean deleted = ossService.deleteObject(OssConfiguration.bucket, objectKey);
+            boolean deleted = deleteByObjectKey(OssConfiguration.bucket, objectKey);
             if (!deleted) {
                 throw new IllegalStateException("Failed to cleanup uploaded published wayline object.");
             }

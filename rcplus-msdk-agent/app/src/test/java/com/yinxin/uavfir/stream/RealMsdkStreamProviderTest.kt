@@ -27,7 +27,7 @@ class RealMsdkStreamProviderTest {
     }
 
     @Test
-    fun start_fallsBackToSharedPreviewWhenThermalBindingFails() = runTest {
+    fun start_fallsBackToVisibleOnlyWhenThermalBindingFails() = runTest {
         val binder = RecordingMsdkStreamBinder(
             bindThermalFailure = IllegalStateException(
                 "msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding",
@@ -43,16 +43,15 @@ class RealMsdkStreamProviderTest {
 
         assertTrue(binder.visibleBound)
         assertEquals(listOf("DRONE-001"), liveStreamController.startedDroneSns)
-        assertTrue(binder.thermalFocused)
         assertEquals(BoundStreamState.BOUND, provider.visibleState)
-        assertEquals(BoundStreamState.BOUND, provider.thermalState)
+        assertEquals(BoundStreamState.IDLE, provider.thermalState)
         assertEquals(BoundStreamState.BOUND, result.visibleState)
-        assertEquals(BoundStreamState.BOUND, result.thermalState)
+        assertEquals(BoundStreamState.IDLE, result.thermalState)
         assertEquals(
-            "single-liveview-source-shared-side-by-side-preview",
+            "msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding",
             result.thermalFailureMessage,
         )
-        assertEquals("shared-side-by-side-preview", result.playbackStatus)
+        assertEquals("visible-live-ready", result.playbackStatus)
     }
 
     @Test
@@ -88,6 +87,54 @@ class RealMsdkStreamProviderTest {
         assertEquals(BoundStreamState.BOUND, result.visibleState)
         assertEquals(BoundStreamState.BOUND, result.thermalState)
         assertEquals("shared-side-by-side-preview", result.playbackStatus)
+    }
+
+    @Test
+    fun focusThermal_restartsRtmpPushAfterSwitchingThermalSource() = runTest {
+        val invocationOrder = mutableListOf<String>()
+        val binder = object : MsdkStreamBinder {
+            override suspend fun bindVisible(droneSn: String) = Unit
+            override suspend fun bindThermal(droneSn: String) = Unit
+            override suspend fun focusVisible(droneSn: String) = Unit
+            override suspend fun focusThermal(droneSn: String) { invocationOrder += "focusThermal" }
+            override suspend fun unbindAll() = Unit
+        }
+        val liveStreamController = object : LiveStreamController {
+            override suspend fun start(droneSn: String) { invocationOrder += "rtmp.start" }
+            override suspend fun stop() { invocationOrder += "rtmp.stop" }
+        }
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = liveStreamController,
+        )
+
+        provider.focusThermal("DRONE-001")
+
+        assertEquals(listOf("focusThermal", "rtmp.stop", "rtmp.start"), invocationOrder)
+    }
+
+    @Test
+    fun focusVisible_restartsRtmpPushAfterSwitchingVisibleSource() = runTest {
+        val invocationOrder = mutableListOf<String>()
+        val binder = object : MsdkStreamBinder {
+            override suspend fun bindVisible(droneSn: String) = Unit
+            override suspend fun bindThermal(droneSn: String) = Unit
+            override suspend fun focusVisible(droneSn: String) { invocationOrder += "focusVisible" }
+            override suspend fun focusThermal(droneSn: String) = Unit
+            override suspend fun unbindAll() = Unit
+        }
+        val liveStreamController = object : LiveStreamController {
+            override suspend fun start(droneSn: String) { invocationOrder += "rtmp.start" }
+            override suspend fun stop() { invocationOrder += "rtmp.stop" }
+        }
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = liveStreamController,
+        )
+
+        provider.focusVisible("DRONE-001")
+
+        assertEquals(listOf("focusVisible", "rtmp.stop", "rtmp.start"), invocationOrder)
     }
 
     @Test

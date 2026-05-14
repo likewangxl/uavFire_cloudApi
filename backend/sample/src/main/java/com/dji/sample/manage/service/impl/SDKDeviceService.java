@@ -268,6 +268,9 @@ public class SDKDeviceService extends AbstractDeviceService {
         }
 
         deviceRedisService.setDeviceOnline(device);
+        // RC aircraft OSD must also be cached in Redis so command prechecks
+        // like return_home can evaluate airborne state in pilot scenarios.
+        deviceRedisService.setDeviceOsd(from, osdData);
 
         log.debug("飞行器OSD推送检查, from={}, workspaceId={}, boundStatus={}", from, device.getWorkspaceId(), device.getBoundStatus());
         OsdRcDrone data = request.getData();
@@ -384,6 +387,16 @@ public class SDKDeviceService extends AbstractDeviceService {
                                 .sn(p.getSn())
                                 .deviceSn(request.getFrom())
                                 .build()).collect(Collectors.toList()));
+    }
+
+    @Override
+    public void rcLiveStatusUpdate(TopicStateRequest<RcLiveStatus> request, MessageHeaders headers) {
+        log.info("RC live status update from {}: {}", request.getFrom(), request.getData().getLiveStatus());
+    }
+
+    @Override
+    public void dockLiveStatusUpdate(TopicStateRequest<DockLiveStatus> request, MessageHeaders headers) {
+        log.info("Dock live status update from {}: {}", request.getFrom(), request.getData().getLiveStatus());
     }
 
     private void dockGoOnline(DeviceDTO gateway, DeviceDTO subDevice) {

@@ -192,8 +192,13 @@ public abstract class AbstractControlService {
      * @param gateway
      * @param request   data
      * @return  services_reply
+     *
+     * NOTE: 与 takeoff_to_point 一样，RC Plus 2 在部分固件/拓扑上报场景下可能仍
+     * 被 SDK 识别成 GatewayTypeEnum.RC。若这里继续在 AOP 层排除 RC，命令会在到达
+     * 飞机前直接被拦成 210003，而拿不到更有意义的飞控错误码。这里放开 RC 限制，
+     * 改由设备自身返回 services_reply.result 判定是否真正支持。
      */
-    @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
+    @CloudSDKVersion
     public TopicServicesResponse<ServicesReplyData> flyToPoint(GatewayManager gateway, FlyToPointRequest request) {
         return servicesPublish.publish(
                 gateway.getGatewaySn(),
@@ -220,7 +225,7 @@ public abstract class AbstractControlService {
      * @param gateway
      * @return  services_reply
      */
-    @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
+    @CloudSDKVersion
     public TopicServicesResponse<ServicesReplyData> flyToPointStop(GatewayManager gateway) {
         return servicesPublish.publish(
                 gateway.getGatewaySn(),

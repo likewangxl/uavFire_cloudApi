@@ -151,9 +151,6 @@
               </Button>
             </div>
             <div>
-              <Button size="small" ghost @click="openLivestreamAgora" >
-                <span>Agora Live</span>
-              </Button>
               <Button size="small" ghost @click="openLivestreamOthers" >
                 <span>RTMP/GB28181 Live</span>
               </Button>
@@ -276,7 +273,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps, reactive, ref, watch, computed, onMounted, watchEffect } from 'vue'
+import { reactive, ref, watch, computed, onMounted, watchEffect } from 'vue'
 import { Select, message, Button } from 'ant-design-vue'
 import { PayloadInfo, DeviceInfoType, ControlSource, DeviceOsdCamera, DrcStateEnum } from '/@/types/device'
 import { useMyStore } from '/@/store'
@@ -740,10 +737,6 @@ function openLivestreamOthers () {
   store.commit('SET_LIVESTREAM_OTHERS_VISIBLE', true)
 }
 
-function openLivestreamAgora () {
-  store.commit('SET_LIVESTREAM_AGORA_VISIBLE', true)
-}
-
 async function onCameraAimConfirm (confirm: boolean) {
   if (confirm) {
     if (cameraAimPopoverData.cameraType === null || cameraAimPopoverData.x === null || cameraAimPopoverData.y === null) {
@@ -803,21 +796,16 @@ watch(() => errorInfo, (errorInfo) => {
           margin-bottom: 6px;
         }
 
-        &::v-deep{
-          .ant-btn{
-            font-size: 12px;
-            padding: 0px 4px;
-            margin-right: 5px;
-          }
+        :deep(.ant-btn) {
+          font-size: 12px;
+          padding: 0px 4px;
+          margin-right: 5px;
         }
       }
 
       .drone-control{
-         &::v-deep{
-
-          .ant-select-single:not(.ant-select-customize-input) .ant-select-selector{
-           padding: 0 2px;
-          }
+        :deep(.ant-select-single:not(.ant-select-customize-input) .ant-select-selector) {
+          padding: 0 2px;
         }
       }
 

@@ -52,9 +52,9 @@ public abstract class AbstractLivestreamService {
      * @param request   data
      * @return  services_reply
      */
-    public TopicServicesResponse<ServicesReplyData<String>> liveStartPush(GatewayManager gateway, LiveStartPushRequest request) {
+    public TopicServicesResponse<ServicesReplyData<LiveStartPushResponse>> liveStartPush(GatewayManager gateway, LiveStartPushRequest request) {
         return servicesPublish.publish(
-                new TypeReference<String>() {},
+                new TypeReference<LiveStartPushResponse>() {},
                 gateway.getGatewaySn(),
                 LiveStreamMethodEnum.LIVE_START_PUSH.getMethod(),
                 request,

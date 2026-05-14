@@ -1,6 +1,7 @@
 import { Firmware, FirmwareQueryParam, FirmwareUploadParam } from '/@/types/device-firmware'
 import request, { CommonListResponse, IListWorkspaceResponse, IPage, IWorkspaceResponse } from '/@/api/http/request'
 import { Device } from '/@/types/device'
+import { normalizeDualStreamGroup } from '/@/api/dual-stream-normalizer.mjs'
 
 const HTTP_PREFIX = '/manage/api/v1'
 
@@ -87,6 +88,83 @@ export const setLivestreamQuality = async function (body: {}): Promise<IWorkspac
   const url = `${HTTP_PREFIX}/live/streams/update`
   const result = await request.post(url, body)
   return result.data
+}
+
+export interface DualStreamGroup {
+  droneSn: string
+  connectionState?: string
+  sessionState?: string
+  liveStatus?: string
+  currentMode?: string
+  statusMessage?: string
+  visibleState?: string
+  thermalState?: string
+  statusReason?: string
+  playbackStatus?: string
+  visiblePlayUrl?: string
+  thermalPlayUrl?: string
+  lastCommandAction?: string
+  lastCommandStatus?: string
+  visibleSupported?: boolean
+  thermalSupported?: boolean
+}
+
+export interface DualStreamEvent {
+  taskId?: string
+  droneSn?: string
+  sourceTs?: number
+  visibleScore?: number
+  thermalScore?: number
+  fusionScore?: number
+  riskLevel?: string
+  analysisChannel?: string
+  reviewStatus?: string
+}
+
+const pickEventField = (event: any, camelKey: string, snakeKey: string) => {
+  if (event == null) return undefined
+  return event[camelKey] ?? event[snakeKey]
+}
+
+const normalizeDualStreamEvent = (event: any): DualStreamEvent => ({
+  taskId: pickEventField(event, 'taskId', 'task_id'),
+  droneSn: pickEventField(event, 'droneSn', 'drone_sn'),
+  sourceTs: pickEventField(event, 'sourceTs', 'source_ts'),
+  visibleScore: pickEventField(event, 'visibleScore', 'visible_score'),
+  thermalScore: pickEventField(event, 'thermalScore', 'thermal_score'),
+  fusionScore: pickEventField(event, 'fusionScore', 'fusion_score'),
+  riskLevel: pickEventField(event, 'riskLevel', 'risk_level'),
+  analysisChannel: pickEventField(event, 'analysisChannel', 'analysis_channel'),
+  reviewStatus: pickEventField(event, 'reviewStatus', 'review_status')
+})
+
+export const getDualStreamGroup = async function (droneSn: string): Promise<IWorkspaceResponse<DualStreamGroup>> {
+  const url = `${HTTP_PREFIX}/dual-stream/groups/${droneSn}`
+  const result = await request.get(url)
+  return {
+    ...result.data,
+    data: normalizeDualStreamGroup(result.data?.data)
+  }
+}
+
+export const requestDualStreamFocus = async function (
+  droneSn: string,
+  action: 'focus-visible' | 'focus-thermal'
+): Promise<IWorkspaceResponse<any>> {
+  const url = `${HTTP_PREFIX}/dual-stream/groups/${droneSn}/focus`
+  const result = await request.post(url, { action })
+  return result.data
+}
+
+export const getDualStreamTaskEvents = async function (taskId: string): Promise<IWorkspaceResponse<DualStreamEvent[]>> {
+  const url = `${HTTP_PREFIX}/dual-stream/tasks/${taskId}/events`
+  const result = await request.get(url)
+  return {
+    ...result.data,
+    data: Array.isArray(result.data?.data)
+      ? result.data.data.map(normalizeDualStreamEvent)
+      : []
+  }
 }
 
 export const getAllUsersInfo = async function (wid: string, body: IPage): Promise<CommonListResponse<any>> {

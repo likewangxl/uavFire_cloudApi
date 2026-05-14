@@ -18,7 +18,7 @@
 </template>
 
 <script lang="ts" setup>
-import { defineProps, defineEmits, ref, watch, computed } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { changeFirmareStatus } from '/@/api/manage'
 import { ELocalStorageKey } from '/@/types'
 import { Firmware, FirmwareStatusEnum } from '/@/types/device-firmware'

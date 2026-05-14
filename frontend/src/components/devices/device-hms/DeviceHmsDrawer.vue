@@ -82,7 +82,7 @@
 
 <!-- 暂时只抽取该组件 -->
 <script lang="ts" setup>
-import { watchEffect, reactive, ref, defineProps, defineEmits, watch } from 'vue'
+import { watchEffect, reactive, ref, watch } from 'vue'
 import { getDeviceHms, HmsQueryBody } from '/@/api/manage'
 import moment, { Moment } from 'moment'
 import { ColumnProps, TableState } from 'ant-design-vue/lib/table/interface'

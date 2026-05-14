@@ -11,6 +11,7 @@ import com.dji.sample.wayline.model.dto.PlannedWaylineDTO;
 import com.dji.sample.wayline.model.dto.PlannedWaypointDTO;
 import com.dji.sample.wayline.model.entity.PlannedWaylineEntity;
 import com.dji.sample.wayline.model.param.CreatePlannedWaylineParam;
+import com.dji.sample.wayline.model.param.PreparePlannedWaylineTaskParam;
 import com.dji.sample.wayline.model.param.PublishPlannedWaylineResponse;
 import com.dji.sample.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sample.wayline.service.IPlannedWaylineService;
@@ -35,7 +36,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -46,6 +49,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private static final String STATUS_DRAFT = "draft";
     private static final String STATUS_PUBLISHED = "published";
+    private static final String STATUS_FILE_GENERATED = "file_generated";
+    private static final String STATUS_PUBLISHING = "publishing";
+    private static final String STATUS_EXECUTING = "executing";
+    private static final String STATUS_CANCELED = "canceled";
 
     private final IPlannedWaylineMapper mapper;
 
@@ -93,6 +100,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (Objects.isNull(existing)) {
             throw new IllegalArgumentException("Planned wayline doesn't exist.");
         }
+        if (STATUS_PUBLISHED.equalsIgnoreCase(existing.getStatus()) || StringUtils.hasText(existing.getPublishedWaylineId())) {
+            throw new IllegalArgumentException("Published planned wayline cannot be updated. Save as a new planned wayline instead.");
+        }
 
         applyEditableFields(existing, param);
         existing.setUpdateTime(System.currentTimeMillis());
@@ -104,7 +114,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     @Override
-    public PublishPlannedWaylineResponse publish(String workspaceId, String id) {
+    public PublishPlannedWaylineResponse publish(String workspaceId, String id, String username) {
         PlannedWaylineEntity existing = mapper.selectOne(
                 new LambdaQueryWrapper<PlannedWaylineEntity>()
                         .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
@@ -117,6 +127,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                     .plannedWaylineId(existing.getPlannedWaylineId())
                     .publishedWaylineId(existing.getPublishedWaylineId())
                     .publishedWaylineName(existing.getName())
+                    .publisher(existing.getPublisher())
+                    .publishTime(existing.getPublishTime())
                     .build();
         }
 
@@ -129,6 +141,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .id(existing.getId())
                 .publishedWaylineId(publishedWayline.getWaylineId())
                 .status(STATUS_PUBLISHED)
+                .publisher(username)
+                .publishTime(updateTime)
                 .updateTime(updateTime)
                 .build();
         int updated;
@@ -154,19 +168,142 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                         .plannedWaylineId(current.getPlannedWaylineId())
                         .publishedWaylineId(current.getPublishedWaylineId())
                         .publishedWaylineName(current.getName())
+                        .publisher(current.getPublisher())
+                        .publishTime(current.getPublishTime())
                         .build();
             }
             throw new IllegalArgumentException("Failed to publish planned wayline.");
         }
         existing.setPublishedWaylineId(publishedWayline.getWaylineId());
         existing.setStatus(STATUS_PUBLISHED);
+        existing.setPublisher(username);
+        existing.setPublishTime(updateTime);
         existing.setUpdateTime(updateTime);
 
         return PublishPlannedWaylineResponse.builder()
                 .plannedWaylineId(existing.getPlannedWaylineId())
                 .publishedWaylineId(existing.getPublishedWaylineId())
                 .publishedWaylineName(existing.getName())
+                .publisher(existing.getPublisher())
+                .publishTime(existing.getPublishTime())
                 .build();
+    }
+
+    @Override
+    public PlannedWaylineDTO generateFile(String workspaceId, String id, String username) {
+        PlannedWaylineEntity existing = getExisting(workspaceId, id);
+        String previousPublishedWaylineId = null;
+        if (StringUtils.hasText(existing.getPublishedWaylineId())) {
+            if (isGeneratedWaylineSafe(workspaceId, existing)) {
+                enrichGeneratedFileMetadata(workspaceId, existing);
+                return entity2Dto(existing);
+            }
+            previousPublishedWaylineId = existing.getPublishedWaylineId();
+            waylineFileService.deleteByWaylineId(workspaceId, existing.getPublishedWaylineId());
+            existing.setPublishedWaylineId(null);
+            existing.setKmzUrl(null);
+            existing.setKmzMd5(null);
+            existing.setKmzObjectKey(null);
+            existing.setFileGeneratedTime(null);
+        }
+
+        existing.setName(sanitizeDjiWaylineName(existing.getName(), existing.getPlannedWaylineId()));
+        validatePublishableRecord(existing);
+        PublishedWaylineFileDTO publishedWayline = waylineFileService.createPublishedWayline(
+                workspaceId, buildPublishedWaylineCreate(existing));
+        long now = System.currentTimeMillis();
+        existing.setPublishedWaylineId(publishedWayline.getWaylineId());
+        existing.setStatus(STATUS_FILE_GENERATED);
+        existing.setKmzObjectKey(publishedWayline.getObjectKey());
+        existing.setFileGeneratedTime(now);
+        existing.setPublisher(username);
+        existing.setPublishTime(now);
+        enrichGeneratedFileMetadata(workspaceId, existing);
+        existing.setUpdateTime(now);
+
+        PlannedWaylineEntity update = PlannedWaylineEntity.builder()
+                .id(existing.getId())
+                .name(existing.getName())
+                .publishedWaylineId(existing.getPublishedWaylineId())
+                .status(existing.getStatus())
+                .kmzUrl(existing.getKmzUrl())
+                .kmzMd5(existing.getKmzMd5())
+                .kmzObjectKey(existing.getKmzObjectKey())
+                .fileGeneratedTime(existing.getFileGeneratedTime())
+                .publisher(existing.getPublisher())
+                .publishTime(existing.getPublishTime())
+                .updateTime(existing.getUpdateTime())
+                .build();
+        LambdaUpdateWrapper<PlannedWaylineEntity> updateWrapper = new LambdaUpdateWrapper<PlannedWaylineEntity>()
+                .eq(PlannedWaylineEntity::getId, existing.getId())
+                .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
+                .eq(PlannedWaylineEntity::getPlannedWaylineId, id);
+        if (StringUtils.hasText(previousPublishedWaylineId)) {
+            updateWrapper.eq(PlannedWaylineEntity::getPublishedWaylineId, previousPublishedWaylineId);
+        } else {
+            updateWrapper.isNull(PlannedWaylineEntity::getPublishedWaylineId);
+        }
+        int updated = mapper.update(update, updateWrapper);
+        if (updated <= 0) {
+            rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
+            throw new IllegalArgumentException("Failed to generate planned wayline file.");
+        }
+        return entity2Dto(existing);
+    }
+
+    @Override
+    public PlannedWaylineDTO prepareTask(String workspaceId, String id, String username, PreparePlannedWaylineTaskParam param) {
+        if (param == null || !StringUtils.hasText(param.getDockSn())) {
+            throw new IllegalArgumentException("Dock sn is required.");
+        }
+        PlannedWaylineEntity existing = getExisting(workspaceId, id);
+        if (!StringUtils.hasText(existing.getPublishedWaylineId())) {
+            throw new IllegalArgumentException("Generate the planned wayline file before preparing the flight task.");
+        }
+
+        long now = System.currentTimeMillis();
+        existing.setStatus(STATUS_PUBLISHING);
+        existing.setTaskStatus(STATUS_PUBLISHING);
+        existing.setFlightId(UUID.randomUUID().toString());
+        existing.setDockSn(param.getDockSn());
+        existing.setDroneSn(param.getDroneSn());
+        existing.setPublisher(username);
+        existing.setPublishTime(now);
+        existing.setUpdateTime(now);
+
+        updateTaskFields(existing);
+        return entity2Dto(existing);
+    }
+
+    @Override
+    public PlannedWaylineDTO executeTask(String workspaceId, String id) {
+        PlannedWaylineEntity existing = getExisting(workspaceId, id);
+        if (!StringUtils.hasText(existing.getFlightId())) {
+            throw new IllegalArgumentException("Prepare the planned wayline task before executing it.");
+        }
+        long now = System.currentTimeMillis();
+        existing.setStatus(STATUS_EXECUTING);
+        existing.setTaskStatus(STATUS_EXECUTING);
+        existing.setExecutedTime(now);
+        existing.setUpdateTime(now);
+
+        updateTaskFields(existing);
+        return entity2Dto(existing);
+    }
+
+    @Override
+    public PlannedWaylineDTO cancelTask(String workspaceId, String id) {
+        PlannedWaylineEntity existing = getExisting(workspaceId, id);
+        if (!StringUtils.hasText(existing.getFlightId())) {
+            throw new IllegalArgumentException("Prepare the planned wayline task before canceling it.");
+        }
+        long now = System.currentTimeMillis();
+        existing.setStatus(STATUS_CANCELED);
+        existing.setTaskStatus(STATUS_CANCELED);
+        existing.setUpdateTime(now);
+
+        updateTaskFields(existing);
+        return entity2Dto(existing);
     }
 
     @Override
@@ -186,6 +323,58 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                         .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
                         .eq(PlannedWaylineEntity::getPlannedWaylineId, id));
         return Optional.ofNullable(entity2Dto(entity));
+    }
+
+    private PlannedWaylineEntity getExisting(String workspaceId, String id) {
+        PlannedWaylineEntity existing = mapper.selectOne(
+                new LambdaQueryWrapper<PlannedWaylineEntity>()
+                        .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
+                        .eq(PlannedWaylineEntity::getPlannedWaylineId, id));
+        if (Objects.isNull(existing)) {
+            throw new IllegalArgumentException("Planned wayline doesn't exist.");
+        }
+        return existing;
+    }
+
+    private void enrichGeneratedFileMetadata(String workspaceId, PlannedWaylineEntity entity) {
+        if (!StringUtils.hasText(entity.getPublishedWaylineId())) {
+            return;
+        }
+        waylineFileService.getWaylineByWaylineId(workspaceId, entity.getPublishedWaylineId())
+                .ifPresent(file -> {
+                    entity.setKmzMd5(file.getSign());
+                    if (!StringUtils.hasText(entity.getKmzObjectKey())) {
+                        entity.setKmzObjectKey(file.getObjectKey());
+                    }
+                });
+        try {
+            URL url = waylineFileService.getObjectUrl(workspaceId, entity.getPublishedWaylineId());
+            entity.setKmzUrl(url.toString());
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to get generated planned wayline file URL.", e);
+        }
+    }
+
+    private void updateTaskFields(PlannedWaylineEntity existing) {
+        PlannedWaylineEntity update = PlannedWaylineEntity.builder()
+                .id(existing.getId())
+                .status(existing.getStatus())
+                .flightId(existing.getFlightId())
+                .dockSn(existing.getDockSn())
+                .droneSn(existing.getDroneSn())
+                .taskStatus(existing.getTaskStatus())
+                .taskStatusReason(existing.getTaskStatusReason())
+                .taskProgress(existing.getTaskProgress())
+                .preparedTime(existing.getPreparedTime())
+                .executedTime(existing.getExecutedTime())
+                .publisher(existing.getPublisher())
+                .publishTime(existing.getPublishTime())
+                .updateTime(existing.getUpdateTime())
+                .build();
+        int updated = mapper.updateById(update);
+        if (updated <= 0) {
+            throw new IllegalArgumentException("Planned wayline doesn't exist.");
+        }
     }
 
     private void validateParam(CreatePlannedWaylineParam param) {
@@ -216,12 +405,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         if (!StringUtils.hasText(aircraftModelKey)) {
             throw new IllegalArgumentException("Planned wayline aircraft model key is required.");
-        }
-        if (!StringUtils.hasText(gatewaySn)) {
-            throw new IllegalArgumentException("Planned wayline gateway sn is required.");
-        }
-        if (!StringUtils.hasText(aircraftSn)) {
-            throw new IllegalArgumentException("Planned wayline aircraft sn is required.");
         }
         if (!isFinite(defaultHeight)) {
             throw new IllegalArgumentException("Planned wayline default height is required.");
@@ -307,7 +490,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     private PublishedWaylineCreateDTO buildPublishedWaylineCreate(PlannedWaylineEntity entity) {
-        String filename = entity.getName() + ".kmz";
+        String publishedName = sanitizeDjiWaylineName(entity.getName(), entity.getPlannedWaylineId());
+        String filename = publishedName + ".kmz";
         String objectKey = StringUtils.hasText(OssConfiguration.objectDirPrefix)
                 ? trimTrailingSlash(OssConfiguration.objectDirPrefix) + "/" + entity.getPlannedWaylineId() + ".kmz"
                 : entity.getPlannedWaylineId() + ".kmz";
@@ -315,11 +499,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .filename(filename)
                 .objectKey(objectKey)
                 .username(entity.getCreator())
-                .content(buildPublishedKmz(entity))
+                .content(buildPublishedKmz(entity, publishedName))
                 .build();
     }
 
-    private byte[] buildPublishedKmz(PlannedWaylineEntity entity) {
+    private byte[] buildPublishedKmz(PlannedWaylineEntity entity, String publishedName) {
         DeviceEnum droneDevice = resolveDroneDevice(entity.getAircraftModelKey());
         DeviceEnum payloadDevice = resolvePayloadDevice(droneDevice);
         List<PlannedWaypointDTO> waypoints = readWaypoints(entity.getWaypointsJson());
@@ -331,7 +515,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 zipOutputStream.write(buildTemplateKml(droneDevice, payloadDevice).getBytes(StandardCharsets.UTF_8));
                 zipOutputStream.closeEntry();
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
-                zipOutputStream.write(buildWaylinesWpml(entity, waypoints).getBytes(StandardCharsets.UTF_8));
+                zipOutputStream.write(buildWaylinesWpml(publishedName, waypoints).getBytes(StandardCharsets.UTF_8));
                 zipOutputStream.closeEntry();
             }
             return outputStream.toByteArray();
@@ -389,7 +573,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 + "</kml>";
     }
 
-    private String buildWaylinesWpml(PlannedWaylineEntity entity, List<PlannedWaypointDTO> waypoints) {
+    private String buildWaylinesWpml(String publishedName, List<PlannedWaypointDTO> waypoints) {
         String placemarks = waypoints.stream()
                 .map(waypoint -> "<Placemark>"
                         + "<name>" + waypoint.getOrder() + "</name>"
@@ -399,7 +583,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
                 + "<Document>"
-                + "<name>" + escapeXml(entity.getName()) + "</name>"
+                + "<name>" + escapeXml(publishedName) + "</name>"
                 + "<wpml:waylineCoordinateSysParam>"
                 + "<wpml:coordinateMode>WGS84</wpml:coordinateMode>"
                 + "<wpml:heightMode>relativeToStartPoint</wpml:heightMode>"
@@ -413,6 +597,31 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private String trimTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private String sanitizeDjiWaylineName(String name, String fallback) {
+        String sanitized = StringUtils.hasText(name) ? name.trim() : "";
+        sanitized = sanitized.replaceAll("[<>:\"/|?*._\\\\]+", "-")
+                .replaceAll("\\s+", " ")
+                .replaceAll("^-+|-+$", "")
+                .trim();
+        if (StringUtils.hasText(sanitized)) {
+            return sanitized;
+        }
+        return StringUtils.hasText(fallback) ? fallback : "planned-wayline";
+    }
+
+    private boolean isDjiSafeWaylineName(String name) {
+        return StringUtils.hasText(name) && name.matches("^[^<>:\"/|?*._\\\\]+$");
+    }
+
+    private boolean isGeneratedWaylineSafe(String workspaceId, PlannedWaylineEntity entity) {
+        if (!isDjiSafeWaylineName(entity.getName())) {
+            return false;
+        }
+        return waylineFileService.getWaylineByWaylineId(workspaceId, entity.getPublishedWaylineId())
+                .map(file -> isDjiSafeWaylineName(file.getName()))
+                .orElse(false);
     }
 
     private String escapeXml(String value) {
@@ -439,7 +648,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     private void applyEditableFields(PlannedWaylineEntity target, UpdatePlannedWaylineParam param) {
-        target.setName(param.getName());
+        target.setName(sanitizeDjiWaylineName(param.getName(), target.getPlannedWaylineId()));
         target.setAircraftModelKey(param.getAircraftModelKey());
         target.setGatewaySn(param.getGatewaySn());
         target.setAircraftSn(param.getAircraftSn());
@@ -453,7 +662,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             return new PlannedWaylineEntity();
         }
         return PlannedWaylineEntity.builder()
-                .name(param.getName())
+                .name(sanitizeDjiWaylineName(param.getName(), null))
                 .aircraftModelKey(param.getAircraftModelKey())
                 .gatewaySn(param.getGatewaySn())
                 .aircraftSn(param.getAircraftSn())
@@ -479,7 +688,21 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .waypointsJson(writeWaypoints(dto.getWaypoints()))
                 .status(dto.getStatus())
                 .publishedWaylineId(dto.getPublishedWaylineId())
+                .kmzUrl(dto.getKmzUrl())
+                .kmzMd5(dto.getKmzMd5())
+                .kmzObjectKey(dto.getKmzObjectKey())
+                .fileGeneratedTime(dto.getFileGeneratedTime())
+                .flightId(dto.getFlightId())
+                .dockSn(dto.getDockSn())
+                .droneSn(dto.getDroneSn())
+                .taskStatus(dto.getTaskStatus())
+                .taskStatusReason(dto.getTaskStatusReason())
+                .taskProgress(dto.getTaskProgress())
+                .preparedTime(dto.getPreparedTime())
+                .executedTime(dto.getExecutedTime())
                 .creator(dto.getCreator())
+                .publisher(dto.getPublisher())
+                .publishTime(dto.getPublishTime())
                 .createTime(dto.getCreateTime())
                 .updateTime(dto.getUpdateTime())
                 .build();
@@ -490,7 +713,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             return new PlannedWaylineEntity();
         }
         return PlannedWaylineEntity.builder()
-                .name(param.getName())
+                .name(sanitizeDjiWaylineName(param.getName(), null))
                 .aircraftModelKey(param.getAircraftModelKey())
                 .gatewaySn(param.getGatewaySn())
                 .aircraftSn(param.getAircraftSn())
@@ -516,7 +739,21 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .waypoints(readWaypoints(entity.getWaypointsJson()))
                 .status(entity.getStatus())
                 .publishedWaylineId(entity.getPublishedWaylineId())
+                .kmzUrl(entity.getKmzUrl())
+                .kmzMd5(entity.getKmzMd5())
+                .kmzObjectKey(entity.getKmzObjectKey())
+                .fileGeneratedTime(entity.getFileGeneratedTime())
+                .flightId(entity.getFlightId())
+                .dockSn(entity.getDockSn())
+                .droneSn(entity.getDroneSn())
+                .taskStatus(entity.getTaskStatus())
+                .taskStatusReason(entity.getTaskStatusReason())
+                .taskProgress(entity.getTaskProgress())
+                .preparedTime(entity.getPreparedTime())
+                .executedTime(entity.getExecutedTime())
                 .creator(entity.getCreator())
+                .publisher(entity.getPublisher())
+                .publishTime(entity.getPublishTime())
                 .createTime(entity.getCreateTime())
                 .updateTime(entity.getUpdateTime())
                 .build();

@@ -5,7 +5,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, defineProps, watch } from 'vue'
+import { ref, watch } from 'vue'
 
 const props = defineProps<{
     message?: string,
@@ -23,12 +23,10 @@ watch(() => props.message, message => {
 
 <style lang="scss" scoped>
 .drone-control-info-wrap {
-  &::v-deep{
-    textarea.ant-input {
-      background-color: #000;
-      color: #fff;
-      white-space: pre-wrap;
-    }
+  :deep(textarea.ant-input) {
+    background-color: #000;
+    color: #fff;
+    white-space: pre-wrap;
   }
 }
 </style>

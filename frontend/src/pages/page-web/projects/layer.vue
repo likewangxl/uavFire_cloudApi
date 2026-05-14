@@ -3,7 +3,7 @@
     <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #4f4f4f; font-weight: 450;">
       <a-row>
         <a-col :span="1"></a-col>
-        <a-col :span="22">Annotations</a-col>
+        <a-col :span="22">标注</a-col>
         <a-col :span="1"></a-col>
       </a-row>
     </div>
@@ -18,7 +18,7 @@
     />
     </div>
     <a-drawer
-      title="Map Element"
+      title="地图元素"
       placement="right"
       :closable="true"
       v-model:visible="visible"
@@ -29,11 +29,11 @@
     >
       <div class="drawer-element-content">
         <div class="name element-item">
-          <span class="title">Name:</span>
+          <span class="title">名称：</span>
           <a-input
             v-model:value="layerState.layerName"
             style="width:120px"
-            placeholder="element name"
+            placeholder="请输入元素名称"
             @change="changeLayer"
           />
         </div>
@@ -41,11 +41,11 @@
           class="longitude element-item"
           v-if="layerState.currentType === geoType.Point"
         >
-          <span class="title">Longitude:</span>
+          <span class="title">经度：</span>
           <a-input
             v-model:value="layerState.longitude"
             style="width:120px"
-            placeholder="longitude"
+            placeholder="请输入经度"
             @change="changeLayer"
           />
         </div>
@@ -53,16 +53,16 @@
           class="latitude element-item"
           v-if="layerState.currentType === geoType.Point"
         >
-          <span class="title">Latitude:</span>
+          <span class="title">纬度：</span>
           <a-input
             v-model:value="layerState.latitude"
             style="width:120px"
-            placeholder="latitude"
+            placeholder="请输入纬度"
             @change="changeLayer"
           />
         </div>
         <div class="color-content">
-          <span class="mr30">Color: </span>
+          <span class="mr30">颜色：</span>
           <div
             v-for="item in colors"
             :key="item.id"
@@ -79,7 +79,7 @@
         </div>
       </div>
       <div class="flex-row flex-justify-around flex-align-center mt20">
-        <a-button type="primary" @click="deleteElement">Delete</a-button>
+        <a-button type="primary" @click="deleteElement">删除</a-button>
       </div>
     </a-drawer>
   </div>
@@ -396,7 +396,7 @@ function updateCoordinates (transformType: string, element: LayerResource) {
 </script>
 
 <style lang="scss" scoped>
-@import '/@/styles/index.scss';
+@use '/@/styles/index.scss';
 </style>
 <style lang="scss">
 .drawer-element-wrapper {

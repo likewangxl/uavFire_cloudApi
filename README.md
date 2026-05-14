@@ -24,3 +24,10 @@
 - MQTT Broker，包含 BASIC MQTT 和 DRC WebSocket MQTT
 
 构建产物、依赖目录、IDE 元数据和运行日志不会提交到版本库，例如 `node_modules`、`dist`、`target`、`logs`、`*.log`。
+
+## 双流 PoC 子工程
+
+- `rcplus-msdk-agent/`：RC Plus 2 Android / DJI MSDK v5 执行层工程骨架。
+- `ai-service/`：双流火情识别 AI 服务工程骨架。
+
+当前阶段仅固化工程边界、依赖声明、后续接口与本地验证入口，不代表已完成真机双流联调、正式推流链路或商用级火情识别能力。

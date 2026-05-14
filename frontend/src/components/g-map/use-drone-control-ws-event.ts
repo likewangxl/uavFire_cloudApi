@@ -23,20 +23,50 @@ export function useDroneControlWsEvent (sn: string, payloadSn: string, funcs?: U
     }
   }
 
-  function handleProgress (key: string, message: string, error: number) {
+  // Status strings that indicate the task is still running (not a terminal state).
+  // Seeing these with non-zero result code is normal (the code carries in-progress
+  // diagnostics like battery warnings) and must NOT pop an error notification.
+  const IN_PROGRESS_STATUSES = new Set(['task_ready', 'wayline_progress'])
+  const SUCCESS_STATUSES = new Set(['wayline_ok', 'task_finish'])
+  const FAILURE_STATUSES = new Set(['wayline_failed', 'wayline_cancel'])
+
+  function handleProgress (key: string, description: string, error: number, status?: string) {
+    if (status && IN_PROGRESS_STATUSES.has(status)) {
+      // Silently ignore intermediate progress ticks to avoid notification spam.
+      return
+    }
+    if (status && FAILURE_STATUSES.has(status)) {
+      notification.error({
+        key: key,
+        message: `${key} (${status}) code:${error}`,
+        description: description,
+        duration: 10
+      })
+      return
+    }
+    if (status && SUCCESS_STATUSES.has(status)) {
+      notification.success({
+        key: key,
+        message: `${key} (${status})`,
+        description: description,
+        duration: 5
+      })
+      return
+    }
+    // No status field — fall back to using the numeric result code.
     if (error !== 0) {
       notification.error({
         key: key,
-        message: key + 'Error code:' + error,
-        description: message,
-        duration: null
+        message: `${key} code:${error}`,
+        description: description,
+        duration: 10
       })
     } else {
       notification.info({
         key: key,
         message: key,
-        description: message,
-        duration: 30
+        description: description,
+        duration: 5
       })
     }
   }
@@ -52,15 +82,15 @@ export function useDroneControlWsEvent (sn: string, payloadSn: string, funcs?: U
         break
       }
       case EBizCode.FlyToPointProgress: {
-        const { sn: deviceSn, result, message: msg } = payload.data as FlyToPointMessage
+        const { sn: deviceSn, result, message: msg, status } = payload.data as FlyToPointMessage
         if (deviceSn !== sn) return
-        handleProgress(EBizCode.FlyToPointProgress, `device(sn: ${deviceSn}) ${msg}`, result)
+        handleProgress(EBizCode.FlyToPointProgress, `device(sn: ${deviceSn}) ${msg}`, result, status)
         break
       }
       case EBizCode.TakeoffToPointProgress: {
-        const { sn: deviceSn, result, message: msg } = payload.data as TakeoffToPointMessage
+        const { sn: deviceSn, result, message: msg, status } = payload.data as TakeoffToPointMessage
         if (deviceSn !== sn) return
-        handleProgress(EBizCode.TakeoffToPointProgress, `device(sn: ${deviceSn}) ${msg}`, result)
+        handleProgress(EBizCode.TakeoffToPointProgress, `device(sn: ${deviceSn}) ${msg}`, result, status)
         break
       }
       case EBizCode.JoystickInvalidNotify: {

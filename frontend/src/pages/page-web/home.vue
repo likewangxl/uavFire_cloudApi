@@ -1,9 +1,9 @@
 <template>
-  <a-layout class="width-100 flex-display" style="height: 100vh">
+  <a-layout class="width-100 flex-display page-shell">
     <a-layout-header class="header">
       <Topbar />
     </a-layout-header>
-    <a-layout-content>
+    <a-layout-content class="page-content">
       <router-view />
     </a-layout-content>
 
@@ -54,11 +54,23 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-@import '/@/styles/index.scss';
+@use '/@/styles/index.scss';
 
 .fontBold {
   font-weight: 500;
   font-size: 18px;
+}
+
+.page-shell {
+  height: 100vh;
+  flex-direction: column;
+}
+
+.page-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .header {

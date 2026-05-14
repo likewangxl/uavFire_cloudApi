@@ -419,11 +419,6 @@
       <a style="position: absolute; right: 10px; top: 10px; font-size: 16px; color: white;" @click="closeLivestreamOthers"><CloseOutlined /></a>
       <LivestreamOthers />
     </div>
-    <div class="liveview" v-if="livestreamAgoraVisible" v-drag-window  >
-      <div style="height: 40px; width: 100%" class="drag-title"></div>
-      <a style="position: absolute; right: 10px; top: 10px; font-size: 16px; color: white;" @click="closeLivestreamAgora"><CloseOutlined /></a>
-      <LivestreamAgora />
-    </div>
   </div>
 </template>
 
@@ -464,7 +459,6 @@ import { useDockControl } from './g-map/use-dock-control'
 import DroneControlPanel from './g-map/DroneControlPanel.vue'
 import { useConnectMqtt } from './g-map/use-connect-mqtt'
 import LivestreamOthers from './livestream-others.vue'
-import LivestreamAgora from './livestream-agora.vue'
 import FlightAreaActionIcon from './flight-area/FlightAreaActionIcon.vue'
 import { EFlightAreaType } from '../types/flight-area'
 import { useFlightArea } from './flight-area/use-flight-area'
@@ -495,7 +489,6 @@ export default defineComponent({
     CarryOutOutlined,
     RocketOutlined,
     LivestreamOthers,
-    LivestreamAgora,
     FlightAreaActionIcon,
   },
   name: 'GMap',
@@ -558,9 +551,6 @@ export default defineComponent({
     })
     const livestreamOthersVisible = computed(() => {
       return store.state.livestreamOthersVisible
-    })
-    const livestreamAgoraVisible = computed(() => {
-      return store.state.livestreamAgoraVisible
     })
     const osdVisible = computed(() => {
       return store.state.osdVisible
@@ -731,6 +721,9 @@ export default defineComponent({
     // the clicked point as a waypoint; we also maintain AMap markers + a
     // polyline visualising the current waypoint list.
     const planningState = getPlanningStateRaw()
+    const renderPlanningWaypoints = computed(() => {
+      return planningState.waypoints.length > 0 ? planningState.waypoints : planningState.previewWaypoints
+    })
     const planningMarkers: any[] = []
     let planningPolyline: any = null
     let planningClickBound = false
@@ -758,8 +751,9 @@ export default defineComponent({
       const map = root?.$map
       if (!AMap || !map) return
       clearPlanningOverlays()
-      if (planningState.waypoints.length === 0) return
-      planningState.waypoints.forEach((wp, idx) => {
+      const waypoints = renderPlanningWaypoints.value
+      if (waypoints.length === 0) return
+      waypoints.forEach((wp, idx) => {
         const marker = new AMap.Marker({
           position: [wp.gcjLng, wp.gcjLat],
           label: {
@@ -771,9 +765,9 @@ export default defineComponent({
         map.add(marker)
         planningMarkers.push(marker)
       })
-      if (planningState.waypoints.length >= 2) {
+      if (waypoints.length >= 2) {
         planningPolyline = new AMap.Polyline({
-          path: planningState.waypoints.map(w => [w.gcjLng, w.gcjLat]),
+          path: waypoints.map(w => [w.gcjLng, w.gcjLat]),
           strokeColor: '#faad14',
           strokeWeight: 3,
           strokeStyle: 'dashed',
@@ -808,7 +802,7 @@ export default defineComponent({
     })
 
     watch(
-      () => planningState.waypoints.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|'),
+      () => renderPlanningWaypoints.value.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|'),
       () => rebuildPlanningOverlays()
     )
 
@@ -908,9 +902,6 @@ export default defineComponent({
     function closeLivestreamOthers () {
       store.commit('SET_LIVESTREAM_OTHERS_VISIBLE', false)
     }
-    function closeLivestreamAgora () {
-      store.commit('SET_LIVESTREAM_AGORA_VISIBLE', false)
-    }
     function updateCoordinates (transformType: string, element: any) {
       const geoType = element.resource?.content.geometry.type
       const type = element.resource?.type as number
@@ -977,7 +968,6 @@ export default defineComponent({
       mouseMode,
       drawVisible,
       livestreamOthersVisible,
-      livestreamAgoraVisible,
       osdVisible,
       pin,
       state,
@@ -995,7 +985,6 @@ export default defineComponent({
       RainfallEnum,
       DroneInDockEnum,
       closeLivestreamOthers,
-      closeLivestreamAgora,
       qualityStyle,
       selectFlightAreaAction,
     }

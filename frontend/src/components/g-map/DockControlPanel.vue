@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps, defineEmits, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import {
   CloseOutlined
 } from '@ant-design/icons-vue'

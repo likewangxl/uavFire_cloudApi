@@ -82,6 +82,29 @@ def test_tick_emits_event_with_visible_only_when_thermal_source_is_none():
 
     assert record is not None
     assert record.fusion_score == round(0.6 * 0.6, 3)
+    assert record.analysis_channel == "visible"
+
+
+def test_tick_emits_event_with_thermal_channel_when_only_thermal_packet_available():
+    registry = _registry_with_task()
+    runner = ContinuousTaskRunner(
+        registry=registry,
+        visible_detector=_FakeDetector(score=0.0),
+        thermal_analyzer=_FakeAnalyzer(score=0.9),
+        fusion_service=DualStreamFusionService(),
+    )
+
+    record = runner.tick(
+        task_id="task-CR-1",
+        visible_source=None,
+        thermal_source=_StubVideoSource(
+            packets=[FramePacket(source_ts=1900, channel="thermal", frame=object())]
+        ),
+    )
+
+    assert record is not None
+    assert record.analysis_channel == "thermal"
+    assert record.fusion_score == round(0.9 * 0.4, 3)
 
 
 def test_tick_swallows_read_exception_and_treats_as_no_packet():

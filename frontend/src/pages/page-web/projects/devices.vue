@@ -2,10 +2,10 @@
 <template>
   <a-menu v-model:selectedKeys="current" mode="horizontal" @select="select">
     <a-menu-item :key="EDeviceTypeName.Aircraft" class="ml20">
-      Aircraft
+      飞行器
     </a-menu-item>
     <a-menu-item :key="EDeviceTypeName.Dock">
-      Dock
+      机场
     </a-menu-item>
   </a-menu>
   <div class="device-table-wrap table flex-display flex-column">
@@ -47,11 +47,11 @@
       <template #status="{ text }">
         <span v-if="text" class="flex-row flex-align-center">
             <span class="mr5" style="width: 12px; height: 12px; border-radius: 50%; background-color: green;" />
-            <span>Online</span>
+            <span>在线</span>
         </span>
         <span class="flex-row flex-align-center" v-else>
             <span class="mr5" style="width: 12px; height: 12px; border-radius: 50%; background-color: red;" />
-            <span>Offline</span>
+            <span>离线</span>
         </span>
       </template>
       <!-- 操作 -->
@@ -59,10 +59,10 @@
         <div class="editable-row-operations">
           <!-- 编辑态操作 -->
           <div v-if="editableData[record.device_sn]">
-            <a-tooltip title="Confirm changes">
+            <a-tooltip title="确认修改">
               <span @click="save(record)" style="color: #28d445;"><CheckOutlined /></span>
             </a-tooltip>
-            <a-tooltip title="Modification canceled">
+            <a-tooltip title="取消修改">
               <span @click="() => delete editableData[record.device_sn]" style="color: #e70102;"><CloseOutlined /></span>
             </a-tooltip>
           </div>
@@ -71,13 +71,13 @@
             <a-tooltip v-if="current.indexOf(EDeviceTypeName.Dock) !== -1" title="设备日志">
               <CloudServerOutlined @click="showDeviceLogUploadRecord(record)"/>
             </a-tooltip>
-            <a-tooltip v-if="current.indexOf(EDeviceTypeName.Dock) !== -1" title="Hms Info">
+            <a-tooltip v-if="current.indexOf(EDeviceTypeName.Dock) !== -1" title="HMS 信息">
               <FileSearchOutlined @click="showHms(record)"/>
             </a-tooltip>
-            <a-tooltip title="Edit">
+            <a-tooltip title="编辑">
               <EditOutlined @click="edit(record)"/>
             </a-tooltip>
-            <a-tooltip title="Delete">
+            <a-tooltip title="删除">
               <DeleteOutlined @click="() => { deleteTip = true, deleteSn = record.device_sn }"/>
             </a-tooltip>
           </div>
@@ -86,10 +86,10 @@
 
     </a-table>
     <a-modal v-model:visible="deleteTip" width="450px" :closable="false" centered :okButtonProps="{ danger: true }" @ok="unbind">
-        <p class="pt10 pl20" style="height: 50px;">Delete device from workspace?</p>
+        <p class="pt10 pl20" style="height: 50px;">确认将设备从工作空间中删除？</p>
         <template #title>
             <div class="flex-row flex-justify-center">
-                <span>Delete devices</span>
+                <span>删除设备</span>
             </div>
         </template>
     </a-modal>
@@ -139,10 +139,10 @@ const loading = ref(true)
 const deleteTip = ref<boolean>(false)
 const deleteSn = ref<string>()
 const columns: ColumnProps[] = [
-  { title: 'Model', dataIndex: 'device_name', width: 100, className: 'titleStyle' },
+  { title: '型号', dataIndex: 'device_name', width: 100, className: 'titleStyle' },
   { title: 'SN', dataIndex: 'device_sn', width: 100, className: 'titleStyle', ellipsis: true, slots: { customRender: 'sn' } },
   {
-    title: 'Name',
+    title: '名称',
     dataIndex: 'nickname',
     width: 100,
     sorter: (a: Device, b: Device) => a.nickname.localeCompare(b.nickname),
@@ -150,10 +150,10 @@ const columns: ColumnProps[] = [
     ellipsis: true,
     slots: { customRender: 'nickname' }
   },
-  { title: 'Firmware Version', dataIndex: 'firmware_version', width: 150, className: 'titleStyle', slots: { customRender: 'firmware_version' } },
-  { title: 'Status', dataIndex: 'status', width: 100, className: 'titleStyle', slots: { customRender: 'status' } },
+  { title: '固件版本', dataIndex: 'firmware_version', width: 150, className: 'titleStyle', slots: { customRender: 'firmware_version' } },
+  { title: '状态', dataIndex: 'status', width: 100, className: 'titleStyle', slots: { customRender: 'status' } },
   {
-    title: 'Workspace',
+    title: '工作空间',
     dataIndex: 'workspace_name',
     width: 100,
     className: 'titleStyle',
@@ -172,10 +172,10 @@ const columns: ColumnProps[] = [
       return obj
     }
   },
-  { title: 'Joined', dataIndex: 'bound_time', width: 150, sorter: (a: Device, b: Device) => a.bound_time.localeCompare(b.bound_time), className: 'titleStyle' },
-  { title: 'Last Online', dataIndex: 'login_time', width: 150, sorter: (a: Device, b: Device) => a.login_time.localeCompare(b.login_time), className: 'titleStyle' },
+  { title: '加入时间', dataIndex: 'bound_time', width: 150, sorter: (a: Device, b: Device) => a.bound_time.localeCompare(b.bound_time), className: 'titleStyle' },
+  { title: '最近在线', dataIndex: 'login_time', width: 150, sorter: (a: Device, b: Device) => a.login_time.localeCompare(b.login_time), className: 'titleStyle' },
   {
-    title: 'Actions',
+    title: '操作',
     dataIndex: 'actions',
     width: 100,
     className: 'titleStyle',
@@ -278,8 +278,8 @@ function updateDevicesByWs (devices: Device[], payload: DeviceCmdExecuteInfo) {
       } else { // 终态：成功，失败，超时
         if (status === DeviceCmdExecuteStatus.Failed || status === DeviceCmdExecuteStatus.Timeout) {
           notification.error({
-            message: `(${payload.sn}) Upgrade failed`,
-            description: `Error Code: ${payload.result}`,
+            message: `(${payload.sn}) 升级失败`,
+            description: `错误码：${payload.result}`,
             duration: null
           })
         }

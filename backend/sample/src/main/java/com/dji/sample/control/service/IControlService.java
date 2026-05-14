@@ -62,6 +62,19 @@ public interface IControlService {
     HttpResultResponse seizeAuthority(String sn, DroneAuthorityEnum authority, DronePayloadParam param);
 
     /**
+     * Seize flight/payload authority with the option to bypass the cached
+     * checkAuthorityFlight early-return. Useful when the aircraft has silently
+     * released cloud_control_auth (e.g. after takeoff_to_point completes) but
+     * the backend Redis cache still shows ControlSourceEnum.A.
+     * @param sn gateway sn
+     * @param authority FLIGHT or PAYLOAD
+     * @param param optional payload param
+     * @param force if true, always publish flight_authority_grab even when the cache says we already hold authority
+     * @return
+     */
+    HttpResultResponse seizeAuthority(String sn, DroneAuthorityEnum authority, DronePayloadParam param, boolean force);
+
+    /**
      * Control the payload of the drone.
      * @param param
      * @return

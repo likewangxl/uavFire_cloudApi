@@ -19,11 +19,19 @@ public class LivestreamAgoraUrl extends BaseModel implements ILivestreamUrl {
     @NotNull
     private String sn;
 
-    @NotNull
     private String token;
 
-    @NotNull
     private Integer uid;
+
+    // Agora appid used by the web player to join the channel.
+    // Not part of the DJI push-URL protocol, so excluded from toString().
+    private String appid;
+
+    // Backend-only secret for generating RTC tokens dynamically.
+    private String appCertificate;
+
+    // Token validity period in seconds.
+    private Integer tokenExpireSeconds;
 
     public LivestreamAgoraUrl() {
     }
@@ -41,7 +49,14 @@ public class LivestreamAgoraUrl extends BaseModel implements ILivestreamUrl {
         try {
             return (LivestreamAgoraUrl) super.clone();
         } catch (CloneNotSupportedException e) {
-            return new LivestreamAgoraUrl().setSn(sn).setToken(token).setChannel(channel).setUid(uid);
+            return new LivestreamAgoraUrl()
+                    .setSn(sn)
+                    .setToken(token)
+                    .setChannel(channel)
+                    .setUid(uid)
+                    .setAppid(appid)
+                    .setAppCertificate(appCertificate)
+                    .setTokenExpireSeconds(tokenExpireSeconds);
         }
     }
 
@@ -78,6 +93,33 @@ public class LivestreamAgoraUrl extends BaseModel implements ILivestreamUrl {
 
     public LivestreamAgoraUrl setUid(Integer uid) {
         this.uid = uid;
+        return this;
+    }
+
+    public String getAppid() {
+        return appid;
+    }
+
+    public LivestreamAgoraUrl setAppid(String appid) {
+        this.appid = appid;
+        return this;
+    }
+
+    public String getAppCertificate() {
+        return appCertificate;
+    }
+
+    public LivestreamAgoraUrl setAppCertificate(String appCertificate) {
+        this.appCertificate = appCertificate;
+        return this;
+    }
+
+    public Integer getTokenExpireSeconds() {
+        return tokenExpireSeconds;
+    }
+
+    public LivestreamAgoraUrl setTokenExpireSeconds(Integer tokenExpireSeconds) {
+        this.tokenExpireSeconds = tokenExpireSeconds;
         return this;
     }
 }

@@ -5,8 +5,11 @@ const API_PREFIX = '/control/api/v1'
 // const workspaceId: string = localStorage.getItem(ELocalStorageKey.WorkspaceId) || '
 
 // 获取飞行控制权
-export async function postFlightAuth (sn: string): Promise<IWorkspaceResponse<null>> {
-  const resp = await request.post(`${API_PREFIX}/devices/${sn}/authority/flight`)
+// force=true: 绕过后端 checkAuthorityFlight 的 Redis 缓存判断，强制重新下发
+// flight_authority_grab，用于飞机已经离线地释放了 cloud_control_auth 的场景。
+export async function postFlightAuth (sn: string, opts?: { force?: boolean }): Promise<IWorkspaceResponse<null>> {
+  const query = opts?.force ? '?force=true' : ''
+  const resp = await request.post(`${API_PREFIX}/devices/${sn}/authority/flight${query}`)
   return resp.data
 }
 export enum WaylineLostControlActionInCommandFlight {
@@ -49,6 +52,18 @@ export async function postFlyToPoint (sn: string, body: PostFlyToPointBody): Pro
 // 停止飞向目标点
 export async function deleteFlyToPoint (sn: string): Promise<IWorkspaceResponse<null>> {
   const resp = await request.delete(`${API_PREFIX}/devices/${sn}/jobs/fly-to-point`)
+  return resp.data
+}
+
+// 返航
+export async function postReturnHome (sn: string): Promise<IWorkspaceResponse<null>> {
+  const resp = await request.post(`${API_PREFIX}/devices/${sn}/jobs/return_home`)
+  return resp.data
+}
+
+// 取消返航
+export async function postReturnHomeCancel (sn: string): Promise<IWorkspaceResponse<null>> {
+  const resp = await request.post(`${API_PREFIX}/devices/${sn}/jobs/return_home_cancel`)
   return resp.data
 }
 

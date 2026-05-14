@@ -2,8 +2,114 @@ import { message } from 'ant-design-vue'
 import request, { IPage, IWorkspaceResponse, IListWorkspaceResponse } from '/@/api/http/request'
 import { TaskType, TaskStatus, OutOfControlAction } from '/@/types/task'
 import { WaylineType } from '/@/types/wayline'
+import type {
+  CreatePlannedWaylineBody,
+  PlannedWaypoint,
+  PlannedWaylineRecord,
+  PreparePlannedWaylineTaskBody,
+  PublishPlannedWaylineResult,
+  UpdatePlannedWaylineBody,
+} from '/@/types/wayline'
 
 const HTTP_PREFIX = '/wayline/api/v1'
+const DEFAULT_PLANNED_WAYLINE_MODEL = 'M30T'
+const DEFAULT_PLANNED_WAYLINE_HEIGHT = 30
+const DEFAULT_PLANNED_WAYLINE_SPEED = 5
+
+function finiteNumber (value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : null
+}
+
+function positiveNumber (value: unknown, fallback: number): number {
+  const numberValue = finiteNumber(value)
+  return numberValue !== null && numberValue > 0 ? numberValue : fallback
+}
+
+function assertPlannedWaypoint (waypoint: PlannedWaypoint, index: number): PlannedWaypoint {
+  const gcjLng = finiteNumber(waypoint?.gcjLng)
+  const gcjLat = finiteNumber(waypoint?.gcjLat)
+  const wgsLng = finiteNumber(waypoint?.wgsLng)
+  const wgsLat = finiteNumber(waypoint?.wgsLat)
+  if (gcjLng === null || gcjLat === null || wgsLng === null || wgsLat === null) {
+    message.error(`航点坐标缺失：第 ${index + 1} 个航点，请清空后重新布点。`)
+    throw new Error(`planned waypoint[${index}] coordinates required`)
+  }
+  return {
+    order: index + 1,
+    gcjLng,
+    gcjLat,
+    wgsLng,
+    wgsLat,
+    height: positiveNumber(waypoint.height, DEFAULT_PLANNED_WAYLINE_HEIGHT),
+  }
+}
+
+function validatePlannedWaylineBody<T extends CreatePlannedWaylineBody | UpdatePlannedWaylineBody> (body: T): T {
+  if (!body?.name || !Array.isArray(body.waypoints) || body.waypoints.length === 0) {
+    message.error('规划航线参数不完整，请确认航线名称和航点。')
+    throw new Error('planned wayline payload incomplete')
+  }
+  return {
+    ...body,
+    aircraftModelKey: body.aircraftModelKey || DEFAULT_PLANNED_WAYLINE_MODEL,
+    defaultHeight: positiveNumber(body.defaultHeight, DEFAULT_PLANNED_WAYLINE_HEIGHT),
+    maxSpeed: positiveNumber(body.maxSpeed, DEFAULT_PLANNED_WAYLINE_SPEED),
+    waypoints: body.waypoints.map((waypoint, index) => assertPlannedWaypoint(waypoint, index)),
+  }
+}
+
+function normalizePlannedWaypointResponse (record: any): PlannedWaypoint {
+  return {
+    order: record?.order,
+    gcjLng: record?.gcjLng ?? record?.gcj_lng,
+    gcjLat: record?.gcjLat ?? record?.gcj_lat,
+    wgsLng: record?.wgsLng ?? record?.wgs_lng,
+    wgsLat: record?.wgsLat ?? record?.wgs_lat,
+    height: record?.height,
+  }
+}
+
+function normalizePlannedWaylineResponse (record: any): PlannedWaylineRecord {
+  return {
+    plannedWaylineId: record?.plannedWaylineId ?? record?.planned_wayline_id,
+    workspaceId: record?.workspaceId ?? record?.workspace_id,
+    name: record?.name,
+    aircraftModelKey: record?.aircraftModelKey ?? record?.aircraft_model_key,
+    gatewaySn: record?.gatewaySn ?? record?.gateway_sn,
+    aircraftSn: record?.aircraftSn ?? record?.aircraft_sn,
+    defaultHeight: record?.defaultHeight ?? record?.default_height,
+    maxSpeed: record?.maxSpeed ?? record?.max_speed,
+    waypoints: Array.isArray(record?.waypoints) ? record.waypoints.map(normalizePlannedWaypointResponse) : [],
+    status: record?.status,
+    publishedWaylineId: record?.publishedWaylineId ?? record?.published_wayline_id,
+    kmzUrl: record?.kmzUrl ?? record?.kmz_url,
+    kmzMd5: record?.kmzMd5 ?? record?.kmz_md5,
+    kmzObjectKey: record?.kmzObjectKey ?? record?.kmz_object_key,
+    fileGeneratedTime: record?.fileGeneratedTime ?? record?.file_generated_time,
+    flightId: record?.flightId ?? record?.flight_id,
+    dockSn: record?.dockSn ?? record?.dock_sn,
+    droneSn: record?.droneSn ?? record?.drone_sn,
+    taskStatus: record?.taskStatus ?? record?.task_status,
+    taskStatusReason: record?.taskStatusReason ?? record?.task_status_reason,
+    taskProgress: record?.taskProgress ?? record?.task_progress,
+    preparedTime: record?.preparedTime ?? record?.prepared_time,
+    executedTime: record?.executedTime ?? record?.executed_time,
+    creator: record?.creator,
+    publisher: record?.publisher,
+    publishTime: record?.publishTime ?? record?.publish_time,
+    createTime: record?.createTime ?? record?.create_time,
+    updateTime: record?.updateTime ?? record?.update_time,
+  }
+}
+
+function normalizePlannedWaylineResult (result: IWorkspaceResponse<any>): IWorkspaceResponse<PlannedWaylineRecord> {
+  return {
+    ...result,
+    data: result.data ? normalizePlannedWaylineResponse(result.data) : result.data,
+  }
+}
 
 // Get Wayline Files
 export const getWaylineFiles = async function (wid: string, body: {}): Promise<IWorkspaceResponse<any>> {
@@ -34,6 +140,79 @@ export const deleteWaylineFile = async function (workspaceId: string, waylineId:
   const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/waylines/${waylineId}`
   const result = await request.delete(url)
   return result.data
+}
+
+export const getPlannedWaylines = async function (workspaceId: string, page: IPage): Promise<IListWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines?page=${page.page}&page_size=${page.page_size}`
+  const result = await request.get(url)
+  if (result.data?.data?.list) {
+    result.data.data.list = result.data.data.list.map(normalizePlannedWaylineResponse)
+  }
+  return result.data
+}
+
+export const getPlannedWayline = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}`
+  const result = await request.get(url)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const createPlannedWayline = async function (workspaceId: string, body: CreatePlannedWaylineBody): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines`
+  const validatedBody = validatePlannedWaylineBody(body)
+  const result = await request.post(url, validatedBody)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const updatePlannedWayline = async function (
+  workspaceId: string,
+  plannedWaylineId: string,
+  body: UpdatePlannedWaylineBody
+): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}`
+  const validatedBody = validatePlannedWaylineBody(body)
+  const result = await request.put(url, validatedBody)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const deletePlannedWayline = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<{}>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}`
+  const result = await request.delete(url)
+  return result.data
+}
+
+export const publishPlannedWayline = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PublishPlannedWaylineResult>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/publish`
+  const result = await request.post(url)
+  return result.data
+}
+
+export const generatePlannedWaylineFile = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/generate-file`
+  const result = await request.post(url)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const preparePlannedWaylineTask = async function (
+  workspaceId: string,
+  plannedWaylineId: string,
+  body: PreparePlannedWaylineTaskBody
+): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/prepare`
+  const result = await request.post(url, body)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const executePlannedWaylineTask = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/execute`
+  const result = await request.post(url)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const cancelPlannedWaylineTask = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/cancel`
+  const result = await request.post(url)
+  return normalizePlannedWaylineResult(result.data)
 }
 
 export interface CreatePlan {

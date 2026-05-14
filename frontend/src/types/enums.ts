@@ -126,6 +126,7 @@ export enum EBizCode {
     TakeoffToPointProgress = 'takeoff_to_point_progress', // 一键起飞
     JoystickInvalidNotify = 'joystick_invalid_notify', // 设备端退出drc模式
     DrcStatusNotify = 'drc_status_notify', // 飞行控制模式状态
+    CloudControlAuthUpdate = 'cloud_control_auth_update', // 云控授权状态
 
     // custom flight area
     FlightAreasSyncProgress = 'flight_areas_sync_progress',

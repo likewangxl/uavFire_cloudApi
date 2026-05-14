@@ -73,6 +73,8 @@ public enum BizCodeEnum {
 
     JOYSTICK_INVALID_NOTIFY("joystick_invalid_notify"),
 
+    CLOUD_CONTROL_AUTH_UPDATE("cloud_control_auth_update"),
+
     FLIGHT_AREAS_SYNC_PROGRESS("flight_areas_sync_progress"),
 
     FLIGHT_AREAS_DRONE_LOCATION("flight_areas_drone_location"),

@@ -16,6 +16,9 @@
       <div class="task-wrapper" v-if="root.$route.name === ERouterName.TASK">
         <TaskPanel />
       </div>
+      <div class="livestream-wrapper" v-if="root.$route.name === ERouterName.LIVESTREAM">
+        <WorkspaceLivestreamPanel />
+      </div>
     </div>
   </div>
 </template>
@@ -23,6 +26,7 @@
 import Sidebar from '/@/components/common/sidebar.vue'
 import MediaPanel from '/@/components/MediaPanel.vue'
 import TaskPanel from '/@/components/task/TaskPanel.vue'
+import WorkspaceLivestreamPanel from '/@/components/WorkspaceLivestreamPanel.vue'
 import GMap from '/@/components/GMap.vue'
 import { EBizCode, ERouterName } from '/@/types'
 import { getRoot } from '/@/root'
@@ -105,6 +109,7 @@ const messageHandler = async (payload: any) => {
     case EBizCode.TakeoffToPointProgress:
     case EBizCode.JoystickInvalidNotify:
     case EBizCode.DrcStatusNotify:
+    case EBizCode.CloudControlAuthUpdate:
     {
       EventBus.emit('droneControlWs', payload)
       break
@@ -131,7 +136,7 @@ useConnectWebSocket(messageHandler)
 
 </script>
 <style lang="scss" scoped>
-@import '/@/styles/index.scss';
+@use '/@/styles/index.scss';
 
 .project-app-wrapper {
   display: flex;
@@ -162,7 +167,8 @@ useConnectWebSocket(messageHandler)
     }
 
     .media-wrapper,
-    .task-wrapper {
+    .task-wrapper,
+    .livestream-wrapper {
       position: absolute;
       top: 0;
       bottom: 0;

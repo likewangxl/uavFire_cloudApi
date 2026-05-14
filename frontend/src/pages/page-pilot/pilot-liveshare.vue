@@ -2,17 +2,17 @@
     <div class="width100 flex-column flex-justify-start flex-align-start" style="background-color: white;">
 
       <p class="fz16 ml10 mt15 mb10 color-text-title color-font-bold" style="color: #939393">
-        Before starting manually, please select the publish mode and livestream type
+        手动开始前，请先选择发布模式和直播类型
       </p>
     <div
       class="mt15 flex-row flex-align-center flex-justify-between"
       style="width: 100%;">
       <p class="ml10 mb0 fz16" style="color: black">
-        Select Video Publish Mode:
+        选择视频发布模式：
       </p>
       <a-select
         style="width: 200px; margin-right: 20px;"
-        placeholder="Select Mode"
+        placeholder="请选择模式"
         @select="onPublishModeSelect"
       >
         <a-select-option
@@ -32,10 +32,10 @@
       class="flex-row flex-align-center flex-justify-between"
       style="width: 100%; margin-top: -10px;"
     >
-      <p class="ml10 mb0 fz16">Select Livestream Type:</p>
+      <p class="ml10 mb0 fz16">选择直播类型：</p>
       <a-select
         style="width: 200px; margin-right: 20px;"
-        placeholder="Select Live Type"
+        placeholder="请选择直播类型"
         :value="liveStreamStatus.type"
         @select="onLiveTypeSelect"
       >
@@ -53,28 +53,8 @@
     </div>
     <div class="width-100" style="margin-top: -10px;">
       <div class="ml10" style="width: 97%;">
-        <span class="fz16">Param: </span>
-        <span v-if="liveStreamStatus.type === ELiveTypeValue.Agora" style="word-break: break-all; color: #75c5f6;">
-          <div class="flex-col flex-justify-center flex-align-center">
-            <div>
-              <span class="ml10">Token:</span>
-              <a-input
-                class="ml10"
-                v-model:value="agoraParam.token"
-                placeholder="Token"
-              ></a-input>
-            </div>
-            <div>
-              <span class="ml10">Channel:</span>
-              <a-input
-                class="ml10"
-                v-model:value="agoraParam.channelId"
-                placeholder="Channel"
-              ></a-input>
-            </div>
-          </div>
-        </span>
-        <span v-else-if="liveStreamStatus.type === ELiveTypeValue.RTMP" style="word-break: break-all; color: #75c5f6;">{{ rtmpParam }}</span>
+        <span class="fz16">参数：</span>
+        <span v-if="liveStreamStatus.type === ELiveTypeValue.RTMP" style="word-break: break-all; color: #75c5f6;">{{ rtmpParam }}</span>
         <span v-else-if="liveStreamStatus.type === ELiveTypeValue.RTSP" style="word-break: break-all; color: #75c5f6;">{{ rtspParam }}</span>
         <span v-else-if="liveStreamStatus.type === ELiveTypeValue.GB28181" style="word-break: break-all; color: #75c5f6;">{{ gb28181Param }}</span>
         <span v-else></span>
@@ -86,8 +66,8 @@
     </div>
     <div class="mb20 flex-row flex-align-center flex-justify-center"
       style="width: 100%; ">
-      <a-button class="flex-column fz20 flex-align-center flex-justify-center" style="width: 100px;" type="ghost" @click="onPlay">Play</a-button>
-      <a-button class="flex-column fz20 flex-align-center flex-justify-center ml40" style="width: 100px;" type="ghost" @click="onStop">Stop</a-button>
+      <a-button class="flex-column fz20 flex-align-center flex-justify-center" style="width: 100px;" type="ghost" @click="onPlay">开始</a-button>
+      <a-button class="flex-column fz20 flex-align-center flex-justify-center ml40" style="width: 100px;" type="ghost" @click="onStop">停止</a-button>
     </div>
     <a-button v-if="playVisiable" class="flex-column flex-align-center" shape="circle" @click="showLivingStatus"
       style="position: fixed; top: 13vh; left: 5vw; opacity: 0.8; background-color: rgb(0,0,0,0)">
@@ -98,31 +78,31 @@
       <div class="fz16 width-100">
         <div class="mt20" style=" margin-bottom: -10px;">
           <span class="fz20 flex-row flex-align-center flex-justify-center">
-            <font :color="liveState === EStatusValue.LIVING ? 'green' : liveState === EStatusValue.CONNECTED ? 'blue' : 'red'">{{ liveState }}</font></span>
+            <font :color="liveState === EStatusValue.LIVING ? 'green' : liveState === EStatusValue.CONNECTED ? 'blue' : 'red'">{{ getStatusLabel(liveState) }}</font></span>
         </div>
         <a-divider />
         <div style=" margin-top: -10px; margin-bottom: -15px;">
-          <span>Frame Rate:</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.fps }}<span v-if="liveStreamStatus.fps != -1"> fps</span></span><br/>
+          <span>帧率：</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.fps }}<span v-if="liveStreamStatus.fps != -1"> fps</span></span><br/>
         </div>
         <a-divider />
         <div style=" margin-top: -10px; margin-bottom: -10px;">
-          <span>Video Bit Rate:</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.videoBitRate }}<span v-if="liveStreamStatus.videoBitRate != -1"> kbps</span></span><br/>
+          <span>视频码率：</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.videoBitRate }}<span v-if="liveStreamStatus.videoBitRate != -1"> kbps</span></span><br/>
         </div>
         <a-divider />
         <div style=" margin-top: -10px; margin-bottom: -10px;">
-          <span>Audio Bit Rate:</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.audioBitRate }}<span v-if="liveStreamStatus.audioBitRate != -1"> kbps</span></span><br/>
+          <span>音频码率：</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.audioBitRate }}<span v-if="liveStreamStatus.audioBitRate != -1"> kbps</span></span><br/>
         </div>
         <a-divider />
         <div style=" margin-top: -10px; margin-bottom: -10px;">
-          <span>Packet Loss Rate:</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.dropRate }}<span v-if="liveStreamStatus.dropRate != -1"> %</span></span><br/>
+          <span>丢包率：</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.dropRate }}<span v-if="liveStreamStatus.dropRate != -1"> %</span></span><br/>
         </div>
         <a-divider />
         <div style=" margin-top: -10px; margin-bottom: -10px;">
-          <span>RTT:</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.rtt }}<span v-if="liveStreamStatus.rtt != -1"> ms</span></span><br/>
+          <span>往返时延：</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.rtt }}<span v-if="liveStreamStatus.rtt != -1"> ms</span></span><br/>
         </div>
         <a-divider />
         <div style=" margin-top: -10px;">
-          <span >Jitter:</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.jitter }}</span><br/>
+          <span >抖动：</span><span style="float: right; color: #75c5f6;">{{ liveStreamStatus.jitter }}</span><br/>
         </div>
       </div>
     </a-drawer>
@@ -132,7 +112,7 @@
 <script lang="ts" setup>
 import { message } from 'ant-design-vue'
 import { onMounted, reactive, ref, UnwrapRef } from 'vue'
-import { CURRENT_CONFIG as config, CURRENT_CONFIG } from '/@/api/http/config'
+import { CURRENT_CONFIG } from '/@/api/http/config'
 import { ELiveTypeName, ELiveTypeValue, GB28181Param, LiveConfigParam, LiveStreamStatus, RTSPParam, EVideoPublishType } from '/@/types/live-stream'
 import apiPilot from '/@/api/pilot-bridge'
 import { getRoot } from '/@/root'
@@ -157,10 +137,6 @@ const publishModeList = [
 ]
 const liveTypeList = [
   {
-    value: ELiveTypeValue.Agora,
-    label: ELiveTypeName.Agora
-  },
-  {
     value: ELiveTypeValue.RTMP,
     label: ELiveTypeName.RTMP
   },
@@ -173,13 +149,8 @@ const liveTypeList = [
     label: ELiveTypeName.GB28181
   }
 ]
-const agoraParam = reactive({
-  uid: '2892130292',
-  token: config.agoraToken,
-  channelId: config.agoraChannel
-})
 const rtmpParam = {
-  url: config.rtmpURL + new Date().getTime()
+  url: CURRENT_CONFIG.rtmpURL + 'RC_PLUS_LOCAL-0'
 }
 const rtspParam: RTSPParam = {
   userName: CURRENT_CONFIG.rtspUserName,
@@ -245,11 +216,20 @@ const liveStatusCallback = async (arg: LiveStreamStatus) => {
       liveState.value = EStatusValue.DISCONNECT
   }
 }
+function getStatusLabel (status: string) {
+  switch (status) {
+    case EStatusValue.LIVING:
+      return '直播中'
+    case EStatusValue.CONNECTED:
+      return '已连接'
+    case EStatusValue.DISCONNECT:
+      return '未连接'
+    default:
+      return status
+  }
+}
 function refreshLiveType () {
   switch (liveStreamStatus.type) {
-    case ELiveTypeValue.Agora:
-      liveTypeSelected.value = ELiveTypeName.Agora
-      break
     case ELiveTypeValue.RTMP:
       liveTypeSelected.value = ELiveTypeName.RTMP
       break
@@ -272,29 +252,24 @@ const onPublishModeSelect = (val: string) => {
   apiPilot.setVideoPublishType(publishModeSelected.value)
 }
 const onPlay = () => {
-  console.info(JSON.stringify(agoraParam))
   if (!publishModeSelected.value) {
-    message.warn('Please select publish mode!')
+    message.warn('请选择发布模式！')
     return
   }
   if (liveTypeSelected.value === ELiveTypeName.Unknown) {
-    message.warn('Please select livestream type!')
+    message.warn('请选择直播类型！')
     return
   }
   switch (liveStreamStatus.type) {
-    case 1: {
-      apiPilot.setLiveshareConfig(ELiveTypeValue.Agora, JSON.stringify(agoraParam))
-      break
-    }
-    case 2: {
+    case ELiveTypeValue.RTMP: {
       apiPilot.setLiveshareConfig(ELiveTypeValue.RTMP, JSON.stringify(rtmpParam))
       break
     }
-    case 3: {
+    case ELiveTypeValue.RTSP: {
       apiPilot.setLiveshareConfig(ELiveTypeValue.RTSP, JSON.stringify(rtspParam))
       break
     }
-    case 4: {
+    case ELiveTypeValue.GB28181: {
       apiPilot.setLiveshareConfig(ELiveTypeValue.GB28181, JSON.stringify(gb28181Param))
       break
     }
@@ -303,7 +278,7 @@ const onPlay = () => {
   if (status) {
     playVisiable.value = true
     drawerVisible.value = true
-    message.success('success')
+    message.success('操作成功')
   }
 }
 
@@ -314,7 +289,7 @@ const showLivingStatus = () => {
 const onStop = () => {
   const status = apiPilot.stopLiveshare()
   if (status) {
-    message.success('success')
+    message.success('操作成功')
     playVisiable.value = false
     drawerVisible.value = false
     setTimeout(() => {
@@ -331,5 +306,4 @@ const onStop = () => {
 </script>
 
 <style lang="scss" scoped>
-// @import '/@/styles/index.scss';
 </style>
