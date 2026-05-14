@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @MapperScan("com.yx.uavfire.*.dao")
 @SpringBootApplication
 @EnableScheduling
-@ComponentScan("com.dji")
+@ComponentScan({"com.yx.uavfire", "com.dji"})
 public class CloudApiSampleApplication {
 
 	public static void main(String[] args) {
