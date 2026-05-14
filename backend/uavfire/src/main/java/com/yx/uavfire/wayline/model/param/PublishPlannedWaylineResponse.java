@@ -1,0 +1,23 @@
+package com.yx.uavfire.wayline.model.param;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class PublishPlannedWaylineResponse {
+
+    private String plannedWaylineId;
+
+    private String publishedWaylineId;
+
+    private String publishedWaylineName;
+
+    private String publisher;
+
+    private Long publishTime;
+}

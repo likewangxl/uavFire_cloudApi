@@ -9,7 +9,7 @@ const trackedFiles = [
   'frontend/src/websocket/index.ts',
   'frontend/src/types/device.ts',
   'frontend/src/api/drone-control/payload.ts',
-  'backend/sample/src/main/java/com/dji/sample/control/service/impl/ControlServiceImpl.java'
+  'backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java'
 ]
 
 test('tracked source files do not carry unresolved TODO markers', () => {

@@ -5,7 +5,7 @@
     <packaging>pom</packaging>
     <modules>
         <module>cloud-sdk</module>
-        <module>sample</module>
+        <module>uavfire</module>
     </modules>
 
     <groupId>com.dji</groupId>

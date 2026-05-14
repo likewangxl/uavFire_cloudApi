@@ -13,15 +13,15 @@
 ### Task 1: 在后端建立 dual-stream 协调域模型与 Redis 状态服务
 
 **Files:**
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamAgentHeartbeatDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamAgentStatusDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamAgentCapabilityDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamLiveGroupDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamCommandDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`
-- Create: `backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java`
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamAgentHeartbeatDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamAgentStatusDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamAgentCapabilityDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamLiveGroupDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamCommandDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
+- Create: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java`
 
 - [ ] **Step 1: 先写失败测试，锁定 heartbeat/status/capability 会被合并成 live group 视图**
 
@@ -51,7 +51,7 @@ void mergeAgentState_buildsLiveGroupSnapshot() {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: FAIL，提示 `DualStreamServiceImpl` / `DualStreamAgentHeartbeatDTO` / `DualStreamLiveGroupDTO` 等类型不存在。
 
 - [ ] **Step 3: 写最小 DTO 和服务接口**
@@ -111,7 +111,7 @@ public DualStreamLiveGroupDTO getGroup(String droneSn) {
 
 - [ ] **Step 6: 重跑测试确认通过**
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 7: 再把存储从纯内存切到 Redis Key + 内存 fallback**
@@ -129,24 +129,24 @@ private void saveSnapshot(String droneSn, DualStreamLiveGroupDTO group) {
 
 - [ ] **Step 8: 重跑测试并确认 fallback 逻辑不受影响**
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 9: 提交**
 
 ```bash
-git add backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStream*.java backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java
+git add backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStream*.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java
 git commit -m "feat: add backend dual-stream coordination state"
 ```
 
 ### Task 2: 为后端补 agent 回调入口与 web 侧 live group 查询/命令入口
 
 **Files:**
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/controller/DualStreamController.java`
-- Create: `backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/DualStreamController.java`
+- Create: `backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java`
 
 - [ ] **Step 1: 先写失败测试，锁定 internal callback + web group 接口**
 
@@ -167,7 +167,7 @@ void heartbeatEndpoint_updatesGroupSnapshot() throws Exception {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: FAIL，因为 `DualStreamController` 和对应路由尚不存在。
 
 - [ ] **Step 3: 补 internal agent callback 路由**
@@ -220,7 +220,7 @@ DualStreamCommandDTO buildCommand(String droneSn, String action) {
 
 - [ ] **Step 6: 重跑测试确认通过**
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 7: 补一个 focused service test，确认 start/stop/focus 不会覆盖 live group 已有状态**
@@ -242,13 +242,13 @@ void commandSnapshot_doesNotEraseGroupState() {
 
 - [ ] **Step 8: 运行 controller + service 两组测试**
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamControllerTest,DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 9: 提交**
 
 ```bash
-git add backend/sample/src/main/java/com/dji/sample/manage/controller/DualStreamController.java backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java
+git add backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/DualStreamController.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java
 git commit -m "feat: add backend dual-stream agent endpoints"
 ```
 
@@ -473,12 +473,12 @@ git commit -m "feat: add rcplus device integration entrypoint"
 - Create: `ai-service/app/clients/__init__.py`
 - Create: `ai-service/app/clients/backend_client.py`
 - Create: `ai-service/tests/test_backend_client.py`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamEventDTO.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/controller/DualStreamController.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamEventDTO.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/DualStreamController.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
 - Test: `ai-service/tests/test_backend_client.py`
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java`
 
 - [ ] **Step 1: 先写失败测试，锁定 AI 事件上报请求结构**
 
@@ -541,13 +541,13 @@ public void acceptEvent(String taskId, DualStreamEventDTO event) {
 Run: `cd ai-service && ./.venv/bin/python -m pytest tests/test_backend_client.py -q`
 Expected: PASS
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 7: 提交**
 
 ```bash
-git add ai-service/app/clients ai-service/tests/test_backend_client.py backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamEventDTO.java backend/sample/src/main/java/com/dji/sample/manage/controller/DualStreamController.java backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java
+git add ai-service/app/clients ai-service/tests/test_backend_client.py backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamEventDTO.java backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/DualStreamController.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java
 git commit -m "feat: connect ai service events to backend"
 ```
 
@@ -556,15 +556,15 @@ git commit -m "feat: connect ai service events to backend"
 **Files:**
 - Modify: `WORK_RECORD.md`
 - Create: `HANDOFF_2026-04-21_M4T_DEVICE_AND_BACKEND_NEXT_PHASE.md`
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java`
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java`
 - Test: `rcplus-msdk-agent/app/src/test/java/com/uavfire/rcplus/api/AgentReporterTest.kt`
 - Test: `rcplus-msdk-agent/app/src/test/java/com/uavfire/rcplus/sdk/DjiDeviceSessionTest.kt`
 - Test: `ai-service/tests/test_backend_client.py`
 
 - [ ] **Step 1: 跑后端 focused 测试**
 
-Run: `mvn -pl backend/sample -Dtest=DualStreamServiceImplTest,DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `mvn -pl backend/uavfire -Dtest=DualStreamServiceImplTest,DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 2: 跑 Android focused 测试**

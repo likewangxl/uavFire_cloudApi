@@ -4,7 +4,7 @@
 
 本轮新增完成的主线闭环如下：
 
-- `backend/sample`：
+- `backend/uavfire`：
   - `dual-stream` 已从状态缓存升级为运行时协调器
   - 已具备 `issueCommand / pollCommand / acknowledgeCommand` 最小命令闭环
   - 已具备 task event 的写入、查询、Redis 恢复 fallback
@@ -21,7 +21,7 @@
 本轮验证结果：
 
 ```bash
-cd backend && mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudControlAuthStateResolverTest -Dsurefire.failIfNoSpecifiedTests=false test
+cd backend && mvn -pl uavfire -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudControlAuthStateResolverTest -Dsurefire.failIfNoSpecifiedTests=false test
 cd rcplus-msdk-agent && export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=/usr/local/share/android-commandlinetools ANDROID_SDK_ROOT=/usr/local/share/android-commandlinetools && ./gradlew :app:testDebugUnitTest
 cd ai-service && ./.venv/bin/python -m pytest tests -q && ./.venv/bin/python -m compileall app
 ```
@@ -247,7 +247,7 @@ cd rcplus-msdk-agent && export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openj
 
 本轮已完成：
 
-- `backend/sample` 新增 `GlobalMVCConfigurerTest`
+- `backend/uavfire` 新增 `GlobalMVCConfigurerTest`
   - 约束只放行 `/manage/api/v1/dual-stream/agents/**`
   - 明确不放行整个 `/manage/api/v1/dual-stream/**`
 - `GlobalMVCConfigurer` 已新增：
@@ -260,7 +260,7 @@ cd rcplus-msdk-agent && export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openj
 本轮验证结果：
 
 ```bash
-cd backend && mvn -pl sample -Dtest=GlobalMVCConfigurerTest,DualStreamControllerTest test
+cd backend && mvn -pl uavfire -Dtest=GlobalMVCConfigurerTest,DualStreamControllerTest test
 curl -i http://127.0.0.1:6789/manage/api/v1/dual-stream/agents/RC_PLUS_LOCAL/command
 adb shell am force-stop com.yinxin.uavfir
 adb shell am start -n com.yinxin.uavfir/.MainActivity
@@ -337,7 +337,7 @@ adb logcat -d | rg "ValidationConsole"
 
 ```bash
 cd rcplus-msdk-agent && export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home && ./gradlew :app:testDebugUnitTest :app:assembleDebug
-cd backend && mvn -pl sample -Dtest=GlobalMVCConfigurerTest,DualStreamControllerTest,DualStreamServiceImplTest test
+cd backend && mvn -pl uavfire -Dtest=GlobalMVCConfigurerTest,DualStreamControllerTest,DualStreamServiceImplTest test
 cd frontend && npm run build
 adb install -r rcplus-msdk-agent/app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -413,8 +413,8 @@ npm run build
 主要文件：
 
 ```text
-backend/sample/src/main/java/com/dji/sample/control/service/impl/ControlServiceImpl.java
-backend/sample/src/main/java/com/dji/sample/control/model/param/TakeoffToPointParam.java
+backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java
+backend/uavfire/src/main/java/com/yx/uavfire/control/model/param/TakeoffToPointParam.java
 ```
 
 已完成内容：
@@ -427,7 +427,7 @@ backend/sample/src/main/java/com/dji/sample/control/model/param/TakeoffToPointPa
 已验证：
 
 ```bash
-mvn -pl sample -DskipTests compile
+mvn -pl uavfire -DskipTests compile
 ```
 
 编译可以完成，存在 Maven 配置层面的既有警告。
@@ -498,7 +498,7 @@ https://github.com/likewangxl/uavFire_cloudApi.git
 - 现象：调用 `takeoff_to_point` 直接抛 `CloudSDKException(DEVICE_TYPE_NOT_SUPPORT)`，命令根本未到 MQTT。
 - 根因：RC Plus 2 虽然在 `GatewayTypeEnum` 里已单独拆成 `RC2`（见首次提交），但 `AbstractControlService.takeoffToPoint` 的 `@CloudSDKVersion(exclude = GatewayTypeEnum.RC)` 注解本来就只排除旧 RC，不排除 RC2；然而现场实测 `SDKManager` 识别出的网关类型有时仍为 `RC`，被 AOP 拦截。
 - 修复：去掉 `exclude = GatewayTypeEnum.RC`，放开 SDK 层拦截，改由飞机端判定。见 `backend/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/control/api/AbstractControlService.java`。
-- 关键踩坑：`mvn -pl sample ... compile` 不会重新编译 cloud-sdk 模块。sample 运行时仍使用 `D:\localRepository` 里的旧 cloud-sdk-1.0.3.jar，修改看起来"没生效"。必须先 `mvn -pl cloud-sdk clean install` 刷本地仓库。
+- 关键踩坑：`mvn -pl uavfire ... compile` 不会重新编译 cloud-sdk 模块。sample 运行时仍使用 `D:\localRepository` 里的旧 cloud-sdk-1.0.3.jar，修改看起来"没生效"。必须先 `mvn -pl cloud-sdk clean install` 刷本地仓库。
 
 ### 7.3 336002 根因与修复
 
@@ -532,7 +532,7 @@ https://github.com/likewangxl/uavFire_cloudApi.git
 | `backend/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/control/api/AbstractControlService.java` | 移除 `takeoffToPoint` 的 `exclude = GatewayTypeEnum.RC`；加注释说明原因 |
 | `backend/cloud-sdk/src/main/java/com/dji/sdk/mqtt/MqttGatewayPublish.java` | publish 日志从 debug 升到 info，用 `ObjectMapper.writeValueAsBytes` 序列化真实下发字节 |
 | `backend/cloud-sdk/src/main/java/com/dji/sdk/mqtt/services/ServicesReplyHandler.java` | `services_reply raw payload` 从 debug 升到 info |
-| `backend/sample/src/main/java/com/dji/sample/control/service/impl/ControlServiceImpl.java` | `takeoffToPoint` 增加入参 / 网关类型 / 请求 JSON / `reply.output` 四段诊断日志 |
+| `backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java` | `takeoffToPoint` 增加入参 / 网关类型 / 请求 JSON / `reply.output` 四段诊断日志 |
 | `frontend/src/pages/page-web/projects/tsa.vue` | 起飞参数改为 30/30/5/100；目标点北偏 `0.00015°` (~16 m)；确认弹窗同时显示当前与目标坐标 |
 
 ### 7.6 诊断日志关键位置
@@ -1040,16 +1040,16 @@ AgoraRTCError CAN_NOT_GET_GATEWAY_SERVER: dynamic key or token timeout
 
 主要文件：
 
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
 - `backend/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/LivestreamAgoraUrl.java`
-- `backend/sample/pom.xml`
-- `backend/sample/src/main/resources/application.yml`
-- `backend/sample/src/test/java/com/dji/sample/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
+- `backend/uavfire/pom.xml`
+- `backend/uavfire/src/main/resources/application.yml`
+- `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
 
 已验证：
 
 ```bash
-mvn -pl sample -am -Dtest=LiveStreamServiceImplAgoraConfigTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl uavfire -am -Dtest=LiveStreamServiceImplAgoraConfigTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 说明：
@@ -1240,8 +1240,8 @@ cd rcplus-msdk-agent
   - `frontend/src/components/WorkspaceLivestreamPanel.vue`
   - `frontend/src/pages/page-web/home.vue`
 - Agora 动态 token：
-  - `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
-  - `backend/sample/src/main/resources/application.yml`
+  - `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
+  - `backend/uavfire/src/main/resources/application.yml`
 - 新子工程：
   - `rcplus-msdk-agent/`
   - `ai-service/`
@@ -1354,7 +1354,7 @@ npm.cmd run build
 本轮开始时，前端和 MQTT 服务可用，但后端 `sample` 启动后很快退出。最终确认根因不是命令错误，而是 **Redis 未启动**：
 
 - 现象：
-  - `mvn -pl sample spring-boot:run` 启动后 Tomcat 能短暂拉起。
+  - `mvn -pl uavfire spring-boot:run` 启动后 Tomcat 能短暂拉起。
   - 随后日志报 `Application finished with exit code: 1`。
   - 根因栈为：
     - `RedisConnectionFailureException: Unable to connect to Redis`
@@ -1427,8 +1427,8 @@ Method returnHomeInfo(com.dji.sdk.mqtt.events.TopicEventsRequest, org.springfram
 
 2. 修正 `return_home_info` 的事件处理签名
    - `backend/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/wayline/api/AbstractWaylineService.java`
-   - `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/SDKWaylineService.java`
-   - `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/FlightTaskServiceImpl.java`
+   - `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/SDKWaylineService.java`
+   - `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/FlightTaskServiceImpl.java`
 
 修复策略：
 
@@ -1444,8 +1444,8 @@ Method returnHomeInfo(com.dji.sdk.mqtt.events.TopicEventsRequest, org.springfram
 ```bash
 cd backend
 mvn -pl cloud-sdk clean install
-mvn -pl sample -DskipTests clean compile
-mvn -pl sample spring-boot:run
+mvn -pl uavfire -DskipTests clean compile
+mvn -pl uavfire spring-boot:run
 ```
 
 结果：
@@ -1543,11 +1543,11 @@ flyToPoint precheck failed. reason=The current state of the drone does not suppo
 | 文件 | 目的 |
 | --- | --- |
 | `backend/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/wayline/api/AbstractWaylineService.java` | 修正 `return_home_info` 事件签名 |
-| `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/SDKWaylineService.java` | 直接接收返航事件并记录日志 |
-| `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/FlightTaskServiceImpl.java` | 直接接收返航事件并记录日志 |
-| `backend/sample/src/main/java/com/dji/sample/control/model/dto/ReturnHomeState.java` | 返航前置判断兼容 RC OSD |
-| `backend/sample/src/main/java/com/dji/sample/control/model/dto/ReturnHomeCancelState.java` | 取消返航前置判断兼容 RC OSD |
-| `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DeviceServiceImpl.java` | 设备模式判断优先兼容 RC OSD |
+| `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/SDKWaylineService.java` | 直接接收返航事件并记录日志 |
+| `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/FlightTaskServiceImpl.java` | 直接接收返航事件并记录日志 |
+| `backend/uavfire/src/main/java/com/yx/uavfire/control/model/dto/ReturnHomeState.java` | 返航前置判断兼容 RC OSD |
+| `backend/uavfire/src/main/java/com/yx/uavfire/control/model/dto/ReturnHomeCancelState.java` | 取消返航前置判断兼容 RC OSD |
+| `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DeviceServiceImpl.java` | 设备模式判断优先兼容 RC OSD |
 
 ### 10.6 当前停留点
 
@@ -1602,7 +1602,7 @@ flyToPoint precheck failed. reason=The current state of the drone does not suppo
 | Maven | `/usr/local/bin/mvn`（版本 3.9.13，默认绑的是 JDK 8，必须手动覆盖 `JAVA_HOME`） |
 | 后端端口 | 6789 |
 | MQTT 默认地址 | `application.yml` 里的 `192.168.50.254`（Mac 本机使用，无需额外参数） |
-| 后端日志 | `backend/sample/logs/cloud-api-sample.log` |
+| 后端日志 | `backend/uavfire/logs/cloud-api-sample.log` |
 
 Windows 上的 `run_sample.ps1` 使用 `AI/.jdk17` 并传 `--mqtt.BASIC.host=192.168.50.10`，Mac 上**不要照搬**，MQTT 地址不同。
 
@@ -1625,7 +1625,7 @@ cd /Users/likewang/uavfire/backend
 mvn -pl cloud-sdk -am clean install -DskipTests
 
 # 2) 启动 sample（application.yml 默认 MQTT 即可，不需要额外参数）
-mvn -pl sample \
+mvn -pl uavfire \
   -Dproject.build.sourceEncoding=UTF-8 \
   -Dmaven.compiler.encoding=UTF-8 \
   spring-boot:run
@@ -1641,15 +1641,15 @@ mvn -pl sample \
 export JAVA_HOME=/usr/local/opt/openjdk@11
 export PATH=$JAVA_HOME/bin:$PATH
 cd /Users/likewang/uavfire/backend
-mvn -pl sample spring-boot:run
+mvn -pl uavfire spring-boot:run
 ```
 
 ### 11.5 反模式（不要再做）
 
 - ❌ 用 `/usr/libexec/java_home -V` 判断有没有 JDK 11 —— 它看不到 Homebrew 的 `openjdk@11`。
-- ❌ 直接 `java -jar sample/target/sample-1.10.0.jar` —— sample 的 pom 没有配 `spring-boot-maven-plugin` 的 `repackage`，打出来的 jar 不是可执行 jar，会报 "中没有主清单属性"。必须用 `spring-boot:run`。
+- ❌ 直接 `java -jar uavfire/target/sample-1.10.0.jar` —— sample 的 pom 没有配 `spring-boot-maven-plugin` 的 `repackage`，打出来的 jar 不是可执行 jar，会报 "中没有主清单属性"。必须用 `spring-boot:run`。
 - ❌ 把 Windows `run_sample.ps1` 里的 `--mqtt.BASIC.host=192.168.50.10` 搬到 Mac 上 —— Mac 网络里那个 IP 不通，用 `application.yml` 的默认即可。
-- ❌ 只跑 `mvn -pl sample clean package` 不跑 `cloud-sdk install` —— 如果同时改了 cloud-sdk，sample 会继续依赖本地 `~/.m2/` 里的旧 jar，改动看不到。
+- ❌ 只跑 `mvn -pl uavfire clean package` 不跑 `cloud-sdk install` —— 如果同时改了 cloud-sdk，sample 会继续依赖本地 `~/.m2/` 里的旧 jar，改动看不到。
 
 ### 11.6 停止服务
 
@@ -1687,7 +1687,7 @@ redis-cli ping
 
 # 前端后端配置
 sed -n '1,80p' frontend/env/.env
-sed -n '1,120p' backend/sample/src/main/resources/application.yml
+sed -n '1,120p' backend/uavfire/src/main/resources/application.yml
 
 # Java / Maven / Node 环境
 mvn -v
@@ -1722,7 +1722,7 @@ export JAVA_HOME="$(brew --prefix openjdk@11)/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 
 cd /Users/likewang/uavfire/backend
-mvn -pl sample spring-boot:run
+mvn -pl uavfire spring-boot:run
 ```
 
 启动成功判据：
@@ -1848,15 +1848,15 @@ mvn -v
 ### 14.2 本轮代码改动
 
 - backend:
-  - `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamLiveGroupDTO.java`
+  - `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamLiveGroupDTO.java`
     - 新增 `playbackStatus`
     - 新增 `visiblePlayUrl`
     - 新增 `thermalPlayUrl`
-  - `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamAgentStatusDTO.java`
+  - `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamAgentStatusDTO.java`
     - 新增 `playbackStatus`
     - 新增 `visiblePlayUrl`
     - 新增 `thermalPlayUrl`
-  - `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`
+  - `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
     - `acceptStatus()` 增加上述字段的 merge 逻辑
     - `copyGroup()` 增加上述字段复制，避免缓存/redis 恢复时丢字段
 - Android:
@@ -1893,7 +1893,7 @@ export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 
 ```bash
 cd backend
-mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest test
+mvn -pl uavfire -Dtest=DualStreamControllerTest,DualStreamServiceImplTest test
 ```
 
 结果：`BUILD SUCCESS`

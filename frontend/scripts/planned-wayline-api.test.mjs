@@ -10,7 +10,7 @@ const waylineApiPath = join(frontendRoot, 'src/api/wayline.ts')
 const waylineTypesPath = join(frontendRoot, 'src/types/wayline.ts')
 const planningHookPath = join(frontendRoot, 'src/hooks/use-wayline-planning.ts')
 const waylinePagePath = join(frontendRoot, 'src/pages/page-web/projects/wayline.vue')
-const plannedControllerPath = join(repoRoot, 'backend/sample/src/main/java/com/dji/sample/wayline/controller/PlannedWaylineController.java')
+const plannedControllerPath = join(repoRoot, 'backend/uavfire/src/main/java/com/yx/uavfire/wayline/controller/PlannedWaylineController.java')
 
 test('frontend wayline API exposes planned-wayline CRUD and task action endpoints', () => {
   const source = readFileSync(waylineApiPath, 'utf8')

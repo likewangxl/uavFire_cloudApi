@@ -38,7 +38,7 @@
 
 **Files:**
 - Modify backend dual-stream DTO / persistence files as needed
-- Modify corresponding tests under `backend/sample/src/test/java/...`
+- Modify corresponding tests under `backend/uavfire/src/test/java/...`
 
 - [x] 明确 backend 当前是否足够承载 `visible running / thermal degraded / reason` 这组状态。
 - [x] 如果不够，最小扩展 DTO 和存储结构，不要引入无关重构。

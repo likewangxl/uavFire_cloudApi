@@ -13,16 +13,16 @@
 ### Task 1: 将 backend dual-stream 从状态缓存升级为运行时协调器
 
 **Files:**
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamCommandAckDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamTaskDTO.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStreamLiveGroupDTO.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/controller/DualStreamController.java`
-- Modify: `backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java`
-- Modify: `backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java`
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java`
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamCommandAckDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamTaskDTO.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStreamLiveGroupDTO.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/DualStreamController.java`
+- Modify: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java`
+- Modify: `backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java`
 
 - [ ] **Step 1: 先写失败测试，锁定命令会进入 pending 队列并可被 agent 拉取**
 
@@ -65,7 +65,7 @@ void acknowledgeCommand_updatesCommandStatusWithoutErasingGroupState() {
 
 - [ ] **Step 3: 运行 service 测试，确认红灯**
 
-Run: `cd backend && mvn -pl sample -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `cd backend && mvn -pl uavfire -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: FAIL，提示 `issueCommand` / `pollCommand` / `acknowledgeCommand` / `DualStreamCommandAckDTO` / `commandId` / `status` 等不存在。
 
 - [ ] **Step 4: 补最小 DTO 和接口签名**
@@ -151,7 +151,7 @@ public void acknowledgeCommand(String droneSn, DualStreamCommandAckDTO ack) {
 
 - [ ] **Step 8: 重跑 service 测试，确认转绿**
 
-Run: `cd backend && mvn -pl sample -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `cd backend && mvn -pl uavfire -Dtest=DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 9: 写 controller 失败测试，锁定命令拉取与 ack 路由**
@@ -201,13 +201,13 @@ public HttpResultResponse<DualStreamCommandDTO> start(@PathVariable("drone_sn") 
 
 - [ ] **Step 12: 运行 controller + service 两组测试**
 
-Run: `cd backend && mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `cd backend && mvn -pl uavfire -Dtest=DualStreamControllerTest,DualStreamServiceImplTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 13: 提交**
 
 ```bash
-git add backend/sample/src/main/java/com/dji/sample/manage/model/dto/DualStream*.java backend/sample/src/main/java/com/dji/sample/manage/service/IDualStreamService.java backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java backend/sample/src/main/java/com/dji/sample/manage/controller/DualStreamController.java backend/sample/src/test/java/com/dji/sample/manage/service/DualStreamServiceImplTest.java backend/sample/src/test/java/com/dji/sample/manage/controller/DualStreamControllerTest.java
+git add backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/DualStream*.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/IDualStreamService.java backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/DualStreamController.java backend/uavfire/src/test/java/com/yx/uavfire/manage/service/DualStreamServiceImplTest.java backend/uavfire/src/test/java/com/yx/uavfire/manage/controller/DualStreamControllerTest.java
 git commit -m "feat: add dual-stream runtime coordinator"
 ```
 
@@ -435,7 +435,7 @@ git commit -m "feat: add ai service runtime task loop"
 
 - [ ] **Step 1: 运行 backend focused 验证**
 
-Run: `cd backend && mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudControlAuthStateResolverTest -Dsurefire.failIfNoSpecifiedTests=false test`
+Run: `cd backend && mvn -pl uavfire -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudControlAuthStateResolverTest -Dsurefire.failIfNoSpecifiedTests=false test`
 Expected: PASS
 
 - [ ] **Step 2: 运行 rcplus 全量单测**

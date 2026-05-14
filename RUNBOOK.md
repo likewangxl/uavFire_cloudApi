@@ -32,7 +32,7 @@
 后端配置文件：
 
 ```text
-backend/sample/src/main/resources/application.yml
+backend/uavfire/src/main/resources/application.yml
 ```
 
 需要重点确认以下配置：
@@ -77,19 +77,19 @@ cd backend
 编译：
 
 ```bash
-mvn -pl sample -DskipTests compile
+mvn -pl uavfire -DskipTests compile
 ```
 
 启动：
 
 ```bash
-mvn -pl sample spring-boot:run
+mvn -pl uavfire spring-boot:run
 ```
 
 如果要临时覆盖 MQTT 地址，可以在启动命令中增加参数：
 
 ```bash
-mvn -pl sample spring-boot:run \
+mvn -pl uavfire spring-boot:run \
   --mqtt.BASIC.host=192.168.50.10 \
   --mqtt.BASIC.port=1883 \
   --mqtt.DRC.host=192.168.50.10 \
@@ -99,7 +99,7 @@ mvn -pl sample spring-boot:run \
 Windows PowerShell 中可以写成一行：
 
 ```powershell
-mvn -pl sample spring-boot:run --mqtt.BASIC.host=192.168.50.10 --mqtt.BASIC.port=1883 --mqtt.DRC.host=192.168.50.10 --mqtt.DRC.port=8083
+mvn -pl uavfire spring-boot:run --mqtt.BASIC.host=192.168.50.10 --mqtt.BASIC.port=1883 --mqtt.DRC.host=192.168.50.10 --mqtt.DRC.port=8083
 ```
 
 启动成功后，后端监听：

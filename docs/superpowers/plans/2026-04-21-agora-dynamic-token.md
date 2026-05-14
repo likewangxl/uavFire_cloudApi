@@ -13,9 +13,9 @@
 ### Task 1: Lock desired behavior with failing backend tests
 
 **Files:**
-- Create: `backend/sample/src/test/java/com/dji/sample/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
+- Create: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
 - Modify: none
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -26,7 +26,7 @@ Write a focused unit test that injects Agora config into `LiveStreamServiceImpl`
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `mvn -pl backend/sample -Dtest=LiveStreamServiceImplAgoraConfigTest test`
+Run: `mvn -pl backend/uavfire -Dtest=LiveStreamServiceImplAgoraConfigTest test`
 
 Expected: FAIL because the service still returns the static configured token and has no dynamic generation logic.
 
@@ -36,17 +36,17 @@ Add config support and token generation in the service.
 
 - [ ] **Step 4: Re-run the test to verify it passes**
 
-Run: `mvn -pl backend/sample -Dtest=LiveStreamServiceImplAgoraConfigTest test`
+Run: `mvn -pl backend/uavfire -Dtest=LiveStreamServiceImplAgoraConfigTest test`
 
 Expected: PASS
 
 ### Task 2: Add dependency and backend generation path
 
 **Files:**
-- Modify: `backend/sample/pom.xml`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/model/dto/LiveStreamProperty.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
-- Modify: `backend/sample/src/main/resources/application.yml`
+- Modify: `backend/uavfire/pom.xml`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/model/dto/LiveStreamProperty.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
+- Modify: `backend/uavfire/src/main/resources/application.yml`
 
 - [ ] **Step 1: Add Agora authentication dependency**
 
@@ -68,22 +68,22 @@ Continue returning `appid`, `channel`, and generated `token`.
 
 **Files:**
 - Modify: none
-- Test: `backend/sample/src/test/java/com/dji/sample/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
+- Test: `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
 
 - [ ] **Step 1: Run targeted test**
 
-Run: `mvn -pl sample -Dtest=LiveStreamServiceImplAgoraConfigTest test`
+Run: `mvn -pl uavfire -Dtest=LiveStreamServiceImplAgoraConfigTest test`
 
 Expected: PASS
 
 - [ ] **Step 2: Run existing nearby test**
 
-Run: `mvn -pl sample -Dtest=CloudControlAuthStateResolverTest test`
+Run: `mvn -pl uavfire -Dtest=CloudControlAuthStateResolverTest test`
 
 Expected: PASS
 
 - [ ] **Step 3: Compile backend**
 
-Run: `mvn -pl sample -DskipTests compile`
+Run: `mvn -pl uavfire -DskipTests compile`
 
 Expected: PASS

@@ -462,7 +462,7 @@ const onLiveshareSetting = async (e: any) => {
   root.$router.push(ERouterName.PILOT_LIVESHARE)
 }
 const onOpen3rdApp = () => {
-  const packageName = 'com.dji.sample'
+  const packageName = 'com.yx.uavfire'
   const isInstalled = apiPilot.isAppInstalled(packageName)
   if (isInstalled) {
     window.open('https://www.dji.com')

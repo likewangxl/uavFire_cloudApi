@@ -47,11 +47,11 @@ npm --prefix frontend run build
 
 相关文件：
 
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
 - `backend/cloud-sdk/src/main/java/com/dji/sdk/cloudapi/livestream/LivestreamAgoraUrl.java`
-- `backend/sample/pom.xml`
-- `backend/sample/src/main/resources/application.yml`
-- `backend/sample/src/test/java/com/dji/sample/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
+- `backend/uavfire/pom.xml`
+- `backend/uavfire/src/main/resources/application.yml`
+- `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImplAgoraConfigTest.java`
 
 已完成：
 
@@ -62,7 +62,7 @@ npm --prefix frontend run build
 验证：
 
 ```bash
-mvn -pl sample -am -Dtest=LiveStreamServiceImplAgoraConfigTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl uavfire -am -Dtest=LiveStreamServiceImplAgoraConfigTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 注意：
@@ -239,7 +239,7 @@ cd rcplus-msdk-agent
 - `ai-service/`
 - `frontend/src/pages/page-web/projects/leadership-cockpit.vue`
 - `frontend/src/components/WorkspaceLivestreamPanel.vue`
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
 
 ---
 

@@ -9,7 +9,7 @@ const srcRoot = join(frontendRoot, 'src')
 const packageJsonPath = join(frontendRoot, 'package.json')
 const pilotLivesharePath = join(srcRoot, 'pages/page-pilot/pilot-liveshare.vue')
 const configPath = join(srcRoot, 'api/http/config.ts')
-const backendSampleRoot = join(repoRoot, 'backend/sample')
+const backendSampleRoot = join(repoRoot, 'backend/uavfire')
 const backendApplicationPath = join(backendSampleRoot, 'src/main/resources/application.yml')
 
 function collectSourceFiles (dir) {
@@ -73,8 +73,8 @@ test('frontend HTTP config no longer contains Agora credentials placeholders', (
 })
 
 test('backend sample livestream entrypoint rejects Agora instead of configuring it', () => {
-  const serviceSource = readFileSync(join(backendSampleRoot, 'src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java'), 'utf8')
-  const propertySource = readFileSync(join(backendSampleRoot, 'src/main/java/com/dji/sample/manage/model/dto/LiveStreamProperty.java'), 'utf8')
+  const serviceSource = readFileSync(join(backendSampleRoot, 'src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java'), 'utf8')
+  const propertySource = readFileSync(join(backendSampleRoot, 'src/main/java/com/yx/uavfire/manage/model/dto/LiveStreamProperty.java'), 'utf8')
   const applicationSource = readFileSync(backendApplicationPath, 'utf8')
 
   assert.doesNotMatch(serviceSource, /case AGORA|LivestreamAgoraUrl|AGORA_UID_ANY/)

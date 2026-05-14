@@ -11,7 +11,7 @@ $env:CONSOLE_LOG_CHARSET = "UTF-8"
 
 Set-Location $PSScriptRoot
 
-mvn -pl sample `
+mvn -pl uavfire `
   "-Dproject.build.sourceEncoding=UTF-8" `
   "-Dmaven.compiler.encoding=UTF-8" `
   spring-boot:run `

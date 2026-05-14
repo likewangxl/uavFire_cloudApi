@@ -18,7 +18,7 @@
    - 已具备最小 `TaskRunner`，`start` 后会生成 detection event 并回传 backend
    - 本地 `/healthz`、测试与 `compileall` 已验证
    - 还没有接入真实视频流与真实模型
-3. `backend/sample/`
+3. `backend/uavfire/`
    - `dual-stream` 已具备命令发放 / 拉取 / ack 最小闭环
    - 已具备 task events 写入、查询和 Redis fallback
 
@@ -286,7 +286,7 @@ curl http://127.0.0.1:9000/healthz
 - `TaskRegistry` 仍是进程内存，不代表生产级任务调度
 - 当前事件输出已经接上 backend callback，但 runner 仍是单次执行，不是持续消费
 
-### 3. `backend/sample/` 已完成项
+### 3. `backend/uavfire/` 已完成项
 
 当前定性：
 
@@ -298,7 +298,7 @@ curl http://127.0.0.1:9000/healthz
 
 ```bash
 cd backend
-mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudControlAuthStateResolverTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl uavfire -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudControlAuthStateResolverTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 结果：
@@ -363,8 +363,8 @@ mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudCo
 - 驾驶舱页面：`frontend/src/pages/page-web/projects/leadership-cockpit.vue`
 - 当前播放器：`frontend/src/components/WorkspaceLivestreamPanel.vue`
 - 前端 Agora 配置请求：`frontend/src/api/manage.ts#getAgoraConfig`
-- 后端旧直播控制器：`backend/sample/src/main/java/com/dji/sample/manage/controller/LiveStreamController.java`
-- 后端旧直播服务：`backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
+- 后端旧直播控制器：`backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/LiveStreamController.java`
+- 后端旧直播服务：`backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
 
 建议接手顺序：
 
@@ -404,7 +404,7 @@ mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudCo
 已经确认该事项**尚未开始**，且当前前后端直播链路仍是“单路直播 + 镜头切换”，不是“双通道并播”：
 
 - `frontend/src/components/WorkspaceLivestreamPanel.vue` 当前只有单个播放器挂载点和单个 Agora client。
-- `backend/sample` 当前 `live/streams/start` 语义仍围绕单个 `video_id`。
+- `backend/uavfire` 当前 `live/streams/start` 语义仍围绕单个 `video_id`。
 - 现阶段没有“可见光 + 红外”两路独立可订阅流的统一契约。
 
 因此该事项先加入待办，但**不作为下一步主线**。处理顺序后置到以下主线完成之后再启动论证与落地：
@@ -491,10 +491,10 @@ mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudCo
 
 ### 后端
 
-- `backend/sample/src/main/java/com/dji/sample/manage/controller/LiveStreamController.java`
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
-- `backend/sample/src/main/java/com/dji/sample/control/controller/RcAircraftController.java`
-- `backend/sample/src/main/java/com/dji/sample/control/service/impl/RcAircraftControlServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/LiveStreamController.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/control/controller/RcAircraftController.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/RcAircraftControlServiceImpl.java`
 
 ### Android
 
@@ -516,7 +516,7 @@ mvn -pl sample -Dtest=DualStreamControllerTest,DualStreamServiceImplTest,CloudCo
 后端新增后，优先验证：
 
 ```bash
-mvn -pl backend/sample -Dtest=DualStreamServiceImplTest,DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl backend/uavfire -Dtest=DualStreamServiceImplTest,DualStreamControllerTest -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 Android 新增后，优先验证：

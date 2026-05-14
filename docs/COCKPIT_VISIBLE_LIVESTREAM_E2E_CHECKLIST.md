@@ -108,8 +108,8 @@ curl -fsS 'http://192.168.50.254:58925/index/api/getMediaList?schema=rtmp' | jq 
 - agent RTMP 推流：`rcplus-msdk-agent/app/src/main/java/com/yinxin/uavfir/stream/DjiLiveStreamController.kt:23-44`
 - agent 可见光绑定：`rcplus-msdk-agent/app/src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt:25-32`
 - agent 启动双流入口：`rcplus-msdk-agent/app/src/main/java/com/yinxin/uavfir/stream/RealMsdkStreamProvider.kt:15-41`
-- backend 兜底 URL：`backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`（`buildPlaybackUrl`）
-- backend 直播配置：`backend/sample/src/main/resources/application.yml`（`livestream.playback.webrtc-host` / `webrtc-port`）
+- backend 兜底 URL：`backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`（`buildPlaybackUrl`）
+- backend 直播配置：`backend/uavfire/src/main/resources/application.yml`（`livestream.playback.webrtc-host` / `webrtc-port`）
 - 驾驶舱播放器：`frontend/src/pages/page-web/projects/leadership-cockpit.vue`（`mountPlayerInstance` / `syncLivePlayers`，约 509-630 行）
 - ZLM 配置：`deployment/zlmediakit/.env`（`ZLM_PUBLIC_HOST=192.168.50.254`）+ `deployment/zlmediakit/config/config.ini`（`externIP=192.168.50.254`）
 

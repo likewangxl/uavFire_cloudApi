@@ -45,4 +45,4 @@
 
 ## 如何接入WebSocket
  - CloudSDK 已经定义了WebSocket服务，但是没有实现WebSocket管理。默认地址为：http://localhost:6789/api/v1/ws 
- - 自定义接入参考：com.dji.sample.component.websocket.config
+ - 自定义接入参考：com.yx.uavfire.component.websocket.config

@@ -61,10 +61,10 @@
 
 关键文件：
 
-- `backend/sample/src/main/resources/application.yml`
-- `backend/sample/src/main/java/com/dji/sample/manage/controller/RootController.java`
+- `backend/uavfire/src/main/resources/application.yml`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java`
 - `frontend/src/api/http/config.ts`
-- `backend/sample/src/test/java/com/dji/sample/manage/service/impl/LiveStreamServiceImplPlaybackUrlTest.java`
+- `backend/uavfire/src/test/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImplPlaybackUrlTest.java`
 
 已确认不再残留旧直播 IP：
 
@@ -199,7 +199,7 @@ curl -I http://127.0.0.1:58925/
 
 本轮新增：
 
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
   - 在 `visible_state = running` 且 `visiblePlayUrl` 为空时，兜底生成：
     - `webrtc://172.20.10.7:58925/live/{droneSn}-0`
   - 对应 `playback_status` 会从 `awaiting-media-url` 收敛为 `visible-playback-ready`
@@ -212,7 +212,7 @@ curl -I http://127.0.0.1:58925/
 对应测试/验证：
 
 - backend：
-  - `mvn -pl sample -Dtest=DualStreamServiceImplTest,LiveStreamServiceImplPlaybackUrlTest,LiveStreamServiceImplAgoraConfigTest test`
+  - `mvn -pl uavfire -Dtest=DualStreamServiceImplTest,LiveStreamServiceImplPlaybackUrlTest,LiveStreamServiceImplAgoraConfigTest test`
   - `BUILD SUCCESS`
 - frontend：
   - `npm run build`
@@ -356,9 +356,9 @@ RC Plus 上当前真实状态：
 
 ### Backend / Frontend
 
-- `backend/sample/src/main/resources/application.yml`
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
-- `backend/sample/src/main/java/com/dji/sample/manage/controller/RootController.java`
+- `backend/uavfire/src/main/resources/application.yml`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java`
 - `frontend/src/api/http/config.ts`
 - `frontend/src/pages/page-web/projects/leadership-cockpit.vue`
 - `frontend/src/api/manage.ts`
@@ -371,7 +371,7 @@ RC Plus 上当前真实状态：
 
 ```bash
 cd backend
-mvn -pl sample -Dtest=LiveStreamServiceImplPlaybackUrlTest,LiveStreamServiceImplAgoraConfigTest test
+mvn -pl uavfire -Dtest=LiveStreamServiceImplPlaybackUrlTest,LiveStreamServiceImplAgoraConfigTest test
 ```
 
 结果：
@@ -492,9 +492,9 @@ JAVA_HOME=/usr/local/opt/openjdk@17 ./gradlew :app:assembleDebug
 - `HANDOFF_2026-04-24_LOCAL_ZLM_RCPLUS_DUAL_STREAM.md`
 - `HANDOFF_2026-04-21_M4T_DEVICE_AND_BACKEND_NEXT_PHASE.md`
 - `HANDOFF_2026-04-21_M4T_DUAL_STREAM_AND_LIVESTREAM.md`
-- `backend/sample/src/main/resources/application.yml`
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/LiveStreamServiceImpl.java`
-- `backend/sample/src/main/java/com/dji/sample/manage/service/impl/DualStreamServiceImpl.java`
+- `backend/uavfire/src/main/resources/application.yml`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/LiveStreamServiceImpl.java`
+- `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
 - `frontend/src/pages/page-web/projects/leadership-cockpit.vue`
 - `frontend/src/components/WorkspaceLivestreamPanel.vue`
 - `rcplus-msdk-agent/app/src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt`
@@ -509,7 +509,7 @@ JAVA_HOME=/usr/local/opt/openjdk@17 ./gradlew :app:assembleDebug
 
 **事实更正**：该 IP 切换已经被回滚。仓库当前的真实统一基准是 `192.168.50.254`（Mac 当前 wifi 接口 en0），具体见：
 
-- `backend/sample/src/main/resources/application.yml`（MQTT host、pilot2 web-entry、livestream.playback.webrtc-host、RTMP、GB28181、WHIP 全部为 `192.168.50.254`）
+- `backend/uavfire/src/main/resources/application.yml`（MQTT host、pilot2 web-entry、livestream.playback.webrtc-host、RTMP、GB28181、WHIP 全部为 `192.168.50.254`）
 - `frontend/src/api/http/config.ts` + `frontend/env/.env`（baseURL / websocketURL / rtmpURL 全部为 `192.168.50.254`）
 - `rcplus-msdk-agent/gradle.properties`（`agentBackendBaseUrl` / `agentMediaHost` 为 `192.168.50.254`）
 - `deployment/zlmediakit/.env`、`deployment/zlmediakit/config/config.ini`（`ZLM_PUBLIC_HOST` / `externIP` 为 `192.168.50.254`）

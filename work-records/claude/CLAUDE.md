@@ -76,8 +76,8 @@ Maven 模块：
 
 ```bash
 mvn package
-mvn -pl sample -DskipTests compile
-mvn -pl sample spring-boot:run
+mvn -pl uavfire -DskipTests compile
+mvn -pl uavfire spring-boot:run
 ```
 
 默认后端端口：`6789`。
@@ -135,7 +135,7 @@ mvn -pl sample spring-boot:run
 ## 当前已验证事项
 
 - 前端 `npm run build` 可完成构建，存在上游依赖或 Sass 的既有警告。
-- 后端 `mvn -pl sample -DskipTests compile` 可完成编译，存在 Maven 配置层面的既有警告。
+- 后端 `mvn -pl uavfire -DskipTests compile` 可完成编译，存在 Maven 配置层面的既有警告。
 - 后端服务可在 `6789` 端口启动。
 - 前后端源码已经整理到 GitHub 仓库，未提交 `node_modules`、`dist`、`target`、运行日志等生成内容。
 

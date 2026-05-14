@@ -41,8 +41,8 @@
   - 前端：
     - `frontend/src/api/http/config.ts`
   - 后端：
-    - `backend/sample/src/main/java/com/dji/sample/manage/controller/RootController.java`
-    - `backend/sample/src/main/resources/application.yml`
+    - `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java`
+    - `backend/uavfire/src/main/resources/application.yml`
 - 这意味着当前应按下面这组地址理解本机环境：
   - 前端：`http://192.168.50.254:8080`
   - 后端：`http://192.168.50.254:6789`
@@ -247,7 +247,7 @@ DJI Cloud API 官方文档：
 
 见：
 
-- [backend/sample/logs/cloud-api-sample.log:13837](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:13837)
+- [backend/uavfire/logs/cloud-api-sample.log:13837](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13837)
 
 #### 飞机规划路径
 
@@ -264,8 +264,8 @@ DJI Cloud API 官方文档：
 
 见：
 
-- [backend/sample/logs/cloud-api-sample.log:14004](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:14004)
-- [backend/sample/logs/cloud-api-sample.log:9598](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:9598)
+- [backend/uavfire/logs/cloud-api-sample.log:14004](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:14004)
+- [backend/uavfire/logs/cloud-api-sample.log:9598](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:9598)
 
 这正说明飞机同时在处理：
 
@@ -285,11 +285,11 @@ DJI Cloud API 官方文档：
 
 见：
 
-- [backend/sample/logs/cloud-api-sample.log:13912](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:13912)
-- [backend/sample/logs/cloud-api-sample.log:13953](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:13953)
-- [backend/sample/logs/cloud-api-sample.log:13996](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:13996)
-- [backend/sample/logs/cloud-api-sample.log:14047](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:14047)
-- [backend/sample/logs/cloud-api-sample.log:14075](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:14075)
+- [backend/uavfire/logs/cloud-api-sample.log:13912](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13912)
+- [backend/uavfire/logs/cloud-api-sample.log:13953](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13953)
+- [backend/uavfire/logs/cloud-api-sample.log:13996](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13996)
+- [backend/uavfire/logs/cloud-api-sample.log:14047](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:14047)
+- [backend/uavfire/logs/cloud-api-sample.log:14075](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:14075)
 
 因此可以明确排除：
 
@@ -456,9 +456,9 @@ DJI Cloud API 官方文档：
 
 关键日志在：
 
-- [backend/sample/logs/cloud-api-sample.log:23064](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:23064)
-- [backend/sample/logs/cloud-api-sample.log:23078](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:23078)
-- [backend/sample/logs/cloud-api-sample.log:23116](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:23116)
+- [backend/uavfire/logs/cloud-api-sample.log:23064](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:23064)
+- [backend/uavfire/logs/cloud-api-sample.log:23078](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:23078)
+- [backend/uavfire/logs/cloud-api-sample.log:23116](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:23116)
 
 时序：
 
@@ -535,7 +535,7 @@ DJI Cloud API 官方文档：
 
 ### 6.3 后端主要改动文件
 
-- [backend/sample/src/main/java/com/dji/sample/control/service/impl/SDKControlService.java](/Users/likewang/uavfire/backend/sample/src/main/java/com/dji/sample/control/service/impl/SDKControlService.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/SDKControlService.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/SDKControlService.java)
   - 增加 `takeoff_to_point_progress` 详细日志：
     - `flightId`
     - `status`
@@ -545,17 +545,17 @@ DJI Cloud API 官方文档：
     - `wayPointIndex`
     - `plannedPathPoints`
 
-- [backend/sample/src/main/java/com/dji/sample/control/service/impl/ControlServiceImpl.java](/Users/likewang/uavfire/backend/sample/src/main/java/com/dji/sample/control/service/impl/ControlServiceImpl.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java)
   - 增加 `takeoff_to_point` 请求 JSON 输出
   - 增加 `flight authority` 抢占日志
 
-- [backend/sample/src/main/java/com/dji/sample/manage/service/impl/CloudControlAuthStateResolver.java](/Users/likewang/uavfire/backend/sample/src/main/java/com/dji/sample/manage/service/impl/CloudControlAuthStateResolver.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStateResolver.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStateResolver.java)
   - 作用：从未知 `state` 消息中解析 `cloud_control_auth` / `is_cloud_control_auth`
 
-- [backend/sample/src/main/java/com/dji/sample/manage/service/impl/CloudControlAuthStatePushService.java](/Users/likewang/uavfire/backend/sample/src/main/java/com/dji/sample/manage/service/impl/CloudControlAuthStatePushService.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStatePushService.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStatePushService.java)
   - 作用：把设备侧授权状态推送成 WebSocket 事件 `cloud_control_auth_update`
 
-- [backend/sample/src/main/java/com/dji/sample/component/websocket/model/BizCodeEnum.java](/Users/likewang/uavfire/backend/sample/src/main/java/com/dji/sample/component/websocket/model/BizCodeEnum.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/component/websocket/model/BizCodeEnum.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/component/websocket/model/BizCodeEnum.java)
   - 新增 `CLOUD_CONTROL_AUTH_UPDATE`
 
 ### 6.4 测试文件
@@ -565,7 +565,7 @@ DJI Cloud API 官方文档：
 - [frontend/scripts/official-takeoff-flow.test.mjs](/Users/likewang/uavfire/frontend/scripts/official-takeoff-flow.test.mjs)
 - [frontend/scripts/cloud-control-auth-policy.test.mjs](/Users/likewang/uavfire/frontend/scripts/cloud-control-auth-policy.test.mjs)
 - [frontend/scripts/official-takeoff-session-policy.test.mjs](/Users/likewang/uavfire/frontend/scripts/official-takeoff-session-policy.test.mjs)
-- [backend/sample/src/test/java/com/dji/sample/manage/service/CloudControlAuthStateResolverTest.java](/Users/likewang/uavfire/backend/sample/src/test/java/com/dji/sample/manage/service/CloudControlAuthStateResolverTest.java)
+- [backend/uavfire/src/test/java/com/yx/uavfire/manage/service/CloudControlAuthStateResolverTest.java](/Users/likewang/uavfire/backend/uavfire/src/test/java/com/yx/uavfire/manage/service/CloudControlAuthStateResolverTest.java)
 
 ## 7. 本次已经做过的验证
 
@@ -610,7 +610,7 @@ npm --prefix frontend run build
 ```bash
 export JAVA_HOME="$(brew --prefix openjdk@11)/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
-mvn -pl sample -Dtest=CloudControlAuthStateResolverTest test
+mvn -pl uavfire -Dtest=CloudControlAuthStateResolverTest test
 ```
 
 ## 8. 当前未解决的问题
@@ -676,7 +676,7 @@ curl -I http://127.0.0.1:8080
 export JAVA_HOME="$(brew --prefix openjdk@11)/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 cd /Users/likewang/uavfire/backend
-mvn -pl sample spring-boot:run
+mvn -pl uavfire spring-boot:run
 ```
 
 ### 第二步：先看当前前端代码状态，不要急着飞
@@ -717,7 +717,7 @@ git clone --depth=1 https://github.com/dji-sdk/Cloud-API-Doc.git /tmp/Cloud-API-
 建议搜索范围：
 
 ```bash
-rg -n "wayline_failed|takeoff_to_point_progress|cloud_control_auth=\\[\\]|joystick_invalid_notify|drc_status_notify|hms|airsense|mode_code|current_commander_flight_mode" backend/sample/logs/cloud-api-sample.log
+rg -n "wayline_failed|takeoff_to_point_progress|cloud_control_auth=\\[\\]|joystick_invalid_notify|drc_status_notify|hms|airsense|mode_code|current_commander_flight_mode" backend/uavfire/logs/cloud-api-sample.log
 ```
 
 ### 第五步：如果要改代码，优先级如下
@@ -773,7 +773,7 @@ rg -n "wayline_failed|takeoff_to_point_progress|cloud_control_auth=\\[\\]|joysti
 export JAVA_HOME="$(brew --prefix openjdk@11)/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 cd /Users/likewang/uavfire/backend
-mvn -pl sample spring-boot:run
+mvn -pl uavfire spring-boot:run
 ```
 
 前端：
@@ -805,11 +805,11 @@ npm --prefix frontend run serve
 
 关键日志：
 
-- [backend/sample/logs/cloud-api-sample.log:29802](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:29802)
-- [backend/sample/logs/cloud-api-sample.log:29819](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:29819)
-- [backend/sample/logs/cloud-api-sample.log:29858](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:29858)
-- [backend/sample/logs/cloud-api-sample.log:30078](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:30078)
-- [backend/sample/logs/cloud-api-sample.log:30339](/Users/likewang/uavfire/backend/sample/logs/cloud-api-sample.log:30339)
+- [backend/uavfire/logs/cloud-api-sample.log:29802](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:29802)
+- [backend/uavfire/logs/cloud-api-sample.log:29819](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:29819)
+- [backend/uavfire/logs/cloud-api-sample.log:29858](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:29858)
+- [backend/uavfire/logs/cloud-api-sample.log:30078](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:30078)
+- [backend/uavfire/logs/cloud-api-sample.log:30339](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:30339)
 
 时序要点：
 
@@ -868,7 +868,7 @@ npm --prefix frontend run build
 ```bash
 export JAVA_HOME="$(brew --prefix openjdk@11)/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
-mvn -pl sample -Dtest=CloudControlAuthStateResolverTest test
+mvn -pl uavfire -Dtest=CloudControlAuthStateResolverTest test
 ```
 
 ### 12.6 如果下一轮还能测试，最该盯什么
@@ -1067,8 +1067,8 @@ mvn -pl sample -Dtest=CloudControlAuthStateResolverTest test
 
 本轮已把代码默认 IP 改为 `172.20.10.7`，后续若本机网络再次变化，需要同时检查：
 
-- [backend/sample/src/main/resources/application.yml](/Users/likewang/uavfire/backend/sample/src/main/resources/application.yml:57)
-- [backend/sample/src/main/java/com/dji/sample/manage/controller/RootController.java](/Users/likewang/uavfire/backend/sample/src/main/java/com/dji/sample/manage/controller/RootController.java:13)
+- [backend/uavfire/src/main/resources/application.yml](/Users/likewang/uavfire/backend/uavfire/src/main/resources/application.yml:57)
+- [backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java:13)
 - [frontend/src/api/http/config.ts](/Users/likewang/uavfire/frontend/src/api/http/config.ts:9)
 
 不要只改前端地址或只改 MQTT 地址，否则会再次出现：

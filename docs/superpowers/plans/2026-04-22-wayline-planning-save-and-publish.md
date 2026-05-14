@@ -14,18 +14,18 @@
 
 ### Backend
 
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/entity/PlannedWaylineEntity.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/dto/PlannedWaypointDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/dto/PlannedWaylineDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/param/CreatePlannedWaylineParam.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/param/UpdatePlannedWaylineParam.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/param/PublishPlannedWaylineResponse.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/dao/IPlannedWaylineMapper.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/service/IPlannedWaylineService.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/PlannedWaylineServiceImpl.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/controller/PlannedWaylineController.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/WaylineFileServiceImpl.java`
-- Modify: `backend/sample/src/main/resources/application.yml` only if a new mapper scan or serialization setting is required.
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/entity/PlannedWaylineEntity.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/dto/PlannedWaypointDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/dto/PlannedWaylineDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/CreatePlannedWaylineParam.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/UpdatePlannedWaylineParam.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/PublishPlannedWaylineResponse.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/dao/IPlannedWaylineMapper.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/IPlannedWaylineService.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/PlannedWaylineServiceImpl.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/controller/PlannedWaylineController.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/WaylineFileServiceImpl.java`
+- Modify: `backend/uavfire/src/main/resources/application.yml` only if a new mapper scan or serialization setting is required.
 
 ### Frontend
 
@@ -46,19 +46,19 @@
 ### Task 1: Backend Planned-Wayline Model And CRUD Service
 
 **Files:**
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/entity/PlannedWaylineEntity.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/dto/PlannedWaypointDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/dto/PlannedWaylineDTO.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/param/CreatePlannedWaylineParam.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/param/UpdatePlannedWaylineParam.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/dao/IPlannedWaylineMapper.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/service/IPlannedWaylineService.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/PlannedWaylineServiceImpl.java`
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/controller/PlannedWaylineController.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/entity/PlannedWaylineEntity.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/dto/PlannedWaypointDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/dto/PlannedWaylineDTO.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/CreatePlannedWaylineParam.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/UpdatePlannedWaylineParam.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/dao/IPlannedWaylineMapper.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/IPlannedWaylineService.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/PlannedWaylineServiceImpl.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/controller/PlannedWaylineController.java`
 
 - [ ] **Step 1: Write the failing backend tests first**
 
-Create `backend/sample/src/test/java/com/dji/sample/wayline/PlannedWaylineControllerTest.java` covering:
+Create `backend/uavfire/src/test/java/com/yx/uavfire/wayline/PlannedWaylineControllerTest.java` covering:
 
 ```java
 @Test
@@ -74,7 +74,7 @@ void deletePlannedWaylineShouldRemoveWorkspaceOwnedRecord() {}
 void listPlannedWaylinesShouldReturnWorkspaceScopedRecords() {}
 ```
 
-Also create `backend/sample/src/test/java/com/dji/sample/wayline/PlannedWaylineServiceTest.java` covering JSON waypoint serialization and status defaults:
+Also create `backend/uavfire/src/test/java/com/yx/uavfire/wayline/PlannedWaylineServiceTest.java` covering JSON waypoint serialization and status defaults:
 
 ```java
 @Test
@@ -90,7 +90,7 @@ Run:
 
 ```bash
 cd /Users/likewang/uavfire/backend
-mvn -pl sample -Dtest=PlannedWaylineControllerTest,PlannedWaylineServiceTest test
+mvn -pl uavfire -Dtest=PlannedWaylineControllerTest,PlannedWaylineServiceTest test
 ```
 
 Expected:
@@ -152,7 +152,7 @@ Run:
 
 ```bash
 cd /Users/likewang/uavfire/backend
-mvn -pl sample -Dtest=PlannedWaylineControllerTest,PlannedWaylineServiceTest test
+mvn -pl uavfire -Dtest=PlannedWaylineControllerTest,PlannedWaylineServiceTest test
 ```
 
 Expected:
@@ -162,17 +162,17 @@ Expected:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/sample/src/main/java/com/dji/sample/wayline/model/entity/PlannedWaylineEntity.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/model/dto/PlannedWaypointDTO.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/model/dto/PlannedWaylineDTO.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/model/param/CreatePlannedWaylineParam.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/model/param/UpdatePlannedWaylineParam.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/dao/IPlannedWaylineMapper.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/service/IPlannedWaylineService.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/service/impl/PlannedWaylineServiceImpl.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/controller/PlannedWaylineController.java \
-  backend/sample/src/test/java/com/dji/sample/wayline/PlannedWaylineControllerTest.java \
-  backend/sample/src/test/java/com/dji/sample/wayline/PlannedWaylineServiceTest.java
+git add backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/entity/PlannedWaylineEntity.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/dto/PlannedWaypointDTO.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/dto/PlannedWaylineDTO.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/CreatePlannedWaylineParam.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/UpdatePlannedWaylineParam.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/dao/IPlannedWaylineMapper.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/IPlannedWaylineService.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/PlannedWaylineServiceImpl.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/controller/PlannedWaylineController.java \
+  backend/uavfire/src/test/java/com/yx/uavfire/wayline/PlannedWaylineControllerTest.java \
+  backend/uavfire/src/test/java/com/yx/uavfire/wayline/PlannedWaylineServiceTest.java
 git commit -m "feat: add planned wayline CRUD"
 ```
 
@@ -181,11 +181,11 @@ git commit -m "feat: add planned wayline CRUD"
 ### Task 2: Backend Publish Flow From Planned Record To Formal Wayline File
 
 **Files:**
-- Create: `backend/sample/src/main/java/com/dji/sample/wayline/model/param/PublishPlannedWaylineResponse.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/wayline/service/IPlannedWaylineService.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/PlannedWaylineServiceImpl.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/wayline/controller/PlannedWaylineController.java`
-- Modify: `backend/sample/src/main/java/com/dji/sample/wayline/service/impl/WaylineFileServiceImpl.java`
+- Create: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/PublishPlannedWaylineResponse.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/IPlannedWaylineService.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/PlannedWaylineServiceImpl.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/controller/PlannedWaylineController.java`
+- Modify: `backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/WaylineFileServiceImpl.java`
 
 - [ ] **Step 1: Write the failing publish tests**
 
@@ -212,7 +212,7 @@ Run:
 
 ```bash
 cd /Users/likewang/uavfire/backend
-mvn -pl sample -Dtest=PlannedWaylineServiceTest test
+mvn -pl uavfire -Dtest=PlannedWaylineServiceTest test
 ```
 
 Expected:
@@ -252,7 +252,7 @@ Run:
 
 ```bash
 cd /Users/likewang/uavfire/backend
-mvn -pl sample -Dtest=PlannedWaylineServiceTest test
+mvn -pl uavfire -Dtest=PlannedWaylineServiceTest test
 ```
 
 Expected:
@@ -262,12 +262,12 @@ Expected:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/sample/src/main/java/com/dji/sample/wayline/model/param/PublishPlannedWaylineResponse.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/service/IPlannedWaylineService.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/service/impl/PlannedWaylineServiceImpl.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/controller/PlannedWaylineController.java \
-  backend/sample/src/main/java/com/dji/sample/wayline/service/impl/WaylineFileServiceImpl.java \
-  backend/sample/src/test/java/com/dji/sample/wayline/PlannedWaylineServiceTest.java
+git add backend/uavfire/src/main/java/com/yx/uavfire/wayline/model/param/PublishPlannedWaylineResponse.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/IPlannedWaylineService.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/PlannedWaylineServiceImpl.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/controller/PlannedWaylineController.java \
+  backend/uavfire/src/main/java/com/yx/uavfire/wayline/service/impl/WaylineFileServiceImpl.java \
+  backend/uavfire/src/test/java/com/yx/uavfire/wayline/PlannedWaylineServiceTest.java
 git commit -m "feat: publish planned waylines to wayline library"
 ```
 
@@ -467,7 +467,7 @@ Run:
 
 ```bash
 cd /Users/likewang/uavfire/backend
-mvn -pl sample -Dtest=PlannedWaylineControllerTest,PlannedWaylineServiceTest test
+mvn -pl uavfire -Dtest=PlannedWaylineControllerTest,PlannedWaylineServiceTest test
 ```
 
 Expected:

@@ -3,7 +3,7 @@
 ## 🚀 后端启动
 
 - JDK 11 路径：`/usr/local/opt/openjdk@11`
-- 启动命令：`JAVA_HOME=/usr/local/opt/openjdk@11 mvn spring-boot:run -pl sample`
+- 启动命令：`JAVA_HOME=/usr/local/opt/openjdk@11 mvn spring-boot:run -pl uavfire`
 - 端口：6789
 
 ## Karpathy 编码准则
