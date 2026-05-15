@@ -22,3 +22,6 @@ Thumbs.db
 sample-run*.out.log
 sample-run*.err.log
 vite-*.out.log
+
+# OMC tool state (local only)
+.omc/
