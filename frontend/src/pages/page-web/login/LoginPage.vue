@@ -41,7 +41,7 @@ function onDemo () {
   position: fixed;
   inset: 0;
   background-image: url('/@/assets/login-bg.png');
-  background-size: contain;
+  background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   background-color: #0a1a35;
