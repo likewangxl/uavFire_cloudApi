@@ -84,16 +84,13 @@ const form = reactive<FormState>({
 const submitting = ref(false)
 const demoLoading = ref(false)
 const forgotOpen = ref(false)
-const captchaRef = ref<{ refresh: () => void } | null>(null)
+const captchaRef = ref<{ refresh:() => void } | null>(null)
 
 const canSubmit = computed(
   () => !!form.username && !!form.password && !!form.captcha && !!form.captchaToken
 )
 
-const emit = defineEmits<{
-  (e: 'submit', payload: FormState): void,
-  (e: 'demo'): void,
-}>()
+const emit = defineEmits<{(e: 'submit', payload: FormState): void, (e: 'demo'): void }>()
 
 function onSubmit () {
   if (!canSubmit.value || submitting.value) return
