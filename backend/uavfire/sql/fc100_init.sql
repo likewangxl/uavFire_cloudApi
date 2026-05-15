@@ -1,9 +1,9 @@
 -- FC100 消防灭火系统数据库初始化
 -- spec: docs/superpowers/specs/2026-05-13-fc100-fire-suppression-design.md §3
--- 本期独立工程数据库：uavfire（独立 schema）；未来合并 M4T 时迁到 cloud_sample
+-- 合并进 M4T 后,fc100 表与 M4T 共用 cloud_sample 库。
 -- 命名约定与 M4T cloud_sample.sql 一致：bigint 毫秒时间戳 / utf8mb3 / tinyint(1) 布尔 / utf8_general_ci
 
-USE `uavfire`;
+USE `cloud_sample`;
 SET NAMES utf8mb4;
 
 -- ---------------------------------------------------------------------------
