@@ -5,6 +5,7 @@ import com.yx.uavfire.manage.model.dto.CaptchaDTO;
 import com.yx.uavfire.manage.service.ICaptchaService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
@@ -13,6 +14,7 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -21,6 +23,13 @@ import java.util.concurrent.TimeUnit;
 public class CaptchaServiceImpl implements ICaptchaService {
 
     private static final SecureRandom RNG = new SecureRandom();
+
+    private static final DefaultRedisScript<String> VERIFY_AND_CONSUME_SCRIPT = new DefaultRedisScript<>(
+            "local v = redis.call('GET', KEYS[1]); " +
+            "if v then redis.call('DEL', KEYS[1]); end; " +
+            "return v",
+            String.class
+    );
 
     @Autowired
     private StringRedisTemplate redisTemplate;
@@ -44,7 +53,7 @@ public class CaptchaServiceImpl implements ICaptchaService {
     public boolean verifyAndConsume(String token, String userInput) {
         if (token == null || userInput == null) return false;
         String key = CaptchaConfig.REDIS_KEY_PREFIX + token;
-        String stored = redisTemplate.opsForValue().getAndDelete(key);
+        String stored = redisTemplate.execute(VERIFY_AND_CONSUME_SCRIPT, Collections.singletonList(key));
         if (stored == null) return false;
         return Objects.equals(stored.toUpperCase(), userInput.toUpperCase());
     }

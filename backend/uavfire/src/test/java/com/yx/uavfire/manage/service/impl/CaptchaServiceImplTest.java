@@ -10,7 +10,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -50,41 +52,43 @@ class CaptchaServiceImplTest {
 
     @Test
     void verifyAndConsume_returnsTrue_whenMatchCaseInsensitive_andConsumesAtomically() {
-        when(valueOps.getAndDelete("captcha:tok1")).thenReturn("ABCD");
+        when(redisTemplate.execute(any(DefaultRedisScript.class), eq(Collections.singletonList("captcha:tok1"))))
+            .thenReturn("ABCD");
 
         assertTrue(service.verifyAndConsume("tok1", "abcd"));
 
-        verify(valueOps).getAndDelete("captcha:tok1");
-        verify(redisTemplate, never()).delete(anyString());
+        verify(redisTemplate).execute(any(DefaultRedisScript.class), eq(Collections.singletonList("captcha:tok1")));
     }
 
     @Test
     void verifyAndConsume_returnsFalse_whenTokenMissing() {
-        when(valueOps.getAndDelete("captcha:gone")).thenReturn(null);
+        when(redisTemplate.execute(any(DefaultRedisScript.class), eq(Collections.singletonList("captcha:gone"))))
+            .thenReturn(null);
 
         assertFalse(service.verifyAndConsume("gone", "ABCD"));
     }
 
     @Test
     void verifyAndConsume_returnsFalse_whenMismatch_andStillConsumes() {
-        when(valueOps.getAndDelete("captcha:tok2")).thenReturn("ABCD");
+        when(redisTemplate.execute(any(DefaultRedisScript.class), eq(Collections.singletonList("captcha:tok2"))))
+            .thenReturn("ABCD");
 
         assertFalse(service.verifyAndConsume("tok2", "WXYZ"));
 
-        verify(valueOps).getAndDelete("captcha:tok2");
+        verify(redisTemplate).execute(any(DefaultRedisScript.class), eq(Collections.singletonList("captcha:tok2")));
     }
 
     @Test
     void verifyAndConsume_returnsFalse_whenTokenIsNull_withoutTouchingRedis() {
         assertFalse(service.verifyAndConsume(null, "ABCD"));
 
-        verifyNoInteractions(valueOps);
+        verifyNoInteractions(redisTemplate);
     }
 
     @Test
     void verifyAndConsume_returnsFalse_whenUserInputIsNull_withoutTouchingRedis() {
         assertFalse(service.verifyAndConsume("tok", null));
 
-        verifyNoInteractions(valueOps);
+        verifyNoInteractions(redisTemplate);
     }
 }
