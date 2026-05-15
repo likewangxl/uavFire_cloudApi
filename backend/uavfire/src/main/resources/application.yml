@@ -90,6 +90,10 @@ url:
   wayline-agent:
     prefix: wayline-agent
     version: /api/v1
+
+wayline-agent:
+  shared-secret: change-me-in-production
+  token-ttl-seconds: 86400
   storage:
     prefix: storage
     version: /api/v1
