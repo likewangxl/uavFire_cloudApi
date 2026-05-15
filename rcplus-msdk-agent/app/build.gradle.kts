@@ -90,6 +90,7 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     compileOnly("com.dji:dji-sdk-v5-aircraft-provided:${djiMsdkVersion.get()}")
     implementation("com.dji:dji-sdk-v5-aircraft:${djiMsdkVersion.get()}")
     runtimeOnly("com.dji:dji-sdk-v5-networkImp:${djiMsdkVersion.get()}")
