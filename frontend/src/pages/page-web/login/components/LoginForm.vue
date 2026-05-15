@@ -60,7 +60,7 @@
 </template>
 
 <script lang="ts" setup>
-import { reactive, ref, computed, defineEmits, defineExpose } from 'vue'
+import { reactive, ref, computed } from 'vue'
 import { UserOutlined, LockOutlined, SafetyOutlined } from '@ant-design/icons-vue'
 import CaptchaImage from './CaptchaImage.vue'
 import ForgotPasswordModal from './ForgotPasswordModal.vue'

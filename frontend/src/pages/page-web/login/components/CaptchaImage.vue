@@ -6,7 +6,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, defineExpose, defineEmits } from 'vue'
+import { ref, onMounted } from 'vue'
 import { getCaptcha } from '/@/api/captcha'
 
 const emit = defineEmits<{ (e: 'update:token', token: string): void }>()
