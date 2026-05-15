@@ -31,7 +31,6 @@ export function readRememberedUsername (): string {
 }
 
 export function useLogin () {
-
   async function onLogin (payload: FormSubmitPayload, formHandle: FormHandle) {
     formHandle.setSubmitting(true)
     try {

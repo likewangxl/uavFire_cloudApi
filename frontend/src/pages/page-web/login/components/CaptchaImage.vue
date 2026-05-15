@@ -9,7 +9,7 @@
 import { ref, onMounted } from 'vue'
 import { getCaptcha } from '/@/api/captcha'
 
-const emit = defineEmits<{ (e: 'update:token', token: string): void }>()
+const emit = defineEmits<{(e: 'update:token', token: string): void }>()
 
 const src = ref<string>('')
 const loading = ref(false)
