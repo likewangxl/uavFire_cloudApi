@@ -52,6 +52,17 @@ zip -r ../m30t_min_v2.kmz wpmz/
 4. 选这份 KMZ → 上传 → 起飞 → 看是否被 M4T 拒绝
 5. 如果被拒,记录拒绝原因(MSDK callback 的 errorCode + errorMsg),报回来调整 enum
 
+### 改完后自检
+
+```bash
+python3 samples/wayline/validate_kmz.py samples/wayline/<your-edited>.kmz
+```
+
+校验器(`validate_kmz.py`)做的事:解压、按 WPML spec 检查必填 `wpml:*`
+元素、检查枚举值合法、检查 `<coordinates>` 至少有逗号。**这是下限校验,
+不等于 M4T 一定接受**——只能用来抓掉字段、namespace 错、coordinates
+残缺之类的低级问题。
+
 ### 失败信号对照
 
 | 现象 | 可能原因 |
