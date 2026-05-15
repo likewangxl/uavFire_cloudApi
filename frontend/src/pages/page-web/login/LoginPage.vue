@@ -40,18 +40,13 @@ function onDemo () {
 .login-page {
   position: fixed;
   inset: 0;
-  background-image: url('/@/assets/login-bg-narrow.png');
-  background-size: cover;
-  background-position: top center;
+  background-image: url('/@/assets/login-bg.png');
+  background-size: contain;
+  background-position: center;
   background-repeat: no-repeat;
   background-color: #0a1a35;
   min-width: 1366px;
   overflow: hidden;
-}
-@media (min-width: 1920px) {
-  .login-page {
-    background-image: url('/@/assets/login-bg-wide.png');
-  }
 }
 .login-card {
   position: absolute;
