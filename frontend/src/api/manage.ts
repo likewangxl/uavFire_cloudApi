@@ -10,6 +10,8 @@ export interface LoginBody {
  username: string,
  password: string,
  flag: number,
+ captcha: string,
+ captcha_token: string,
 }
 export interface BindBody {
   device_sn: string,
