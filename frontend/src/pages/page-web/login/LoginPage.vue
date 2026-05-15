@@ -42,7 +42,7 @@ function onDemo () {
   inset: 0;
   background-image: url('/@/assets/login-bg-narrow.png');
   background-size: cover;
-  background-position: center;
+  background-position: top center;
   background-repeat: no-repeat;
   background-color: #0a1a35;
   min-width: 1366px;
