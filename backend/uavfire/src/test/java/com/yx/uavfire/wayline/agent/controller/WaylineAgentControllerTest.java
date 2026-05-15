@@ -1,6 +1,8 @@
 package com.yx.uavfire.wayline.agent.controller;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineAgentCommandAckDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineAgentCommandDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO;
@@ -29,7 +31,19 @@ class WaylineAgentControllerTest {
 
     private MockMvc mockMvc;
     private IWaylineAgentService service;
-    private final ObjectMapper json = new ObjectMapper();
+    private final ObjectMapper json = productionLikeMapper();
+
+    /**
+     * Mirrors {@code SpringBeanConfiguration#objectMapper}: snake_case wire
+     * format with case-insensitive deserialization. Tests must hit the same
+     * wire shape the agent actually sees.
+     */
+    private static ObjectMapper productionLikeMapper() {
+        ObjectMapper m = new ObjectMapper();
+        m.setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
+        m.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        return m;
+    }
 
     @BeforeEach
     void setUp() {
@@ -37,7 +51,7 @@ class WaylineAgentControllerTest {
         service = mock(IWaylineAgentService.class);
         ReflectionTestUtils.setField(controller, "waylineAgentService", service);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setMessageConverters(new MappingJackson2HttpMessageConverter(new ObjectMapper()))
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(productionLikeMapper()))
                 .addPlaceholderValue("url.wayline-agent.prefix", "wayline-agent")
                 .addPlaceholderValue("url.wayline-agent.version", "/api/v1")
                 .build();
@@ -104,6 +118,37 @@ class WaylineAgentControllerTest {
         verify(service).dispatchWayline(eq("SN-A"), captor.capture());
         org.junit.jupiter.api.Assertions.assertEquals("m-1", captor.getValue().getMissionId());
         org.junit.jupiter.api.Assertions.assertEquals("md5-abc", captor.getValue().getKmzMd5());
+    }
+
+    @Test
+    void dispatch_acceptsSnakeCaseFieldsAndEmitsSnakeCaseResponse() throws Exception {
+        // Mirror the actual wire format the agent sends/receives.
+        when(service.dispatchWayline(eq("SN-A"), any(WaylineDispatchDataDTO.class)))
+                .thenReturn(new WaylineAgentCommandDTO()
+                        .setTid("tid-x")
+                        .setBid("m-1")
+                        .setMethod("wayline_dispatch")
+                        .setData(new WaylineDispatchDataDTO()
+                                .setMissionId("m-1")
+                                .setKmzUrl("http://x/y.kmz")
+                                .setKmzMd5("md5-abc")));
+
+        String snakeCaseRequest = "{\"mission_id\":\"m-1\",\"kmz_url\":\"http://x/y.kmz\",\"kmz_md5\":\"md5-abc\"}";
+
+        mockMvc.perform(post("/wayline-agent/api/v1/agents/SN-A/dispatch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(snakeCaseRequest))
+                .andExpect(status().isOk())
+                // response keys must be snake_case for the agent's Gson policy to pick them up
+                .andExpect(jsonPath("$.data.tid").value("tid-x"))
+                .andExpect(jsonPath("$.data.data.mission_id").value("m-1"))
+                .andExpect(jsonPath("$.data.data.kmz_url").value("http://x/y.kmz"))
+                .andExpect(jsonPath("$.data.data.kmz_md5").value("md5-abc"));
+
+        ArgumentCaptor<WaylineDispatchDataDTO> captor = ArgumentCaptor.forClass(WaylineDispatchDataDTO.class);
+        verify(service).dispatchWayline(eq("SN-A"), captor.capture());
+        org.junit.jupiter.api.Assertions.assertEquals("m-1", captor.getValue().getMissionId());
+        org.junit.jupiter.api.Assertions.assertEquals("http://x/y.kmz", captor.getValue().getKmzUrl());
     }
 
     @Test

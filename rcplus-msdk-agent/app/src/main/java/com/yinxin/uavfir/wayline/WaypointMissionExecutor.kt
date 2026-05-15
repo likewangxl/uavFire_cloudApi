@@ -30,7 +30,11 @@ class WaypointMissionExecutor(
     }
 
     private val activeMissionId = AtomicReference<String?>(null)
+    private val activeMissionFileName = AtomicReference<String?>(null)
     private val lastState = AtomicReference<WaypointMissionExecuteState?>(null)
+
+    fun activeMissionId(): String? = activeMissionId.get()
+    fun activeMissionFileName(): String? = activeMissionFileName.get()
 
     private val stateListener = WaypointMissionExecuteStateListener { newState ->
         val previous = lastState.getAndSet(newState)
@@ -74,6 +78,7 @@ class WaypointMissionExecutor(
 
     fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
         activeMissionId.set(missionId)
+        activeMissionFileName.set(missionFileName)
         val callback = simpleCallback(missionId, "startMission")
         if (waylineIds.isNullOrEmpty()) {
             WaypointMissionManager.getInstance().startMission(missionFileName, callback)
@@ -90,8 +95,23 @@ class WaypointMissionExecutor(
         WaypointMissionManager.getInstance().resumeMission(simpleCallback(activeMissionId.get(), "resumeMission"))
     }
 
-    fun stopMission(missionFileName: String) {
-        WaypointMissionManager.getInstance().stopMission(missionFileName, simpleCallback(activeMissionId.get(), "stopMission"))
+    fun stopActiveMission() {
+        val fileName = activeMissionFileName.get()
+        if (fileName == null) {
+            Log.w(TAG, "stopActiveMission called but no active mission")
+            return
+        }
+        WaypointMissionManager.getInstance().stopMission(fileName, simpleCallback(activeMissionId.get(), "stopMission"))
+    }
+
+    fun queryActiveBreakpoint(onResult: (BreakPointInfo?, IDJIError?) -> Unit) {
+        val fileName = activeMissionFileName.get()
+        if (fileName == null) {
+            Log.w(TAG, "queryActiveBreakpoint called but no active mission")
+            onResult(null, null)
+            return
+        }
+        queryBreakpoint(fileName, onResult)
     }
 
     fun queryBreakpoint(missionFileName: String, onResult: (BreakPointInfo?, IDJIError?) -> Unit) {

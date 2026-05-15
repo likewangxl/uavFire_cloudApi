@@ -16,6 +16,11 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
  *
  * Connects lazily on first publish and reconnects on failure. Single instance
  * per agent (one drone).
+ *
+ * Threading: [connect] and [publishEvent] perform blocking network I/O — must
+ * be called off the Android main thread (e.g. from a coroutine on Dispatchers.IO
+ * or the existing AgentRuntimeLoop executor). On the main thread the Android
+ * runtime will throw NetworkOnMainThreadException.
  */
 class WaylineMqttPublisher(
     private val brokerUrl: String,

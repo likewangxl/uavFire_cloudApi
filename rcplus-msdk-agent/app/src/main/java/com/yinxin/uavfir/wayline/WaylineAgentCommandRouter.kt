@@ -35,13 +35,11 @@ class WaylineAgentCommandRouter(
                 client.ack(cmd.tid, RESULT_OK)
             }
             WaylineAgentMethod.STOP -> {
-                val missionFileName = (cmd.data?.get("missionFileName") as? String) ?: ""
-                executor.stopMission(missionFileName)
+                executor.stopActiveMission()
                 client.ack(cmd.tid, RESULT_OK)
             }
             WaylineAgentMethod.QUERY_BREAKPOINT -> {
-                val missionFileName = (cmd.data?.get("missionFileName") as? String) ?: ""
-                executor.queryBreakpoint(missionFileName) { _, err ->
+                executor.queryActiveBreakpoint { _, err ->
                     // TODO: forward breakpoint info via MQTT event
                     Log.i(TAG, "breakpoint result err=${err?.errorCode()}")
                 }
