@@ -30,6 +30,8 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/token/refresh");
+        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/captcha");
+        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/demo-login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
         EXCLUDE_PATHS.add("/");
         EXCLUDE_PATHS.add("/index.html");
