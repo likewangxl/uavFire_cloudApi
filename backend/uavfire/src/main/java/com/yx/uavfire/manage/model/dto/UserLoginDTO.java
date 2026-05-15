@@ -18,4 +18,8 @@ public class UserLoginDTO {
 
     @NonNull
     private Integer flag;
+
+    private String captcha;
+
+    private String captchaToken;
 }
