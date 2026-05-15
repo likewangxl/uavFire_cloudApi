@@ -1,6 +1,7 @@
 package com.yx.uavfire.configuration.mvc;
 
 import com.yx.uavfire.component.AuthInterceptor;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -19,8 +20,11 @@ class GlobalMVCConfigurerTest {
     void setUp() {
         configurer = new GlobalMVCConfigurer();
         ReflectionTestUtils.setField(configurer, "authInterceptor", new AuthInterceptor());
+        ReflectionTestUtils.setField(configurer, "waylineAgentAuthInterceptor", new WaylineAgentAuthInterceptor());
         ReflectionTestUtils.setField(configurer, "managePrefix", "manage/api");
         ReflectionTestUtils.setField(configurer, "manageVersion", "/v1");
+        ReflectionTestUtils.setField(configurer, "waylineAgentPrefix", "wayline-agent");
+        ReflectionTestUtils.setField(configurer, "waylineAgentVersion", "/api/v1");
         @SuppressWarnings("unchecked")
         List<String> excludePaths = (List<String>) ReflectionTestUtils.getField(GlobalMVCConfigurer.class, "EXCLUDE_PATHS");
         excludePaths.clear();
@@ -35,5 +39,15 @@ class GlobalMVCConfigurerTest {
 
         assertTrue(excludePaths.contains("/manage/api/v1/dual-stream/agents/**"));
         assertFalse(excludePaths.contains("/manage/api/v1/dual-stream/**"));
+    }
+
+    @Test
+    void addInterceptors_excludesWaylineAgentPathsFromGlobalAuth() {
+        configurer.addInterceptors(new InterceptorRegistry());
+
+        @SuppressWarnings("unchecked")
+        List<String> excludePaths = (List<String>) ReflectionTestUtils.getField(GlobalMVCConfigurer.class, "EXCLUDE_PATHS");
+
+        assertTrue(excludePaths.contains("/wayline-agent/api/v1/**"));
     }
 }

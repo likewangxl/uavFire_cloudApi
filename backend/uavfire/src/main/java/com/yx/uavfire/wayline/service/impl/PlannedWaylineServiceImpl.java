@@ -42,6 +42,10 @@ import java.sql.SQLException;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamWriter;
+
 @Service
 @Transactional
 @RequiredArgsConstructor
@@ -503,6 +507,20 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .build();
     }
 
+    /**
+     * Default mission-config values applied to every published KMZ. Mirrors
+     * the wayline-agent contract (docs/WAYLINE_AGENT_CONTRACT.md §2).
+     */
+    private static final String NS_KML = "http://www.opengis.net/kml/2.2";
+    private static final String NS_WPML = "http://www.dji.com/wpmz/1.0.2";
+    private static final String FINISH_ACTION = "goHome";
+    private static final String EXIT_ON_RC_LOST = "goContinue";
+    private static final String EXECUTE_RC_LOST_ACTION = "goBack";
+    private static final int TAKE_OFF_SECURITY_HEIGHT_M = 20;
+    private static final int GLOBAL_RTH_HEIGHT_M = 50;
+    private static final int GLOBAL_TRANSITIONAL_SPEED_MPS = 5;
+    private static final int AUTO_FLIGHT_SPEED_MPS = 5;
+
     private byte[] buildPublishedKmz(PlannedWaylineEntity entity, String publishedName) {
         DeviceEnum droneDevice = resolveDroneDevice(entity.getAircraftModelKey());
         DeviceEnum payloadDevice = resolvePayloadDevice(droneDevice);
@@ -512,10 +530,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
-                zipOutputStream.write(buildTemplateKml(droneDevice, payloadDevice).getBytes(StandardCharsets.UTF_8));
+                zipOutputStream.write(buildTemplateKml(publishedName, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
-                zipOutputStream.write(buildWaylinesWpml(publishedName, waypoints).getBytes(StandardCharsets.UTF_8));
+                zipOutputStream.write(buildWaylinesWpml(publishedName, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
             }
             return outputStream.toByteArray();
@@ -556,43 +574,203 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
     }
 
-    private String buildTemplateKml(DeviceEnum droneDevice, DeviceEnum payloadDevice) {
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
-                + "<Document>"
-                + "<wpml:templateType>waypoint</wpml:templateType>"
-                + "<wpml:droneInfo>"
-                + "<wpml:droneEnumValue>" + droneDevice.getType().getType() + "</wpml:droneEnumValue>"
-                + "<wpml:droneSubEnumValue>" + droneDevice.getSubType().getSubType() + "</wpml:droneSubEnumValue>"
-                + "</wpml:droneInfo>"
-                + "<wpml:payloadInfo>"
-                + "<wpml:payloadEnumValue>" + payloadDevice.getType().getType() + "</wpml:payloadEnumValue>"
-                + "<wpml:payloadSubEnumValue>" + payloadDevice.getSubType().getSubType() + "</wpml:payloadSubEnumValue>"
-                + "</wpml:payloadInfo>"
-                + "</Document>"
-                + "</kml>";
+    /** Image format string for the wpml:payloadParam, per drone family. */
+    private String imageFormatFor(DeviceEnum droneDevice) {
+        switch (droneDevice) {
+            case M30:
+                return "zoom,wide";
+            case M30T:
+            case M3T:
+            case M3TD:
+                return "zoom,ir";
+            case M3E:
+            case M3D:
+                return "wide";
+            case M3M:
+                return "wide";
+            default:
+                return "wide";
+        }
     }
 
-    private String buildWaylinesWpml(String publishedName, List<PlannedWaypointDTO> waypoints) {
-        String placemarks = waypoints.stream()
-                .map(waypoint -> "<Placemark>"
-                        + "<name>" + waypoint.getOrder() + "</name>"
-                        + "<Point><coordinates>" + waypoint.getWgsLng() + "," + waypoint.getWgsLat() + "," + waypoint.getHeight() + "</coordinates></Point>"
-                        + "</Placemark>")
-                .collect(Collectors.joining());
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
-                + "<Document>"
-                + "<name>" + escapeXml(publishedName) + "</name>"
-                + "<wpml:waylineCoordinateSysParam>"
-                + "<wpml:coordinateMode>WGS84</wpml:coordinateMode>"
-                + "<wpml:heightMode>relativeToStartPoint</wpml:heightMode>"
-                + "</wpml:waylineCoordinateSysParam>"
-                + "<Folder>"
-                + placemarks
-                + "</Folder>"
-                + "</Document>"
-                + "</kml>";
+    private byte[] buildTemplateKml(String name, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
+        return writeKml(w -> {
+            elem(w, NS_KML, "name", name);
+            long now = System.currentTimeMillis();
+            elem(w, "createTime", String.valueOf(now));
+            elem(w, "updateTime", String.valueOf(now));
+
+            w.writeStartElement(NS_WPML, "missionConfig");
+            elem(w, "flyToWaylineMode", "safely");
+            elem(w, "finishAction", FINISH_ACTION);
+            elem(w, "exitOnRCLost", EXIT_ON_RC_LOST);
+            elem(w, "executeRCLostAction", EXECUTE_RC_LOST_ACTION);
+            elem(w, "takeOffSecurityHeight", String.valueOf(TAKE_OFF_SECURITY_HEIGHT_M));
+            elem(w, "globalTransitionalSpeed", String.valueOf(GLOBAL_TRANSITIONAL_SPEED_MPS));
+            elem(w, "globalRTHHeight", String.valueOf(GLOBAL_RTH_HEIGHT_M));
+            writeDroneInfo(w, droneDevice);
+            writePayloadInfo(w, payloadDevice);
+            w.writeEndElement(); // /missionConfig
+
+            w.writeStartElement("Folder");
+            elem(w, "templateType", "waypoint");
+            elem(w, "templateId", "0");
+
+            w.writeStartElement(NS_WPML, "waylineCoordinateSysParam");
+            elem(w, "coordinateMode", "WGS84");
+            elem(w, "heightMode", "relativeToStartPoint");
+            elem(w, "positioningType", "GPS");
+            w.writeEndElement();
+
+            elem(w, "autoFlightSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+            elem(w, "gimbalPitchMode", "manual");
+
+            w.writeStartElement(NS_WPML, "globalWaypointHeadingParam");
+            elem(w, "waypointHeadingMode", "followWayline");
+            elem(w, "waypointHeadingAngle", "0");
+            elem(w, "waypointPoiPoint", "0.000000,0.000000,0.000000");
+            elem(w, "waypointHeadingPathMode", "followBadArc");
+            w.writeEndElement();
+
+            elem(w, "globalWaypointTurnMode", "toPointAndStopWithDiscontinuityCurvature");
+            elem(w, "globalUseStraightLine", "0");
+
+            w.writeStartElement(NS_WPML, "payloadParam");
+            elem(w, "payloadPositionIndex", "0");
+            elem(w, "imageFormat", imageFormatFor(droneDevice));
+            w.writeEndElement();
+
+            int index = 0;
+            for (PlannedWaypointDTO wp : waypoints) {
+                writeTemplatePlacemark(w, wp, index++);
+            }
+
+            w.writeEndElement(); // /Folder
+        });
+    }
+
+    private byte[] buildWaylinesWpml(String name, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
+        return writeKml(w -> {
+            elem(w, NS_KML, "name", name);
+            w.writeStartElement(NS_WPML, "missionConfig");
+            elem(w, "flyToWaylineMode", "safely");
+            elem(w, "finishAction", FINISH_ACTION);
+            elem(w, "exitOnRCLost", EXIT_ON_RC_LOST);
+            elem(w, "executeRCLostAction", EXECUTE_RC_LOST_ACTION);
+            elem(w, "takeOffSecurityHeight", String.valueOf(TAKE_OFF_SECURITY_HEIGHT_M));
+            elem(w, "globalTransitionalSpeed", String.valueOf(GLOBAL_TRANSITIONAL_SPEED_MPS));
+            elem(w, "globalRTHHeight", String.valueOf(GLOBAL_RTH_HEIGHT_M));
+            writeDroneInfo(w, droneDevice);
+            writePayloadInfo(w, payloadDevice);
+            w.writeEndElement(); // /missionConfig
+
+            w.writeStartElement("Folder");
+            elem(w, "templateId", "0");
+            elem(w, "executeHeightMode", "relativeToStartPoint");
+            elem(w, "waylineId", "0");
+            elem(w, "autoFlightSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+
+            w.writeStartElement(NS_WPML, "payloadParam");
+            elem(w, "payloadPositionIndex", "0");
+            elem(w, "imageFormat", imageFormatFor(droneDevice));
+            w.writeEndElement();
+
+            int index = 0;
+            for (PlannedWaypointDTO wp : waypoints) {
+                writeWaylinePlacemark(w, wp, index++);
+            }
+
+            w.writeEndElement(); // /Folder
+        });
+    }
+
+    private void writeDroneInfo(XMLStreamWriter w, DeviceEnum droneDevice) throws XMLStreamException {
+        w.writeStartElement(NS_WPML, "droneInfo");
+        elem(w, "droneEnumValue", String.valueOf(droneDevice.getType().getType()));
+        elem(w, "droneSubEnumValue", String.valueOf(droneDevice.getSubType().getSubType()));
+        w.writeEndElement();
+    }
+
+    private void writePayloadInfo(XMLStreamWriter w, DeviceEnum payloadDevice) throws XMLStreamException {
+        w.writeStartElement(NS_WPML, "payloadInfo");
+        elem(w, "payloadEnumValue", String.valueOf(payloadDevice.getType().getType()));
+        elem(w, "payloadSubEnumValue", String.valueOf(payloadDevice.getSubType().getSubType()));
+        elem(w, "payloadPositionIndex", "0");
+        w.writeEndElement();
+    }
+
+    private void writeTemplatePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index) throws XMLStreamException {
+        w.writeStartElement("Placemark");
+        w.writeStartElement("Point");
+        elem(w, NS_KML, "coordinates", wp.getWgsLng() + "," + wp.getWgsLat());
+        w.writeEndElement();
+        elem(w, "index", String.valueOf(index));
+        elem(w, "ellipsoidHeight", String.valueOf(wp.getHeight()));
+        elem(w, "height", String.valueOf(wp.getHeight()));
+        elem(w, "useGlobalHeight", "1");
+        elem(w, "useGlobalSpeed", "1");
+        elem(w, "useGlobalHeadingParam", "1");
+        elem(w, "useGlobalTurnParam", "1");
+        elem(w, "gimbalPitchAngle", "0");
+        w.writeEndElement();
+    }
+
+    private void writeWaylinePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index) throws XMLStreamException {
+        w.writeStartElement("Placemark");
+        w.writeStartElement("Point");
+        elem(w, NS_KML, "coordinates", wp.getWgsLng() + "," + wp.getWgsLat());
+        w.writeEndElement();
+        elem(w, "index", String.valueOf(index));
+        elem(w, "executeHeight", String.valueOf(wp.getHeight()));
+        elem(w, "waypointSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+        w.writeStartElement(NS_WPML, "waypointHeadingParam");
+        elem(w, "waypointHeadingMode", "followWayline");
+        elem(w, "waypointHeadingAngle", "0");
+        elem(w, "waypointPoiPoint", "0.000000,0.000000,0.000000");
+        elem(w, "waypointHeadingPathMode", "followBadArc");
+        w.writeEndElement();
+        w.writeStartElement(NS_WPML, "waypointTurnParam");
+        elem(w, "waypointTurnMode", "toPointAndStopWithDiscontinuityCurvature");
+        elem(w, "waypointTurnDampingDist", "0");
+        w.writeEndElement();
+        elem(w, "useStraightLine", "0");
+        elem(w, "gimbalPitchAngle", "0");
+        w.writeEndElement();
+    }
+
+    private void elem(XMLStreamWriter w, String name, String value) throws XMLStreamException {
+        elem(w, NS_WPML, name, value);
+    }
+
+    private void elem(XMLStreamWriter w, String ns, String name, String value) throws XMLStreamException {
+        w.writeStartElement(ns, name);
+        w.writeCharacters(value);
+        w.writeEndElement();
+    }
+
+    @FunctionalInterface
+    private interface KmlBody {
+        void write(XMLStreamWriter w) throws XMLStreamException;
+    }
+
+    private byte[] writeKml(KmlBody body) {
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            XMLStreamWriter w = XMLOutputFactory.newInstance().createXMLStreamWriter(bos, "UTF-8");
+            w.writeStartDocument("UTF-8", "1.0");
+            w.writeStartElement("kml");
+            w.writeDefaultNamespace(NS_KML);
+            w.writeNamespace("wpml", NS_WPML);
+            w.writeStartElement("Document");
+            body.write(w);
+            w.writeEndElement(); // /Document
+            w.writeEndElement(); // /kml
+            w.writeEndDocument();
+            w.flush();
+            return bos.toByteArray();
+        } catch (XMLStreamException e) {
+            throw new IllegalStateException("Failed to write WPML KMZ XML.", e);
+        }
     }
 
     private String trimTrailingSlash(String value) {
@@ -622,18 +800,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return waylineFileService.getWaylineByWaylineId(workspaceId, entity.getPublishedWaylineId())
                 .map(file -> isDjiSafeWaylineName(file.getName()))
                 .orElse(false);
-    }
-
-    private String escapeXml(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&apos;");
     }
 
     private void rollbackPublishedWayline(String workspaceId, String publishedWaylineId) {
