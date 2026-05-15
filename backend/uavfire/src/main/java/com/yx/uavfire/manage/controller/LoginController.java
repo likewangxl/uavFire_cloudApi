@@ -27,10 +27,17 @@ public class LoginController {
 
     @PostMapping("/login")
     public HttpResultResponse login(@RequestBody UserLoginDTO loginDTO) {
+        return userService.userLogin(
+                loginDTO.getUsername(),
+                loginDTO.getPassword(),
+                loginDTO.getFlag(),
+                loginDTO.getCaptcha(),
+                loginDTO.getCaptchaToken());
+    }
 
-        String username = loginDTO.getUsername();
-        String password = loginDTO.getPassword();
-        return userService.userLogin(username, password, loginDTO.getFlag());
+    @PostMapping("/demo-login")
+    public HttpResultResponse demoLogin() {
+        return userService.demoLogin();
     }
 
     @PostMapping("/token/refresh")
