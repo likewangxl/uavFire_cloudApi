@@ -16,6 +16,7 @@ import com.yx.uavfire.manage.model.dto.UserListDTO;
 import com.yx.uavfire.manage.model.dto.WorkspaceDTO;
 import com.yx.uavfire.manage.model.entity.UserEntity;
 import com.yx.uavfire.manage.model.enums.UserTypeEnum;
+import com.yx.uavfire.manage.service.ICaptchaService;
 import com.yx.uavfire.manage.service.IUserService;
 import com.yx.uavfire.manage.service.IWorkspaceService;
 import com.dji.sdk.common.HttpResultResponse;
@@ -48,6 +49,9 @@ public class UserServiceImpl implements IUserService {
     @Autowired
     private IWorkspaceService workspaceService;
 
+    @Autowired
+    private ICaptchaService captchaService;
+
     @Override
     public HttpResultResponse getUserByUsername(String username, String workspaceId) {
 
@@ -60,12 +64,29 @@ public class UserServiceImpl implements IUserService {
 
         UserDTO user = this.entityConvertToDTO(userEntity);
         user.setWorkspaceId(workspaceId);
+        // Pilot 每次进入 Cloud API Platform 会调 /users/current 刷新 MQTT 配置,
+        // 必须把 mqtt_addr 一起带回,否则 Pilot 候选地址列表为空 → "thing module not load"
+        user.setMqttAddr(resolveMqttAddress());
 
         return HttpResultResponse.success(user);
     }
 
     @Override
-    public HttpResultResponse userLogin(String username, String password, Integer flag) {
+    public HttpResultResponse userLogin(String username, String password, Integer flag,
+                                        String captcha, String captchaToken) {
+        // captcha 校验
+        if (captchaToken == null || captchaToken.isBlank()
+                || captcha == null || captcha.isBlank()) {
+            return new HttpResultResponse()
+                    .setCode(HttpStatus.UNAUTHORIZED.value())
+                    .setMessage("验证码不能为空");
+        }
+        if (!captchaService.verifyAndConsume(captchaToken, captcha)) {
+            return new HttpResultResponse()
+                    .setCode(HttpStatus.UNAUTHORIZED.value())
+                    .setMessage("验证码错误或已过期");
+        }
+
         // check user
         UserEntity userEntity = this.getUserByUsername(username);
         if (userEntity == null) {
@@ -89,18 +110,50 @@ public class UserServiceImpl implements IUserService {
                     .setMessage("invalid workspace id");
         }
 
+        return signAndPack(userEntity, workspaceOpt.get());
+    }
+
+    @Override
+    public HttpResultResponse demoLogin() {
+        UserEntity userEntity = this.getUserByUsername("adminPC");
+        if (userEntity == null) {
+            return new HttpResultResponse()
+                    .setCode(HttpStatus.UNAUTHORIZED.value())
+                    .setMessage("演示账号未配置");
+        }
+
+        Optional<WorkspaceDTO> workspaceOpt = workspaceService.getWorkspaceByWorkspaceId(userEntity.getWorkspaceId());
+        if (workspaceOpt.isEmpty()) {
+            return new HttpResultResponse()
+                    .setCode(HttpStatus.UNAUTHORIZED.value())
+                    .setMessage("演示工作区无效");
+        }
+
+        return signAndPack(userEntity, workspaceOpt.get());
+    }
+
+    /**
+     * Build JWT token and UserDTO response for a verified user + workspace.
+     */
+    private HttpResultResponse signAndPack(UserEntity userEntity, WorkspaceDTO workspace) {
         CustomClaim customClaim = new CustomClaim(userEntity.getUserId(),
                 userEntity.getUsername(), userEntity.getUserType(),
-                workspaceOpt.get().getWorkspaceId());
+                workspace.getWorkspaceId());
 
-        // create token
         String token = JwtUtil.createToken(customClaim.convertToMap());
 
         UserDTO userDTO = entityConvertToDTO(userEntity);
-        userDTO.setMqttAddr(MqttPropertyConfiguration.getBasicMqttAddress());
+        userDTO.setMqttAddr(resolveMqttAddress());
         userDTO.setAccessToken(token);
-        userDTO.setWorkspaceId(workspaceOpt.get().getWorkspaceId());
+        userDTO.setWorkspaceId(workspace.getWorkspaceId());
         return HttpResultResponse.success(userDTO);
+    }
+
+    /**
+     * Returns the basic MQTT broker address. Protected to allow override in tests.
+     */
+    protected String resolveMqttAddress() {
+        return MqttPropertyConfiguration.getBasicMqttAddress();
     }
 
     @Override
@@ -208,7 +261,6 @@ public class UserServiceImpl implements IUserService {
                 .userType(entity.getUserType())
                 .mqttUsername(entity.getMqttUsername())
                 .mqttPassword(entity.getMqttPassword())
-                .mqttAddr(MqttPropertyConfiguration.getBasicMqttAddress())
                 .build();
     }
 }

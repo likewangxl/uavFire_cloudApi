@@ -18,7 +18,7 @@ spring:
     druid:
       type: com.alibaba.druid.pool.DruidDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true
+      url: jdbc:mysql://192.168.50.201:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true
       username: g_byzt
       password: g_byzt
       initial-size: 10
@@ -54,7 +54,7 @@ mqtt:
   # BASIC parameters are required.
   BASIC:
     protocol: MQTT # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.3.218
+    host: 192.168.50.10
     port: 1883
     username: JavaServer
     password: 123456
@@ -63,7 +63,7 @@ mqtt:
     path:
   DRC:
     protocol: WS # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.3.218
+    host: 192.168.50.10
     port: 8083
     path: /mqtt
     username: JavaServer
@@ -145,7 +145,9 @@ logging:
     name: logs/cloud-api-sample.log
 
 pilot2:
-  web-entry: http://192.168.3.218:8080/pilot-login
+  # Pilot 2 设备通过此 URL 跳转到 frontend pilot 入口。
+  # 注意:Pilot 上的 localhost 指向 Pilot 自己,必须用 server 实际可达 IP。
+  web-entry: http://192.168.50.10:8080/pilot-login
 
 ntp:
   server:
@@ -188,3 +190,53 @@ livestream:
     # Webrtc: Only supports using whip standard
     whip:
       url: http://192.168.3.218:1985/rtc/v1/whip/?app=live&stream=  #  Example：http://192.168.1.1:1985/rtc/v1/whip/?app=live&stream=
+
+# ---------------------------------------------------------------------------
+# fc100 灭火模块(合并自 fc100-backend,2026-05-15 feature/fc100-merge 分支)
+# ---------------------------------------------------------------------------
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    default-fetch-size: 100
+    default-statement-timeout: 30
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+  access-key: ${MINIO_ACCESS_KEY:}
+  secret-key: ${MINIO_SECRET_KEY:}
+  bucket: ${MINIO_BUCKET:fc100-routes}
+
+fc100:
+  enabled: true
+  delivery-sync:
+    mode: mock                # mock | http
+    base-url: https://ta-api.dji.com
+    ak: ${FC100_DELIVERY_SYNC_AK:}
+    sk: ${FC100_DELIVERY_SYNC_SK:}
+    group-id: ${FC100_DELIVERY_SYNC_GROUP_ID:}
+    workspace-id: ${FC100_DELIVERY_SYNC_WORKSPACE_ID:DEFAULT}
+    connect-timeout-ms: 5000
+    read-timeout-ms: 15000
+    retry:
+      max-attempts: 3
+      backoff-ms: [500, 1500, 4500]
+  safety:
+    four-eyes-enabled: false
+    wind-speed-error-threshold: 10
+    wind-speed-warn-threshold: 6
+    payload-weight-max-kg: 82
+  waypoint:
+    default-cruise-speed: 5
+    max-route-length-m: 8000
+    max-distance-from-takeoff-m: 5000
+    drop-altitude-agl-m: 30
+    drift-coefficient: 0.4
+    max-drop-offset-m: 30
+  route:
+    file-storage: local              # local | minio
+    local-dir: /tmp/fc100-routes
+    wpml-version: 1.0.6
+    default-drone-enum-value: 100
+    default-payload-enum-value: 99
+    take-off-security-height: 20
+    global-transitional-speed: 15

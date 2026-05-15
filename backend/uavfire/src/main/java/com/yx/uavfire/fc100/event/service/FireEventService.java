@@ -1,0 +1,32 @@
+package com.yx.uavfire.fc100.event.service;
+
+import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
+import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
+import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+
+import java.util.List;
+
+public interface FireEventService {
+
+    /**
+     * 火情上报入口。三档置信度逻辑见 spec §3.1：
+     * <ul>
+     *   <li>&lt; 0.75：仅保存事件，status=LOW_CONFIDENCE，不建任务</li>
+     *   <li>0.75–0.90：保存事件 + 自动建 WAITING_REVIEW 任务</li>
+     *   <li>≥ 0.90：同上，并标 isHighConfidence=1</li>
+     * </ul>
+     * 同 eventId 重复上报：返回已存在事件的任务（去重）。
+     */
+    FireEventCreateResponse create(FireEventCreateParam param);
+
+    FireEventDTO get(String eventId);
+
+    /**
+     * 查询火情事件列表，按 createTime DESC 排序。
+     *
+     * @param workspaceId 工作空间过滤（null=不过滤）
+     * @param status      状态过滤（null=不过滤）
+     * @param limit       最多返回条数，默认 50
+     */
+    List<FireEventDTO> list(String workspaceId, String status, int limit);
+}

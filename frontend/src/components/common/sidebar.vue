@@ -60,6 +60,8 @@ export default defineComponent({
       { key: 4, label: '航线库', path: '/' + ERouterName.WAYLINE, icon: 'NodeIndexOutlined' },
       { key: 5, label: '任务计划库', path: '/' + ERouterName.TASK, icon: 'CalendarOutlined' },
       { key: 6, label: '飞行区域', path: '/' + ERouterName.FLIGHT_AREA, icon: 'GroupOutlined' },
+      { key: 7, label: '火情事件', path: '/' + ERouterName.FIRE_EVENTS, icon: 'FireOutlined' },
+      { key: 8, label: '灭火任务', path: '/' + ERouterName.FIRE_MISSIONS, icon: 'AlertOutlined' },
     ]
 
     function selectedRoute (item: IOptions) {

@@ -18,6 +18,12 @@ export enum ERouterName {
     FIRMWARES = 'firmwares',
     FLIGHT_AREA = 'flight-area',
 
+    FIRE_EVENTS = 'fire-events',
+    FIRE_MISSIONS = 'fire-missions',
+    FIRE_MISSION_DETAIL = 'fire-mission-detail',
+    FIRE_ROUTE_PREVIEW = 'fire-route-preview',
+    FIRE_PAYLOAD_RELEASE = 'fire-payload-release',
+
     PILOT = 'pilot-login',
     PILOT_HOME = 'pilot-home',
     PILOT_MEDIA = 'pilot-media',
@@ -66,6 +72,7 @@ export enum ELocalStorageKey {
     Device = 'device',
     GatewayOnline = 'gateway_online',
     PlannedWaylineDraft = 'planned_wayline_draft',
+    RememberUsername = 'remember_username',
 }
 
 export enum EPhotoType {

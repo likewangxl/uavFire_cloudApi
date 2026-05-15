@@ -22,9 +22,18 @@ public interface IUserService {
      * @param username
      * @param password
      * @param flag
+     * @param captcha
+     * @param captchaToken
      * @return
      */
-    HttpResultResponse userLogin(String username, String password, Integer flag);
+    HttpResultResponse userLogin(String username, String password, Integer flag,
+                                 String captcha, String captchaToken);
+
+    /**
+     * Log in as the demo account (adminPC) without password or captcha.
+     * @return
+     */
+    HttpResultResponse demoLogin();
 
     /**
      * Create a user object containing a new token.

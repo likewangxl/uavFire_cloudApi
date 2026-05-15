@@ -24,6 +24,7 @@
         <glassfish-jaxb.version>2.3.3</glassfish-jaxb.version>
         <log4j2.version>2.15.0</log4j2.version>
         <javax-jaxb.version>2.3.0</javax-jaxb.version>
+        <resilience4j.version>1.7.1</resilience4j.version>
     </properties>
 
     <dependencies>
@@ -142,6 +143,17 @@
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk15on</artifactId>
             <version>1.69</version>
+        </dependency>
+
+        <!-- fc100 依赖:AOP(@Aspect 幂等切面) + Resilience4j(@Retry/@CircuitBreaker) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot2</artifactId>
+            <version>${resilience4j.version}</version>
         </dependency>
 
     </dependencies>

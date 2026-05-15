@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.filter.CommonsRequestLoggingFilter;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -30,6 +31,8 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/token/refresh");
+        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/captcha");
+        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/demo-login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
         EXCLUDE_PATHS.add("/");
         EXCLUDE_PATHS.add("/index.html");
@@ -40,6 +43,18 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/v3/**");
         EXCLUDE_PATHS.add("/ui/**");
         registry.addInterceptor(authInterceptor).addPathPatterns("/**").excludePathPatterns(EXCLUDE_PATHS);
+    }
+
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        // dev/prod 跨域:M4T frontend (8080) 调 M4T backend (6789);fc100 模块合并后共用同一 CORS
+        registry.addMapping("/**")
+            .allowedOriginPatterns("*")
+            .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH")
+            .allowedHeaders("*")
+            .exposedHeaders("x-auth-token", "X-Request-Id", "X-Idempotency-Key")
+            .allowCredentials(true)
+            .maxAge(3600);
     }
 
     @Bean

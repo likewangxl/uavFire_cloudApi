@@ -1,0 +1,170 @@
+package com.yx.uavfire.fc100.event.service.impl;
+
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.yx.uavfire.fc100.common.Clock;
+import com.yx.uavfire.fc100.common.MissionNoGenerator;
+import com.yx.uavfire.fc100.event.dao.FireEventMapper;
+import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
+import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
+import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
+import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
+import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.service.FireEventService;
+import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
+import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
+import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+import java.util.Set;
+
+@Service
+@Slf4j
+public class FireEventServiceImpl implements FireEventService {
+
+    private static final BigDecimal LOW = new BigDecimal("0.75");
+    private static final BigDecimal HIGH = new BigDecimal("0.90");
+
+    /** 已绑定活跃任务的 mission 状态集合（用于同 eventId 去重） */
+    private static final Set<String> ACTIVE_MISSION_STATUSES = Set.of(
+        FireMissionStatus.CREATED.name(),
+        FireMissionStatus.WAITING_REVIEW.name(),
+        FireMissionStatus.APPROVED.name(),
+        FireMissionStatus.ROUTE_GENERATED.name(),
+        FireMissionStatus.ROUTE_EXPORTED.name(),
+        FireMissionStatus.SENT_TO_DELIVERY.name(),
+        FireMissionStatus.ACCEPTED_BY_PILOT.name(),
+        FireMissionStatus.IN_PROGRESS.name(),
+        FireMissionStatus.PAYLOAD_RELEASE_PENDING.name(),
+        FireMissionStatus.PAYLOAD_RELEASED.name(),
+        FireMissionStatus.RETURNING.name(),
+        FireMissionStatus.REVIEWING.name(),
+        FireMissionStatus.MANUAL_TAKEOVER.name(),
+        FireMissionStatus.PAYLOAD_RELEASE_FAILED.name(),
+        FireMissionStatus.RETURN_FAILED.name()
+    );
+
+    private final FireEventMapper eventMapper;
+    private final FireMissionMapper missionMapper;
+    private final MissionNoGenerator noGen;
+    private final Clock clock;
+
+    public FireEventServiceImpl(FireEventMapper em, FireMissionMapper mm,
+                                MissionNoGenerator g, Clock c) {
+        this.eventMapper = em;
+        this.missionMapper = mm;
+        this.noGen = g;
+        this.clock = c;
+    }
+
+    @Override
+    @Transactional
+    public FireEventCreateResponse create(FireEventCreateParam param) {
+        // 1. 同 eventId 去重：已存在则返回已绑定的活跃任务
+        FireEventEntity existing = eventMapper.selectOne(
+            new QueryWrapper<FireEventEntity>().eq("event_id", param.getEventId()));
+        if (existing != null) {
+            String activeMissionNo = findActiveMissionNo(existing.getId());
+            return new FireEventCreateResponse(
+                existing.getId(),
+                existing.getEventId(),
+                activeMissionNo != null,
+                activeMissionNo,
+                activeMissionNo != null
+                    ? FireMissionStatus.WAITING_REVIEW.name()
+                    : existing.getStatus());
+        }
+
+        long now = clock.now();
+        FireEventEntity e = new FireEventEntity();
+        BeanUtils.copyProperties(param, e);
+        e.setEventTimestamp(Instant.parse(param.getTimestamp()).toEpochMilli());
+        e.setAltitudeReference(param.getAltitudeReference() != null
+            ? param.getAltitudeReference() : "ELLIPSOID");
+        e.setTemperatureUnit(param.getTemperatureUnit() != null
+            ? param.getTemperatureUnit() : "K");
+        e.setWorkspaceId(param.getWorkspaceId() != null
+            ? param.getWorkspaceId() : "DEFAULT");
+        e.setDeleted(0);
+        e.setCreateTime(now);
+        e.setUpdateTime(now);
+
+        BigDecimal c = param.getConfidence();
+        boolean autoCreate = c.compareTo(LOW) >= 0;
+        e.setStatus(autoCreate
+            ? FireEventStatus.MISSION_CREATED.name()
+            : FireEventStatus.LOW_CONFIDENCE.name());
+        eventMapper.insert(e);
+
+        if (!autoCreate) {
+            return new FireEventCreateResponse(e.getId(), e.getEventId(),
+                false, null, e.getStatus());
+        }
+
+        // 2. 自动建 WAITING_REVIEW 任务
+        FireMissionEntity m = new FireMissionEntity();
+        m.setMissionNo(noGen.next());
+        m.setWorkspaceId(e.getWorkspaceId());
+        m.setFireEventId(e.getId());
+        m.setAttemptIndex(1);
+        m.setStatus(FireMissionStatus.WAITING_REVIEW.name());
+        m.setVersion(0L);
+        m.setIsHighConfidence(c.compareTo(HIGH) >= 0 ? 1 : 0);
+        m.setDeleted(0);
+        m.setCreateTime(now);
+        m.setUpdateTime(now);
+        missionMapper.insert(m);
+
+        log.info("auto-created mission {} from fire event {} (confidence={}, highConf={})",
+            m.getMissionNo(), e.getEventId(), c, m.getIsHighConfidence());
+
+        return new FireEventCreateResponse(e.getId(), e.getEventId(),
+            true, m.getMissionNo(), FireMissionStatus.WAITING_REVIEW.name());
+    }
+
+    private String findActiveMissionNo(Long fireEventId) {
+        List<FireMissionEntity> list = missionMapper.selectList(
+            new QueryWrapper<FireMissionEntity>()
+                .eq("fire_event_id", fireEventId)
+                .eq("deleted", 0)
+                .in("status", ACTIVE_MISSION_STATUSES)
+                .orderByDesc("create_time"));
+        return list.isEmpty() ? null : list.get(0).getMissionNo();
+    }
+
+    @Override
+    public FireEventDTO get(String eventId) {
+        FireEventEntity e = eventMapper.selectOne(
+            new QueryWrapper<FireEventEntity>().eq("event_id", eventId));
+        if (e == null) return null;
+        FireEventDTO d = new FireEventDTO();
+        BeanUtils.copyProperties(e, d);
+        return d;
+    }
+
+    @Override
+    public List<FireEventDTO> list(String workspaceId, String status, int limit) {
+        QueryWrapper<FireEventEntity> qw = new QueryWrapper<FireEventEntity>()
+            .eq("deleted", 0)
+            .orderByDesc("create_time")
+            .last("LIMIT " + limit);
+        if (workspaceId != null && !workspaceId.isEmpty()) {
+            qw.eq("workspace_id", workspaceId);
+        }
+        if (status != null && !status.isEmpty()) {
+            qw.eq("status", status);
+        }
+        return eventMapper.selectList(qw).stream()
+            .map(e -> {
+                FireEventDTO d = new FireEventDTO();
+                BeanUtils.copyProperties(e, d);
+                return d;
+            })
+            .collect(java.util.stream.Collectors.toList());
+    }
+}
