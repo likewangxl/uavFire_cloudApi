@@ -3,13 +3,15 @@ package com.yx.uavfire;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-@MapperScan("com.yx.uavfire.*.dao")
+@MapperScan({"com.yx.uavfire.*.dao", "com.yx.uavfire.fc100.**.dao"})
 @SpringBootApplication
 @EnableScheduling
 @ComponentScan({"com.yx.uavfire", "com.dji"})
+@ConfigurationPropertiesScan({"com.yx.uavfire", "com.dji"})
 public class CloudApiSampleApplication {
 
 	public static void main(String[] args) {

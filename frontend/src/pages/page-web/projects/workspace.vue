@@ -1,12 +1,12 @@
 <template>
-  <div class="project-app-wrapper">
+  <div class="project-app-wrapper" :class="{ 'fire-mode': isFireRoute }">
     <div class="left">
       <Sidebar />
       <div class="main-content uranus-scrollbar dark">
         <router-view />
       </div>
     </div>
-    <div class="right">
+    <div class="right" v-if="!isFireRoute">
       <div class="map-wrapper">
         <GMap />
       </div>
@@ -33,9 +33,20 @@ import { getRoot } from '/@/root'
 import { useMyStore } from '/@/store'
 import { useConnectWebSocket } from '/@/hooks/use-connect-websocket'
 import EventBus from '/@/event-bus'
+import { computed } from 'vue'
 
 const root = getRoot()
 const store = useMyStore()
+
+// fc100 灭火模块的路由进入时,隐藏右侧固定 GMap,左侧扩展占满,fire 页面有自己的地图和全宽列表
+const FIRE_ROUTES = new Set<string>([
+  ERouterName.FIRE_EVENTS,
+  ERouterName.FIRE_MISSIONS,
+  ERouterName.FIRE_MISSION_DETAIL,
+  ERouterName.FIRE_ROUTE_PREVIEW,
+  ERouterName.FIRE_PAYLOAD_RELEASE,
+])
+const isFireRoute = computed(() => FIRE_ROUTES.has(root.$route.name as string))
 
 const messageHandler = async (payload: any) => {
   if (!payload) {
@@ -143,6 +154,20 @@ useConnectWebSocket(messageHandler)
   transition: width 0.2s ease;
   height: 100%;
   width: 100%;
+
+  &.fire-mode {
+    .left {
+      width: 100%;
+      flex: 1 1 auto;
+
+      .main-content {
+        flex: 1;
+        width: auto;
+        background-color: #f6f8fa;
+        color: #222;
+      }
+    }
+  }
 
   .left {
     display: flex;

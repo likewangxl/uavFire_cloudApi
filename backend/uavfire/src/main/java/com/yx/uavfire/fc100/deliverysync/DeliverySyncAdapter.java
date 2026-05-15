@@ -1,0 +1,20 @@
+package com.yx.uavfire.fc100.deliverysync;
+
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceDTO;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceProperties;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskRef;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
+import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
+
+import java.util.List;
+
+/**
+ * spec §3.6 / §5.7 — Delivery Sync 接口抽象。MockAdapter / HttpAdapter 互斥注入。
+ */
+public interface DeliverySyncAdapter {
+    List<DeliveryDeviceDTO> listDevices(String workspaceId);
+    DeliveryDeviceProperties getDeviceProperties(String deviceSn);
+    DeliveryTaskRef createTask(CreateTaskRequest req);
+    void startTask(String taskId);
+    DeliveryTaskStatus queryTaskStatus(String taskId);
+}

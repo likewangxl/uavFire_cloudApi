@@ -64,6 +64,9 @@ public class UserServiceImpl implements IUserService {
 
         UserDTO user = this.entityConvertToDTO(userEntity);
         user.setWorkspaceId(workspaceId);
+        // Pilot 每次进入 Cloud API Platform 会调 /users/current 刷新 MQTT 配置,
+        // 必须把 mqtt_addr 一起带回,否则 Pilot 候选地址列表为空 → "thing module not load"
+        user.setMqttAddr(resolveMqttAddress());
 
         return HttpResultResponse.success(user);
     }

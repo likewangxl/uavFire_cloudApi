@@ -112,6 +112,35 @@ const routes: Array<RouteRecordRaw> = [
         name: ERouterName.FLIGHT_AREA,
         component: () => import('/@/pages/page-web/projects/flight-area.vue')
       },
+      // fc100 灭火模块(挂在 workspace 子路由下,保留左侧 sidebar)
+      {
+        path: '/' + ERouterName.FIRE_EVENTS,
+        name: ERouterName.FIRE_EVENTS,
+        component: () => import('/@/pages/page-web/projects/fire/FireEventList.vue')
+      },
+      {
+        path: '/' + ERouterName.FIRE_MISSIONS,
+        name: ERouterName.FIRE_MISSIONS,
+        component: () => import('/@/pages/page-web/projects/fire/FireMissionList.vue')
+      },
+      {
+        path: '/' + ERouterName.FIRE_MISSION_DETAIL + '/:no',
+        name: ERouterName.FIRE_MISSION_DETAIL,
+        component: () => import('/@/pages/page-web/projects/fire/FireMissionDetail.vue'),
+        props: true
+      },
+      {
+        path: '/' + ERouterName.FIRE_ROUTE_PREVIEW + '/:no',
+        name: ERouterName.FIRE_ROUTE_PREVIEW,
+        component: () => import('/@/pages/page-web/projects/fire/FireRoutePreview.vue'),
+        props: true
+      },
+      {
+        path: '/' + ERouterName.FIRE_PAYLOAD_RELEASE + '/:no',
+        name: ERouterName.FIRE_PAYLOAD_RELEASE,
+        component: () => import('/@/pages/page-web/projects/fire/FirePayloadRelease.vue'),
+        props: true
+      },
     ]
   },
   // pilot
