@@ -94,6 +94,8 @@ url:
 wayline-agent:
   shared-secret: change-me-in-production
   token-ttl-seconds: 86400
+  mqtt:
+    event-topic: uavfire/agent/+/events/#
   storage:
     prefix: storage
     version: /api/v1

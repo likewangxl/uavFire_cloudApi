@@ -2,6 +2,7 @@ package com.yx.uavfire.wayline.agent.mqtt;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.integration.channel.ExecutorChannel;
@@ -16,10 +17,11 @@ import java.util.concurrent.Executors;
 @Configuration
 public class WaylineAgentMqttConfiguration {
 
-    private static final String TOPIC_PATTERN = "uavfire/agent/+/events/#";
-
     @Autowired
     private MqttPahoClientFactory mqttClientFactory;
+
+    @Value("${wayline-agent.mqtt.event-topic:uavfire/agent/+/events/#}")
+    private String eventTopic;
 
     @Bean(name = WaylineAgentMqttChannel.INBOUND)
     public MessageChannel waylineAgentMqttInbound() {
@@ -34,7 +36,7 @@ public class WaylineAgentMqttConfiguration {
     public MqttPahoMessageDrivenChannelAdapter waylineAgentMqttAdapter(
             @Qualifier(WaylineAgentMqttChannel.INBOUND) MessageChannel inbound) {
         MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
-                "wayline-agent-" + UUID.randomUUID(), mqttClientFactory, TOPIC_PATTERN);
+                "wayline-agent-" + UUID.randomUUID(), mqttClientFactory, eventTopic);
         DefaultPahoMessageConverter converter = new DefaultPahoMessageConverter();
         converter.setPayloadAsBytes(true);
         adapter.setConverter(converter);

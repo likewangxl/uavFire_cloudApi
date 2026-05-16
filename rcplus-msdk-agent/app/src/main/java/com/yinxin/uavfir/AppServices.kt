@@ -17,7 +17,9 @@ import com.yinxin.uavfir.ui.ValidationConsoleController
 import com.yinxin.uavfir.wayline.WaylineAgentApi
 import com.yinxin.uavfir.wayline.WaylineAgentClient
 import com.yinxin.uavfir.wayline.WaylineAgentCommandRouter
+import com.yinxin.uavfir.wayline.WaylineEventForwarder
 import com.yinxin.uavfir.wayline.WaylineKmzDownloader
+import com.yinxin.uavfir.wayline.WaylineMqttPublisher
 import com.yinxin.uavfir.wayline.WaypointMissionExecutor
 import okhttp3.OkHttpClient
 import java.io.File
@@ -39,42 +41,20 @@ class AppServices(
     private val sessionManager = DualStreamSessionManager(RealMsdkStreamProvider())
     private val dualStreamPoller = CommandPollingCoordinator(backendClient, sessionManager)
 
-    // Wayline-agent control plane: poll /wayline-agent commands and route to
-    // the MSDK WaypointMissionManager wrapper. MSDK init is shared with the
-    // dual-stream side; only the executor's listeners attach independently.
+    // Wayline-agent control plane (HTTP) + event plane (MQTT).
     private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
     private val waylineClient = WaylineAgentClient(
         api = waylineApi,
-        sharedSecret = WAYLINE_AGENT_SHARED_SECRET,
+        sharedSecret = BuildConfig.AGENT_WAYLINE_SHARED_SECRET,
     )
-    private val waypointExecutorListener = object : WaypointMissionExecutor.Listener {
-        override fun onState(
-            missionId: String?,
-            msdk: dji.v5.manager.aircraft.waypoint3.model.WaypointMissionExecuteState,
-            previous: dji.v5.manager.aircraft.waypoint3.model.WaypointMissionExecuteState?,
-        ) {
-            Log.i(TAG, "wayline state mission=$missionId msdk=$msdk previous=$previous")
-            // TODO: publish wayline_state_change via WaylineMqttPublisher
-        }
-
-        override fun onProgress(
-            missionId: String?,
-            info: dji.v5.manager.aircraft.waypoint3.model.WaylineExecutingInfo,
-        ) {
-            Log.d(TAG, "wayline progress mission=$missionId wayline=${info.waylineID} waypoint=${info.currentWaypointIndex}")
-            // TODO: publish wayline_progress via WaylineMqttPublisher
-        }
-
-        override fun onError(
-            missionId: String?,
-            stage: String,
-            error: dji.v5.common.error.IDJIError,
-        ) {
-            Log.w(TAG, "wayline error mission=$missionId stage=$stage err=${error.errorCode()} desc=${error.description()}")
-            // TODO: publish wayline_state_change with error via WaylineMqttPublisher
-        }
-    }
-    private val waypointExecutor = WaypointMissionExecutor(waypointExecutorListener)
+    private val mqttPublisher = WaylineMqttPublisher(
+        brokerUrl = BuildConfig.AGENT_MQTT_BROKER_URL,
+        clientIdPrefix = "wayline-agent",
+        username = BuildConfig.AGENT_MQTT_BROKER_USERNAME.takeIf { it.isNotEmpty() },
+        password = BuildConfig.AGENT_MQTT_BROKER_PASSWORD.takeIf { it.isNotEmpty() },
+    )
+    private val eventForwarder = WaylineEventForwarder(mqttPublisher, appScope)
+    private val waypointExecutor = WaypointMissionExecutor(eventForwarder)
     private val kmzHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -106,15 +86,22 @@ class AppServices(
         waypointExecutor.attach()
     }
 
+    /**
+     * Tell wayline MQTT plane which droneSn this agent represents. Must be
+     * called before the publisher emits its first event.
+     */
+    fun setActiveDroneSn(droneSn: String) {
+        mqttPublisher.setDefaultDroneSn(droneSn)
+    }
+
     fun shutdown() {
         waypointExecutor.detach()
         runtimeLoop.stop()
+        mqttPublisher.disconnect()
         appScope.cancel()
     }
 
     companion object {
         private const val TAG = "AppServices"
-        // TODO: load from BuildConfig / encrypted preferences before production
-        private const val WAYLINE_AGENT_SHARED_SECRET = "change-me-in-production"
     }
 }

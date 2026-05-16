@@ -14,27 +14,38 @@ import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
  * Publishes wayline mission events to the backend MQTT broker on topics
  * `uavfire/agent/{droneSn}/events/{method}`.
  *
- * Connects lazily on first publish and reconnects on failure. Single instance
- * per agent (one drone).
+ * Connects lazily on first publish and reconnects on failure.
  *
  * Threading: [connect] and [publishEvent] perform blocking network I/O — must
- * be called off the Android main thread (e.g. from a coroutine on Dispatchers.IO
- * or the existing AgentRuntimeLoop executor). On the main thread the Android
- * runtime will throw NetworkOnMainThreadException.
+ * be called off the Android main thread (e.g. from a coroutine on
+ * Dispatchers.IO). On the main thread the Android runtime will throw
+ * NetworkOnMainThreadException.
  */
 class WaylineMqttPublisher(
     private val brokerUrl: String,
-    private val droneSn: String,
+    private val clientIdPrefix: String,
     private val username: String?,
     private val password: String?,
     private val gson: Gson = Gson(),
 ) {
     private var client: MqttClient? = null
 
+    /**
+     * Default droneSn used when callers don't supply one. Tracked externally
+     * (typically set when MSDK reports the connected aircraft SN) so the
+     * publisher can be wired before the SN is known.
+     */
+    @Volatile
+    private var defaultDroneSn: String? = null
+
+    fun setDefaultDroneSn(droneSn: String?) {
+        defaultDroneSn = droneSn
+    }
+
     @Synchronized
     fun connect() {
         if (client?.isConnected == true) return
-        val c = MqttClient(brokerUrl, "wayline-agent-$droneSn", MemoryPersistence())
+        val c = MqttClient(brokerUrl, "${clientIdPrefix}-${java.util.UUID.randomUUID()}", MemoryPersistence())
         c.setCallback(object : MqttCallback {
             override fun connectionLost(cause: Throwable?) {
                 Log.w(TAG, "connection lost", cause)
@@ -49,17 +60,22 @@ class WaylineMqttPublisher(
             isCleanSession = false
             connectionTimeout = 10
             keepAliveInterval = 30
-            username?.let { userName = it }
-            password?.let { this.password = it.toCharArray() }
+            username?.takeIf { it.isNotEmpty() }?.let { userName = it }
+            password?.takeIf { it.isNotEmpty() }?.let { this.password = it.toCharArray() }
         }
         c.connect(opts)
         client = c
     }
 
-    fun publishEvent(method: String, payload: Map<String, Any?>) {
+    fun publishEvent(method: String, payload: Map<String, Any?>, droneSn: String? = null) {
+        val effectiveSn = droneSn ?: defaultDroneSn
+        if (effectiveSn == null) {
+            Log.w(TAG, "publishEvent skipped: no droneSn available (method=$method)")
+            return
+        }
         try {
             connect()
-            val topic = "uavfire/agent/$droneSn/events/$method"
+            val topic = "uavfire/agent/$effectiveSn/events/$method"
             val envelope = mapOf(
                 "tid" to (payload["tid"] ?: java.util.UUID.randomUUID().toString()),
                 "method" to method,

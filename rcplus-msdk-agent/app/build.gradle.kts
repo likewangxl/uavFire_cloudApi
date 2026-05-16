@@ -9,6 +9,10 @@ val agentBackendBaseUrl = providers.gradleProperty("agentBackendBaseUrl").orElse
 val agentMediaHost = providers.gradleProperty("agentMediaHost").orElse("127.0.0.1")
 val agentMediaRtmpPort = providers.gradleProperty("agentMediaRtmpPort").orElse("1935")
 val agentMediaStreamApp = providers.gradleProperty("agentMediaStreamApp").orElse("live")
+val agentMqttBrokerUrl = providers.gradleProperty("agentMqttBrokerUrl").orElse("tcp://192.168.50.10:1883")
+val agentMqttBrokerUsername = providers.gradleProperty("agentMqttBrokerUsername").orElse("")
+val agentMqttBrokerPassword = providers.gradleProperty("agentMqttBrokerPassword").orElse("")
+val agentWaylineSharedSecret = providers.gradleProperty("agentWaylineSharedSecret").orElse("change-me-in-production")
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -31,6 +35,10 @@ android {
         buildConfigField("String", "AGENT_MEDIA_HOST", "\"${agentMediaHost.get()}\"")
         buildConfigField("int", "AGENT_MEDIA_RTMP_PORT", agentMediaRtmpPort.get())
         buildConfigField("String", "AGENT_MEDIA_STREAM_APP", "\"${agentMediaStreamApp.get()}\"")
+        buildConfigField("String", "AGENT_MQTT_BROKER_URL", "\"${agentMqttBrokerUrl.get()}\"")
+        buildConfigField("String", "AGENT_MQTT_BROKER_USERNAME", "\"${agentMqttBrokerUsername.get()}\"")
+        buildConfigField("String", "AGENT_MQTT_BROKER_PASSWORD", "\"${agentMqttBrokerPassword.get()}\"")
+        buildConfigField("String", "AGENT_WAYLINE_SHARED_SECRET", "\"${agentWaylineSharedSecret.get()}\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
