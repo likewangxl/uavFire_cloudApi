@@ -1,5 +1,6 @@
 package com.yx.uavfire.wayline.agent.service;
 
+import com.yx.uavfire.wayline.agent.model.WaylineAgentKmzEntry;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineAgentCommandAckDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineAgentCommandDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO;
@@ -8,11 +9,17 @@ import com.yx.uavfire.wayline.agent.model.enums.WaylineAgentMethodEnum;
 import com.yx.uavfire.wayline.agent.service.impl.WaylineAgentServiceImpl;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WaylineAgentServiceImplTest {
 
@@ -93,6 +100,50 @@ class WaylineAgentServiceImplTest {
 
         assertNotEquals(first.getTid(), second.getTid());
         assertSame(second, svc.pollCommand("SN-A"));
+    }
+
+    @Test
+    void prepareKmz_storesBytesAndMd5() {
+        WaylineAgentServiceImpl svc = new WaylineAgentServiceImpl();
+        byte[] bytes = "abc".getBytes(StandardCharsets.UTF_8);
+
+        svc.prepareKmz("SN-A", "m-1", bytes);
+
+        Optional<WaylineAgentKmzEntry> entry = svc.getKmz("SN-A", "m-1");
+        assertTrue(entry.isPresent());
+        assertArrayEquals(bytes, entry.get().getKmzBytes());
+        // RFC 1321 md5("abc") = 900150983cd24fb0d6963f7d28e17f72
+        assertEquals("900150983cd24fb0d6963f7d28e17f72", entry.get().getMd5());
+    }
+
+    @Test
+    void getKmz_returnsEmptyWhenMissionIdMismatches() {
+        WaylineAgentServiceImpl svc = new WaylineAgentServiceImpl();
+        svc.prepareKmz("SN-A", "m-1", new byte[]{1, 2, 3});
+
+        Optional<WaylineAgentKmzEntry> entry = svc.getKmz("SN-A", "m-2");
+
+        assertFalse(entry.isPresent());
+    }
+
+    @Test
+    void getKmz_returnsEmptyWhenDroneNotRegistered() {
+        WaylineAgentServiceImpl svc = new WaylineAgentServiceImpl();
+        svc.prepareKmz("SN-A", "m-1", new byte[]{1});
+
+        assertFalse(svc.getKmz("SN-B", "m-1").isPresent());
+    }
+
+    @Test
+    void prepareKmz_overwritesPreviousEntryForSameDrone() {
+        WaylineAgentServiceImpl svc = new WaylineAgentServiceImpl();
+        svc.prepareKmz("SN-A", "m-1", new byte[]{1});
+        svc.prepareKmz("SN-A", "m-2", new byte[]{2, 2});
+
+        assertFalse(svc.getKmz("SN-A", "m-1").isPresent());
+        Optional<WaylineAgentKmzEntry> entry = svc.getKmz("SN-A", "m-2");
+        assertTrue(entry.isPresent());
+        assertEquals(2, entry.get().getKmzBytes().length);
     }
 
     @Test

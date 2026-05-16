@@ -19,6 +19,11 @@ class WaylineAgentClient(
 ) {
     private val tokenByDrone = ConcurrentHashMap<String, String>()
 
+    /**
+     * Returns a valid agent JWT for the given drone, fetching a fresh one if
+     * we haven't issued one yet. Public so the command router can use the
+     * same token to download KMZ via [WaylineKmzDownloader].
+     */
     suspend fun ensureToken(droneSn: String): String {
         tokenByDrone[droneSn]?.let { return it }
         val resp = api.issueToken(WaylineAgentTokenRequest(droneSn, sharedSecret))

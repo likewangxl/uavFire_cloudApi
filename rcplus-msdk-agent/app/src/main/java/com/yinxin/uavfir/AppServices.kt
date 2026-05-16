@@ -17,7 +17,11 @@ import com.yinxin.uavfir.ui.ValidationConsoleController
 import com.yinxin.uavfir.wayline.WaylineAgentApi
 import com.yinxin.uavfir.wayline.WaylineAgentClient
 import com.yinxin.uavfir.wayline.WaylineAgentCommandRouter
+import com.yinxin.uavfir.wayline.WaylineKmzDownloader
 import com.yinxin.uavfir.wayline.WaypointMissionExecutor
+import okhttp3.OkHttpClient
+import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +31,7 @@ class AppServices(
     application: Application,
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val kmzCacheDir = File(application.cacheDir, "wayline-kmz")
     private val api = AgentBackendApiFactory.create()
     private val backendClient = AgentBackendClient(api)
     private val reporter = AgentReporter(backendClient)
@@ -70,7 +75,13 @@ class AppServices(
         }
     }
     private val waypointExecutor = WaypointMissionExecutor(waypointExecutorListener)
-    private val waylineRouter = WaylineAgentCommandRouter(waylineClient, waypointExecutor)
+    private val kmzHttpClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .build()
+    private val kmzDownloader = WaylineKmzDownloader(kmzHttpClient, kmzCacheDir)
+    private val waylineRouter = WaylineAgentCommandRouter(waylineClient, waypointExecutor, kmzDownloader)
 
     private val commandPoller = CompositeCommandPoller(listOf(dualStreamPoller, waylineRouter))
 
