@@ -17,8 +17,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var refreshButton: Button
     private lateinit var startButton: Button
+    private lateinit var probeWaypointButton: Button
     private val controller: ValidationConsoleController
         get() = (application as App).services.validationController
+    private val waypointProbe: com.yinxin.uavfir.wayline.WaypointProbeController
+        get() = (application as App).services.waypointProbe
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,6 +29,7 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         refreshButton = findViewById(R.id.refreshButton)
         startButton = findViewById(R.id.startButton)
+        probeWaypointButton = findViewById(R.id.probeWaypointButton)
 
         refreshButton.setOnClickListener {
             runAction("refresh-device-status") {
@@ -35,6 +39,12 @@ class MainActivity : AppCompatActivity() {
         startButton.setOnClickListener {
             runAction("start-dual-stream") {
                 controller.startDualStream(App.LOCAL_DRONE_SN)
+            }
+        }
+        probeWaypointButton.setOnClickListener {
+            runAction("probe-waypoint-push") {
+                val r = waypointProbe.probePush()
+                ValidationConsoleController.UiResult(statusText = r.message)
             }
         }
 
@@ -54,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         refreshButton.isEnabled = false
         startButton.isEnabled = false
+        probeWaypointButton.isEnabled = false
         statusText.text = getString(R.string.app_status_running, action)
         uiScope.launch {
             runCatching { work() }
@@ -69,6 +80,7 @@ class MainActivity : AppCompatActivity() {
                 }
             refreshButton.isEnabled = true
             startButton.isEnabled = true
+            probeWaypointButton.isEnabled = true
         }
     }
 

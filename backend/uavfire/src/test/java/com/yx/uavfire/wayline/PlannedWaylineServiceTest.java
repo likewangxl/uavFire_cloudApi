@@ -1233,6 +1233,13 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(template.contains("<wpml:payloadSubEnumValue>0</wpml:payloadSubEnumValue>"), "M4T payloadSubEnumValue=0"),
                 () -> assertTrue(waylines.contains("<wpml:droneEnumValue>100</wpml:droneEnumValue>"), "M4T drone enum in waylines"),
                 () -> assertTrue(waylines.contains("<wpml:payloadEnumValue>99</wpml:payloadEnumValue>"), "M4T payload enum in waylines"));
+
+        // When -Dkmz.dump.path=<path> is set, also write the generated KMZ to that
+        // path so it can be adb-pushed to an RC for real-aircraft validation.
+        String dumpPath = System.getProperty("kmz.dump.path");
+        if (dumpPath != null && !dumpPath.isBlank()) {
+            java.nio.file.Files.write(java.nio.file.Paths.get(dumpPath), createCaptor.getValue().getContent());
+        }
     }
 
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {

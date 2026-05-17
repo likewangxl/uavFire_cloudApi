@@ -21,6 +21,7 @@ import com.yinxin.uavfir.wayline.WaylineEventForwarder
 import com.yinxin.uavfir.wayline.WaylineKmzDownloader
 import com.yinxin.uavfir.wayline.WaylineMqttPublisher
 import com.yinxin.uavfir.wayline.WaypointMissionExecutor
+import com.yinxin.uavfir.wayline.WaypointProbeController
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -62,6 +63,13 @@ class AppServices(
         .build()
     private val kmzDownloader = WaylineKmzDownloader(kmzHttpClient, kmzCacheDir)
     private val waylineRouter = WaylineAgentCommandRouter(waylineClient, waypointExecutor, kmzDownloader, eventForwarder)
+
+    val waypointProbe = WaypointProbeController(
+        executor = waypointExecutor,
+        probeKmzBytes = application.resources.openRawResource(R.raw.m4t_probe).use { it.readBytes() },
+        // External app dir (Pilot 2 / MSDK can reach here without legacy storage perms).
+        cacheDir = File(application.getExternalFilesDir(null), "wayline-probe"),
+    )
 
     private val commandPoller = CompositeCommandPoller(listOf(dualStreamPoller, waylineRouter))
 

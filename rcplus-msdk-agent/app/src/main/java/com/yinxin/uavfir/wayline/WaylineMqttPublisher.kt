@@ -55,13 +55,15 @@ class WaylineMqttPublisher(
             }
             override fun deliveryComplete(token: IMqttDeliveryToken?) {}
         })
+        val brokerUser = username
+        val brokerPassword = password
         val opts = MqttConnectOptions().apply {
             isAutomaticReconnect = true
             isCleanSession = false
             connectionTimeout = 10
             keepAliveInterval = 30
-            username?.takeIf { it.isNotEmpty() }?.let { userName = it }
-            password?.takeIf { it.isNotEmpty() }?.let { this.password = it.toCharArray() }
+            brokerUser?.takeIf { it.isNotEmpty() }?.let { userName = it }
+            brokerPassword?.takeIf { it.isNotEmpty() }?.let { this.password = it.toCharArray() }
         }
         c.connect(opts)
         client = c
