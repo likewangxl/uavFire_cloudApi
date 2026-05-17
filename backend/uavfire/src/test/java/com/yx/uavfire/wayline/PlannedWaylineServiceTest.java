@@ -1110,18 +1110,22 @@ class PlannedWaylineServiceTest {
         String template = readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml");
         String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
 
+        // Field set asserted here mirrors Pilot 2's real M4T export
+        // (see /Users/likewang/uavfire/kmz/麟游官坪.kmz baseline).
         assertAll("template.kml WPML compliance",
-                () -> assertTrue(template.contains("xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\""), "wpml namespace"),
+                () -> assertTrue(template.contains("xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\""), "wpml namespace 1.0.6"),
                 () -> assertTrue(template.contains("<wpml:missionConfig>"), "missionConfig"),
                 () -> assertTrue(template.contains("<wpml:flyToWaylineMode>safely</wpml:flyToWaylineMode>"), "flyToWaylineMode"),
                 () -> assertTrue(template.contains("<wpml:finishAction>goHome</wpml:finishAction>"), "finishAction=goHome"),
                 () -> assertTrue(template.contains("<wpml:exitOnRCLost>goContinue</wpml:exitOnRCLost>"), "exitOnRCLost=goContinue"),
+                () -> assertTrue(template.contains("<wpml:executeRCLostAction>goBack</wpml:executeRCLostAction>"), "executeRCLostAction"),
                 () -> assertTrue(template.contains("<wpml:takeOffSecurityHeight>20</wpml:takeOffSecurityHeight>"), "takeOffSecurityHeight"),
                 () -> assertTrue(template.contains("<wpml:globalTransitionalSpeed>5</wpml:globalTransitionalSpeed>"), "globalTransitionalSpeed"),
-                () -> assertTrue(template.contains("<wpml:globalRTHHeight>50</wpml:globalRTHHeight>"), "globalRTHHeight"),
+                () -> assertFalse(template.contains("<wpml:globalRTHHeight>"), "globalRTHHeight must NOT be in missionConfig (Pilot 2 doesn't emit it here)"),
                 () -> assertTrue(template.contains("<wpml:droneInfo>"), "droneInfo block"),
                 () -> assertTrue(template.contains("<wpml:droneEnumValue>67</wpml:droneEnumValue>"), "M30T droneEnumValue=67"),
                 () -> assertTrue(template.contains("<wpml:droneSubEnumValue>1</wpml:droneSubEnumValue>"), "M30T droneSubEnumValue=1"),
+                () -> assertTrue(template.contains("<wpml:waylineAvoidLimitAreaMode>0</wpml:waylineAvoidLimitAreaMode>"), "waylineAvoidLimitAreaMode"),
                 () -> assertTrue(template.contains("<wpml:payloadInfo>"), "payloadInfo block"),
                 () -> assertTrue(template.contains("<wpml:payloadEnumValue>53</wpml:payloadEnumValue>"), "M30T_CAMERA payloadEnumValue=53"),
                 () -> assertTrue(template.contains("<wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>"), "payloadPositionIndex"),
@@ -1130,30 +1134,105 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(template.contains("<wpml:waylineCoordinateSysParam>"), "coord sys param"),
                 () -> assertTrue(template.contains("<wpml:coordinateMode>WGS84</wpml:coordinateMode>"), "coordinateMode=WGS84"),
                 () -> assertTrue(template.contains("<wpml:heightMode>relativeToStartPoint</wpml:heightMode>"), "heightMode"),
+                () -> assertTrue(template.contains("<wpml:positioningType>GPS</wpml:positioningType>"), "positioningType=GPS"),
                 () -> assertTrue(template.contains("<wpml:autoFlightSpeed>5</wpml:autoFlightSpeed>"), "autoFlightSpeed"),
-                () -> assertTrue(template.contains("<wpml:imageFormat>zoom,ir</wpml:imageFormat>"), "M30T imageFormat=zoom,ir"),
+                () -> assertTrue(template.contains("<wpml:globalHeight>"), "globalHeight"),
+                () -> assertTrue(template.contains("<wpml:caliFlightEnable>0</wpml:caliFlightEnable>"), "caliFlightEnable"),
+                () -> assertTrue(template.contains("<wpml:gimbalPitchMode>manual</wpml:gimbalPitchMode>"), "gimbalPitchMode"),
                 () -> assertTrue(template.contains("<wpml:globalWaypointHeadingParam>"), "global heading param"),
+                () -> assertFalse(template.contains("waypointHeadingPathMode"), "no waypointHeadingPathMode (Pilot 2 omits)"),
                 () -> assertTrue(template.contains("<wpml:globalWaypointTurnMode>"), "global turn mode"),
+                () -> assertFalse(template.contains("<wpml:payloadParam>"), "no Folder-level payloadParam (Pilot 2 doesn't emit)"),
                 () -> assertTrue(template.contains("<Placemark>"), "placemarks present"),
                 () -> assertTrue(template.contains("<wpml:index>0</wpml:index>"), "first waypoint index"),
                 () -> assertTrue(template.contains("<wpml:index>2</wpml:index>"), "third waypoint index"),
                 () -> assertTrue(template.contains("<wpml:ellipsoidHeight>30.0</wpml:ellipsoidHeight>"), "ellipsoidHeight per waypoint"),
-                () -> assertTrue(template.contains("<wpml:height>30.0</wpml:height>"), "height per waypoint"));
+                () -> assertTrue(template.contains("<wpml:height>30.0</wpml:height>"), "height per waypoint"),
+                () -> assertTrue(template.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "per-waypoint turn mode"),
+                () -> assertTrue(template.contains("<wpml:useGlobalSpeed>1</wpml:useGlobalSpeed>"), "useGlobalSpeed"),
+                () -> assertTrue(template.contains("<wpml:useGlobalHeadingParam>1</wpml:useGlobalHeadingParam>"), "useGlobalHeadingParam"),
+                () -> assertTrue(template.contains("<wpml:useStraightLine>1</wpml:useStraightLine>"), "useStraightLine"),
+                () -> assertTrue(template.contains("<wpml:isRisky>0</wpml:isRisky>"), "isRisky"));
 
         assertAll("waylines.wpml WPML compliance",
+                () -> assertTrue(waylines.contains("xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\""), "wpml namespace 1.0.6"),
                 () -> assertTrue(waylines.contains("<wpml:missionConfig>"), "missionConfig"),
                 () -> assertTrue(waylines.contains("<wpml:finishAction>goHome</wpml:finishAction>"), "finishAction"),
                 () -> assertTrue(waylines.contains("<wpml:droneEnumValue>67</wpml:droneEnumValue>"), "drone enum"),
+                () -> assertTrue(waylines.contains("<wpml:waylineAvoidLimitAreaMode>0</wpml:waylineAvoidLimitAreaMode>"), "waylineAvoidLimitAreaMode"),
+                () -> assertTrue(waylines.contains("<wpml:payloadEnumValue>53</wpml:payloadEnumValue>"), "payload enum"),
                 () -> assertTrue(waylines.contains("<wpml:templateId>0</wpml:templateId>"), "templateId"),
                 () -> assertTrue(waylines.contains("<wpml:executeHeightMode>relativeToStartPoint</wpml:executeHeightMode>"), "executeHeightMode"),
                 () -> assertTrue(waylines.contains("<wpml:waylineId>0</wpml:waylineId>"), "waylineId"),
+                () -> assertTrue(waylines.contains("<wpml:distance>"), "Folder distance"),
+                () -> assertTrue(waylines.contains("<wpml:duration>"), "Folder duration"),
                 () -> assertTrue(waylines.contains("<wpml:autoFlightSpeed>5</wpml:autoFlightSpeed>"), "wayline autoFlightSpeed"),
+                () -> assertFalse(waylines.contains("<wpml:payloadParam>"), "no Folder-level payloadParam"),
                 () -> assertTrue(waylines.contains("<wpml:executeHeight>30.0</wpml:executeHeight>"), "per-waypoint executeHeight"),
                 () -> assertTrue(waylines.contains("<wpml:waypointSpeed>5</wpml:waypointSpeed>"), "per-waypoint waypointSpeed"),
-                () -> assertTrue(waylines.contains("<wpml:waypointHeadingParam>"), "per-waypoint heading param"),
-                () -> assertTrue(waylines.contains("<wpml:waypointTurnParam>"), "per-waypoint turn param"),
+                () -> assertTrue(waylines.contains("<wpml:waypointHeadingAngleEnable>0</wpml:waypointHeadingAngleEnable>"), "waypointHeadingAngleEnable"),
+                () -> assertTrue(waylines.contains("<wpml:waypointHeadingPoiIndex>0</wpml:waypointHeadingPoiIndex>"), "waypointHeadingPoiIndex"),
+                () -> assertFalse(waylines.contains("waypointHeadingPathMode"), "no waypointHeadingPathMode (Pilot 2 omits)"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "wayline placemark turn mode"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist>"), "wayline placemark damping=10"),
+                () -> assertTrue(waylines.contains("<wpml:waypointGimbalHeadingParam>"), "waypointGimbalHeadingParam block"),
+                () -> assertTrue(waylines.contains("<wpml:waypointGimbalPitchAngle>0</wpml:waypointGimbalPitchAngle>"), "gimbal pitch"),
+                () -> assertTrue(waylines.contains("<wpml:waypointGimbalYawAngle>0</wpml:waypointGimbalYawAngle>"), "gimbal yaw"),
+                () -> assertTrue(waylines.contains("<wpml:waypointWorkType>0</wpml:waypointWorkType>"), "waypointWorkType"),
+                () -> assertTrue(waylines.contains("<wpml:useStraightLine>1</wpml:useStraightLine>"), "useStraightLine=1"),
+                () -> assertTrue(waylines.contains("<wpml:isRisky>0</wpml:isRisky>"), "isRisky"),
                 () -> assertTrue(waylines.contains("<coordinates>113.0,22.0</coordinates>"), "2D coordinates, not 3D"),
                 () -> assertFalse(waylines.contains("<coordinates>113.0,22.0,30.0</coordinates>"), "no 3D coords slip-through"));
+    }
+
+    @Test
+    void m4tKmzHasPilot2EnumValues() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(1001)
+                .plannedWaylineId("pw-m4t")
+                .workspaceId("workspace-001")
+                .name("M4T Probe")
+                .aircraftModelKey("M4T")
+                .gatewaySn("GW-002")
+                .aircraftSn("AC-002")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}," +
+                        "{\"order\":2,\"gcjLng\":113.002,\"gcjLat\":22.002,\"wgsLng\":113.001,\"wgsLat\":22.001,\"height\":30.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-m4t")
+                        .name("M4T Probe")
+                        .objectKey("custom-prefix/pw-m4t.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-m4t", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String template = readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml");
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+
+        // Pilot 2 真机导出的 M4T KMZ 实测值 (kmz/麟游*.kmz)
+        assertAll("M4T enum values match Pilot 2 real export",
+                () -> assertTrue(template.contains("<wpml:droneEnumValue>100</wpml:droneEnumValue>"), "M4T droneEnumValue=100"),
+                () -> assertTrue(template.contains("<wpml:droneSubEnumValue>1</wpml:droneSubEnumValue>"), "M4T droneSubEnumValue=1"),
+                () -> assertTrue(template.contains("<wpml:payloadEnumValue>99</wpml:payloadEnumValue>"), "M4T payloadEnumValue=99"),
+                () -> assertTrue(template.contains("<wpml:payloadSubEnumValue>0</wpml:payloadSubEnumValue>"), "M4T payloadSubEnumValue=0"),
+                () -> assertTrue(waylines.contains("<wpml:droneEnumValue>100</wpml:droneEnumValue>"), "M4T drone enum in waylines"),
+                () -> assertTrue(waylines.contains("<wpml:payloadEnumValue>99</wpml:payloadEnumValue>"), "M4T payload enum in waylines"));
     }
 
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {

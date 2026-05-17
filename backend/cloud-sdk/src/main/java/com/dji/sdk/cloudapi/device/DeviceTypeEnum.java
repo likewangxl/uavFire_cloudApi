@@ -65,11 +65,13 @@ public enum DeviceTypeEnum {
 
     M3D(91),
 
-    M4_SERIES(99),
+    M4_SERIES(100),
 
     M3D_CAMERA(80),
 
     M3TD_CAMERA(81),
+
+    M4T_CAMERA(99),
     ;
 
     private final int type;

@@ -24,7 +24,13 @@ class WaylineKmzDownloader(
         data class Failure(val reason: String) : Result()
     }
 
-    fun download(url: String, agentToken: String, expectedMd5: String?, missionId: String): Result {
+    /**
+     * @param filename desired on-disk basename (also the basename MSDK sees when
+     * pushKMZFileToAircraft uploads it). Must match the {@code kmz_filename} the
+     * backend sent in the dispatch payload — otherwise startMission will not find
+     * the file on the aircraft. Pass {@code "$missionId.kmz"} as a stable fallback.
+     */
+    fun download(url: String, agentToken: String, expectedMd5: String?, missionId: String, filename: String): Result {
         val req = Request.Builder()
             .url(url)
             .header(HEADER_AGENT_TOKEN, agentToken)
@@ -50,7 +56,7 @@ class WaylineKmzDownloader(
                 if (!cacheDir.exists() && !cacheDir.mkdirs()) {
                     return Result.Failure("cache-dir-create-failed:${cacheDir.absolutePath}")
                 }
-                val file = File(cacheDir, "$missionId.kmz")
+                val file = File(cacheDir, filename)
                 file.writeBytes(body)
                 Result.Success(file, actualMd5)
             }

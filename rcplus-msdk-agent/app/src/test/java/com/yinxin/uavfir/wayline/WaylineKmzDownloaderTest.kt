@@ -49,13 +49,14 @@ class WaylineKmzDownloaderTest {
             agentToken = "jwt-token-abc",
             expectedMd5 = expectedMd5,
             missionId = "m-1",
+            filename = "fire_mission_1.kmz",
         )
 
         assertTrue(result is WaylineKmzDownloader.Result.Success)
         val success = result as WaylineKmzDownloader.Result.Success
         assertEquals(expectedMd5, success.md5)
         assertArrayEquals(payload, success.file.readBytes())
-        assertTrue(success.file.name.endsWith("m-1.kmz"))
+        assertEquals("fire_mission_1.kmz", success.file.name)
 
         val req: RecordedRequest = server.takeRequest()
         assertEquals("jwt-token-abc", req.getHeader(WaylineKmzDownloader.HEADER_AGENT_TOKEN))
@@ -73,6 +74,7 @@ class WaylineKmzDownloaderTest {
             agentToken = "tok",
             expectedMd5 = null,
             missionId = "m-2",
+            filename = "m-2.kmz",
         )
 
         assertTrue(result is WaylineKmzDownloader.Result.Failure)
@@ -93,6 +95,7 @@ class WaylineKmzDownloaderTest {
             agentToken = "tok",
             expectedMd5 = "0000000000",
             missionId = "m-3",
+            filename = "m-3.kmz",
         )
 
         assertTrue(result is WaylineKmzDownloader.Result.Failure)
@@ -108,6 +111,7 @@ class WaylineKmzDownloaderTest {
             agentToken = "tok",
             expectedMd5 = null,
             missionId = "m-x",
+            filename = "m-x.kmz",
         )
 
         assertTrue(result is WaylineKmzDownloader.Result.Failure)
@@ -125,6 +129,7 @@ class WaylineKmzDownloaderTest {
             agentToken = "tok",
             expectedMd5 = expectedMd5,
             missionId = "m-4",
+            filename = "m-4.kmz",
         )
 
         assertTrue(result is WaylineKmzDownloader.Result.Success)

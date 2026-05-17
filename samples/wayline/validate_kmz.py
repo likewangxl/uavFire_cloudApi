@@ -15,7 +15,7 @@ import zipfile
 from xml.etree import ElementTree as ET
 
 NS = {"kml": "http://www.opengis.net/kml/2.2",
-      "wpml": "http://www.dji.com/wpmz/1.0.2"}
+      "wpml": "http://www.dji.com/wpmz/1.0.6"}
 
 # Required <wpml:missionConfig> children (both files)
 MISSION_CONFIG_REQUIRED = [
@@ -98,7 +98,7 @@ def check_template_kml(root):
         raise WpmlError("template.kml: no <Folder>")
 
     must_enum(must_text(folder, "templateType", "template.kml/Folder"),
-              {"waypoint", "mapping2d", "mapping3d", "mappingStrip"},
+              {"waypoint", "mapping2d", "mapping3d", "strip"},
               "template.kml/Folder", "templateType")
     must(folder, "templateId", "template.kml/Folder")
     coord = must(folder, "waylineCoordinateSysParam", "template.kml/Folder")

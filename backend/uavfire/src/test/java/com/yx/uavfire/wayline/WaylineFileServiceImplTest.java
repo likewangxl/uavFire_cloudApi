@@ -220,7 +220,7 @@ class WaylineFileServiceImplTest {
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
             zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
             zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\">"
                     + "<Document>"
                     + "<wpml:templateType>waypoint</wpml:templateType>"
                     + "<wpml:droneInfo><wpml:droneEnumValue>67</wpml:droneEnumValue><wpml:droneSubEnumValue>1</wpml:droneSubEnumValue></wpml:droneInfo>"
@@ -230,7 +230,7 @@ class WaylineFileServiceImplTest {
             zipOutputStream.closeEntry();
             zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
             zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\">"
                     + "<Document><name>Survey A</name><wpml:waylineCoordinateSysParam/>"
                     + "<Folder><Placemark><name>1</name><Point><coordinates>120.0,30.1,80.0</coordinates></Point></Placemark></Folder>"
                     + "</Document>"
@@ -245,7 +245,7 @@ class WaylineFileServiceImplTest {
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
             zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
             zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.2\">"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\">"
                     + "<Document>"
                     + "<wpml:templateType>waypoint</wpml:templateType>"
                     + "<wpml:droneInfo><wpml:droneEnumValue>67</wpml:droneEnumValue><wpml:droneSubEnumValue>1</wpml:droneSubEnumValue></wpml:droneInfo>"

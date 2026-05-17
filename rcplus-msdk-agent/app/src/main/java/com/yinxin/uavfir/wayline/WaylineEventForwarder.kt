@@ -71,6 +71,24 @@ class WaylineEventForwarder(
         }
     }
 
+    /**
+     * Publish `wayline_dispatch_result` for a dispatch outcome (download / push / start).
+     * Fires asynchronously on the forwarder's IO dispatcher; callers should not block on it.
+     */
+    fun publishDispatchResult(missionId: String, result: Int, reason: String? = null, msdkMissionFileName: String? = null) {
+        scope.launch(dispatcher) {
+            publisher.publishEvent(
+                method = "wayline_dispatch_result",
+                payload = mapOf(
+                    "mission_id" to missionId,
+                    "result" to result,
+                    "reason" to reason,
+                    "msdk_mission_file_name" to msdkMissionFileName,
+                ),
+            )
+        }
+    }
+
     companion object {
         private const val TAG = "WaylineEventForwarder"
     }

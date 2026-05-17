@@ -61,7 +61,7 @@ class AppServices(
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
     private val kmzDownloader = WaylineKmzDownloader(kmzHttpClient, kmzCacheDir)
-    private val waylineRouter = WaylineAgentCommandRouter(waylineClient, waypointExecutor, kmzDownloader)
+    private val waylineRouter = WaylineAgentCommandRouter(waylineClient, waypointExecutor, kmzDownloader, eventForwarder)
 
     private val commandPoller = CompositeCommandPoller(listOf(dualStreamPoller, waylineRouter))
 

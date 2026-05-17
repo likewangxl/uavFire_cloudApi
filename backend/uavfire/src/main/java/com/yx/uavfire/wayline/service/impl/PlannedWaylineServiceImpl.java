@@ -507,17 +507,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .build();
     }
 
-    /**
-     * Default mission-config values applied to every published KMZ. Mirrors
-     * the wayline-agent contract (docs/WAYLINE_AGENT_CONTRACT.md §2).
-     */
+    // Field set + namespace mirrors Pilot 2's real M4T export
+    // (baseline: /Users/likewang/uavfire/kmz/麟游官坪.kmz; see WAYLINE_AGENT_CONTRACT.md §2).
     private static final String NS_KML = "http://www.opengis.net/kml/2.2";
-    private static final String NS_WPML = "http://www.dji.com/wpmz/1.0.2";
+    private static final String NS_WPML = "http://www.dji.com/wpmz/1.0.6";
     private static final String FINISH_ACTION = "goHome";
     private static final String EXIT_ON_RC_LOST = "goContinue";
     private static final String EXECUTE_RC_LOST_ACTION = "goBack";
     private static final int TAKE_OFF_SECURITY_HEIGHT_M = 20;
-    private static final int GLOBAL_RTH_HEIGHT_M = 50;
     private static final int GLOBAL_TRANSITIONAL_SPEED_MPS = 5;
     private static final int AUTO_FLIGHT_SPEED_MPS = 5;
 
@@ -566,30 +563,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 return DeviceEnum.M3D_CAMERA;
             case M3TD:
                 return DeviceEnum.M3TD_CAMERA;
+            case M4T:
+                return DeviceEnum.M4T_CAMERA;
             case M300:
             case M350:
                 return DeviceEnum.H20T;
             default:
                 throw new IllegalArgumentException("Unsupported aircraft model for planned-wayline publish: " + droneDevice.name());
-        }
-    }
-
-    /** Image format string for the wpml:payloadParam, per drone family. */
-    private String imageFormatFor(DeviceEnum droneDevice) {
-        switch (droneDevice) {
-            case M30:
-                return "zoom,wide";
-            case M30T:
-            case M3T:
-            case M3TD:
-                return "zoom,ir";
-            case M3E:
-            case M3D:
-                return "wide";
-            case M3M:
-                return "wide";
-            default:
-                return "wide";
         }
     }
 
@@ -600,17 +580,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             elem(w, "createTime", String.valueOf(now));
             elem(w, "updateTime", String.valueOf(now));
 
-            w.writeStartElement(NS_WPML, "missionConfig");
-            elem(w, "flyToWaylineMode", "safely");
-            elem(w, "finishAction", FINISH_ACTION);
-            elem(w, "exitOnRCLost", EXIT_ON_RC_LOST);
-            elem(w, "executeRCLostAction", EXECUTE_RC_LOST_ACTION);
-            elem(w, "takeOffSecurityHeight", String.valueOf(TAKE_OFF_SECURITY_HEIGHT_M));
-            elem(w, "globalTransitionalSpeed", String.valueOf(GLOBAL_TRANSITIONAL_SPEED_MPS));
-            elem(w, "globalRTHHeight", String.valueOf(GLOBAL_RTH_HEIGHT_M));
-            writeDroneInfo(w, droneDevice);
-            writePayloadInfo(w, payloadDevice);
-            w.writeEndElement(); // /missionConfig
+            writeMissionConfig(w, droneDevice, payloadDevice);
 
             w.writeStartElement("Folder");
             elem(w, "templateType", "waypoint");
@@ -623,22 +593,19 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             w.writeEndElement();
 
             elem(w, "autoFlightSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+            elem(w, "globalHeight", String.valueOf(globalAvgHeight(waypoints)));
+            elem(w, "caliFlightEnable", "0");
             elem(w, "gimbalPitchMode", "manual");
 
             w.writeStartElement(NS_WPML, "globalWaypointHeadingParam");
             elem(w, "waypointHeadingMode", "followWayline");
             elem(w, "waypointHeadingAngle", "0");
             elem(w, "waypointPoiPoint", "0.000000,0.000000,0.000000");
-            elem(w, "waypointHeadingPathMode", "followBadArc");
+            elem(w, "waypointHeadingPoiIndex", "0");
             w.writeEndElement();
 
             elem(w, "globalWaypointTurnMode", "toPointAndStopWithDiscontinuityCurvature");
             elem(w, "globalUseStraightLine", "0");
-
-            w.writeStartElement(NS_WPML, "payloadParam");
-            elem(w, "payloadPositionIndex", "0");
-            elem(w, "imageFormat", imageFormatFor(droneDevice));
-            w.writeEndElement();
 
             int index = 0;
             for (PlannedWaypointDTO wp : waypoints) {
@@ -652,28 +619,17 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     private byte[] buildWaylinesWpml(String name, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
         return writeKml(w -> {
             elem(w, NS_KML, "name", name);
-            w.writeStartElement(NS_WPML, "missionConfig");
-            elem(w, "flyToWaylineMode", "safely");
-            elem(w, "finishAction", FINISH_ACTION);
-            elem(w, "exitOnRCLost", EXIT_ON_RC_LOST);
-            elem(w, "executeRCLostAction", EXECUTE_RC_LOST_ACTION);
-            elem(w, "takeOffSecurityHeight", String.valueOf(TAKE_OFF_SECURITY_HEIGHT_M));
-            elem(w, "globalTransitionalSpeed", String.valueOf(GLOBAL_TRANSITIONAL_SPEED_MPS));
-            elem(w, "globalRTHHeight", String.valueOf(GLOBAL_RTH_HEIGHT_M));
-            writeDroneInfo(w, droneDevice);
-            writePayloadInfo(w, payloadDevice);
-            w.writeEndElement(); // /missionConfig
+
+            writeMissionConfig(w, droneDevice, payloadDevice);
 
             w.writeStartElement("Folder");
             elem(w, "templateId", "0");
             elem(w, "executeHeightMode", "relativeToStartPoint");
             elem(w, "waylineId", "0");
+            double distance = totalDistanceMeters(waypoints);
+            elem(w, "distance", String.valueOf(distance));
+            elem(w, "duration", String.valueOf(distance / Math.max(AUTO_FLIGHT_SPEED_MPS, 1)));
             elem(w, "autoFlightSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
-
-            w.writeStartElement(NS_WPML, "payloadParam");
-            elem(w, "payloadPositionIndex", "0");
-            elem(w, "imageFormat", imageFormatFor(droneDevice));
-            w.writeEndElement();
 
             int index = 0;
             for (PlannedWaypointDTO wp : waypoints) {
@@ -682,6 +638,20 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
             w.writeEndElement(); // /Folder
         });
+    }
+
+    private void writeMissionConfig(XMLStreamWriter w, DeviceEnum droneDevice, DeviceEnum payloadDevice) throws XMLStreamException {
+        w.writeStartElement(NS_WPML, "missionConfig");
+        elem(w, "flyToWaylineMode", "safely");
+        elem(w, "finishAction", FINISH_ACTION);
+        elem(w, "exitOnRCLost", EXIT_ON_RC_LOST);
+        elem(w, "executeRCLostAction", EXECUTE_RC_LOST_ACTION);
+        elem(w, "takeOffSecurityHeight", String.valueOf(TAKE_OFF_SECURITY_HEIGHT_M));
+        elem(w, "globalTransitionalSpeed", String.valueOf(GLOBAL_TRANSITIONAL_SPEED_MPS));
+        writeDroneInfo(w, droneDevice);
+        elem(w, "waylineAvoidLimitAreaMode", "0");
+        writePayloadInfo(w, payloadDevice);
+        w.writeEndElement(); // /missionConfig
     }
 
     private void writeDroneInfo(XMLStreamWriter w, DeviceEnum droneDevice) throws XMLStreamException {
@@ -707,11 +677,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "index", String.valueOf(index));
         elem(w, "ellipsoidHeight", String.valueOf(wp.getHeight()));
         elem(w, "height", String.valueOf(wp.getHeight()));
-        elem(w, "useGlobalHeight", "1");
+        w.writeStartElement(NS_WPML, "waypointTurnParam");
+        elem(w, "waypointTurnMode", "toPointAndPassWithContinuityCurvature");
+        elem(w, "waypointTurnDampingDist", "0");
+        w.writeEndElement();
         elem(w, "useGlobalSpeed", "1");
         elem(w, "useGlobalHeadingParam", "1");
-        elem(w, "useGlobalTurnParam", "1");
-        elem(w, "gimbalPitchAngle", "0");
+        elem(w, "useStraightLine", "1");
+        elem(w, "isRisky", "0");
         w.writeEndElement();
     }
 
@@ -727,15 +700,53 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "waypointHeadingMode", "followWayline");
         elem(w, "waypointHeadingAngle", "0");
         elem(w, "waypointPoiPoint", "0.000000,0.000000,0.000000");
-        elem(w, "waypointHeadingPathMode", "followBadArc");
+        elem(w, "waypointHeadingAngleEnable", "0");
+        elem(w, "waypointHeadingPoiIndex", "0");
         w.writeEndElement();
         w.writeStartElement(NS_WPML, "waypointTurnParam");
-        elem(w, "waypointTurnMode", "toPointAndStopWithDiscontinuityCurvature");
-        elem(w, "waypointTurnDampingDist", "0");
+        elem(w, "waypointTurnMode", "toPointAndPassWithContinuityCurvature");
+        elem(w, "waypointTurnDampingDist", "10");
         w.writeEndElement();
-        elem(w, "useStraightLine", "0");
-        elem(w, "gimbalPitchAngle", "0");
+        elem(w, "useStraightLine", "1");
+        w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
+        elem(w, "waypointGimbalPitchAngle", "0");
+        elem(w, "waypointGimbalYawAngle", "0");
         w.writeEndElement();
+        elem(w, "isRisky", "0");
+        elem(w, "waypointWorkType", "0");
+        w.writeEndElement();
+    }
+
+    private static int globalAvgHeight(List<PlannedWaypointDTO> wps) {
+        if (wps == null || wps.isEmpty()) return 100;
+        double sum = 0;
+        int n = 0;
+        for (PlannedWaypointDTO wp : wps) {
+            if (wp.getHeight() != null) { sum += wp.getHeight(); n++; }
+        }
+        return n == 0 ? 100 : (int) (sum / n);
+    }
+
+    /** Haversine distance sum in meters between consecutive WGS84 waypoints. */
+    private static double totalDistanceMeters(List<PlannedWaypointDTO> wps) {
+        if (wps == null || wps.size() < 2) return 0;
+        double total = 0;
+        for (int i = 1; i < wps.size(); i++) {
+            total += haversineMeters(
+                    wps.get(i - 1).getWgsLat(), wps.get(i - 1).getWgsLng(),
+                    wps.get(i).getWgsLat(), wps.get(i).getWgsLng());
+        }
+        return total;
+    }
+
+    private static double haversineMeters(double lat1, double lng1, double lat2, double lng2) {
+        double r = 6371000.0;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        return 2 * r * Math.asin(Math.sqrt(a));
     }
 
     private void elem(XMLStreamWriter w, String name, String value) throws XMLStreamException {
