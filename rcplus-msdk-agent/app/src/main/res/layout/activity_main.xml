@@ -45,4 +45,11 @@
         android:layout_marginTop="12dp"
         android:text="@string/action_start_dual_stream" />
 
+    <Button
+        android:id="@+id/probeWaypointButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/action_probe_waypoint" />
+
 </LinearLayout>

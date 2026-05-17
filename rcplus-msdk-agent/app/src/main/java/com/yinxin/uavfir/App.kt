@@ -21,6 +21,7 @@ class App : Application() {
         super.onCreate()
         AppContextHolder.initialize(this)
         services = AppServices(this)
+        services.setActiveDroneSn(LOCAL_DRONE_SN)
         Log.i(TAG, "application created, runtime loop ready for ${LOCAL_DRONE_SN}")
         if (runtimeLoopLifecyclePolicy.startOnApplicationCreate) {
             Log.i(TAG, "application created, starting runtime loop for ${LOCAL_DRONE_SN}")

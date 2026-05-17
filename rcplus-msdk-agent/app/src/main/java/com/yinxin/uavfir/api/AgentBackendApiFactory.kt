@@ -10,6 +10,14 @@ import java.util.concurrent.TimeUnit
 
 object AgentBackendApiFactory {
     fun create(config: AgentBackendConfig = AgentBackendConfig()): DualStreamApi {
+        return retrofit(config).create(DualStreamApi::class.java)
+    }
+
+    fun <T : Any> create(api: Class<T>, config: AgentBackendConfig = AgentBackendConfig()): T {
+        return retrofit(config).create(api)
+    }
+
+    private fun retrofit(config: AgentBackendConfig): Retrofit {
         val client = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
@@ -21,7 +29,6 @@ object AgentBackendApiFactory {
             .client(client)
             .addConverterFactory(GsonConverterFactory.create(backendGson()))
             .build()
-            .create(DualStreamApi::class.java)
     }
 }
 

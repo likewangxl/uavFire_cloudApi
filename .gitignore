@@ -12,6 +12,12 @@ target/
 logs/
 *.class
 
+# Android / Kotlin agent
+.gradle/
+**/build/
+local.properties
+.cxx/
+
 # IDE / OS
 .idea/
 .vscode/

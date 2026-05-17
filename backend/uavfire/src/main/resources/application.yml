@@ -87,6 +87,15 @@ url:
   wayline:
     prefix: wayline
     version: /api/v1
+  wayline-agent:
+    prefix: wayline-agent
+    version: /api/v1
+
+wayline-agent:
+  shared-secret: change-me-in-production
+  token-ttl-seconds: 86400
+  mqtt:
+    event-topic: uavfire/agent/+/events/#
   storage:
     prefix: storage
     version: /api/v1

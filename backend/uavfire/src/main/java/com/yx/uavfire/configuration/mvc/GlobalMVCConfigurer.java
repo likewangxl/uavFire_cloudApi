@@ -1,6 +1,7 @@
 package com.yx.uavfire.configuration.mvc;
 
 import com.yx.uavfire.component.AuthInterceptor;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -19,6 +20,9 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
     @Autowired
     private AuthInterceptor authInterceptor;
 
+    @Autowired
+    private WaylineAgentAuthInterceptor waylineAgentAuthInterceptor;
+
     private static final List<String> EXCLUDE_PATHS = new ArrayList<>();
 
     @Value("${url.manage.prefix}")
@@ -27,13 +31,22 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
     @Value("${url.manage.version}")
     private String manageVersion;
 
+    @Value("${url.wayline-agent.prefix}")
+    private String waylineAgentPrefix;
+
+    @Value("${url.wayline-agent.version}")
+    private String waylineAgentVersion;
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        String waylineAgentBase = "/" + waylineAgentPrefix + waylineAgentVersion;
+
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/token/refresh");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/captcha");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/demo-login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
+        EXCLUDE_PATHS.add(waylineAgentBase + "/**");
         EXCLUDE_PATHS.add("/");
         EXCLUDE_PATHS.add("/index.html");
         EXCLUDE_PATHS.add("/favicon.ico");
@@ -43,6 +56,9 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/v3/**");
         EXCLUDE_PATHS.add("/ui/**");
         registry.addInterceptor(authInterceptor).addPathPatterns("/**").excludePathPatterns(EXCLUDE_PATHS);
+
+        registry.addInterceptor(waylineAgentAuthInterceptor)
+                .addPathPatterns(waylineAgentBase + "/agents/**");
     }
 
     @Override
