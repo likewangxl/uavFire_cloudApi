@@ -6,6 +6,7 @@ import com.yx.uavfire.common.util.JwtUtil;
 import com.yx.uavfire.manage.dao.IUserMapper;
 import com.yx.uavfire.manage.model.dto.WorkspaceDTO;
 import com.yx.uavfire.manage.model.entity.UserEntity;
+import com.yx.uavfire.manage.model.enums.UserTypeEnum;
 import com.yx.uavfire.manage.service.ICaptchaService;
 import com.yx.uavfire.manage.service.IWorkspaceService;
 import com.dji.sdk.common.HttpResultResponse;
@@ -34,6 +35,7 @@ class UserServiceImplLoginTest {
     @InjectMocks private UserServiceImpl service;
 
     private UserEntity adminPC;
+    private UserEntity pilot;
     private WorkspaceDTO workspace;
     private Algorithm originalAlgorithm;
 
@@ -49,6 +51,13 @@ class UserServiceImplLoginTest {
         adminPC.setPassword("adminPC");
         adminPC.setUserType(1);
         adminPC.setWorkspaceId("ws-1");
+
+        pilot = new UserEntity();
+        pilot.setUserId("uid-2");
+        pilot.setUsername("pilot");
+        pilot.setPassword("pilot123");
+        pilot.setUserType(UserTypeEnum.PILOT.getVal());
+        pilot.setWorkspaceId("ws-1");
 
         workspace = WorkspaceDTO.builder()
                 .workspaceId("ws-1")
@@ -94,6 +103,25 @@ class UserServiceImplLoginTest {
 
         assertEquals(0, r.getCode());
         verify(captchaService).verifyAndConsume("tok", "ABCD");
+    }
+
+    @Test
+    void userLogin_skipsCaptchaForPilotLogin() {
+        when(mapper.selectOne(any(QueryWrapper.class))).thenReturn(pilot);
+        when(workspaceService.getWorkspaceByWorkspaceId("ws-1")).thenReturn(Optional.of(workspace));
+
+        UserServiceImpl spySvc = spy(service);
+        doReturn("tcp://test:1883").when(spySvc).resolveMqttAddress();
+
+        HttpResultResponse r = spySvc.userLogin(
+                "pilot",
+                "pilot123",
+                UserTypeEnum.PILOT.getVal(),
+                null,
+                null);
+
+        assertEquals(0, r.getCode());
+        verifyNoInteractions(captchaService);
     }
 
     @Test

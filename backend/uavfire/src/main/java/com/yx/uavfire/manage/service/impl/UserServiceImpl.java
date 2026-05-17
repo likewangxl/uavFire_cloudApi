@@ -74,17 +74,19 @@ public class UserServiceImpl implements IUserService {
     @Override
     public HttpResultResponse userLogin(String username, String password, Integer flag,
                                         String captcha, String captchaToken) {
-        // captcha 校验
-        if (captchaToken == null || captchaToken.isBlank()
-                || captcha == null || captcha.isBlank()) {
-            return new HttpResultResponse()
-                    .setCode(HttpStatus.UNAUTHORIZED.value())
-                    .setMessage("验证码不能为空");
-        }
-        if (!captchaService.verifyAndConsume(captchaToken, captcha)) {
-            return new HttpResultResponse()
-                    .setCode(HttpStatus.UNAUTHORIZED.value())
-                    .setMessage("验证码错误或已过期");
+        if (!Objects.equals(flag, UserTypeEnum.PILOT.getVal())) {
+            // captcha 校验
+            if (captchaToken == null || captchaToken.isBlank()
+                    || captcha == null || captcha.isBlank()) {
+                return new HttpResultResponse()
+                        .setCode(HttpStatus.UNAUTHORIZED.value())
+                        .setMessage("验证码不能为空");
+            }
+            if (!captchaService.verifyAndConsume(captchaToken, captcha)) {
+                return new HttpResultResponse()
+                        .setCode(HttpStatus.UNAUTHORIZED.value())
+                        .setMessage("验证码错误或已过期");
+            }
         }
 
         // check user
