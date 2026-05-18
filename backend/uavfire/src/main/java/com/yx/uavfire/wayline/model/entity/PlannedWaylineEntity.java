@@ -46,6 +46,25 @@ public class PlannedWaylineEntity implements Serializable {
     @TableField("max_speed")
     private Double maxSpeed;
 
+    // ---- L1 全局 mission 配置(KMZ <wpml:missionConfig>) ----
+    @TableField("finish_action")
+    private String finishAction;
+
+    @TableField("exit_on_rc_lost")
+    private String exitOnRcLost;
+
+    @TableField("rc_lost_action")
+    private String rcLostAction;
+
+    @TableField("takeoff_security_height")
+    private Integer takeoffSecurityHeight;
+
+    @TableField("global_transitional_speed")
+    private Double globalTransitionalSpeed;
+
+    @TableField("rth_altitude")
+    private Integer rthAltitude;
+
     @TableField("waypoints_json")
     private String waypointsJson;
 
@@ -84,6 +103,25 @@ public class PlannedWaylineEntity implements Serializable {
 
     @TableField("task_progress")
     private Integer taskProgress;
+
+    // ---- L2 实时任务进度(agent / dock 共用) ----
+    @TableField("wayline_mission_state")
+    private Integer waylineMissionState;
+
+    @TableField("current_waypoint_index")
+    private Integer currentWaypointIndex;
+
+    @TableField("total_waypoints")
+    private Integer totalWaypoints;
+
+    @TableField("media_count")
+    private Integer mediaCount;
+
+    @TableField("break_point_json")
+    private String breakPointJson;
+
+    @TableField("last_progress_time")
+    private Long lastProgressTime;
 
     @TableField("prepared_time")
     private Long preparedTime;

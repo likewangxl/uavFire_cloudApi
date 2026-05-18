@@ -284,12 +284,14 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
             }
 
             Node coordinateSystemNode = waylinesDocument.selectSingleNode("//" + KmzFileProperties.TAG_WPML_PREFIX + "waylineCoordinateSysParam");
-            List<Node> placemarkNodes = waylinesDocument.selectNodes("//Placemark");
+            // Pilot 2 真机导出 + 我们自己生成的 KMZ 都把 <kml> 设为默认命名空间，Placemark/coordinates
+            // 继承该命名空间；dom4j XPath 中无前缀名只匹配「无命名空间」元素，必须用 local-name() 兜底。
+            List<Node> placemarkNodes = waylinesDocument.selectNodes("//*[local-name()='Placemark']");
             if (Objects.isNull(coordinateSystemNode) || placemarkNodes.isEmpty()) {
                 throw new RuntimeException("The file format is incorrect.");
             }
             boolean hasCoordinates = placemarkNodes.stream()
-                    .map(node -> node.selectSingleNode(".//coordinates"))
+                    .map(node -> node.selectSingleNode(".//*[local-name()='coordinates']"))
                     .anyMatch(Objects::nonNull);
             if (!hasCoordinates) {
                 throw new RuntimeException("The file format is incorrect.");

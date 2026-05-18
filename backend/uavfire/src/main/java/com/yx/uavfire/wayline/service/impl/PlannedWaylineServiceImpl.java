@@ -17,6 +17,7 @@ import com.yx.uavfire.wayline.model.param.UpdatePlannedWaylineParam;
 import com.yx.uavfire.wayline.service.IPlannedWaylineService;
 import com.yx.uavfire.wayline.service.IWaylineFileService;
 import com.dji.sdk.cloudapi.device.DeviceEnum;
+import com.dji.sdk.cloudapi.device.DeviceTypeEnum;
 import com.dji.sdk.common.Pagination;
 import com.dji.sdk.common.PaginationData;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -527,10 +528,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
-                zipOutputStream.write(buildTemplateKml(publishedName, droneDevice, payloadDevice, waypoints));
+                zipOutputStream.write(buildTemplateKml(publishedName, entity, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
-                zipOutputStream.write(buildWaylinesWpml(publishedName, droneDevice, payloadDevice, waypoints));
+                zipOutputStream.write(buildWaylinesWpml(publishedName, entity, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
             }
             return outputStream.toByteArray();
@@ -573,14 +574,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
     }
 
-    private byte[] buildTemplateKml(String name, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
+    private byte[] buildTemplateKml(String name, PlannedWaylineEntity entity, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
         return writeKml(w -> {
             elem(w, NS_KML, "name", name);
             long now = System.currentTimeMillis();
             elem(w, "createTime", String.valueOf(now));
             elem(w, "updateTime", String.valueOf(now));
 
-            writeMissionConfig(w, droneDevice, payloadDevice);
+            writeMissionConfig(w, entity, droneDevice, payloadDevice);
 
             w.writeStartElement("Folder");
             elem(w, "templateType", "waypoint");
@@ -616,16 +617,25 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         });
     }
 
-    private byte[] buildWaylinesWpml(String name, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
+    private byte[] buildWaylinesWpml(String name, PlannedWaylineEntity entity, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
         return writeKml(w -> {
             elem(w, NS_KML, "name", name);
 
-            writeMissionConfig(w, droneDevice, payloadDevice);
+            writeMissionConfig(w, entity, droneDevice, payloadDevice);
 
             w.writeStartElement("Folder");
             elem(w, "templateId", "0");
             elem(w, "executeHeightMode", "relativeToStartPoint");
             elem(w, "waylineId", "0");
+
+            // 校验侧 WaylineFileServiceImpl.validKmzBytes 在 waylines.wpml 中查找该元素，
+            // 缺失会以 "The file format is incorrect." 报错。Pilot 2 真机导出也包含此节点。
+            w.writeStartElement(NS_WPML, "waylineCoordinateSysParam");
+            elem(w, "coordinateMode", "WGS84");
+            elem(w, "heightMode", "relativeToStartPoint");
+            elem(w, "positioningType", "GPS");
+            w.writeEndElement();
+
             double distance = totalDistanceMeters(waypoints);
             elem(w, "distance", String.valueOf(distance));
             elem(w, "duration", String.valueOf(distance / Math.max(AUTO_FLIGHT_SPEED_MPS, 1)));
@@ -640,14 +650,19 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         });
     }
 
-    private void writeMissionConfig(XMLStreamWriter w, DeviceEnum droneDevice, DeviceEnum payloadDevice) throws XMLStreamException {
+    private void writeMissionConfig(XMLStreamWriter w, PlannedWaylineEntity entity, DeviceEnum droneDevice, DeviceEnum payloadDevice) throws XMLStreamException {
         w.writeStartElement(NS_WPML, "missionConfig");
         elem(w, "flyToWaylineMode", "safely");
-        elem(w, "finishAction", FINISH_ACTION);
-        elem(w, "exitOnRCLost", EXIT_ON_RC_LOST);
-        elem(w, "executeRCLostAction", EXECUTE_RC_LOST_ACTION);
-        elem(w, "takeOffSecurityHeight", String.valueOf(TAKE_OFF_SECURITY_HEIGHT_M));
-        elem(w, "globalTransitionalSpeed", String.valueOf(GLOBAL_TRANSITIONAL_SPEED_MPS));
+        elem(w, "finishAction",
+                entity.getFinishAction() != null ? entity.getFinishAction() : FINISH_ACTION);
+        elem(w, "exitOnRCLost",
+                entity.getExitOnRcLost() != null ? entity.getExitOnRcLost() : EXIT_ON_RC_LOST);
+        elem(w, "executeRCLostAction",
+                entity.getRcLostAction() != null ? entity.getRcLostAction() : EXECUTE_RC_LOST_ACTION);
+        elem(w, "takeOffSecurityHeight", String.valueOf(
+                entity.getTakeoffSecurityHeight() != null ? entity.getTakeoffSecurityHeight() : TAKE_OFF_SECURITY_HEIGHT_M));
+        elem(w, "globalTransitionalSpeed", formatNumeric(
+                entity.getGlobalTransitionalSpeed() != null ? entity.getGlobalTransitionalSpeed() : (double) GLOBAL_TRANSITIONAL_SPEED_MPS));
         writeDroneInfo(w, droneDevice);
         elem(w, "waylineAvoidLimitAreaMode", "0");
         writePayloadInfo(w, payloadDevice);
@@ -656,7 +671,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private void writeDroneInfo(XMLStreamWriter w, DeviceEnum droneDevice) throws XMLStreamException {
         w.writeStartElement(NS_WPML, "droneInfo");
-        elem(w, "droneEnumValue", String.valueOf(droneDevice.getType().getType()));
+        // KMZ 离线导出和 Cloud API runtime 对 M4 系列飞机的 type 编码不一致：
+        // KMZ 文件里 Pilot 2 实测写 100；Cloud API runtime 上报 99（DeviceTypeEnum.M4_SERIES）。
+        int droneEnumValue = droneDevice.getType() == DeviceTypeEnum.M4_SERIES
+                ? 100
+                : droneDevice.getType().getType();
+        elem(w, "droneEnumValue", String.valueOf(droneEnumValue));
         elem(w, "droneSubEnumValue", String.valueOf(droneDevice.getSubType().getSubType()));
         w.writeEndElement();
     }
@@ -678,14 +698,20 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "ellipsoidHeight", String.valueOf(wp.getHeight()));
         elem(w, "height", String.valueOf(wp.getHeight()));
         w.writeStartElement(NS_WPML, "waypointTurnParam");
-        elem(w, "waypointTurnMode", "toPointAndPassWithContinuityCurvature");
-        elem(w, "waypointTurnDampingDist", "0");
+        elem(w, "waypointTurnMode",
+                wp.getTurnMode() != null ? wp.getTurnMode() : "toPointAndPassWithContinuityCurvature");
+        elem(w, "waypointTurnDampingDist", formatNumeric(
+                wp.getTurnDamping() != null ? wp.getTurnDamping() : 0.0));
         w.writeEndElement();
-        elem(w, "useGlobalSpeed", "1");
-        elem(w, "useGlobalHeadingParam", "1");
+        elem(w, "useGlobalSpeed", wp.getSpeed() != null ? "0" : "1");
+        elem(w, "useGlobalHeadingParam", hasCustomHeading(wp) ? "0" : "1");
         elem(w, "useStraightLine", "1");
         elem(w, "isRisky", "0");
         w.writeEndElement();
+    }
+
+    private static boolean hasCustomHeading(PlannedWaypointDTO wp) {
+        return wp.getHeadingMode() != null || wp.getHeadingAngle() != null || wp.getPoiLng() != null;
     }
 
     private void writeWaylinePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index) throws XMLStreamException {
@@ -695,22 +721,34 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         w.writeEndElement();
         elem(w, "index", String.valueOf(index));
         elem(w, "executeHeight", String.valueOf(wp.getHeight()));
-        elem(w, "waypointSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+        elem(w, "waypointSpeed", formatNumeric(
+                wp.getSpeed() != null ? wp.getSpeed() : (double) AUTO_FLIGHT_SPEED_MPS));
         w.writeStartElement(NS_WPML, "waypointHeadingParam");
-        elem(w, "waypointHeadingMode", "followWayline");
-        elem(w, "waypointHeadingAngle", "0");
-        elem(w, "waypointPoiPoint", "0.000000,0.000000,0.000000");
+        elem(w, "waypointHeadingMode",
+                wp.getHeadingMode() != null ? wp.getHeadingMode() : "followWayline");
+        elem(w, "waypointHeadingAngle", formatNumeric(
+                wp.getHeadingAngle() != null ? wp.getHeadingAngle() : 0.0));
+        String poiStr = "0.000000,0.000000,0.000000";
+        if (wp.getPoiLng() != null && wp.getPoiLat() != null) {
+            double alt = wp.getPoiAlt() != null ? wp.getPoiAlt() : 0.0;
+            poiStr = wp.getPoiLng() + "," + wp.getPoiLat() + "," + alt;
+        }
+        elem(w, "waypointPoiPoint", poiStr);
         elem(w, "waypointHeadingAngleEnable", "0");
         elem(w, "waypointHeadingPoiIndex", "0");
         w.writeEndElement();
         w.writeStartElement(NS_WPML, "waypointTurnParam");
-        elem(w, "waypointTurnMode", "toPointAndPassWithContinuityCurvature");
-        elem(w, "waypointTurnDampingDist", "10");
+        elem(w, "waypointTurnMode",
+                wp.getTurnMode() != null ? wp.getTurnMode() : "toPointAndPassWithContinuityCurvature");
+        elem(w, "waypointTurnDampingDist", formatNumeric(
+                wp.getTurnDamping() != null ? wp.getTurnDamping() : 10.0));
         w.writeEndElement();
         elem(w, "useStraightLine", "1");
         w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
-        elem(w, "waypointGimbalPitchAngle", "0");
-        elem(w, "waypointGimbalYawAngle", "0");
+        elem(w, "waypointGimbalPitchAngle", formatNumeric(
+                wp.getGimbalPitch() != null ? wp.getGimbalPitch() : 0.0));
+        elem(w, "waypointGimbalYawAngle", formatNumeric(
+                wp.getGimbalYaw() != null ? wp.getGimbalYaw() : 0.0));
         w.writeEndElement();
         elem(w, "isRisky", "0");
         elem(w, "waypointWorkType", "0");
@@ -751,6 +789,15 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private void elem(XMLStreamWriter w, String name, String value) throws XMLStreamException {
         elem(w, NS_WPML, name, value);
+    }
+
+    /** 数值序列化:整数值不带 .0(对齐 Pilot 2 真机 KMZ 风格);非整数保留小数位。 */
+    private static String formatNumeric(Number value) {
+        double d = value.doubleValue();
+        if (d == Math.floor(d) && !Double.isInfinite(d)) {
+            return String.valueOf((long) d);
+        }
+        return String.valueOf(d);
     }
 
     private void elem(XMLStreamWriter w, String ns, String name, String value) throws XMLStreamException {
@@ -845,6 +892,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
                 .maxSpeed(param.getMaxSpeed())
+                .finishAction(param.getFinishAction())
+                .exitOnRcLost(param.getExitOnRcLost())
+                .rcLostAction(param.getRcLostAction())
+                .takeoffSecurityHeight(param.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(param.getGlobalTransitionalSpeed())
+                .rthAltitude(param.getRthAltitude())
                 .waypointsJson(writeWaypoints(param.getWaypoints()))
                 .build();
     }
@@ -862,6 +915,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(dto.getAircraftSn())
                 .defaultHeight(dto.getDefaultHeight())
                 .maxSpeed(dto.getMaxSpeed())
+                .finishAction(dto.getFinishAction())
+                .exitOnRcLost(dto.getExitOnRcLost())
+                .rcLostAction(dto.getRcLostAction())
+                .takeoffSecurityHeight(dto.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(dto.getGlobalTransitionalSpeed())
+                .rthAltitude(dto.getRthAltitude())
                 .waypointsJson(writeWaypoints(dto.getWaypoints()))
                 .status(dto.getStatus())
                 .publishedWaylineId(dto.getPublishedWaylineId())
@@ -875,6 +934,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .taskStatus(dto.getTaskStatus())
                 .taskStatusReason(dto.getTaskStatusReason())
                 .taskProgress(dto.getTaskProgress())
+                .waylineMissionState(dto.getWaylineMissionState())
+                .currentWaypointIndex(dto.getCurrentWaypointIndex())
+                .totalWaypoints(dto.getTotalWaypoints())
+                .mediaCount(dto.getMediaCount())
+                .breakPointJson(dto.getBreakPointJson())
+                .lastProgressTime(dto.getLastProgressTime())
                 .preparedTime(dto.getPreparedTime())
                 .executedTime(dto.getExecutedTime())
                 .creator(dto.getCreator())
@@ -896,6 +961,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
                 .maxSpeed(param.getMaxSpeed())
+                .finishAction(param.getFinishAction())
+                .exitOnRcLost(param.getExitOnRcLost())
+                .rcLostAction(param.getRcLostAction())
+                .takeoffSecurityHeight(param.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(param.getGlobalTransitionalSpeed())
+                .rthAltitude(param.getRthAltitude())
                 .waypointsJson(writeWaypoints(param.getWaypoints()))
                 .build();
     }
@@ -913,6 +984,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(entity.getAircraftSn())
                 .defaultHeight(entity.getDefaultHeight())
                 .maxSpeed(entity.getMaxSpeed())
+                .finishAction(entity.getFinishAction())
+                .exitOnRcLost(entity.getExitOnRcLost())
+                .rcLostAction(entity.getRcLostAction())
+                .takeoffSecurityHeight(entity.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(entity.getGlobalTransitionalSpeed())
+                .rthAltitude(entity.getRthAltitude())
                 .waypoints(readWaypoints(entity.getWaypointsJson()))
                 .status(entity.getStatus())
                 .publishedWaylineId(entity.getPublishedWaylineId())
@@ -926,6 +1003,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .taskStatus(entity.getTaskStatus())
                 .taskStatusReason(entity.getTaskStatusReason())
                 .taskProgress(entity.getTaskProgress())
+                .waylineMissionState(entity.getWaylineMissionState())
+                .currentWaypointIndex(entity.getCurrentWaypointIndex())
+                .totalWaypoints(entity.getTotalWaypoints())
+                .mediaCount(entity.getMediaCount())
+                .breakPointJson(entity.getBreakPointJson())
+                .lastProgressTime(entity.getLastProgressTime())
                 .preparedTime(entity.getPreparedTime())
                 .executedTime(entity.getExecutedTime())
                 .creator(entity.getCreator())

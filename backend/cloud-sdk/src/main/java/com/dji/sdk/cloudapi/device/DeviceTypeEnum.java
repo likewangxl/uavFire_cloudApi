@@ -65,7 +65,7 @@ public enum DeviceTypeEnum {
 
     M3D(91),
 
-    M4_SERIES(100),
+    M4_SERIES(99),
 
     M3D_CAMERA(80),
 

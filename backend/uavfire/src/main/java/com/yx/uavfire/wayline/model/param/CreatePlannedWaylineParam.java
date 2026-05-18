@@ -50,6 +50,26 @@ public class CreatePlannedWaylineParam {
     @Builder.Default
     private Double maxSpeed = 5.0;
 
+    // ---- L1 mission 配置(可选,缺省走 DB 列默认值)。契约见 WAYLINE_L1_L2_CONTRACT.md 2.3 ----
+
+    @JsonAlias({"finishAction", "finish_action"})
+    private String finishAction;
+
+    @JsonAlias({"exitOnRcLost", "exit_on_rc_lost"})
+    private String exitOnRcLost;
+
+    @JsonAlias({"rcLostAction", "rc_lost_action"})
+    private String rcLostAction;
+
+    @JsonAlias({"takeoffSecurityHeight", "takeoff_security_height"})
+    private Integer takeoffSecurityHeight;
+
+    @JsonAlias({"globalTransitionalSpeed", "global_transitional_speed"})
+    private Double globalTransitionalSpeed;
+
+    @JsonAlias({"rthAltitude", "rth_altitude"})
+    private Integer rthAltitude;
+
     @NotEmpty
     @Valid
     private List<PlannedWaypointDTO> waypoints;

@@ -1242,6 +1242,166 @@ class PlannedWaylineServiceTest {
         }
     }
 
+    @Test
+    void missionConfigUsesEntityValuesNotHardcoded() throws Exception {
+        // L1: KMZ <wpml:missionConfig> 必须从 entity 字段读,不能继续 hardcode。
+        // 配置一组与默认值都不同的 mission 参数,断言全部出现在生成 KMZ 中。
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2001)
+                .plannedWaylineId("pw-cfg")
+                .workspaceId("workspace-001")
+                .name("Mission Config Test")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(8.0)
+                .finishAction("autoLand")
+                .exitOnRcLost("executeLostAction")
+                .rcLostAction("hover")
+                .takeoffSecurityHeight(50)
+                .globalTransitionalSpeed(10.0)
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}," +
+                        "{\"order\":2,\"gcjLng\":113.002,\"gcjLat\":22.002,\"wgsLng\":113.001,\"wgsLat\":22.001,\"height\":30.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-cfg")
+                        .name("Mission Config Test")
+                        .objectKey("custom-prefix/pw-cfg.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-cfg", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String template = readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml");
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+
+        assertAll("mission config 来自 entity",
+                () -> assertTrue(template.contains("<wpml:finishAction>autoLand</wpml:finishAction>"), "template finishAction=autoLand"),
+                () -> assertTrue(waylines.contains("<wpml:finishAction>autoLand</wpml:finishAction>"), "waylines finishAction=autoLand"),
+                () -> assertTrue(template.contains("<wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost>"), "template exitOnRCLost=executeLostAction"),
+                () -> assertTrue(template.contains("<wpml:executeRCLostAction>hover</wpml:executeRCLostAction>"), "template executeRCLostAction=hover"),
+                () -> assertTrue(template.contains("<wpml:takeOffSecurityHeight>50</wpml:takeOffSecurityHeight>"), "template takeOffSecurityHeight=50"),
+                () -> assertTrue(template.contains("<wpml:globalTransitionalSpeed>10"), "template globalTransitionalSpeed=10"),
+                () -> assertFalse(template.contains("<wpml:finishAction>goHome</wpml:finishAction>"), "no hardcoded goHome"),
+                () -> assertFalse(template.contains("<wpml:takeOffSecurityHeight>20</wpml:takeOffSecurityHeight>"), "no hardcoded 20"));
+    }
+
+    @Test
+    void missionConfigFallsBackToDefaultsWhenEntityFieldsNull() throws Exception {
+        // 向后兼容:entity 的 6 个 mission 配置字段为 null 时,KMZ 必须用 contract 默认值
+        // (goHome / goContinue / goBack / 20 / 5)。
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2002)
+                .plannedWaylineId("pw-defaults")
+                .workspaceId("workspace-001")
+                .name("Defaults Test")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                // 6 个 mission 配置全部不设
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}," +
+                        "{\"order\":2,\"gcjLng\":113.002,\"gcjLat\":22.002,\"wgsLng\":113.001,\"wgsLat\":22.001,\"height\":30.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-defaults")
+                        .name("Defaults Test")
+                        .objectKey("custom-prefix/pw-defaults.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-defaults", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String template = readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml");
+
+        assertAll("entity 字段 null 时走默认值",
+                () -> assertTrue(template.contains("<wpml:finishAction>goHome</wpml:finishAction>"), "default goHome"),
+                () -> assertTrue(template.contains("<wpml:exitOnRCLost>goContinue</wpml:exitOnRCLost>"), "default goContinue"),
+                () -> assertTrue(template.contains("<wpml:executeRCLostAction>goBack</wpml:executeRCLostAction>"), "default goBack"),
+                () -> assertTrue(template.contains("<wpml:takeOffSecurityHeight>20</wpml:takeOffSecurityHeight>"), "default 20"),
+                () -> assertTrue(template.contains("<wpml:globalTransitionalSpeed>5"), "default 5"));
+    }
+
+    @Test
+    void waypointOverrideFieldsFlowIntoKmz() throws Exception {
+        // L1: wp[0] 自定义 speed / gimbal / heading / turn,wp[1] 全部 null 走全局。
+        // 断言生成 KMZ 同时反映 override 和全局默认。
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2003)
+                .plannedWaylineId("pw-wpoverride")
+                .workspaceId("workspace-001")
+                .name("Waypoint Override Test")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0," +
+                        "  \"speed\":10.0,\"gimbalPitch\":-45.0,\"gimbalYaw\":0.0," +
+                        "  \"headingMode\":\"fixed\",\"headingAngle\":90.0," +
+                        "  \"turnMode\":\"coordinateTurn\",\"turnDamping\":2.0}," +
+                        "{\"order\":2,\"gcjLng\":113.002,\"gcjLat\":22.002,\"wgsLng\":113.001,\"wgsLat\":22.001,\"height\":30.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-wpoverride")
+                        .name("Waypoint Override Test")
+                        .objectKey("custom-prefix/pw-wpoverride.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-wpoverride", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+
+        assertAll("wp[0] override 字段写入 KMZ",
+                () -> assertTrue(waylines.contains("<wpml:waypointSpeed>10</wpml:waypointSpeed>"), "wp[0] speed override = 10"),
+                () -> assertTrue(waylines.contains("<wpml:waypointGimbalPitchAngle>-45</wpml:waypointGimbalPitchAngle>"), "wp[0] gimbalPitch = -45"),
+                () -> assertTrue(waylines.contains("<wpml:waypointHeadingMode>fixed</wpml:waypointHeadingMode>"), "wp[0] headingMode = fixed"),
+                () -> assertTrue(waylines.contains("<wpml:waypointHeadingAngle>90</wpml:waypointHeadingAngle>"), "wp[0] headingAngle = 90"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>"), "wp[0] turnMode = coordinateTurn"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>2</wpml:waypointTurnDampingDist>"), "wp[0] turnDamping = 2"));
+
+        assertAll("wp[1] 全 null 走全局默认",
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "wp[1] default turnMode"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist>"), "wp[1] default turnDamping = 10"),
+                () -> assertTrue(waylines.contains("<wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>"), "wp[1] default headingMode"));
+    }
+
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
             ZipEntry entry = zipInputStream.getNextEntry();
