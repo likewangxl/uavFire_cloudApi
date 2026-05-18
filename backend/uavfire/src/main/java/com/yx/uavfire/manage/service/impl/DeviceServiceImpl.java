@@ -163,24 +163,39 @@ public class DeviceServiceImpl implements IDeviceService {
 
     @Override
     public void gatewayOnlineSubscribeTopic(GatewayManager gateway) {
-        statusSubscribe.subscribe(gateway);
-        stateSubscribe.subscribe(gateway, true);
-        osdSubscribe.subscribe(gateway, true);
-        servicesSubscribe.subscribe(gateway);
-        eventsSubscribe.subscribe(gateway, true);
-        requestsSubscribe.subscribe(gateway);
-        propertySetSubscribe.subscribe(gateway);
+        subscribeQuietly(() -> statusSubscribe.subscribe(gateway));
+        subscribeQuietly(() -> stateSubscribe.subscribe(gateway, true));
+        subscribeQuietly(() -> osdSubscribe.subscribe(gateway, true));
+        subscribeQuietly(() -> servicesSubscribe.subscribe(gateway));
+        subscribeQuietly(() -> eventsSubscribe.subscribe(gateway, true));
+        subscribeQuietly(() -> requestsSubscribe.subscribe(gateway));
+        subscribeQuietly(() -> propertySetSubscribe.subscribe(gateway));
     }
 
     @Override
     public void subDeviceOnlineSubscribeTopic(GatewayManager gateway) {
-        statusSubscribe.subscribe(gateway);
-        stateSubscribe.subscribe(gateway, false);
-        osdSubscribe.subscribe(gateway, false);
-        servicesSubscribe.subscribe(gateway);
-        eventsSubscribe.subscribe(gateway, false);
-        requestsSubscribe.subscribe(gateway);
-        propertySetSubscribe.subscribe(gateway);
+        subscribeQuietly(() -> statusSubscribe.subscribe(gateway));
+        subscribeQuietly(() -> stateSubscribe.subscribe(gateway, false));
+        subscribeQuietly(() -> osdSubscribe.subscribe(gateway, false));
+        subscribeQuietly(() -> servicesSubscribe.subscribe(gateway));
+        subscribeQuietly(() -> eventsSubscribe.subscribe(gateway, false));
+        subscribeQuietly(() -> requestsSubscribe.subscribe(gateway));
+        subscribeQuietly(() -> propertySetSubscribe.subscribe(gateway));
+    }
+
+    // backend 重启后 cloud-sdk 内部 subscribed set 跟新 MQTT 连接不同步，
+    // 单次重订阅抛 "already subscribed" 会中断 updateTopo 流程让后续 device 状态步骤
+    // 失败。视为成功跳过，让 register/subscribe 整体幂等。
+    private static void subscribeQuietly(Runnable subscribe) {
+        try {
+            subscribe.run();
+        } catch (RuntimeException ex) {
+            String msg = ex.getMessage();
+            if (msg != null && msg.contains("already subscribed")) {
+                return;
+            }
+            throw ex;
+        }
     }
 
     @Override

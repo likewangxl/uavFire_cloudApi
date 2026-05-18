@@ -17,6 +17,7 @@ import com.yx.uavfire.wayline.model.param.UpdatePlannedWaylineParam;
 import com.yx.uavfire.wayline.service.IPlannedWaylineService;
 import com.yx.uavfire.wayline.service.IWaylineFileService;
 import com.dji.sdk.cloudapi.device.DeviceEnum;
+import com.dji.sdk.cloudapi.device.DeviceTypeEnum;
 import com.dji.sdk.common.Pagination;
 import com.dji.sdk.common.PaginationData;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -626,6 +627,15 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             elem(w, "templateId", "0");
             elem(w, "executeHeightMode", "relativeToStartPoint");
             elem(w, "waylineId", "0");
+
+            // 校验侧 WaylineFileServiceImpl.validKmzBytes 在 waylines.wpml 中查找该元素，
+            // 缺失会以 "The file format is incorrect." 报错。Pilot 2 真机导出也包含此节点。
+            w.writeStartElement(NS_WPML, "waylineCoordinateSysParam");
+            elem(w, "coordinateMode", "WGS84");
+            elem(w, "heightMode", "relativeToStartPoint");
+            elem(w, "positioningType", "GPS");
+            w.writeEndElement();
+
             double distance = totalDistanceMeters(waypoints);
             elem(w, "distance", String.valueOf(distance));
             elem(w, "duration", String.valueOf(distance / Math.max(AUTO_FLIGHT_SPEED_MPS, 1)));
@@ -656,7 +666,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private void writeDroneInfo(XMLStreamWriter w, DeviceEnum droneDevice) throws XMLStreamException {
         w.writeStartElement(NS_WPML, "droneInfo");
-        elem(w, "droneEnumValue", String.valueOf(droneDevice.getType().getType()));
+        // KMZ 离线导出和 Cloud API runtime 对 M4 系列飞机的 type 编码不一致：
+        // KMZ 文件里 Pilot 2 实测写 100；Cloud API runtime 上报 99（DeviceTypeEnum.M4_SERIES）。
+        int droneEnumValue = droneDevice.getType() == DeviceTypeEnum.M4_SERIES
+                ? 100
+                : droneDevice.getType().getType();
+        elem(w, "droneEnumValue", String.valueOf(droneEnumValue));
         elem(w, "droneSubEnumValue", String.valueOf(droneDevice.getSubType().getSubType()));
         w.writeEndElement();
     }

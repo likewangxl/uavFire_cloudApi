@@ -21,7 +21,7 @@ public class MqttTopicServiceImpl implements IMqttTopicService {
 
     private static final Logger log = LoggerFactory.getLogger(MqttTopicServiceImpl.class);
 
-    @Resource
+    @Resource(name = "mqttInbound")
     private MqttPahoMessageDrivenChannelAdapter adapter;
 
     @Override
