@@ -400,7 +400,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import {
   getDualStreamGroup,
   getDualStreamTaskEvents,
+  getLiveCapacity,
   requestDualStreamFocus,
+  requestPilotLiveStart,
   type DualStreamEvent,
   type DualStreamGroup
 } from '/@/api/manage'
@@ -717,11 +719,39 @@ const syncLivePlayers = async () => {
   )
 }
 
+// Cloud API 直播（路线 A）的播放 URL —— Pilot 2 推流后由 backend 返回。
+// 5s 轮询的 loadDualStreamState() 会把它 patch 到 group.visiblePlayUrl，
+// 让原有视频渲染管线直接拉 Cloud API 流，无需改 video 元素逻辑。
+const pilotLiveUrl = ref<string>('')
+
+const startPilotLivestreamOnce = async () => {
+  try {
+    const cap = await getLiveCapacity()
+    const dev: any = (cap.data || [])[0]
+    const cam = dev?.cameras_list?.[0]
+    const vid = cam?.videos_list?.[0]
+    if (!dev || !cam || !vid) {
+      console.warn('[cockpit] live capacity empty, Pilot 2 not in flight mode?')
+      return
+    }
+    const videoId = `${dev.sn}/${cam.index}/${vid.index}`
+    const r = await requestPilotLiveStart(videoId)
+    pilotLiveUrl.value = r.data?.url || ''
+    console.info('[cockpit] pilot live started, url=', pilotLiveUrl.value)
+  } catch (e) {
+    console.warn('[cockpit] pilot live-start failed', e)
+  }
+}
+
 const loadDualStreamState = async () => {
   dualStreamState.loading = true
   try {
     const response = await getDualStreamGroup('RC_PLUS_LOCAL')
     dualStreamState.group = response.data ?? null
+    if (dualStreamState.group && pilotLiveUrl.value) {
+      // 用 Cloud API 推流 URL 覆盖 agent 链路的 visible_play_url
+      dualStreamState.group.visiblePlayUrl = pilotLiveUrl.value
+    }
     dualStreamState.error = ''
   } catch (error: any) {
     dualStreamState.error = error?.message || 'dual-stream-state-unavailable'
@@ -771,7 +801,9 @@ const ensureThermalPreviewMode = async () => {
   // Do not auto-switch RC Plus to thermal/PIP just to populate the web preview.
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 路线 A：让 Pilot 2 自己推 RTMP 到 ZLM（Cloud API），URL patch 到 group.visiblePlayUrl
+  await startPilotLivestreamOnce()
   loadDualStreamState()
   loadAiRiskEvents()
   dualStreamTimer = window.setInterval(loadDualStreamState, 5000)

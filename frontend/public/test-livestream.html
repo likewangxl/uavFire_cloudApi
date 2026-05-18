@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Cloud API 直播链路验证</title>
+<style>
+  body { background:#111; color:#ddd; font-family:-apple-system,sans-serif; margin:0; padding:16px; }
+  #status { font-size:13px; line-height:1.6; white-space:pre-wrap; background:#222; padding:10px; border-radius:6px; max-width:960px; }
+  video { display:block; margin-top:12px; max-width:960px; background:#000; }
+  button { margin-right:8px; padding:6px 14px; }
+</style>
+</head>
+<body>
+<h2>Cloud API 直播链路验证 (路线 A)</h2>
+<div>
+  <button id="startBtn">① backend POST /live/streams/start</button>
+  <button id="stopBtn">② backend POST /live/streams/stop</button>
+  <button id="playBtn">③ 浏览器 WHEP 拉流</button>
+</div>
+<pre id="status">就绪。先点 ①，然后 ③。</pre>
+<video id="v" autoplay playsinline muted controls></video>
+
+<script>
+const ZLM_HOST = '192.168.2.34';
+const ZLM_PORT = 58925;
+const BACKEND = 'http://192.168.2.34:6789';
+const VIDEO_ID = '1581F7K3D249E00AM3Q3/89-0-0/normal-0';
+const STREAM_KEY = '1581F7K3D249E00AM3Q3-89-0-0';
+
+const statusEl = document.getElementById('status');
+const log = (msg) => { statusEl.textContent += '\n' + new Date().toLocaleTimeString() + ' | ' + msg; };
+
+let token = null;
+async function login() {
+  if (token) return token;
+  const r = await fetch(`${BACKEND}/manage/api/v1/demo-login`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}'
+  });
+  const j = await r.json();
+  token = j.data.access_token;
+  log('demo-login OK, token len=' + token.length);
+  return token;
+}
+
+async function call(path, body) {
+  await login();
+  const r = await fetch(`${BACKEND}${path}`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json', 'x-auth-token': token},
+    body: JSON.stringify(body || {})
+  });
+  return r.json();
+}
+
+document.getElementById('startBtn').onclick = async () => {
+  log('POST /live/streams/start ...');
+  const r = await call('/manage/api/v1/live/streams/start', {
+    url_type: 1, video_id: VIDEO_ID, video_quality: 2, video_type: 'wide'
+  });
+  log('reply: ' + JSON.stringify(r));
+};
+
+document.getElementById('stopBtn').onclick = async () => {
+  log('POST /live/streams/stop ...');
+  const r = await call('/manage/api/v1/live/streams/stop', { video_id: VIDEO_ID });
+  log('reply: ' + JSON.stringify(r));
+};
+
+document.getElementById('playBtn').onclick = async () => {
+  log('loading ZLMRTCClient ...');
+  await new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = `http://${ZLM_HOST}:${ZLM_PORT}/ZLMRTCClient.js`;
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  log('ZLMRTCClient loaded, creating endpoint for stream=' + STREAM_KEY);
+  const sdpUrl = `http://${ZLM_HOST}:${ZLM_PORT}/index/api/webrtc?app=live&stream=${STREAM_KEY}&type=play`;
+  const ep = new window.ZLMRTCClient.Endpoint({
+    element: document.getElementById('v'),
+    debug: true,
+    zlmsdpUrl: sdpUrl,
+    simulecast: false,
+    useCamera: false,
+    audioEnable: false,
+    videoEnable: true,
+    recvOnly: true,
+  });
+  ep.on?.(window.ZLMRTCClient.Events.WEBRTC_ON_CONNECTION_STATE_CHANGE, (s) => log('connection state=' + s));
+  ep.on?.(window.ZLMRTCClient.Events.WEBRTC_OFFER_ANWSER_EXCHANGE_FAILED, (p) => log('offer/answer fail: ' + JSON.stringify(p)));
+};
+</script>
+</body>
+</html>

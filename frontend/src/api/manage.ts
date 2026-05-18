@@ -158,6 +158,25 @@ export const requestDualStreamFocus = async function (
   return result.data
 }
 
+export const requestDualStreamStart = async function (droneSn: string): Promise<IWorkspaceResponse<any>> {
+  const url = `${HTTP_PREFIX}/dual-stream/groups/${droneSn}/start`
+  const result = await request.post(url)
+  return result.data
+}
+
+// Cloud API 直播（路线 A）：让 Pilot 2 自己推 RTMP 到 ZLM
+// video_id 格式：<deviceSn>/<cameraIndex>/<videoIndex>（来自 /live/capacity 返回的 cameras_list）
+export const requestPilotLiveStart = async function (videoId: string): Promise<IWorkspaceResponse<{ url: string }>> {
+  const url = `${HTTP_PREFIX}/live/streams/start`
+  const result = await request.post(url, {
+    url_type: 1,
+    video_id: videoId,
+    video_quality: 2,
+    video_type: 'wide',
+  })
+  return result.data
+}
+
 export const getDualStreamTaskEvents = async function (taskId: string): Promise<IWorkspaceResponse<DualStreamEvent[]>> {
   const url = `${HTTP_PREFIX}/dual-stream/tasks/${taskId}/events`
   const result = await request.get(url)

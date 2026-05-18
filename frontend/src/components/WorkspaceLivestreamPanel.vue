@@ -121,6 +121,7 @@ import { message } from 'ant-design-vue'
 import { computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import {
   getLiveCapacity,
+  requestDualStreamStart,
   stopLivestream
 } from '/@/api/manage'
 import { useMyStore } from '/@/store'
@@ -375,6 +376,9 @@ let playbackPoll: ReturnType<typeof setInterval> | null = null
 onMounted(async () => {
   await disableLegacyPlaybackConfig()
   await onRefresh()
+  // 自动触发 agent 推 RTMP：前端无 UI 按钮，进入面板时 fire-and-forget 调一次。
+  // RC_PLUS_LOCAL 是 rcplus-msdk-agent 的占位 droneSn (App.kt: LOCAL_DRONE_SN)。
+  requestDualStreamStart('RC_PLUS_LOCAL').catch(e => console.warn('[livestream] auto-start failed', e))
   // 保留 DOM 轮询，避免 Pilot 发起的旧播放器节点状态无法及时刷新。
   playbackPoll = setInterval(async () => {
     state.remotePlaying = state.videoAttached
