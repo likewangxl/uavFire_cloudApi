@@ -1402,6 +1402,156 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(waylines.contains("<wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>"), "wp[1] default headingMode"));
     }
 
+    @Test
+    void actionGroupsEmittedPerWaypointInBothKmzFiles() throws Exception {
+        // P1.b: wp[0] takePhoto, wp[1] gimbalRotate, wp[2] hover。每个航点一个 actionGroup,
+        // 出现在 template.kml 和 waylines.wpml 中,结构对齐 Pilot 2 真机导出 (kmz/麟游官坪.kmz)。
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2004)
+                .plannedWaylineId("pw-actions")
+                .workspaceId("workspace-001")
+                .name("Action Group Test")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0," +
+                        "  \"actions\":[{\"actuatorFunc\":\"takePhoto\",\"params\":{\"fileSuffix\":\"wp0\",\"payloadPositionIndex\":0}}]}," +
+                        "{\"order\":2,\"gcjLng\":113.002,\"gcjLat\":22.002,\"wgsLng\":113.001,\"wgsLat\":22.001,\"height\":30.0," +
+                        "  \"actions\":[{\"actuatorFunc\":\"gimbalRotate\",\"params\":{\"gimbalRotateMode\":\"absoluteAngle\",\"gimbalPitchRotateEnable\":1,\"gimbalPitchRotateAngle\":-30,\"gimbalYawRotateEnable\":0,\"gimbalYawRotateAngle\":0,\"gimbalRotateTimeEnable\":0,\"gimbalRotateTime\":0,\"payloadPositionIndex\":0}}]}," +
+                        "{\"order\":3,\"gcjLng\":113.003,\"gcjLat\":22.003,\"wgsLng\":113.002,\"wgsLat\":22.002,\"height\":30.0," +
+                        "  \"actions\":[{\"actuatorFunc\":\"hover\",\"params\":{\"hoverTime\":3}}]}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-actions")
+                        .name("Action Group Test")
+                        .objectKey("custom-prefix/pw-actions.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-actions", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String template = readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml");
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+
+        // 结构断言:每个 placemark 内嵌 actionGroup (template + waylines 双份)
+        for (String file : new String[]{template, waylines}) {
+            String label = (file == template) ? "template.kml" : "waylines.wpml";
+            assertAll(label + " — 通用 actionGroup 结构",
+                    () -> assertTrue(file.contains("<wpml:actionGroupId>0</wpml:actionGroupId>"), "wp[0] actionGroupId=0"),
+                    () -> assertTrue(file.contains("<wpml:actionGroupId>1</wpml:actionGroupId>"), "wp[1] actionGroupId=1"),
+                    () -> assertTrue(file.contains("<wpml:actionGroupId>2</wpml:actionGroupId>"), "wp[2] actionGroupId=2"),
+                    () -> assertTrue(file.contains("<wpml:actionGroupStartIndex>0</wpml:actionGroupStartIndex>"), "wp[0] startIndex=0"),
+                    () -> assertTrue(file.contains("<wpml:actionGroupStartIndex>1</wpml:actionGroupStartIndex>"), "wp[1] startIndex=1"),
+                    () -> assertTrue(file.contains("<wpml:actionGroupStartIndex>2</wpml:actionGroupStartIndex>"), "wp[2] startIndex=2"),
+                    () -> assertTrue(file.contains("<wpml:actionGroupMode>sequence</wpml:actionGroupMode>"), "sequence mode"),
+                    () -> assertTrue(file.contains("<wpml:actionTriggerType>reachPoint</wpml:actionTriggerType>"), "trigger reachPoint default"));
+        }
+
+        assertAll("waylines — wp[0] takePhoto",
+                () -> assertTrue(waylines.contains("<wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>"), "actuatorFunc=takePhoto"),
+                () -> assertTrue(waylines.contains("<wpml:fileSuffix>wp0</wpml:fileSuffix>"), "fileSuffix=wp0"),
+                () -> assertTrue(waylines.contains("<wpml:payloadPositionIndex>0</wpml:payloadPositionIndex>"), "payloadPositionIndex=0"));
+
+        assertAll("waylines — wp[1] gimbalRotate",
+                () -> assertTrue(waylines.contains("<wpml:actionActuatorFunc>gimbalRotate</wpml:actionActuatorFunc>"), "actuatorFunc=gimbalRotate"),
+                () -> assertTrue(waylines.contains("<wpml:gimbalRotateMode>absoluteAngle</wpml:gimbalRotateMode>"), "rotateMode=absoluteAngle"),
+                () -> assertTrue(waylines.contains("<wpml:gimbalPitchRotateEnable>1</wpml:gimbalPitchRotateEnable>"), "pitchEnable=1"),
+                () -> assertTrue(waylines.contains("<wpml:gimbalPitchRotateAngle>-30</wpml:gimbalPitchRotateAngle>"), "pitchAngle=-30"),
+                () -> assertTrue(waylines.contains("<wpml:gimbalYawRotateEnable>0</wpml:gimbalYawRotateEnable>"), "yawEnable=0"),
+                () -> assertTrue(waylines.contains("<wpml:gimbalRotateTimeEnable>0</wpml:gimbalRotateTimeEnable>"), "rotateTimeEnable=0"));
+
+        assertAll("waylines — wp[2] hover",
+                () -> assertTrue(waylines.contains("<wpml:actionActuatorFunc>hover</wpml:actionActuatorFunc>"), "actuatorFunc=hover"),
+                () -> assertTrue(waylines.contains("<wpml:hoverTime>3</wpml:hoverTime>"), "hoverTime=3"));
+    }
+
+    @Test
+    void actionGroupMultipleActionsPerWaypointInSequence() throws Exception {
+        // 同一个航点挂 2 个 action:先转云台再拍照。actionId 递增,Pilot 2 spec sequence 模式。
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2005)
+                .plannedWaylineId("pw-multi")
+                .workspaceId("workspace-001")
+                .name("Multi-Action Test")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0," +
+                        "  \"actions\":[" +
+                        "    {\"actuatorFunc\":\"gimbalRotate\",\"params\":{\"gimbalRotateMode\":\"absoluteAngle\",\"gimbalPitchRotateEnable\":1,\"gimbalPitchRotateAngle\":-90,\"gimbalYawRotateEnable\":0,\"gimbalYawRotateAngle\":0,\"gimbalRotateTimeEnable\":0,\"gimbalRotateTime\":0,\"payloadPositionIndex\":0}}," +
+                        "    {\"actuatorFunc\":\"takePhoto\",\"params\":{\"fileSuffix\":\"after-rotate\",\"payloadPositionIndex\":0}}" +
+                        "  ]}]")
+                .status("draft").creator("alice").createTime(1000L).updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder().waylineId("wayline-multi").name("Multi-Action Test").objectKey("custom-prefix/pw-multi.kmz").build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-multi", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+
+        // 同航点 2 个 action,actionId 0 和 1
+        assertAll("同航点多 action 顺序",
+                () -> assertTrue(waylines.contains("<wpml:actionId>0</wpml:actionId>"), "first actionId=0"),
+                () -> assertTrue(waylines.contains("<wpml:actionId>1</wpml:actionId>"), "second actionId=1"),
+                () -> assertTrue(waylines.contains("<wpml:actuatorFunc>gimbalRotate</wpml:actuatorFunc>".replace("actuatorFunc", "actionActuatorFunc")), "has gimbalRotate"),
+                () -> assertTrue(waylines.contains("<wpml:fileSuffix>after-rotate</wpml:fileSuffix>"), "fileSuffix=after-rotate"),
+                // 2 个 action 应在同一个 actionGroup 内,所以只有 1 个 <wpml:actionGroup> 标签
+                () -> assertEquals(1, waylines.split("<wpml:actionGroup>", -1).length - 1, "single actionGroup wraps both actions"));
+    }
+
+    @Test
+    void waypointsWithoutActionsEmitNoActionGroup() throws Exception {
+        // 向后兼容:wp.actions 为 null / 空时,placemark 内不能出现 <wpml:actionGroup>。
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2006).plannedWaylineId("pw-noaction").workspaceId("workspace-001").name("No Action")
+                .aircraftModelKey("M4T").defaultHeight(30.0).maxSpeed(5.0)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}]")
+                .status("draft").creator("alice").createTime(1000L).updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder().waylineId("wayline-noaction").name("No Action").objectKey("custom-prefix/pw-noaction.kmz").build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-noaction", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+        String template = readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml");
+
+        assertAll("无 action 不输出 actionGroup",
+                () -> assertFalse(template.contains("<wpml:actionGroup>"), "no actionGroup in template"),
+                () -> assertFalse(waylines.contains("<wpml:actionGroup>"), "no actionGroup in waylines"));
+    }
+
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
             ZipEntry entry = zipInputStream.getNextEntry();

@@ -9,6 +9,7 @@ import com.yx.uavfire.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineFileDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaylineDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaypointDTO;
+import com.yx.uavfire.wayline.model.dto.WaypointActionDTO;
 import com.yx.uavfire.wayline.model.entity.PlannedWaylineEntity;
 import com.yx.uavfire.wayline.model.param.CreatePlannedWaylineParam;
 import com.yx.uavfire.wayline.model.param.PreparePlannedWaylineTaskParam;
@@ -706,6 +707,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "useGlobalSpeed", wp.getSpeed() != null ? "0" : "1");
         elem(w, "useGlobalHeadingParam", hasCustomHeading(wp) ? "0" : "1");
         elem(w, "useStraightLine", "1");
+        writeActionGroups(w, wp, index);
         elem(w, "isRisky", "0");
         w.writeEndElement();
     }
@@ -750,9 +752,61 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "waypointGimbalYawAngle", formatNumeric(
                 wp.getGimbalYaw() != null ? wp.getGimbalYaw() : 0.0));
         w.writeEndElement();
+        writeActionGroups(w, wp, index);
         elem(w, "isRisky", "0");
         elem(w, "waypointWorkType", "0");
         w.writeEndElement();
+    }
+
+    /**
+     * 输出航点 actionGroup 块。null/空 actions 不写。结构对齐 Pilot 2 真机导出
+     * (kmz/麟游官坪.kmz):
+     *   <wpml:actionGroup>
+     *     <wpml:actionGroupId>{wpIdx}</wpml:actionGroupId>
+     *     <wpml:actionGroupStartIndex>{wpIdx}</wpml:actionGroupStartIndex>
+     *     <wpml:actionGroupEndIndex>{wpIdx}</wpml:actionGroupEndIndex>
+     *     <wpml:actionGroupMode>sequence</wpml:actionGroupMode>
+     *     <wpml:actionTrigger><wpml:actionTriggerType>reachPoint</wpml:actionTriggerType></wpml:actionTrigger>
+     *     <wpml:action>...</wpml:action> (按 wp.actions 顺序;actionId 从 0 递增)
+     *   </wpml:actionGroup>
+     */
+    private void writeActionGroups(XMLStreamWriter w, PlannedWaypointDTO wp, int waypointIndex) throws XMLStreamException {
+        List<WaypointActionDTO> actions = wp.getActions();
+        if (actions == null || actions.isEmpty()) {
+            return;
+        }
+        w.writeStartElement(NS_WPML, "actionGroup");
+        elem(w, "actionGroupId", String.valueOf(waypointIndex));
+        elem(w, "actionGroupStartIndex", String.valueOf(waypointIndex));
+        elem(w, "actionGroupEndIndex", String.valueOf(waypointIndex));
+        elem(w, "actionGroupMode", "sequence");
+
+        WaypointActionDTO firstAction = actions.get(0);
+        String triggerType = firstAction.getActionTrigger() != null ? firstAction.getActionTrigger() : "reachPoint";
+        w.writeStartElement(NS_WPML, "actionTrigger");
+        elem(w, "actionTriggerType", triggerType);
+        if ("multipleTiming".equals(triggerType) && firstAction.getActionTriggerParam() != null) {
+            elem(w, "actionTriggerParam", formatNumeric(firstAction.getActionTriggerParam()));
+        }
+        w.writeEndElement(); // /actionTrigger
+
+        int actionId = 0;
+        for (WaypointActionDTO action : actions) {
+            w.writeStartElement(NS_WPML, "action");
+            elem(w, "actionId", String.valueOf(actionId++));
+            elem(w, "actionActuatorFunc", action.getActuatorFunc());
+            w.writeStartElement(NS_WPML, "actionActuatorFuncParam");
+            if (action.getParams() != null) {
+                for (java.util.Map.Entry<String, Object> entry : action.getParams().entrySet()) {
+                    Object v = entry.getValue();
+                    String s = (v instanceof Number) ? formatNumeric((Number) v) : String.valueOf(v);
+                    elem(w, entry.getKey(), s);
+                }
+            }
+            w.writeEndElement(); // /actionActuatorFuncParam
+            w.writeEndElement(); // /action
+        }
+        w.writeEndElement(); // /actionGroup
     }
 
     private static int globalAvgHeight(List<PlannedWaypointDTO> wps) {
