@@ -42,7 +42,7 @@ Out of scope（PoC 阶段不做）：
 ```
 Pilot2 (RC Plus, Android) ──RTMP push──> ZLMediaKit (Mac :1935)
                                               │
-                                              ├── Web UI :8090  ─┐
+                                              ├── HTTP API :58925─┐
                                               │                   ├── 人眼判定
                                               └── ffplay 拉流  ────┘
 ```
@@ -52,19 +52,20 @@ Pilot2 (RC Plus, Android) ──RTMP push──> ZLMediaKit (Mac :1935)
 ## Procedure
 
 1. **准备**
-   - `curl http://localhost:8090/` 确认 ZLM 在跑
+   - `curl http://localhost:58925/` 确认 ZLM 在跑
    - 拿到 Mac LAN IP：`ifconfig | grep "inet 192"`（如果换过 wifi，先跑 `scripts/switch-dev-ip.sh` 同步配置）
    - RC Plus 和 Mac 在同一个 WiFi
 2. **Pilot2 配 RTMP**
    - 设置 → 直播平台 → 自定义 → URL：`rtmp://<mac-ip>:1935/live/pilot2-composite`
-   - 若 ZLM 需要 secret（参考 `application.yml` 或 ZLM config），URL 带 `?secret=<value>`
+   - ZLM RTMP push 默认不需要 secret（hook.on_publish 未挂），smoke test 已验证。如 Pilot2 报 auth 错误再加 `?secret=...`
+   - 真实 ZLM 配置在 `deployment/zlmediakit/config/config.ini`（HTTP API 端口 58925，secret `psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy`，跟 application.yml 的 `CloudApiSample` 不一致 —— ZLM 实际跑的是 config.ini 里那份）
 3. **开 PIP**
    - Pilot2 飞行界面打开双镜头 / 画中画
    - M4T 主镜头通常是可见光（广角/变焦），小窗是红外
 4. **起推**
    - 飞机/RC 通电 + Pilot2 看到画面后，在直播设置里点"开始直播"
 5. **后端观测**
-   - 浏览器打开 `http://localhost:8090/` → 看 RTMP/RTSP/HLS 列表里有没有 `pilot2-composite`
+   - `curl -s "http://localhost:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy"` 看 `pilot2-composite` 在不在
    - `ffplay rtmp://<mac-ip>:1935/live/pilot2-composite` 拉流播放
 6. **视觉判定**
    - 单帧里同时能看到可见光 + 红外 → ✅ B 可行
