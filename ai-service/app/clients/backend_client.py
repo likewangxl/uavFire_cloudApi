@@ -65,6 +65,15 @@ class BackendClient:
             headers=headers or None,
         )
 
+    def report_fire_event(self, payload: Dict[str, Any]) -> None:
+        assert self.transport is not None
+        headers = self._auth_headers()
+        self.transport.post(
+            "/api/fire/events",
+            json=payload,
+            headers=headers or None,
+        )
+
     def _auth_headers(self) -> Dict[str, str]:
         token = self._ensure_access_token()
         return {"x-auth-token": token} if token else {}

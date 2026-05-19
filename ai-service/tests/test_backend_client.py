@@ -20,6 +20,39 @@ def test_backend_client_posts_dual_stream_event():
     assert transport.last_json["risk_level"] == "HIGH"
 
 
+def test_backend_client_posts_fire_event_to_fire_events_endpoint():
+    transport = RecordingTransport()
+    client = BackendClient(base_url="http://backend", transport=transport)
+
+    client.report_fire_event(
+        payload={
+            "eventId": "zlm-demo-1779163200000",
+            "source": "M4T",
+            "deviceSn": "DRONE-1",
+            "confidence": 0.78,
+            "fireLevel": "MEDIUM",
+            "timestamp": "2026-05-19T04:00:00.000Z",
+        }
+    )
+
+    assert transport.last_path == "/api/fire/events"
+    assert transport.last_json["fireLevel"] == "MEDIUM"
+    assert transport.last_json["confidence"] == 0.78
+
+
+def test_backend_client_fire_event_carries_access_token_header():
+    transport = RecordingTransport()
+    client = BackendClient(
+        base_url="http://backend",
+        access_token="token-abc",
+        transport=transport,
+    )
+
+    client.report_fire_event(payload={"eventId": "x", "fireLevel": "MEDIUM"})
+
+    assert transport.last_headers == {"x-auth-token": "token-abc"}
+
+
 def test_backend_client_adds_configured_token_header_when_reporting_event():
     transport = RecordingTransport()
     client = BackendClient(

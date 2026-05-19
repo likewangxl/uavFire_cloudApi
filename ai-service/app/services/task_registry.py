@@ -20,10 +20,15 @@ SourceFactory = Callable[[TaskRecord], Tuple[Optional[VideoSource], Optional[Vid
 
 
 class TaskRegistry:
-    def __init__(self, backend_client: Optional[SupportsBackendEventReporting] = None) -> None:
+    def __init__(
+        self,
+        backend_client: Optional[SupportsBackendEventReporting] = None,
+        fire_event_reporter: Optional["FireEventReporter"] = None,
+    ) -> None:
         self._tasks: Dict[str, TaskRecord] = {}
         self._events: Dict[str, List[EventRecord]] = {}
         self._backend_client = backend_client
+        self._fire_event_reporter = fire_event_reporter
         self._runner: Optional["TaskRunner"] = None
         self._continuous_supervisor: Optional["ContinuousTaskSupervisor"] = None
         self._source_factory: Optional[SourceFactory] = None
@@ -136,6 +141,13 @@ class TaskRegistry:
                     "analysis_channel": event.analysis_channel,
                 },
             )
+        if self._fire_event_reporter is not None:
+            try:
+                self._fire_event_reporter.maybe_report(task, event)
+            except Exception:
+                logger.exception(
+                    "fire-event reporter raised unexpectedly task=%s", task_id
+                )
         return record
 
     def list_events(self, task_id: str) -> List[EventRecord]:
@@ -197,6 +209,7 @@ def build_registry() -> TaskRegistry:
         ContinuousTaskSupervisor,
         opencv_source_factory_from_task,
     )
+    from app.services.fire_event_reporter import FireEventReporter
     from app.services.task_runner import (
         StreamScoreThermalAnalyzer,
         StreamScoreVisibleDetector,
@@ -205,7 +218,13 @@ def build_registry() -> TaskRegistry:
 
     settings = Settings()
     backend_client = _build_backend_client(settings)
-    registry = TaskRegistry(backend_client=backend_client)
+    fire_event_reporter = (
+        FireEventReporter(backend_client) if backend_client is not None else None
+    )
+    registry = TaskRegistry(
+        backend_client=backend_client,
+        fire_event_reporter=fire_event_reporter,
+    )
     fusion = DualStreamFusionService()
     registry.bind_runner(
         TaskRunner(
@@ -234,4 +253,5 @@ registry = build_registry()
 
 if TYPE_CHECKING:
     from app.services.continuous_supervisor import ContinuousTaskSupervisor
+    from app.services.fire_event_reporter import FireEventReporter
     from app.services.task_runner import TaskRunner

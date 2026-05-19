@@ -1,7 +1,10 @@
 package com.yx.uavfire.fc100.event.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.dji.sdk.cloudapi.device.OsdDockDrone;
 import com.yx.uavfire.fc100.common.Clock;
+import com.yx.uavfire.fc100.common.Fc100BusinessException;
+import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.common.MissionNoGenerator;
 import com.yx.uavfire.fc100.event.dao.FireEventMapper;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
@@ -13,6 +16,7 @@ import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
+import com.yx.uavfire.manage.service.IDeviceRedisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -21,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -53,18 +58,23 @@ public class FireEventServiceImpl implements FireEventService {
     private final FireMissionMapper missionMapper;
     private final MissionNoGenerator noGen;
     private final Clock clock;
+    private final IDeviceRedisService deviceRedisService;
 
     public FireEventServiceImpl(FireEventMapper em, FireMissionMapper mm,
-                                MissionNoGenerator g, Clock c) {
+                                MissionNoGenerator g, Clock c,
+                                IDeviceRedisService deviceRedisService) {
         this.eventMapper = em;
         this.missionMapper = mm;
         this.noGen = g;
         this.clock = c;
+        this.deviceRedisService = deviceRedisService;
     }
 
     @Override
     @Transactional
     public FireEventCreateResponse create(FireEventCreateParam param) {
+        fillPositionFromOsdIfMissing(param);
+
         // 1. 同 eventId 去重：已存在则返回已绑定的活跃任务
         FireEventEntity existing = eventMapper.selectOne(
             new QueryWrapper<FireEventEntity>().eq("event_id", param.getEventId()));
@@ -125,6 +135,38 @@ public class FireEventServiceImpl implements FireEventService {
 
         return new FireEventCreateResponse(e.getId(), e.getEventId(),
             true, m.getMissionNo(), FireMissionStatus.WAITING_REVIEW.name());
+    }
+
+    /**
+     * 当 caller (ai-service) 没带 lat/lng 时,从 Redis 里取该 deviceSn 最新 OSD 自动填入。
+     * OSD 也查不到则抛 MISSING_DEVICE_POSITION (HTTP 400),不持久化半残事件。
+     */
+    private void fillPositionFromOsdIfMissing(FireEventCreateParam param) {
+        if (param.getLat() != null && param.getLng() != null) {
+            return;
+        }
+        String sn = param.getDeviceSn();
+        if (sn == null || sn.isBlank()) {
+            throw new Fc100BusinessException(Fc100ErrorCode.MISSING_DEVICE_POSITION,
+                "deviceSn missing; cannot infer position");
+        }
+        Optional<OsdDockDrone> osdOpt = deviceRedisService.getDeviceOsd(sn, OsdDockDrone.class);
+        if (osdOpt.isEmpty()) {
+            throw new Fc100BusinessException(Fc100ErrorCode.MISSING_DEVICE_POSITION,
+                "no OSD position cached for device: " + sn);
+        }
+        OsdDockDrone osd = osdOpt.get();
+        Float lat = osd.getLatitude();
+        Float lng = osd.getLongitude();
+        if (lat == null || lng == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.MISSING_DEVICE_POSITION,
+                "OSD has no latitude/longitude for device: " + sn);
+        }
+        if (param.getLat() == null) param.setLat(lat.doubleValue());
+        if (param.getLng() == null) param.setLng(lng.doubleValue());
+        if (param.getAlt() == null && osd.getHeight() != null) {
+            param.setAlt(osd.getHeight().doubleValue());
+        }
     }
 
     private String findActiveMissionNo(Long fireEventId) {

@@ -6,6 +6,7 @@ public enum Fc100ErrorCode {
     INVALID_PARAM(1000, "invalid param"),
     INVALID_COORDINATE(1001, "invalid coordinate"),
     INVALID_WIND_PARAM(1002, "invalid wind param"),
+    MISSING_DEVICE_POSITION(1003, "missing device position; drone OSD not yet available"),
 
     // 2xxx 业务
     MISSION_NOT_FOUND(2000, "mission not found"),
