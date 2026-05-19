@@ -27,6 +27,15 @@ public interface IPlannedWaylineService {
 
     PlannedWaylineDTO cancelTask(String workspaceId, String id);
 
+    // P2: 实时控制 (按 entity.dockSn 路由到 dock Cloud SDK 或 agent path)
+    PlannedWaylineDTO pauseTask(String workspaceId, String id);
+
+    PlannedWaylineDTO recoveryTask(String workspaceId, String id);
+
+    PlannedWaylineDTO stopTask(String workspaceId, String id);
+
+    PlannedWaylineDTO queryBreakpoint(String workspaceId, String id);
+
     void delete(String workspaceId, String id);
 
     Optional<PlannedWaylineDTO> getOne(String workspaceId, String id);

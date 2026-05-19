@@ -33,6 +33,14 @@ public class PlannedWaylineDTO {
 
     private Double maxSpeed;
 
+    // L1 mission 配置
+    private String finishAction;
+    private String exitOnRcLost;
+    private String rcLostAction;
+    private Integer takeoffSecurityHeight;
+    private Double globalTransitionalSpeed;
+    private Integer rthAltitude;
+
     private List<PlannedWaypointDTO> waypoints;
 
     private String status;
@@ -58,6 +66,14 @@ public class PlannedWaylineDTO {
     private String taskStatusReason;
 
     private Integer taskProgress;
+
+    // L2 实时任务进度
+    private Integer waylineMissionState;
+    private Integer currentWaypointIndex;
+    private Integer totalWaypoints;
+    private Integer mediaCount;
+    private String breakPointJson;
+    private Long lastProgressTime;
 
     private Long preparedTime;
 

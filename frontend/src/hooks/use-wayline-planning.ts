@@ -20,6 +20,10 @@ import type {
   PlannedWaypoint as PlannedWaypointBody,
   PlannedWaylineRecord,
   UpdatePlannedWaylineBody,
+  WaypointAction,
+  WaypointActuatorFunc,
+  WaypointHeadingMode,
+  WaypointTurnMode,
 } from '/@/types/wayline'
 import { gcj02towgs84, wgs84togcj02 } from '/@/vendors/coordtransform'
 import rootStore from '/@/store'
@@ -35,6 +39,18 @@ export interface PlannedWaypoint {
   wgsLat: number
   // Target height relative to takeoff point (m).
   height: number
+  // ---- L1 per-航点定制 (全部可选,缺省走全局) ----
+  speed?: number
+  gimbalPitch?: number
+  gimbalYaw?: number
+  headingMode?: WaypointHeadingMode
+  headingAngle?: number
+  poiLng?: number
+  poiLat?: number
+  poiAlt?: number
+  turnMode?: WaypointTurnMode
+  turnDamping?: number
+  actions?: WaypointAction[]
 }
 
 export enum PlanningExecState {
@@ -69,6 +85,13 @@ const state = reactive({
   aircraftModelKey: '',
   defaultHeight: DEFAULT_HEIGHT_M,
   maxSpeed: DEFAULT_MAX_SPEED,
+  // L1 mission 配置 (undefined = 用后端默认 goHome/goContinue/goBack/20/5)
+  finishAction: undefined as string | undefined,
+  exitOnRcLost: undefined as string | undefined,
+  rcLostAction: undefined as string | undefined,
+  takeoffSecurityHeight: undefined as number | undefined,
+  globalTransitionalSpeed: undefined as number | undefined,
+  rthAltitude: undefined as number | undefined,
   statusText: '',
   lastError: '',
 })
@@ -86,6 +109,12 @@ interface PersistedPlanningDraft {
   aircraftModelKey?: string
   defaultHeight: number
   maxSpeed: number
+  finishAction?: string
+  exitOnRcLost?: string
+  rcLostAction?: string
+  takeoffSecurityHeight?: number
+  globalTransitionalSpeed?: number
+  rthAltitude?: number
   waypoints: PlannedWaypoint[]
 }
 
@@ -97,6 +126,12 @@ function buildPersistedDraft (): PersistedPlanningDraft {
     aircraftModelKey: state.aircraftModelKey,
     defaultHeight: state.defaultHeight,
     maxSpeed: state.maxSpeed,
+    finishAction: state.finishAction,
+    exitOnRcLost: state.exitOnRcLost,
+    rcLostAction: state.rcLostAction,
+    takeoffSecurityHeight: state.takeoffSecurityHeight,
+    globalTransitionalSpeed: state.globalTransitionalSpeed,
+    rthAltitude: state.rthAltitude,
     waypoints: state.waypoints.map(wp => ({ ...wp })),
   }
 }
@@ -146,6 +181,12 @@ function restoreDraft () {
     state.editingPlannedWaylineId = ''
     state.defaultHeight = Number.isFinite(Number(parsed.defaultHeight)) ? Number(parsed.defaultHeight) : DEFAULT_HEIGHT_M
     state.maxSpeed = Number.isFinite(Number(parsed.maxSpeed)) ? Number(parsed.maxSpeed) : DEFAULT_MAX_SPEED
+    state.finishAction = typeof parsed.finishAction === 'string' ? parsed.finishAction : undefined
+    state.exitOnRcLost = typeof parsed.exitOnRcLost === 'string' ? parsed.exitOnRcLost : undefined
+    state.rcLostAction = typeof parsed.rcLostAction === 'string' ? parsed.rcLostAction : undefined
+    state.takeoffSecurityHeight = Number.isFinite(Number(parsed.takeoffSecurityHeight)) ? Number(parsed.takeoffSecurityHeight) : undefined
+    state.globalTransitionalSpeed = Number.isFinite(Number(parsed.globalTransitionalSpeed)) ? Number(parsed.globalTransitionalSpeed) : undefined
+    state.rthAltitude = Number.isFinite(Number(parsed.rthAltitude)) ? Number(parsed.rthAltitude) : undefined
     state.waypoints = restoredWaypoints
     state.active = false
     state.executing = false
@@ -231,6 +272,25 @@ function normalizePlannedWaypoint (wp: PlannedWaypoint): PlannedWaypoint {
     wgsLng: wgsLng as number,
     wgsLat: wgsLat as number,
     height: normalizePositiveNumber(raw.height, normalizePositiveNumber(state.defaultHeight, DEFAULT_HEIGHT_M)),
+    speed: Number.isFinite(Number(raw.speed)) ? Number(raw.speed) : undefined,
+    gimbalPitch: Number.isFinite(Number(raw.gimbalPitch)) ? Number(raw.gimbalPitch) : undefined,
+    gimbalYaw: Number.isFinite(Number(raw.gimbalYaw)) ? Number(raw.gimbalYaw) : undefined,
+    headingMode: typeof raw.headingMode === 'string' ? raw.headingMode as WaypointHeadingMode : undefined,
+    headingAngle: Number.isFinite(Number(raw.headingAngle)) ? Number(raw.headingAngle) : undefined,
+    poiLng: Number.isFinite(Number(raw.poiLng)) ? Number(raw.poiLng) : undefined,
+    poiLat: Number.isFinite(Number(raw.poiLat)) ? Number(raw.poiLat) : undefined,
+    poiAlt: Number.isFinite(Number(raw.poiAlt)) ? Number(raw.poiAlt) : undefined,
+    turnMode: typeof raw.turnMode === 'string' ? raw.turnMode as WaypointTurnMode : undefined,
+    turnDamping: Number.isFinite(Number(raw.turnDamping)) ? Number(raw.turnDamping) : undefined,
+    actions: Array.isArray(raw.actions)
+      ? raw.actions.map((a: any) => ({
+        actionId: Number.isFinite(Number(a?.actionId)) ? Number(a.actionId) : undefined,
+        actionTrigger: typeof a?.actionTrigger === 'string' ? a.actionTrigger : undefined,
+        actionTriggerParam: Number.isFinite(Number(a?.actionTriggerParam)) ? Number(a.actionTriggerParam) : undefined,
+        actuatorFunc: a?.actuatorFunc,
+        params: a?.params && typeof a.params === 'object' ? { ...a.params } : undefined,
+      }))
+      : undefined,
   }
 }
 
@@ -369,6 +429,17 @@ function buildPlannedWaypointBody (wp: PlannedWaypoint, idx: number): PlannedWay
     wgsLng: wp.wgsLng,
     wgsLat: wp.wgsLat,
     height: wp.height,
+    speed: wp.speed,
+    gimbalPitch: wp.gimbalPitch,
+    gimbalYaw: wp.gimbalYaw,
+    headingMode: wp.headingMode,
+    headingAngle: wp.headingAngle,
+    poiLng: wp.poiLng,
+    poiLat: wp.poiLat,
+    poiAlt: wp.poiAlt,
+    turnMode: wp.turnMode,
+    turnDamping: wp.turnDamping,
+    actions: wp.actions && wp.actions.length > 0 ? wp.actions : undefined,
   }
 }
 
@@ -386,6 +457,12 @@ export function buildPlannedWaylineBody (name: string, aircraftModelKey?: string
     aircraftSn: state.aircraftSn,
     defaultHeight: normalizePositiveNumber(state.defaultHeight, DEFAULT_HEIGHT_M),
     maxSpeed: normalizePositiveNumber(state.maxSpeed, DEFAULT_MAX_SPEED),
+    finishAction: state.finishAction,
+    exitOnRcLost: state.exitOnRcLost,
+    rcLostAction: state.rcLostAction,
+    takeoffSecurityHeight: state.takeoffSecurityHeight,
+    globalTransitionalSpeed: state.globalTransitionalSpeed,
+    rthAltitude: state.rthAltitude,
     waypoints: state.waypoints.map((wp, idx) => buildPlannedWaypointBody(normalizePlannedWaypoint(wp), idx)),
   }
 }
@@ -403,6 +480,12 @@ export function loadPlannedWayline (record: PlannedWaylineRecord) {
   state.aircraftSn = record.aircraftSn
   state.defaultHeight = Number.isFinite(Number(record.defaultHeight)) ? Number(record.defaultHeight) : DEFAULT_HEIGHT_M
   state.maxSpeed = Number.isFinite(Number(record.maxSpeed)) ? Number(record.maxSpeed) : DEFAULT_MAX_SPEED
+  state.finishAction = record.finishAction || undefined
+  state.exitOnRcLost = record.exitOnRcLost || undefined
+  state.rcLostAction = record.rcLostAction || undefined
+  state.takeoffSecurityHeight = Number.isFinite(Number(record.takeoffSecurityHeight)) ? Number(record.takeoffSecurityHeight) : undefined
+  state.globalTransitionalSpeed = Number.isFinite(Number(record.globalTransitionalSpeed)) ? Number(record.globalTransitionalSpeed) : undefined
+  state.rthAltitude = Number.isFinite(Number(record.rthAltitude)) ? Number(record.rthAltitude) : undefined
   state.waypoints = record.waypoints.map(wp => ({
     id: uuidv4(),
     gcjLng: Number(wp.gcjLng),
@@ -410,6 +493,17 @@ export function loadPlannedWayline (record: PlannedWaylineRecord) {
     wgsLng: Number(wp.wgsLng),
     wgsLat: Number(wp.wgsLat),
     height: Number(wp.height),
+    speed: Number.isFinite(Number(wp.speed)) ? Number(wp.speed) : undefined,
+    gimbalPitch: Number.isFinite(Number(wp.gimbalPitch)) ? Number(wp.gimbalPitch) : undefined,
+    gimbalYaw: Number.isFinite(Number(wp.gimbalYaw)) ? Number(wp.gimbalYaw) : undefined,
+    headingMode: (wp as any).headingMode || undefined,
+    headingAngle: Number.isFinite(Number(wp.headingAngle)) ? Number(wp.headingAngle) : undefined,
+    poiLng: Number.isFinite(Number(wp.poiLng)) ? Number(wp.poiLng) : undefined,
+    poiLat: Number.isFinite(Number(wp.poiLat)) ? Number(wp.poiLat) : undefined,
+    poiAlt: Number.isFinite(Number(wp.poiAlt)) ? Number(wp.poiAlt) : undefined,
+    turnMode: (wp as any).turnMode || undefined,
+    turnDamping: Number.isFinite(Number(wp.turnDamping)) ? Number(wp.turnDamping) : undefined,
+    actions: Array.isArray(wp.actions) ? wp.actions.map(a => ({ ...a, params: a.params ? { ...a.params } : undefined })) : undefined,
   }))
   state.statusText = `Loaded planned wayline "${record.name}" (${record.status}).`
   state.lastError = ''
@@ -447,9 +541,101 @@ export function resetPlanningDraft () {
   clearPlannedWaylinePreview()
   state.defaultHeight = DEFAULT_HEIGHT_M
   state.maxSpeed = DEFAULT_MAX_SPEED
+  state.finishAction = undefined
+  state.exitOnRcLost = undefined
+  state.rcLostAction = undefined
+  state.takeoffSecurityHeight = undefined
+  state.globalTransitionalSpeed = undefined
+  state.rthAltitude = undefined
   state.statusText = ''
   state.lastError = ''
   persistDraft()
+}
+
+// ---- L1 编辑 helpers (供 wayline.vue 调用) ----
+
+export function updateWaypointField<K extends keyof PlannedWaypoint> (id: string, key: K, value: PlannedWaypoint[K]) {
+  if (state.executing) return
+  const wp = state.waypoints.find(w => w.id === id)
+  if (!wp) return
+  (wp as any)[key] = value
+  persistDraft()
+}
+
+export function setMissionConfig (cfg: Partial<{
+  finishAction: string
+  exitOnRcLost: string
+  rcLostAction: string
+  takeoffSecurityHeight: number
+  globalTransitionalSpeed: number
+  rthAltitude: number
+}>) {
+  if (cfg.finishAction !== undefined) state.finishAction = cfg.finishAction || undefined
+  if (cfg.exitOnRcLost !== undefined) state.exitOnRcLost = cfg.exitOnRcLost || undefined
+  if (cfg.rcLostAction !== undefined) state.rcLostAction = cfg.rcLostAction || undefined
+  if (cfg.takeoffSecurityHeight !== undefined) state.takeoffSecurityHeight = cfg.takeoffSecurityHeight
+  if (cfg.globalTransitionalSpeed !== undefined) state.globalTransitionalSpeed = cfg.globalTransitionalSpeed
+  if (cfg.rthAltitude !== undefined) state.rthAltitude = cfg.rthAltitude
+  persistDraft()
+}
+
+export function addWaypointAction (id: string, actuatorFunc: WaypointActuatorFunc) {
+  if (state.executing) return
+  const wp = state.waypoints.find(w => w.id === id)
+  if (!wp) return
+  if (!wp.actions) wp.actions = []
+  const defaults = defaultParamsFor(actuatorFunc)
+  wp.actions.push({ actuatorFunc, actionTrigger: 'reachPoint', params: defaults })
+  persistDraft()
+}
+
+export function removeWaypointAction (id: string, actionIdx: number) {
+  if (state.executing) return
+  const wp = state.waypoints.find(w => w.id === id)
+  if (!wp || !wp.actions || actionIdx < 0 || actionIdx >= wp.actions.length) return
+  wp.actions.splice(actionIdx, 1)
+  if (wp.actions.length === 0) wp.actions = undefined
+  persistDraft()
+}
+
+export function updateWaypointActionParam (id: string, actionIdx: number, paramKey: string, value: any) {
+  if (state.executing) return
+  const wp = state.waypoints.find(w => w.id === id)
+  if (!wp || !wp.actions || actionIdx < 0 || actionIdx >= wp.actions.length) return
+  const action = wp.actions[actionIdx]
+  if (!action.params) action.params = {}
+  action.params[paramKey] = value
+  persistDraft()
+}
+
+function defaultParamsFor (actuatorFunc: WaypointActuatorFunc): Record<string, string | number | boolean> {
+  switch (actuatorFunc) {
+    case 'takePhoto':
+      return { fileSuffix: '', payloadPositionIndex: 0 }
+    case 'startRecord':
+      return { fileSuffix: '', payloadPositionIndex: 0 }
+    case 'stopRecord':
+      return { payloadPositionIndex: 0 }
+    case 'gimbalRotate':
+      return {
+        gimbalRotateMode: 'absoluteAngle',
+        gimbalPitchRotateEnable: 1,
+        gimbalPitchRotateAngle: 0,
+        gimbalYawRotateEnable: 0,
+        gimbalYawRotateAngle: 0,
+        gimbalRotateTimeEnable: 0,
+        gimbalRotateTime: 0,
+        payloadPositionIndex: 0,
+      }
+    case 'hover':
+      return { hoverTime: 3 }
+    case 'focus':
+      return { payloadPositionIndex: 0, isPointFocus: 1, focusX: 0.5, focusY: 0.5 }
+    case 'rotateYaw':
+      return { aircraftHeading: 0, aircraftPathMode: 'clockwise' }
+    default:
+      return {}
+  }
 }
 
 function abortExecution (reason: 'error' | 'stopped' | 'done') {

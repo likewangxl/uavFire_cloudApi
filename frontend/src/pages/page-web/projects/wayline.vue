@@ -66,6 +66,108 @@
               v-model:value="planningState.maxSpeed" />
           </div>
         </div>
+        <!-- L1: 全局 mission 配置 -->
+        <div class="planning-row">
+          <a-button
+            size="small"
+            type="link"
+            style="padding: 0;"
+            @click="advancedConfigOpen = !advancedConfigOpen">
+            {{ advancedConfigOpen ? '▼ 高级配置' : '▶ 高级配置' }}
+          </a-button>
+        </div>
+        <div class="planning-advanced" v-if="advancedConfigOpen">
+          <div class="planning-row planning-two-col">
+            <div>
+              <span class="planning-label">完成动作</span>
+              <a-select
+                size="small"
+                style="width: 100%;"
+                :value="planningState.finishAction"
+                placeholder="goHome (默认)"
+                allow-clear
+                :disabled="planningState.executing"
+                @change="(v: any) => planningSetMissionConfig({ finishAction: v })">
+                <a-select-option value="goHome">goHome 返航</a-select-option>
+                <a-select-option value="autoLand">autoLand 原地降落</a-select-option>
+                <a-select-option value="noAction">noAction 不动作</a-select-option>
+                <a-select-option value="gotoFirstWaypoint">回到首点</a-select-option>
+              </a-select>
+            </div>
+            <div>
+              <span class="planning-label">RC 失联</span>
+              <a-select
+                size="small"
+                style="width: 100%;"
+                :value="planningState.exitOnRcLost"
+                placeholder="goContinue (默认)"
+                allow-clear
+                :disabled="planningState.executing"
+                @change="(v: any) => planningSetMissionConfig({ exitOnRcLost: v })">
+                <a-select-option value="goContinue">goContinue 继续飞</a-select-option>
+                <a-select-option value="executeLostAction">executeLostAction 执行失联动作</a-select-option>
+              </a-select>
+            </div>
+          </div>
+          <div class="planning-row planning-two-col">
+            <div>
+              <span class="planning-label">失联动作</span>
+              <a-select
+                size="small"
+                style="width: 100%;"
+                :value="planningState.rcLostAction"
+                placeholder="goBack (默认)"
+                allow-clear
+                :disabled="planningState.executing"
+                @change="(v: any) => planningSetMissionConfig({ rcLostAction: v })">
+                <a-select-option value="hover">hover 悬停</a-select-option>
+                <a-select-option value="goBack">goBack 返航</a-select-option>
+                <a-select-option value="landing">landing 降落</a-select-option>
+              </a-select>
+            </div>
+            <div>
+              <span class="planning-label">起飞安全高度 (m)</span>
+              <a-input-number
+                size="small"
+                style="width: 100%;"
+                :min="2"
+                :max="1500"
+                :step="1"
+                :value="planningState.takeoffSecurityHeight"
+                placeholder="20 (默认)"
+                :disabled="planningState.executing"
+                @change="(v: any) => planningSetMissionConfig({ takeoffSecurityHeight: v })" />
+            </div>
+          </div>
+          <div class="planning-row planning-two-col">
+            <div>
+              <span class="planning-label">转场速度 (m/s)</span>
+              <a-input-number
+                size="small"
+                style="width: 100%;"
+                :min="1"
+                :max="15"
+                :step="1"
+                :value="planningState.globalTransitionalSpeed"
+                placeholder="5 (默认)"
+                :disabled="planningState.executing"
+                @change="(v: any) => planningSetMissionConfig({ globalTransitionalSpeed: v })" />
+            </div>
+            <div>
+              <span class="planning-label">RTH 高度 (m, 仅 dock)</span>
+              <a-input-number
+                size="small"
+                style="width: 100%;"
+                :min="2"
+                :max="1500"
+                :step="1"
+                :value="planningState.rthAltitude"
+                placeholder="飞机默认"
+                :disabled="planningState.executing"
+                @change="(v: any) => planningSetMissionConfig({ rthAltitude: v })" />
+            </div>
+          </div>
+        </div>
         <div class="planning-row planning-actions">
           <a-button
             v-if="!planningState.active"
@@ -115,9 +217,126 @@
                   @change="(v) => onUpdateHeight(wp.id, v)"
                   style="width: 70px;" />
                 <span class="planning-wp-unit">m</span>
+                <a-button size="small" :disabled="planningState.executing" @click="toggleWaypointExpand(wp.id)">
+                  {{ expandedWaypointId === wp.id ? '收起' : '高级' }}
+                </a-button>
                 <a-button size="small" :disabled="planningState.executing || idx === 0" @click="onMove(wp.id, 'up')">↑</a-button>
                 <a-button size="small" :disabled="planningState.executing || idx === planningState.waypoints.length - 1" @click="onMove(wp.id, 'down')">↓</a-button>
                 <a-button size="small" danger :disabled="planningState.executing" @click="onRemove(wp.id)">✕</a-button>
+              </div>
+              <!-- L1 per-waypoint 高级编辑 -->
+              <div class="planning-wp-advanced" v-if="expandedWaypointId === wp.id">
+                <div class="planning-wp-row">
+                  <span class="planning-wp-row-label">飞行速度</span>
+                  <a-input-number
+                    size="small"
+                    :min="1"
+                    :max="15"
+                    :step="0.5"
+                    :value="wp.speed"
+                    placeholder="走全局"
+                    :disabled="planningState.executing"
+                    @change="(v: any) => planningUpdateField(wp.id, 'speed', v ?? undefined)"
+                    style="width: 100%;" />
+                </div>
+                <div class="planning-wp-row planning-two-col">
+                  <div>
+                    <span class="planning-wp-row-label">云台俯仰°</span>
+                    <a-input-number
+                      size="small"
+                      :min="-90"
+                      :max="30"
+                      :step="5"
+                      :value="wp.gimbalPitch"
+                      placeholder="0"
+                      :disabled="planningState.executing"
+                      @change="(v: any) => planningUpdateField(wp.id, 'gimbalPitch', v ?? undefined)"
+                      style="width: 100%;" />
+                  </div>
+                  <div>
+                    <span class="planning-wp-row-label">云台偏航°</span>
+                    <a-input-number
+                      size="small"
+                      :min="-180"
+                      :max="180"
+                      :step="5"
+                      :value="wp.gimbalYaw"
+                      placeholder="跟随机头"
+                      :disabled="planningState.executing"
+                      @change="(v: any) => planningUpdateField(wp.id, 'gimbalYaw', v ?? undefined)"
+                      style="width: 100%;" />
+                  </div>
+                </div>
+                <div class="planning-wp-row planning-two-col">
+                  <div>
+                    <span class="planning-wp-row-label">朝向模式</span>
+                    <a-select
+                      size="small"
+                      :value="wp.headingMode"
+                      placeholder="followWayline"
+                      allow-clear
+                      :disabled="planningState.executing"
+                      @change="(v: any) => planningUpdateField(wp.id, 'headingMode', v ?? undefined)"
+                      style="width: 100%;">
+                      <a-select-option value="followWayline">followWayline</a-select-option>
+                      <a-select-option value="smoothTransition">smoothTransition</a-select-option>
+                      <a-select-option value="fixed">fixed</a-select-option>
+                      <a-select-option value="towardPOI">towardPOI</a-select-option>
+                    </a-select>
+                  </div>
+                  <div>
+                    <span class="planning-wp-row-label">朝向角°</span>
+                    <a-input-number
+                      size="small"
+                      :min="-180"
+                      :max="180"
+                      :step="5"
+                      :value="wp.headingAngle"
+                      placeholder="0 (fixed 用)"
+                      :disabled="planningState.executing || wp.headingMode !== 'fixed'"
+                      @change="(v: any) => planningUpdateField(wp.id, 'headingAngle', v ?? undefined)"
+                      style="width: 100%;" />
+                  </div>
+                </div>
+                <div class="planning-wp-row planning-two-col">
+                  <div>
+                    <span class="planning-wp-row-label">转弯模式</span>
+                    <a-select
+                      size="small"
+                      :value="wp.turnMode"
+                      placeholder="默认平滑过弯"
+                      allow-clear
+                      :disabled="planningState.executing"
+                      @change="(v: any) => planningUpdateField(wp.id, 'turnMode', v ?? undefined)"
+                      style="width: 100%;">
+                      <a-select-option value="coordinateTurn">协调转弯</a-select-option>
+                      <a-select-option value="toPointAndStopWithDiscontinuityCurvature">停止转弯</a-select-option>
+                      <a-select-option value="toPointAndStopWithContinuityCurvature">平滑停止</a-select-option>
+                      <a-select-option value="toPointAndPassWithContinuityCurvature">平滑通过</a-select-option>
+                    </a-select>
+                  </div>
+                  <div>
+                    <span class="planning-wp-row-label">转弯阻尼 (m)</span>
+                    <a-input-number
+                      size="small"
+                      :min="0"
+                      :max="500"
+                      :step="1"
+                      :value="wp.turnDamping"
+                      placeholder="10"
+                      :disabled="planningState.executing"
+                      @change="(v: any) => planningUpdateField(wp.id, 'turnDamping', v ?? undefined)"
+                      style="width: 100%;" />
+                  </div>
+                </div>
+                <div class="planning-wp-row">
+                  <span class="planning-wp-row-label">动作 (执行到该航点时)</span>
+                  <WaypointActionEditor
+                    :actions="wp.actions"
+                    @add="(fn: any) => planningAddAction(wp.id, fn)"
+                    @remove="(i: number) => planningRemoveAction(wp.id, i)"
+                    @updateParam="(i: number, k: string, v: any) => planningUpdateActionParam(wp.id, i, k, v)" />
+                </div>
               </div>
             </div>
           </div>
@@ -184,6 +403,13 @@
             <div class="planned-wayline-meta muted">
               <span>机型 {{ record.aircraftModelKey || '-' }}</span>
               <span>更新于 {{ formatTimestamp(record.updateTime) }}</span>
+            </div>
+            <!-- P2.c L2 任务监控:只在 task 已 prepare 后显示 -->
+            <div class="planned-wayline-monitor" v-if="record.flightId" @click.stop>
+              <WaylineMissionMonitor
+                :workspace-id="monitorWorkspaceId"
+                :record="record"
+                @change="(updated: any) => onMissionMonitorChange(updated)" />
             </div>
             <div class="planned-wayline-actions">
               <a-button size="small" @click.stop="showPlannedWaylineDetail(record)">详情</a-button>
@@ -397,6 +623,11 @@ import {
   removeWaypoint as planningRemove,
   moveWaypoint as planningMove,
   updateWaypointHeight as planningUpdateHeight,
+  updateWaypointField as planningUpdateField,
+  setMissionConfig as planningSetMissionConfig,
+  addWaypointAction as planningAddAction,
+  removeWaypointAction as planningRemoveAction,
+  updateWaypointActionParam as planningUpdateActionParam,
   startExecution as planningExecute,
   stopExecution as planningStopExec,
   setTargetAircraft as planningSetTarget,
@@ -406,6 +637,8 @@ import {
   resetPlanningDraft,
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
+import WaypointActionEditor from '/@/components/WaypointActionEditor.vue'
+import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 
 const loading = ref(false)
 const store = useMyStore()
@@ -416,6 +649,16 @@ const showPlanningTools = computed(() => !isTaskRouteSelector.value)
 // ---------- Planned wayline (click-to-fly) ----------
 const planningState = getPlanningStateRaw()
 const selectedAircraftSn = ref('')
+const advancedConfigOpen = ref(false)
+const expandedWaypointId = ref<string | null>(null)
+function toggleWaypointExpand (id: string) {
+  expandedWaypointId.value = expandedWaypointId.value === id ? null : id
+}
+const monitorWorkspaceId = computed(() => localStorage.getItem(ELocalStorageKey.WorkspaceId) || '')
+function onMissionMonitorChange (updated: PlannedWaylineRecord) {
+  const idx = plannedWaylinesData.data.findIndex(r => r.plannedWaylineId === updated.plannedWaylineId)
+  if (idx >= 0) plannedWaylinesData.data.splice(idx, 1, updated)
+}
 
 interface AircraftSummary {
   sn: string
@@ -567,6 +810,18 @@ function buildPagePlannedWaypointBody (wp: any, idx: number, defaultHeight: numb
     wgsLng,
     wgsLat,
     height: positiveSaveNumber(wp?.height, defaultHeight),
+    // L1 per-航点定制字段透传 (null 时由后端默认值兜底)
+    speed: wp?.speed ?? undefined,
+    gimbalPitch: wp?.gimbalPitch ?? undefined,
+    gimbalYaw: wp?.gimbalYaw ?? undefined,
+    headingMode: wp?.headingMode ?? undefined,
+    headingAngle: wp?.headingAngle ?? undefined,
+    poiLng: wp?.poiLng ?? undefined,
+    poiLat: wp?.poiLat ?? undefined,
+    poiAlt: wp?.poiAlt ?? undefined,
+    turnMode: wp?.turnMode ?? undefined,
+    turnDamping: wp?.turnDamping ?? undefined,
+    actions: wp?.actions && wp.actions.length > 0 ? wp.actions : undefined,
   }
 }
 
@@ -580,6 +835,13 @@ function buildPagePlannedWaylineBody (name: string, aircraftModelKey: string): C
     aircraftSn: planningState.aircraftSn || '',
     defaultHeight,
     maxSpeed,
+    // L1 全局 mission 配置 (undefined 时由后端 entity 默认值兜底)
+    finishAction: planningState.finishAction ?? undefined,
+    exitOnRcLost: planningState.exitOnRcLost ?? undefined,
+    rcLostAction: planningState.rcLostAction ?? undefined,
+    takeoffSecurityHeight: planningState.takeoffSecurityHeight ?? undefined,
+    globalTransitionalSpeed: planningState.globalTransitionalSpeed ?? undefined,
+    rthAltitude: planningState.rthAltitude ?? undefined,
     waypoints: planningState.waypoints.map((wp, idx) => buildPagePlannedWaypointBody(wp, idx, defaultHeight)),
   }
 }
@@ -882,18 +1144,20 @@ async function onGeneratePlannedWaylineFile (record: PlannedWaylineRecord) {
 }
 
 async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
-  if (!record.gatewaySn) {
-    message.warning('下发准备前需要选择或绑定目标机场/网关。')
-    return
+  // Agent 路径 (M4T + RC,无机场) 不需要 dockSn,后端按 dockSn 是否非空自动路由。
+  // 如果用户绑定了机场就走 dock 路径;否则走 agent 把 KMZ 推到 RC + MSDK。
+  const body: any = {
+    droneSn: record.aircraftSn,
+    executeTime: 0,
+    taskType: 'IMMEDIATE',
+  }
+  // 仅当 record.dockSn 存在 (用户显式选了机场) 才透传,gatewaySn 是 RC 的 SN,不能当 dockSn 用
+  if (record.dockSn) {
+    body.dockSn = record.dockSn
   }
   await runPlannedWaylineAction(
     record,
-    () => preparePlannedWaylineTask(workspaceId, record.plannedWaylineId, {
-      dockSn: record.gatewaySn,
-      droneSn: record.aircraftSn,
-      executeTime: 0,
-      taskType: 'IMMEDIATE',
-    }),
+    () => preparePlannedWaylineTask(workspaceId, record.plannedWaylineId, body),
     '航线任务已下发准备')
 }
 
@@ -1295,6 +1559,44 @@ const uploadFile = async () => {
   gap: 4px;
 }
 .planning-wp-unit {
+  color: #8c8c8c;
+  font-size: 11px;
+}
+.scrollbar {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.planning-advanced {
+  margin-top: 4px;
+  padding: 8px;
+  background: #1f1f1f;
+  border-radius: 3px;
+  border: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.planning-wp-advanced {
+  margin-top: 6px;
+  padding: 6px;
+  background: #1f1f1f;
+  border-radius: 3px;
+  border: 1px dashed #555;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.planning-wp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.planning-wp-row.planning-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.planning-wp-row-label {
   color: #8c8c8c;
   font-size: 11px;
 }

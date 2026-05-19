@@ -215,6 +215,31 @@ export const cancelPlannedWaylineTask = async function (workspaceId: string, pla
   return normalizePlannedWaylineResult(result.data)
 }
 
+// L2 实时控制 (按 entity.dockSn 自动路由到 dock 或 agent path,前端无感知)
+export const pausePlannedWaylineTask = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/pause`
+  const result = await request.post(url)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const recoveryPlannedWaylineTask = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/recovery`
+  const result = await request.post(url)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const stopPlannedWaylineTask = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/stop`
+  const result = await request.post(url)
+  return normalizePlannedWaylineResult(result.data)
+}
+
+export const queryPlannedWaylineBreakpoint = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/query-breakpoint`
+  const result = await request.post(url)
+  return normalizePlannedWaylineResult(result.data)
+}
+
 export interface CreatePlan {
   name: string,
   file_id: string,

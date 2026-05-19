@@ -9,6 +9,7 @@ import com.yx.uavfire.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineFileDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaylineDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaypointDTO;
+import com.yx.uavfire.wayline.model.dto.WaypointActionDTO;
 import com.yx.uavfire.wayline.model.entity.PlannedWaylineEntity;
 import com.yx.uavfire.wayline.model.param.CreatePlannedWaylineParam;
 import com.yx.uavfire.wayline.model.param.PreparePlannedWaylineTaskParam;
@@ -37,6 +38,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
@@ -50,6 +52,7 @@ import javax.xml.stream.XMLStreamWriter;
 @Service
 @Transactional
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private static final String STATUS_DRAFT = "draft";
@@ -59,11 +62,23 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     private static final String STATUS_EXECUTING = "executing";
     private static final String STATUS_CANCELED = "canceled";
 
+    private static final String STATUS_PAUSED = "paused";
+    private static final String STATUS_STOPPED = "stopped";
+
     private final IPlannedWaylineMapper mapper;
 
     private final ObjectMapper objectMapper;
 
     private final IWaylineFileService waylineFileService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private SDKWaylineService sdkWaylineService;
+
+    @org.springframework.beans.factory.annotation.Value("${wayline-agent.server-url:http://localhost:6789}")
+    private String waylineAgentServerUrl;
 
     @Override
     public PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize) {
@@ -258,9 +273,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     @Override
     public PlannedWaylineDTO prepareTask(String workspaceId, String id, String username, PreparePlannedWaylineTaskParam param) {
-        if (param == null || !StringUtils.hasText(param.getDockSn())) {
-            throw new IllegalArgumentException("Dock sn is required.");
-        }
         PlannedWaylineEntity existing = getExisting(workspaceId, id);
         if (!StringUtils.hasText(existing.getPublishedWaylineId())) {
             throw new IllegalArgumentException("Generate the planned wayline file before preparing the flight task.");
@@ -270,11 +282,22 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setStatus(STATUS_PUBLISHING);
         existing.setTaskStatus(STATUS_PUBLISHING);
         existing.setFlightId(UUID.randomUUID().toString());
-        existing.setDockSn(param.getDockSn());
-        existing.setDroneSn(param.getDroneSn());
+        if (param != null && StringUtils.hasText(param.getDockSn())) {
+            existing.setDockSn(param.getDockSn());
+        }
+        if (param != null && StringUtils.hasText(param.getDroneSn())) {
+            existing.setDroneSn(param.getDroneSn());
+        }
         existing.setPublisher(username);
         existing.setPublishTime(now);
         existing.setUpdateTime(now);
+        existing.setPreparedTime(now);
+
+        // P3: 如果是 dock 路径,真发 flighttaskPrepare MQTT 给机场
+        if (StringUtils.hasText(existing.getDockSn())) {
+            invokeDockPrepare(existing, param);
+        }
+        // Agent 路径无需发命令:用户在前端点 "执行" 时会触发 WAYLINE_DISPATCH (executeTask)
 
         updateTaskFields(existing);
         return entity2Dto(existing);
@@ -292,6 +315,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setExecutedTime(now);
         existing.setUpdateTime(now);
 
+        // 按 dockSn 路由发命令
+        if (StringUtils.hasText(existing.getDockSn())) {
+            invokeDockExecute(existing);
+        } else {
+            invokeAgentDispatch(existing);
+        }
+
         updateTaskFields(existing);
         return entity2Dto(existing);
     }
@@ -303,12 +333,248 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalArgumentException("Prepare the planned wayline task before canceling it.");
         }
         long now = System.currentTimeMillis();
+
+        // 按 dockSn 路由发命令 (cancel 同义于 dock flighttaskUndo / agent STOP)
+        if (StringUtils.hasText(existing.getDockSn())) {
+            try {
+                invokeDockControl(existing, ControlOp.STOP);
+            } catch (RuntimeException e) {
+                log.warn("dock cancel command failed, marking canceled locally: {}", e.getMessage());
+            }
+        } else {
+            try {
+                invokeAgentControl(existing, ControlOp.STOP);
+            } catch (RuntimeException e) {
+                log.warn("agent cancel command failed, marking canceled locally: {}", e.getMessage());
+            }
+        }
+
         existing.setStatus(STATUS_CANCELED);
         existing.setTaskStatus(STATUS_CANCELED);
         existing.setUpdateTime(now);
 
         updateTaskFields(existing);
         return entity2Dto(existing);
+    }
+
+    @Override
+    public PlannedWaylineDTO pauseTask(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.PAUSE);
+    }
+
+    @Override
+    public PlannedWaylineDTO recoveryTask(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.RECOVERY);
+    }
+
+    @Override
+    public PlannedWaylineDTO stopTask(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.STOP);
+    }
+
+    @Override
+    public PlannedWaylineDTO queryBreakpoint(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.QUERY_BREAKPOINT);
+    }
+
+    private enum ControlOp { PAUSE, RECOVERY, STOP, QUERY_BREAKPOINT }
+
+    private PlannedWaylineDTO controlTask(String workspaceId, String id, ControlOp op) {
+        PlannedWaylineEntity existing = getExisting(workspaceId, id);
+        if (!StringUtils.hasText(existing.getFlightId())) {
+            throw new IllegalArgumentException("Task has not been prepared yet.");
+        }
+
+        boolean isDockPath = StringUtils.hasText(existing.getDockSn());
+        if (isDockPath) {
+            invokeDockControl(existing, op);
+        } else {
+            invokeAgentControl(existing, op);
+        }
+
+        long now = System.currentTimeMillis();
+        switch (op) {
+            case PAUSE:
+                existing.setTaskStatus(STATUS_PAUSED);
+                break;
+            case RECOVERY:
+                existing.setTaskStatus(STATUS_EXECUTING);
+                break;
+            case STOP:
+                existing.setTaskStatus(STATUS_STOPPED);
+                break;
+            case QUERY_BREAKPOINT:
+                // 不动状态;agent/dock 返回断点会异步到 progress 事件,持久化到 break_point_json
+                break;
+        }
+        existing.setUpdateTime(now);
+        updateTaskFields(existing);
+        return entity2Dto(existing);
+    }
+
+    /**
+     * P3: Dock 路径 flighttask_prepare。装配 FlighttaskPrepareRequest 并通过
+     * sdkWaylineService 发往机场。注:真飞 deferred,无机场时此路径不会走到。
+     */
+    private void invokeDockPrepare(PlannedWaylineEntity entity, PreparePlannedWaylineTaskParam param) {
+        if (sdkWaylineService == null) {
+            log.warn("sdkWaylineService not wired, skipping dock prepare for flight {} (local-only mode)", entity.getFlightId());
+            return;
+        }
+        com.dji.sdk.config.version.GatewayManager gateway = com.dji.sdk.common.SDKManager.getDeviceSDK(entity.getDockSn());
+        if (gateway == null) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online.");
+        }
+        if (!StringUtils.hasText(entity.getKmzUrl())) {
+            throw new IllegalStateException("KMZ url is missing; regenerate the planned wayline file.");
+        }
+        com.dji.sdk.cloudapi.wayline.FlighttaskPrepareRequest req = new com.dji.sdk.cloudapi.wayline.FlighttaskPrepareRequest()
+                .setFlightId(entity.getFlightId())
+                .setTaskType(com.dji.sdk.cloudapi.wayline.TaskTypeEnum.IMMEDIATE)
+                .setWaylineType(com.dji.sdk.cloudapi.wayline.WaylineTypeEnum.WAYPOINT)
+                .setFile(new com.dji.sdk.cloudapi.wayline.FlighttaskFile()
+                        .setUrl(entity.getKmzUrl())
+                        .setFingerprint(entity.getKmzMd5()));
+        if (entity.getRthAltitude() != null) {
+            req.setRthAltitude(entity.getRthAltitude());
+        }
+        if (param != null) {
+            if (param.getExecuteTime() != null) {
+                req.setExecuteTime(param.getExecuteTime());
+            }
+            if (Boolean.TRUE.equals(param.getSimulate()) && param.getSimulateLat() != null && param.getSimulateLng() != null) {
+                req.setSimulateMission(new com.dji.sdk.cloudapi.wayline.SimulateMission()
+                        .setIsEnable(com.dji.sdk.cloudapi.wayline.SimulateSwitchEnum.ENABLE)
+                        .setLatitude(param.getSimulateLat().floatValue())
+                        .setLongitude(param.getSimulateLng().floatValue()));
+            }
+            if (param.getMinBattery() != null || param.getBeginTime() != null || param.getEndTime() != null) {
+                com.dji.sdk.cloudapi.wayline.ReadyConditions rc = new com.dji.sdk.cloudapi.wayline.ReadyConditions();
+                if (param.getMinBattery() != null) rc.setBatteryCapacity(param.getMinBattery());
+                if (param.getBeginTime() != null) rc.setBeginTime(param.getBeginTime());
+                if (param.getEndTime() != null) rc.setEndTime(param.getEndTime());
+                req.setReadyConditions(rc);
+            }
+        }
+        com.dji.sdk.mqtt.services.TopicServicesResponse<com.dji.sdk.mqtt.services.ServicesReplyData> reply =
+                sdkWaylineService.flighttaskPrepare(gateway, req);
+        if (reply == null || reply.getData() == null || reply.getData().getResult() == null
+                || !reply.getData().getResult().isSuccess()) {
+            throw new IllegalStateException("Dock prepare failed: "
+                    + (reply != null && reply.getData() != null ? reply.getData().getResult() : "no reply"));
+        }
+    }
+
+    /** P3: Dock 路径 flighttask_execute。 */
+    private void invokeDockExecute(PlannedWaylineEntity entity) {
+        if (sdkWaylineService == null) {
+            log.warn("sdkWaylineService not wired, skipping dock execute for flight {} (local-only mode)", entity.getFlightId());
+            return;
+        }
+        com.dji.sdk.config.version.GatewayManager gateway = com.dji.sdk.common.SDKManager.getDeviceSDK(entity.getDockSn());
+        if (gateway == null) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online.");
+        }
+        com.dji.sdk.mqtt.services.TopicServicesResponse<com.dji.sdk.mqtt.services.ServicesReplyData> reply =
+                sdkWaylineService.flighttaskExecute(gateway,
+                        new com.dji.sdk.cloudapi.wayline.FlighttaskExecuteRequest().setFlightId(entity.getFlightId()));
+        if (reply == null || reply.getData() == null || reply.getData().getResult() == null
+                || !reply.getData().getResult().isSuccess()) {
+            throw new IllegalStateException("Dock execute failed: "
+                    + (reply != null && reply.getData() != null ? reply.getData().getResult() : "no reply"));
+        }
+    }
+
+    /** Agent 路径派发航线 (WAYLINE_DISPATCH with KMZ url + missionId)。 */
+    private void invokeAgentDispatch(PlannedWaylineEntity entity) {
+        if (waylineAgentService == null) {
+            log.warn("waylineAgentService not wired, skipping agent dispatch for flight {} (local-only mode)", entity.getFlightId());
+            return;
+        }
+        if (!StringUtils.hasText(entity.getKmzUrl())) {
+            log.warn("KMZ url missing for flight {}, skipping agent dispatch", entity.getFlightId());
+            return;
+        }
+        String droneSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : "RC_PLUS_LOCAL";
+
+        // Load KMZ into memory so the agent can download it via the HTTP KMZ endpoint.
+        try {
+            byte[] kmzBytes;
+            try (InputStream is = new URL(entity.getKmzUrl()).openStream()) {
+                kmzBytes = is.readAllBytes();
+            }
+            waylineAgentService.prepareKmz(droneSn, entity.getFlightId(), kmzBytes);
+        } catch (Exception e) {
+            log.warn("Failed to cache KMZ for flight {}: {}", entity.getFlightId(), e.getMessage());
+            return;
+        }
+
+        String httpKmzUrl = waylineAgentServerUrl + "/wayline-agent/api/v1/agents/" + droneSn
+                + "/missions/" + entity.getFlightId() + "/kmz";
+        com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO data =
+                new com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO()
+                        .setMissionId(entity.getFlightId())
+                        .setKmzUrl(httpKmzUrl)
+                        .setKmzFilename(entity.getFlightId() + ".kmz")
+                        .setKmzMd5(entity.getKmzMd5());
+        waylineAgentService.dispatchWayline(droneSn, data);
+        log.info("Dispatched wayline to agent {} flight {} kmzUrl={}", droneSn, entity.getFlightId(), httpKmzUrl);
+    }
+
+    private void invokeAgentControl(PlannedWaylineEntity entity, ControlOp op) {
+        if (waylineAgentService == null) {
+            throw new IllegalStateException("Agent service unavailable; cannot route control command.");
+        }
+        String droneSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : "RC_PLUS_LOCAL";
+        com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO data =
+                new com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO().setMissionId(entity.getFlightId());
+        switch (op) {
+            case PAUSE:           waylineAgentService.pauseMission(droneSn, data); break;
+            case RECOVERY:        waylineAgentService.resumeMission(droneSn, data); break;
+            case STOP:            waylineAgentService.stopMission(droneSn, data); break;
+            case QUERY_BREAKPOINT: waylineAgentService.queryBreakpoint(droneSn, data); break;
+        }
+    }
+
+    private void invokeDockControl(PlannedWaylineEntity entity, ControlOp op) {
+        // P3: 真接通 dock 路径。实际真飞回归 deferred 到机场到位后。
+        if (sdkWaylineService == null) {
+            throw new IllegalStateException("Cloud SDK wayline service unavailable.");
+        }
+        com.dji.sdk.config.version.GatewayManager gateway;
+        try {
+            gateway = com.dji.sdk.common.SDKManager.getDeviceSDK(entity.getDockSn());
+        } catch (Exception e) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online via Cloud API.", e);
+        }
+        if (gateway == null) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online via Cloud API.");
+        }
+        com.dji.sdk.mqtt.services.TopicServicesResponse<com.dji.sdk.mqtt.services.ServicesReplyData> reply;
+        switch (op) {
+            case PAUSE:
+                reply = sdkWaylineService.flighttaskPause(gateway);
+                break;
+            case RECOVERY:
+                reply = sdkWaylineService.flighttaskRecovery(gateway);
+                break;
+            case STOP:
+                reply = sdkWaylineService.flighttaskUndo(gateway,
+                        new com.dji.sdk.cloudapi.wayline.FlighttaskUndoRequest()
+                                .setFlightIds(java.util.List.of(entity.getFlightId())));
+                break;
+            case QUERY_BREAKPOINT:
+                // Cloud SDK 中 break_point 通过 flighttask_progress.ext.break_point 异步上报,
+                // 无主动 query 命令;直接返回让 controller 反馈当前 break_point_json (来自 P2.b 持久化)。
+                return;
+            default:
+                return;
+        }
+        if (reply == null || reply.getData() == null || reply.getData().getResult() == null
+                || !reply.getData().getResult().isSuccess()) {
+            throw new IllegalStateException("Dock control " + op + " failed: "
+                    + (reply != null && reply.getData() != null ? reply.getData().getResult() : "no reply"));
+        }
     }
 
     @Override
@@ -528,10 +794,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
-                zipOutputStream.write(buildTemplateKml(publishedName, droneDevice, payloadDevice, waypoints));
+                zipOutputStream.write(buildTemplateKml(publishedName, entity, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
-                zipOutputStream.write(buildWaylinesWpml(publishedName, droneDevice, payloadDevice, waypoints));
+                zipOutputStream.write(buildWaylinesWpml(publishedName, entity, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
             }
             return outputStream.toByteArray();
@@ -574,14 +840,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
     }
 
-    private byte[] buildTemplateKml(String name, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
+    private byte[] buildTemplateKml(String name, PlannedWaylineEntity entity, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
         return writeKml(w -> {
             elem(w, NS_KML, "name", name);
             long now = System.currentTimeMillis();
             elem(w, "createTime", String.valueOf(now));
             elem(w, "updateTime", String.valueOf(now));
 
-            writeMissionConfig(w, droneDevice, payloadDevice);
+            writeMissionConfig(w, entity, droneDevice, payloadDevice);
 
             w.writeStartElement("Folder");
             elem(w, "templateType", "waypoint");
@@ -617,11 +883,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         });
     }
 
-    private byte[] buildWaylinesWpml(String name, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
+    private byte[] buildWaylinesWpml(String name, PlannedWaylineEntity entity, DeviceEnum droneDevice, DeviceEnum payloadDevice, List<PlannedWaypointDTO> waypoints) {
         return writeKml(w -> {
             elem(w, NS_KML, "name", name);
 
-            writeMissionConfig(w, droneDevice, payloadDevice);
+            writeMissionConfig(w, entity, droneDevice, payloadDevice);
 
             w.writeStartElement("Folder");
             elem(w, "templateId", "0");
@@ -650,14 +916,19 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         });
     }
 
-    private void writeMissionConfig(XMLStreamWriter w, DeviceEnum droneDevice, DeviceEnum payloadDevice) throws XMLStreamException {
+    private void writeMissionConfig(XMLStreamWriter w, PlannedWaylineEntity entity, DeviceEnum droneDevice, DeviceEnum payloadDevice) throws XMLStreamException {
         w.writeStartElement(NS_WPML, "missionConfig");
         elem(w, "flyToWaylineMode", "safely");
-        elem(w, "finishAction", FINISH_ACTION);
-        elem(w, "exitOnRCLost", EXIT_ON_RC_LOST);
-        elem(w, "executeRCLostAction", EXECUTE_RC_LOST_ACTION);
-        elem(w, "takeOffSecurityHeight", String.valueOf(TAKE_OFF_SECURITY_HEIGHT_M));
-        elem(w, "globalTransitionalSpeed", String.valueOf(GLOBAL_TRANSITIONAL_SPEED_MPS));
+        elem(w, "finishAction",
+                entity.getFinishAction() != null ? entity.getFinishAction() : FINISH_ACTION);
+        elem(w, "exitOnRCLost",
+                entity.getExitOnRcLost() != null ? entity.getExitOnRcLost() : EXIT_ON_RC_LOST);
+        elem(w, "executeRCLostAction",
+                entity.getRcLostAction() != null ? entity.getRcLostAction() : EXECUTE_RC_LOST_ACTION);
+        elem(w, "takeOffSecurityHeight", String.valueOf(
+                entity.getTakeoffSecurityHeight() != null ? entity.getTakeoffSecurityHeight() : TAKE_OFF_SECURITY_HEIGHT_M));
+        elem(w, "globalTransitionalSpeed", formatNumeric(
+                entity.getGlobalTransitionalSpeed() != null ? entity.getGlobalTransitionalSpeed() : (double) GLOBAL_TRANSITIONAL_SPEED_MPS));
         writeDroneInfo(w, droneDevice);
         elem(w, "waylineAvoidLimitAreaMode", "0");
         writePayloadInfo(w, payloadDevice);
@@ -693,14 +964,21 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "ellipsoidHeight", String.valueOf(wp.getHeight()));
         elem(w, "height", String.valueOf(wp.getHeight()));
         w.writeStartElement(NS_WPML, "waypointTurnParam");
-        elem(w, "waypointTurnMode", "toPointAndPassWithContinuityCurvature");
-        elem(w, "waypointTurnDampingDist", "0");
+        elem(w, "waypointTurnMode",
+                wp.getTurnMode() != null ? wp.getTurnMode() : "toPointAndPassWithContinuityCurvature");
+        elem(w, "waypointTurnDampingDist", formatNumeric(
+                wp.getTurnDamping() != null ? wp.getTurnDamping() : 0.0));
         w.writeEndElement();
-        elem(w, "useGlobalSpeed", "1");
-        elem(w, "useGlobalHeadingParam", "1");
+        elem(w, "useGlobalSpeed", wp.getSpeed() != null ? "0" : "1");
+        elem(w, "useGlobalHeadingParam", hasCustomHeading(wp) ? "0" : "1");
         elem(w, "useStraightLine", "1");
+        writeActionGroups(w, wp, index);
         elem(w, "isRisky", "0");
         w.writeEndElement();
+    }
+
+    private static boolean hasCustomHeading(PlannedWaypointDTO wp) {
+        return wp.getHeadingMode() != null || wp.getHeadingAngle() != null || wp.getPoiLng() != null;
     }
 
     private void writeWaylinePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index) throws XMLStreamException {
@@ -710,26 +988,90 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         w.writeEndElement();
         elem(w, "index", String.valueOf(index));
         elem(w, "executeHeight", String.valueOf(wp.getHeight()));
-        elem(w, "waypointSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+        elem(w, "waypointSpeed", formatNumeric(
+                wp.getSpeed() != null ? wp.getSpeed() : (double) AUTO_FLIGHT_SPEED_MPS));
         w.writeStartElement(NS_WPML, "waypointHeadingParam");
-        elem(w, "waypointHeadingMode", "followWayline");
-        elem(w, "waypointHeadingAngle", "0");
-        elem(w, "waypointPoiPoint", "0.000000,0.000000,0.000000");
+        elem(w, "waypointHeadingMode",
+                wp.getHeadingMode() != null ? wp.getHeadingMode() : "followWayline");
+        elem(w, "waypointHeadingAngle", formatNumeric(
+                wp.getHeadingAngle() != null ? wp.getHeadingAngle() : 0.0));
+        String poiStr = "0.000000,0.000000,0.000000";
+        if (wp.getPoiLng() != null && wp.getPoiLat() != null) {
+            double alt = wp.getPoiAlt() != null ? wp.getPoiAlt() : 0.0;
+            poiStr = wp.getPoiLng() + "," + wp.getPoiLat() + "," + alt;
+        }
+        elem(w, "waypointPoiPoint", poiStr);
         elem(w, "waypointHeadingAngleEnable", "0");
         elem(w, "waypointHeadingPoiIndex", "0");
         w.writeEndElement();
         w.writeStartElement(NS_WPML, "waypointTurnParam");
-        elem(w, "waypointTurnMode", "toPointAndPassWithContinuityCurvature");
-        elem(w, "waypointTurnDampingDist", "10");
+        elem(w, "waypointTurnMode",
+                wp.getTurnMode() != null ? wp.getTurnMode() : "toPointAndPassWithContinuityCurvature");
+        elem(w, "waypointTurnDampingDist", formatNumeric(
+                wp.getTurnDamping() != null ? wp.getTurnDamping() : 10.0));
         w.writeEndElement();
         elem(w, "useStraightLine", "1");
         w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
-        elem(w, "waypointGimbalPitchAngle", "0");
-        elem(w, "waypointGimbalYawAngle", "0");
+        elem(w, "waypointGimbalPitchAngle", formatNumeric(
+                wp.getGimbalPitch() != null ? wp.getGimbalPitch() : 0.0));
+        elem(w, "waypointGimbalYawAngle", formatNumeric(
+                wp.getGimbalYaw() != null ? wp.getGimbalYaw() : 0.0));
         w.writeEndElement();
+        writeActionGroups(w, wp, index);
         elem(w, "isRisky", "0");
         elem(w, "waypointWorkType", "0");
         w.writeEndElement();
+    }
+
+    /**
+     * 输出航点 actionGroup 块。null/空 actions 不写。结构对齐 Pilot 2 真机导出
+     * (kmz/麟游官坪.kmz):
+     *   <wpml:actionGroup>
+     *     <wpml:actionGroupId>{wpIdx}</wpml:actionGroupId>
+     *     <wpml:actionGroupStartIndex>{wpIdx}</wpml:actionGroupStartIndex>
+     *     <wpml:actionGroupEndIndex>{wpIdx}</wpml:actionGroupEndIndex>
+     *     <wpml:actionGroupMode>sequence</wpml:actionGroupMode>
+     *     <wpml:actionTrigger><wpml:actionTriggerType>reachPoint</wpml:actionTriggerType></wpml:actionTrigger>
+     *     <wpml:action>...</wpml:action> (按 wp.actions 顺序;actionId 从 0 递增)
+     *   </wpml:actionGroup>
+     */
+    private void writeActionGroups(XMLStreamWriter w, PlannedWaypointDTO wp, int waypointIndex) throws XMLStreamException {
+        List<WaypointActionDTO> actions = wp.getActions();
+        if (actions == null || actions.isEmpty()) {
+            return;
+        }
+        w.writeStartElement(NS_WPML, "actionGroup");
+        elem(w, "actionGroupId", String.valueOf(waypointIndex));
+        elem(w, "actionGroupStartIndex", String.valueOf(waypointIndex));
+        elem(w, "actionGroupEndIndex", String.valueOf(waypointIndex));
+        elem(w, "actionGroupMode", "sequence");
+
+        WaypointActionDTO firstAction = actions.get(0);
+        String triggerType = firstAction.getActionTrigger() != null ? firstAction.getActionTrigger() : "reachPoint";
+        w.writeStartElement(NS_WPML, "actionTrigger");
+        elem(w, "actionTriggerType", triggerType);
+        if ("multipleTiming".equals(triggerType) && firstAction.getActionTriggerParam() != null) {
+            elem(w, "actionTriggerParam", formatNumeric(firstAction.getActionTriggerParam()));
+        }
+        w.writeEndElement(); // /actionTrigger
+
+        int actionId = 0;
+        for (WaypointActionDTO action : actions) {
+            w.writeStartElement(NS_WPML, "action");
+            elem(w, "actionId", String.valueOf(actionId++));
+            elem(w, "actionActuatorFunc", action.getActuatorFunc());
+            w.writeStartElement(NS_WPML, "actionActuatorFuncParam");
+            if (action.getParams() != null) {
+                for (java.util.Map.Entry<String, Object> entry : action.getParams().entrySet()) {
+                    Object v = entry.getValue();
+                    String s = (v instanceof Number) ? formatNumeric((Number) v) : String.valueOf(v);
+                    elem(w, entry.getKey(), s);
+                }
+            }
+            w.writeEndElement(); // /actionActuatorFuncParam
+            w.writeEndElement(); // /action
+        }
+        w.writeEndElement(); // /actionGroup
     }
 
     private static int globalAvgHeight(List<PlannedWaypointDTO> wps) {
@@ -766,6 +1108,15 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private void elem(XMLStreamWriter w, String name, String value) throws XMLStreamException {
         elem(w, NS_WPML, name, value);
+    }
+
+    /** 数值序列化:整数值不带 .0(对齐 Pilot 2 真机 KMZ 风格);非整数保留小数位。 */
+    private static String formatNumeric(Number value) {
+        double d = value.doubleValue();
+        if (d == Math.floor(d) && !Double.isInfinite(d)) {
+            return String.valueOf((long) d);
+        }
+        return String.valueOf(d);
     }
 
     private void elem(XMLStreamWriter w, String ns, String name, String value) throws XMLStreamException {
@@ -860,6 +1211,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
                 .maxSpeed(param.getMaxSpeed())
+                .finishAction(param.getFinishAction())
+                .exitOnRcLost(param.getExitOnRcLost())
+                .rcLostAction(param.getRcLostAction())
+                .takeoffSecurityHeight(param.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(param.getGlobalTransitionalSpeed())
+                .rthAltitude(param.getRthAltitude())
                 .waypointsJson(writeWaypoints(param.getWaypoints()))
                 .build();
     }
@@ -877,6 +1234,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(dto.getAircraftSn())
                 .defaultHeight(dto.getDefaultHeight())
                 .maxSpeed(dto.getMaxSpeed())
+                .finishAction(dto.getFinishAction())
+                .exitOnRcLost(dto.getExitOnRcLost())
+                .rcLostAction(dto.getRcLostAction())
+                .takeoffSecurityHeight(dto.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(dto.getGlobalTransitionalSpeed())
+                .rthAltitude(dto.getRthAltitude())
                 .waypointsJson(writeWaypoints(dto.getWaypoints()))
                 .status(dto.getStatus())
                 .publishedWaylineId(dto.getPublishedWaylineId())
@@ -890,6 +1253,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .taskStatus(dto.getTaskStatus())
                 .taskStatusReason(dto.getTaskStatusReason())
                 .taskProgress(dto.getTaskProgress())
+                .waylineMissionState(dto.getWaylineMissionState())
+                .currentWaypointIndex(dto.getCurrentWaypointIndex())
+                .totalWaypoints(dto.getTotalWaypoints())
+                .mediaCount(dto.getMediaCount())
+                .breakPointJson(dto.getBreakPointJson())
+                .lastProgressTime(dto.getLastProgressTime())
                 .preparedTime(dto.getPreparedTime())
                 .executedTime(dto.getExecutedTime())
                 .creator(dto.getCreator())
@@ -911,6 +1280,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
                 .maxSpeed(param.getMaxSpeed())
+                .finishAction(param.getFinishAction())
+                .exitOnRcLost(param.getExitOnRcLost())
+                .rcLostAction(param.getRcLostAction())
+                .takeoffSecurityHeight(param.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(param.getGlobalTransitionalSpeed())
+                .rthAltitude(param.getRthAltitude())
                 .waypointsJson(writeWaypoints(param.getWaypoints()))
                 .build();
     }
@@ -928,6 +1303,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(entity.getAircraftSn())
                 .defaultHeight(entity.getDefaultHeight())
                 .maxSpeed(entity.getMaxSpeed())
+                .finishAction(entity.getFinishAction())
+                .exitOnRcLost(entity.getExitOnRcLost())
+                .rcLostAction(entity.getRcLostAction())
+                .takeoffSecurityHeight(entity.getTakeoffSecurityHeight())
+                .globalTransitionalSpeed(entity.getGlobalTransitionalSpeed())
+                .rthAltitude(entity.getRthAltitude())
                 .waypoints(readWaypoints(entity.getWaypointsJson()))
                 .status(entity.getStatus())
                 .publishedWaylineId(entity.getPublishedWaylineId())
@@ -941,6 +1322,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .taskStatus(entity.getTaskStatus())
                 .taskStatusReason(entity.getTaskStatusReason())
                 .taskProgress(entity.getTaskProgress())
+                .waylineMissionState(entity.getWaylineMissionState())
+                .currentWaypointIndex(entity.getCurrentWaypointIndex())
+                .totalWaypoints(entity.getTotalWaypoints())
+                .mediaCount(entity.getMediaCount())
+                .breakPointJson(entity.getBreakPointJson())
+                .lastProgressTime(entity.getLastProgressTime())
                 .preparedTime(entity.getPreparedTime())
                 .executedTime(entity.getExecutedTime())
                 .creator(entity.getCreator())

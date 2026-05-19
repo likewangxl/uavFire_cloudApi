@@ -3,11 +3,14 @@ package com.yx.uavfire.wayline.agent.mqtt;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.yx.uavfire.wayline.agent.model.WaylineEventRecord;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchResultDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineProgressDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineStateChangeDTO;
 import com.yx.uavfire.wayline.agent.service.WaylineEventStore;
+import com.yx.uavfire.wayline.dao.IPlannedWaylineMapper;
+import com.yx.uavfire.wayline.model.entity.PlannedWaylineEntity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.integration.annotation.ServiceActivator;
@@ -38,6 +41,9 @@ public class WaylineAgentEventListener {
 
     private final ObjectMapper objectMapper;
     private final WaylineEventStore eventStore;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private IPlannedWaylineMapper plannedWaylineMapper;
 
     @ServiceActivator(inputChannel = WaylineAgentMqttChannel.INBOUND)
     public void onEvent(Message<byte[]> message) {
@@ -108,5 +114,63 @@ public class WaylineAgentEventListener {
                 .setData(decoded);
         eventStore.append(record);
         log.debug("wayline-agent event stored drone={} method={} mission={}", droneSn, method, missionId);
+
+        // P2.b: 把 progress / state_change 事件同步持久化到 planned_wayline (flightId = missionId)
+        if (plannedWaylineMapper != null && missionId != null && !missionId.isEmpty()) {
+            try {
+                if (decoded instanceof WaylineProgressDTO) {
+                    persistProgress(missionId, (WaylineProgressDTO) decoded);
+                } else if (decoded instanceof WaylineStateChangeDTO) {
+                    persistStateChange(missionId, (WaylineStateChangeDTO) decoded);
+                }
+            } catch (RuntimeException persistErr) {
+                log.warn("wayline-agent persist to planned_wayline failed mission={}: {}", missionId, persistErr.getMessage());
+            }
+        }
+    }
+
+    private void persistProgress(String missionId, WaylineProgressDTO pr) {
+        LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
+                .eq(PlannedWaylineEntity::getFlightId, missionId)
+                .set(PlannedWaylineEntity::getLastProgressTime, System.currentTimeMillis());
+        if (pr.getPercent() != null) {
+            update.set(PlannedWaylineEntity::getTaskProgress, pr.getPercent());
+        }
+        if (pr.getCurrentWaypointIndex() != null) {
+            update.set(PlannedWaylineEntity::getCurrentWaypointIndex, pr.getCurrentWaypointIndex());
+        }
+        if (pr.getTotalWaypoints() != null) {
+            update.set(PlannedWaylineEntity::getTotalWaypoints, pr.getTotalWaypoints());
+        }
+        plannedWaylineMapper.update(null, update);
+    }
+
+    private void persistStateChange(String missionId, WaylineStateChangeDTO sc) {
+        String mappedStatus = mapBusinessState(sc.getBusinessState());
+        LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
+                .eq(PlannedWaylineEntity::getFlightId, missionId)
+                .set(PlannedWaylineEntity::getLastProgressTime, System.currentTimeMillis());
+        if (mappedStatus != null) {
+            update.set(PlannedWaylineEntity::getTaskStatus, mappedStatus);
+        }
+        if (sc.getError() != null && !sc.getError().isEmpty()) {
+            update.set(PlannedWaylineEntity::getTaskStatusReason, sc.getError());
+        }
+        plannedWaylineMapper.update(null, update);
+    }
+
+    /** Agent businessState → planned_wayline.task_status (contract 6.1). */
+    private static String mapBusinessState(String businessState) {
+        if (businessState == null) return null;
+        switch (businessState) {
+            case "Dispatching": return "publishing";
+            case "Ready":       return "ready";
+            case "Executing":   return "executing";
+            case "Paused":      return "paused";
+            case "Stopped":     return "stopped";
+            case "Completed":   return "finished";
+            case "Error":       return "failed";
+            default:            return null;
+        }
     }
 }
