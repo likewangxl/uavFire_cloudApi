@@ -2,8 +2,6 @@ package com.yinxin.uavfir
 
 import android.app.Application
 import android.content.Context
-import android.content.Intent
-import android.os.Build
 import android.util.Log
 
 class App : Application() {
@@ -28,14 +26,6 @@ class App : Application() {
         if (runtimeLoopLifecyclePolicy.startOnApplicationCreate) {
             Log.i(TAG, "application created, starting runtime loop for ${LOCAL_DRONE_SN}")
             services.runtimeLoop.start(LOCAL_DRONE_SN)
-        }
-        // 让 agent 在 Pilot 2 切前台时仍被 OS 视为 IMPORTANCE_FOREGROUND_SERVICE，
-        // 实验 MSDK 是否因此继续供给 video frame（验证 SDK 是看 process importance 还是 activity state）
-        val svc = Intent(this, AgentForegroundService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(svc)
-        } else {
-            startService(svc)
         }
     }
 
