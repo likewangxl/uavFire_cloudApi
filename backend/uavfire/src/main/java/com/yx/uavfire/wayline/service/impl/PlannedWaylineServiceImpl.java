@@ -51,6 +51,7 @@ import javax.xml.stream.XMLStreamWriter;
 @Service
 @Transactional
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private static final String STATUS_DRAFT = "draft";
@@ -268,9 +269,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     @Override
     public PlannedWaylineDTO prepareTask(String workspaceId, String id, String username, PreparePlannedWaylineTaskParam param) {
-        if (param == null || !StringUtils.hasText(param.getDockSn())) {
-            throw new IllegalArgumentException("Dock sn is required.");
-        }
         PlannedWaylineEntity existing = getExisting(workspaceId, id);
         if (!StringUtils.hasText(existing.getPublishedWaylineId())) {
             throw new IllegalArgumentException("Generate the planned wayline file before preparing the flight task.");
@@ -280,11 +278,22 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setStatus(STATUS_PUBLISHING);
         existing.setTaskStatus(STATUS_PUBLISHING);
         existing.setFlightId(UUID.randomUUID().toString());
-        existing.setDockSn(param.getDockSn());
-        existing.setDroneSn(param.getDroneSn());
+        if (param != null && StringUtils.hasText(param.getDockSn())) {
+            existing.setDockSn(param.getDockSn());
+        }
+        if (param != null && StringUtils.hasText(param.getDroneSn())) {
+            existing.setDroneSn(param.getDroneSn());
+        }
         existing.setPublisher(username);
         existing.setPublishTime(now);
         existing.setUpdateTime(now);
+        existing.setPreparedTime(now);
+
+        // P3: 如果是 dock 路径,真发 flighttaskPrepare MQTT 给机场
+        if (StringUtils.hasText(existing.getDockSn())) {
+            invokeDockPrepare(existing, param);
+        }
+        // Agent 路径无需发命令:用户在前端点 "执行" 时会触发 WAYLINE_DISPATCH (executeTask)
 
         updateTaskFields(existing);
         return entity2Dto(existing);
@@ -302,6 +311,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setExecutedTime(now);
         existing.setUpdateTime(now);
 
+        // 按 dockSn 路由发命令
+        if (StringUtils.hasText(existing.getDockSn())) {
+            invokeDockExecute(existing);
+        } else {
+            invokeAgentDispatch(existing);
+        }
+
         updateTaskFields(existing);
         return entity2Dto(existing);
     }
@@ -313,6 +329,22 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalArgumentException("Prepare the planned wayline task before canceling it.");
         }
         long now = System.currentTimeMillis();
+
+        // 按 dockSn 路由发命令 (cancel 同义于 dock flighttaskUndo / agent STOP)
+        if (StringUtils.hasText(existing.getDockSn())) {
+            try {
+                invokeDockControl(existing, ControlOp.STOP);
+            } catch (RuntimeException e) {
+                log.warn("dock cancel command failed, marking canceled locally: {}", e.getMessage());
+            }
+        } else {
+            try {
+                invokeAgentControl(existing, ControlOp.STOP);
+            } catch (RuntimeException e) {
+                log.warn("agent cancel command failed, marking canceled locally: {}", e.getMessage());
+            }
+        }
+
         existing.setStatus(STATUS_CANCELED);
         existing.setTaskStatus(STATUS_CANCELED);
         existing.setUpdateTime(now);
@@ -376,6 +408,98 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return entity2Dto(existing);
     }
 
+    /**
+     * P3: Dock 路径 flighttask_prepare。装配 FlighttaskPrepareRequest 并通过
+     * sdkWaylineService 发往机场。注:真飞 deferred,无机场时此路径不会走到。
+     */
+    private void invokeDockPrepare(PlannedWaylineEntity entity, PreparePlannedWaylineTaskParam param) {
+        if (sdkWaylineService == null) {
+            log.warn("sdkWaylineService not wired, skipping dock prepare for flight {} (local-only mode)", entity.getFlightId());
+            return;
+        }
+        com.dji.sdk.config.version.GatewayManager gateway = com.dji.sdk.common.SDKManager.getDeviceSDK(entity.getDockSn());
+        if (gateway == null) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online.");
+        }
+        if (!StringUtils.hasText(entity.getKmzUrl())) {
+            throw new IllegalStateException("KMZ url is missing; regenerate the planned wayline file.");
+        }
+        com.dji.sdk.cloudapi.wayline.FlighttaskPrepareRequest req = new com.dji.sdk.cloudapi.wayline.FlighttaskPrepareRequest()
+                .setFlightId(entity.getFlightId())
+                .setTaskType(com.dji.sdk.cloudapi.wayline.TaskTypeEnum.IMMEDIATE)
+                .setWaylineType(com.dji.sdk.cloudapi.wayline.WaylineTypeEnum.WAYPOINT)
+                .setFile(new com.dji.sdk.cloudapi.wayline.FlighttaskFile()
+                        .setUrl(entity.getKmzUrl())
+                        .setFingerprint(entity.getKmzMd5()));
+        if (entity.getRthAltitude() != null) {
+            req.setRthAltitude(entity.getRthAltitude());
+        }
+        if (param != null) {
+            if (param.getExecuteTime() != null) {
+                req.setExecuteTime(param.getExecuteTime());
+            }
+            if (Boolean.TRUE.equals(param.getSimulate()) && param.getSimulateLat() != null && param.getSimulateLng() != null) {
+                req.setSimulateMission(new com.dji.sdk.cloudapi.wayline.SimulateMission()
+                        .setIsEnable(com.dji.sdk.cloudapi.wayline.SimulateSwitchEnum.ENABLE)
+                        .setLatitude(param.getSimulateLat().floatValue())
+                        .setLongitude(param.getSimulateLng().floatValue()));
+            }
+            if (param.getMinBattery() != null || param.getBeginTime() != null || param.getEndTime() != null) {
+                com.dji.sdk.cloudapi.wayline.ReadyConditions rc = new com.dji.sdk.cloudapi.wayline.ReadyConditions();
+                if (param.getMinBattery() != null) rc.setBatteryCapacity(param.getMinBattery());
+                if (param.getBeginTime() != null) rc.setBeginTime(param.getBeginTime());
+                if (param.getEndTime() != null) rc.setEndTime(param.getEndTime());
+                req.setReadyConditions(rc);
+            }
+        }
+        com.dji.sdk.mqtt.services.TopicServicesResponse<com.dji.sdk.mqtt.services.ServicesReplyData> reply =
+                sdkWaylineService.flighttaskPrepare(gateway, req);
+        if (reply == null || reply.getData() == null || reply.getData().getResult() == null
+                || !reply.getData().getResult().isSuccess()) {
+            throw new IllegalStateException("Dock prepare failed: "
+                    + (reply != null && reply.getData() != null ? reply.getData().getResult() : "no reply"));
+        }
+    }
+
+    /** P3: Dock 路径 flighttask_execute。 */
+    private void invokeDockExecute(PlannedWaylineEntity entity) {
+        if (sdkWaylineService == null) {
+            log.warn("sdkWaylineService not wired, skipping dock execute for flight {} (local-only mode)", entity.getFlightId());
+            return;
+        }
+        com.dji.sdk.config.version.GatewayManager gateway = com.dji.sdk.common.SDKManager.getDeviceSDK(entity.getDockSn());
+        if (gateway == null) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online.");
+        }
+        com.dji.sdk.mqtt.services.TopicServicesResponse<com.dji.sdk.mqtt.services.ServicesReplyData> reply =
+                sdkWaylineService.flighttaskExecute(gateway,
+                        new com.dji.sdk.cloudapi.wayline.FlighttaskExecuteRequest().setFlightId(entity.getFlightId()));
+        if (reply == null || reply.getData() == null || reply.getData().getResult() == null
+                || !reply.getData().getResult().isSuccess()) {
+            throw new IllegalStateException("Dock execute failed: "
+                    + (reply != null && reply.getData() != null ? reply.getData().getResult() : "no reply"));
+        }
+    }
+
+    /** Agent 路径派发航线 (WAYLINE_DISPATCH with KMZ url + missionId)。 */
+    private void invokeAgentDispatch(PlannedWaylineEntity entity) {
+        if (waylineAgentService == null) {
+            log.warn("waylineAgentService not wired, skipping agent dispatch for flight {} (local-only mode)", entity.getFlightId());
+            return;
+        }
+        if (!StringUtils.hasText(entity.getKmzUrl())) {
+            log.warn("KMZ url missing for flight {}, skipping agent dispatch", entity.getFlightId());
+            return;
+        }
+        String droneSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : "RC_PLUS_LOCAL";
+        com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO data =
+                new com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO()
+                        .setMissionId(entity.getFlightId())
+                        .setKmzUrl(entity.getKmzUrl())
+                        .setKmzMd5(entity.getKmzMd5());
+        waylineAgentService.dispatchWayline(droneSn, data);
+    }
+
     private void invokeAgentControl(PlannedWaylineEntity entity, ControlOp op) {
         if (waylineAgentService == null) {
             throw new IllegalStateException("Agent service unavailable; cannot route control command.");
@@ -392,10 +516,44 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     private void invokeDockControl(PlannedWaylineEntity entity, ControlOp op) {
-        // Dock 路径预留接口,P3 真飞 deferred:接通 sdkWaylineService.flighttaskPause/Recovery/Undo
-        // + SDKManager.getDeviceSDK(dockSn);现阶段无机场,fail-fast 显式提示。
-        throw new IllegalStateException(
-                "Dock path control (" + op + ") not yet wired — pending P3 commit + dock availability.");
+        // P3: 真接通 dock 路径。实际真飞回归 deferred 到机场到位后。
+        if (sdkWaylineService == null) {
+            throw new IllegalStateException("Cloud SDK wayline service unavailable.");
+        }
+        com.dji.sdk.config.version.GatewayManager gateway;
+        try {
+            gateway = com.dji.sdk.common.SDKManager.getDeviceSDK(entity.getDockSn());
+        } catch (Exception e) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online via Cloud API.", e);
+        }
+        if (gateway == null) {
+            throw new IllegalStateException("Dock " + entity.getDockSn() + " is not online via Cloud API.");
+        }
+        com.dji.sdk.mqtt.services.TopicServicesResponse<com.dji.sdk.mqtt.services.ServicesReplyData> reply;
+        switch (op) {
+            case PAUSE:
+                reply = sdkWaylineService.flighttaskPause(gateway);
+                break;
+            case RECOVERY:
+                reply = sdkWaylineService.flighttaskRecovery(gateway);
+                break;
+            case STOP:
+                reply = sdkWaylineService.flighttaskUndo(gateway,
+                        new com.dji.sdk.cloudapi.wayline.FlighttaskUndoRequest()
+                                .setFlightIds(java.util.List.of(entity.getFlightId())));
+                break;
+            case QUERY_BREAKPOINT:
+                // Cloud SDK 中 break_point 通过 flighttask_progress.ext.break_point 异步上报,
+                // 无主动 query 命令;直接返回让 controller 反馈当前 break_point_json (来自 P2.b 持久化)。
+                return;
+            default:
+                return;
+        }
+        if (reply == null || reply.getData() == null || reply.getData().getResult() == null
+                || !reply.getData().getResult().isSuccess()) {
+            throw new IllegalStateException("Dock control " + op + " failed: "
+                    + (reply != null && reply.getData() != null ? reply.getData().getResult() : "no reply"));
+        }
     }
 
     @Override
