@@ -404,6 +404,13 @@
               <span>机型 {{ record.aircraftModelKey || '-' }}</span>
               <span>更新于 {{ formatTimestamp(record.updateTime) }}</span>
             </div>
+            <!-- P2.c L2 任务监控:只在 task 已 prepare 后显示 -->
+            <div class="planned-wayline-monitor" v-if="record.flightId" @click.stop>
+              <WaylineMissionMonitor
+                :workspace-id="monitorWorkspaceId"
+                :record="record"
+                @change="(updated: any) => onMissionMonitorChange(updated)" />
+            </div>
             <div class="planned-wayline-actions">
               <a-button size="small" @click.stop="showPlannedWaylineDetail(record)">详情</a-button>
               <a-button size="small" :disabled="!canOverwritePlannedWayline(record)" @click.stop="onEditPlannedWayline(record)">编辑</a-button>
@@ -631,6 +638,7 @@ import {
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
 import WaypointActionEditor from '/@/components/WaypointActionEditor.vue'
+import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 
 const loading = ref(false)
 const store = useMyStore()
@@ -645,6 +653,11 @@ const advancedConfigOpen = ref(false)
 const expandedWaypointId = ref<string | null>(null)
 function toggleWaypointExpand (id: string) {
   expandedWaypointId.value = expandedWaypointId.value === id ? null : id
+}
+const monitorWorkspaceId = computed(() => localStorage.getItem(ELocalStorageKey.WorkspaceId) || '')
+function onMissionMonitorChange (updated: PlannedWaylineRecord) {
+  const idx = plannedWaylinesData.data.findIndex(r => r.plannedWaylineId === updated.plannedWaylineId)
+  if (idx >= 0) plannedWaylinesData.data.splice(idx, 1, updated)
 }
 
 interface AircraftSummary {
