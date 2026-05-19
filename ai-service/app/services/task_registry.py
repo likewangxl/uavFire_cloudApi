@@ -1,3 +1,4 @@
+import logging
 from typing import Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING
 
 from app.clients.backend_client import BackendClient
@@ -5,6 +6,9 @@ from app.config.settings import Settings
 from app.models.event import DualStreamEvent, EventRecord
 from app.models.task import DualStreamTaskStatus, TaskCreateRequest, TaskRecord
 from app.video.source import VideoSource
+
+
+logger = logging.getLogger(__name__)
 
 
 class SupportsBackendEventReporting(Protocol):
@@ -109,6 +113,16 @@ class TaskRegistry:
             analysis_channel=event.analysis_channel,
         )
         self._events[task_id].append(record)
+        logger.info(
+            "detection task=%s ts=%s ch=%s visible=%.3f thermal=%.3f fusion=%.3f risk=%s",
+            task_id,
+            event.source_ts,
+            event.analysis_channel,
+            event.visible_score,
+            event.thermal_score,
+            event.fusion_score,
+            event.risk_level,
+        )
         if self._backend_client is not None:
             self._backend_client.report_event(
                 task_id,

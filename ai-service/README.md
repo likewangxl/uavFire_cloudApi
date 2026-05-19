@@ -110,6 +110,33 @@ cd ai-service
 
 脚本会下载 Wikimedia Commons 的 `Fire fire flames.jpg` 火焰图、`Amazon green forest.jpg` 森林图和 `Fire flames 9652 Nevit.ogv` 火焰视频到 `/tmp/uavfire-online-media`。如果本机有 `ffmpeg`，脚本会把 OGV 转成 5 秒 MP4 后作为 visible stream 创建任务，并打印 AI 服务事件与后端回传事件。
 
+## ZLM RTSP 直播流跑火情识别
+
+`scripts/run-dev.sh` 现在会自动 `source .env`，所以可以把所有配置写在 `ai-service/.env` 里：
+
+```dotenv
+AI_SERVICE_USE_CONTINUOUS_RUNNER=true
+AI_SERVICE_BACKEND_BASE_URL=
+AI_SERVICE_VISIBLE_YOLO_MODEL_PATH=/tmp/uavfire-models/yolov26-fire-detection-best.pt
+OPENCV_FFMPEG_CAPTURE_OPTIONS="rtsp_transport;tcp"
+```
+
+`OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp` 强制 cv2 走 TCP 拉 RTSP，避免内网 UDP 丢包触发连续 read-fail 看门狗。
+
+启动并把单路可见光指向 ZLM：
+
+```bash
+./scripts/run-dev.sh
+
+curl -X POST http://localhost:9000/api/v1/dual-stream/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"task_id":"zlm-demo","drone_sn":"<DRONE_SN>","visible_stream_url":"rtsp://<ZLM_HOST>:8554/live/<STREAM_KEY>","thermal_stream_url":""}'
+curl -X POST http://localhost:9000/api/v1/dual-stream/tasks/zlm-demo/start
+curl http://localhost:9000/api/v1/dual-stream/tasks/zlm-demo/events
+```
+
+每帧的 `visible_score / thermal_score / fusion_score / risk_level` 同步打印到 ai-service 日志。若拉流失败或连续读帧失败，worker 会在日志里输出 `ERROR app.services.continuous_runner | task=... failed to open ...` 或 `WARNING ... exiting after N consecutive read failures`，不会再静默死掉。
+
 当前默认运行配置：
 
 - `host=0.0.0.0`

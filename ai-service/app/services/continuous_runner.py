@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Callable, Optional, TYPE_CHECKING
 
@@ -10,6 +11,9 @@ from app.video.source import VideoSource
 
 if TYPE_CHECKING:
     from app.services.task_registry import TaskRegistry
+
+
+logger = logging.getLogger(__name__)
 
 
 class ContinuousTaskRunner:
@@ -79,17 +83,36 @@ class ContinuousTaskRunner:
         stop_predicate: Callable[[], bool],
     ) -> None:
         opened_sources = []
-        for source in (visible_source, thermal_source):
-            if source is not None:
-                source.open()
-                opened_sources.append(source)
         try:
+            for source in (visible_source, thermal_source):
+                if source is None:
+                    continue
+                try:
+                    source.open()
+                except Exception:
+                    logger.exception(
+                        "task=%s failed to open %s source url=%s",
+                        task_id,
+                        getattr(source, "channel", "?"),
+                        getattr(source, "url", "?"),
+                    )
+                    return
+                opened_sources.append(source)
             consecutive_read_failures = 0
             while not stop_predicate():
-                produced = self.tick(task_id, visible_source, thermal_source)
+                try:
+                    produced = self.tick(task_id, visible_source, thermal_source)
+                except Exception:
+                    logger.exception("task=%s tick failed unexpectedly", task_id)
+                    return
                 if produced is None:
                     consecutive_read_failures += 1
                     if consecutive_read_failures >= self._max_consecutive_read_failures:
+                        logger.warning(
+                            "task=%s exiting after %d consecutive read failures (stream stale?)",
+                            task_id,
+                            consecutive_read_failures,
+                        )
                         break
                 else:
                     consecutive_read_failures = 0
