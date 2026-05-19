@@ -8,9 +8,11 @@
 
 **Architecture:** Pilot2 (RC Plus, Android) → RTMP push → ZLMediaKit (Mac :1935) → ffplay + visual judgment by operator. Zero code changes; pure device-side configuration + observation.
 
-**Tech Stack:** ZLMediaKit (existing, port 1935 RTMP, port 8090 HTTP API), ffplay/ffmpeg (`/usr/local/bin/`), DJI Pilot 2 (Android app on RC Plus).
+**Tech Stack:** ZLMediaKit (existing, port 1935 RTMP, port 58925 HTTP API), ffplay/ffmpeg (`/usr/local/bin/`), DJI Pilot 2 (Android app on RC Plus).
 
-**ZLM secret:** `CloudApiSample` (from `backend/uavfire/src/main/resources/application.yml`).
+**ZLM config (verified Task 1+2):** HTTP API at port `58925`, secret `psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy` (from `deployment/zlmediakit/config/config.ini`). RTMP push to port `1935` does NOT require secret (smoke test passed without).
+
+**Mac LAN IP (verified Task 1):** `192.168.2.34`.
 
 ---
 
@@ -22,7 +24,7 @@
 
 Run:
 ```bash
-curl -s "http://localhost:8090/index/api/getServerConfig?secret=CloudApiSample" | head -c 200
+curl -s "http://localhost:58925/index/api/getServerConfig?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy" | head -c 200
 ```
 Expected: JSON starting with `{"code":0,"data":[{...`. Code 0 means OK.
 
@@ -70,7 +72,7 @@ Expected: streaming output, frames per second updates.
 
 In Terminal #2, run:
 ```bash
-curl -s "http://localhost:8090/index/api/getMediaList?secret=CloudApiSample" | grep -o '"stream":"[^"]*"'
+curl -s "http://localhost:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy" | grep -o '"stream":"[^"]*"'
 ```
 Expected: `"stream":"smoke-test"` in output.
 
@@ -118,9 +120,9 @@ Concrete example (replace with your `<MAC_IP>` from Task 1):
 rtmp://192.168.2.34:1935/live/pilot2-composite
 ```
 
-ZLM by default does **not** require secret on push (`hook.on_publish` is what gates that, currently unset). Try without secret first. If Pilot2 reports auth failure, append `?secret=CloudApiSample`:
+ZLM by default does **not** require secret on push (`hook.on_publish` is what gates that, currently unset). Try without secret first. If Pilot2 reports auth failure, append `?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy`:
 ```
-rtmp://192.168.2.34:1935/live/pilot2-composite?secret=CloudApiSample
+rtmp://192.168.2.34:1935/live/pilot2-composite?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy
 ```
 
 - [ ] **Step 4: Save settings, do NOT start streaming yet**
@@ -181,7 +183,7 @@ If Pilot2 reports push error here: re-check URL, network, Mac firewall. Stop and
 
 Run:
 ```bash
-curl -s "http://localhost:8090/index/api/getMediaList?secret=CloudApiSample" | grep -o '"stream":"[^"]*"'
+curl -s "http://localhost:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy" | grep -o '"stream":"[^"]*"'
 ```
 Expected: `"stream":"pilot2-composite"` in output.
 
@@ -286,7 +288,7 @@ RC: RC Plus
 
 - Mac LAN IP: [actual IP]
 - RTMP URL: `rtmp://[actual IP]:1935/live/pilot2-composite[?secret=...]`
-- ZLM version: [run `curl -s "http://localhost:8090/index/api/version?secret=CloudApiSample"`]
+- ZLM version: [run `curl -s "http://localhost:58925/index/api/version?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy"`]
 - PIP layout: [describe — e.g. "main=wide visible, small window=thermal bottom-left"]
 
 ## What happened
