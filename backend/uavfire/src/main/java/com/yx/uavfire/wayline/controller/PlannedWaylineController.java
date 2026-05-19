@@ -115,6 +115,38 @@ public class PlannedWaylineController {
         return HttpResultResponse.success(plannedWaylineService.cancelTask(trustedWorkspaceId, id));
     }
 
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/pause")
+    public HttpResultResponse<PlannedWaylineDTO> pause(@PathVariable("workspace_id") String workspaceId,
+                                                       @PathVariable("id") String id,
+                                                       HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        return HttpResultResponse.success(plannedWaylineService.pauseTask(trustedWorkspaceId, id));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/recovery")
+    public HttpResultResponse<PlannedWaylineDTO> recovery(@PathVariable("workspace_id") String workspaceId,
+                                                          @PathVariable("id") String id,
+                                                          HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        return HttpResultResponse.success(plannedWaylineService.recoveryTask(trustedWorkspaceId, id));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/stop")
+    public HttpResultResponse<PlannedWaylineDTO> stop(@PathVariable("workspace_id") String workspaceId,
+                                                      @PathVariable("id") String id,
+                                                      HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        return HttpResultResponse.success(plannedWaylineService.stopTask(trustedWorkspaceId, id));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/{id}/query-breakpoint")
+    public HttpResultResponse<PlannedWaylineDTO> queryBreakpoint(@PathVariable("workspace_id") String workspaceId,
+                                                                 @PathVariable("id") String id,
+                                                                 HttpServletRequest request) {
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
+        return HttpResultResponse.success(plannedWaylineService.queryBreakpoint(trustedWorkspaceId, id));
+    }
+
     @DeleteMapping("/{workspace_id}/planned-waylines/{id}")
     public HttpResultResponse<Void> delete(@PathVariable("workspace_id") String workspaceId,
                                            @PathVariable("id") String id,

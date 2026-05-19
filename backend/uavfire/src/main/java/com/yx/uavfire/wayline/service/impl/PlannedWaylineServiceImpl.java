@@ -60,11 +60,20 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     private static final String STATUS_EXECUTING = "executing";
     private static final String STATUS_CANCELED = "canceled";
 
+    private static final String STATUS_PAUSED = "paused";
+    private static final String STATUS_STOPPED = "stopped";
+
     private final IPlannedWaylineMapper mapper;
 
     private final ObjectMapper objectMapper;
 
     private final IWaylineFileService waylineFileService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private SDKWaylineService sdkWaylineService;
 
     @Override
     public PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize) {
@@ -310,6 +319,83 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
         updateTaskFields(existing);
         return entity2Dto(existing);
+    }
+
+    @Override
+    public PlannedWaylineDTO pauseTask(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.PAUSE);
+    }
+
+    @Override
+    public PlannedWaylineDTO recoveryTask(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.RECOVERY);
+    }
+
+    @Override
+    public PlannedWaylineDTO stopTask(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.STOP);
+    }
+
+    @Override
+    public PlannedWaylineDTO queryBreakpoint(String workspaceId, String id) {
+        return controlTask(workspaceId, id, ControlOp.QUERY_BREAKPOINT);
+    }
+
+    private enum ControlOp { PAUSE, RECOVERY, STOP, QUERY_BREAKPOINT }
+
+    private PlannedWaylineDTO controlTask(String workspaceId, String id, ControlOp op) {
+        PlannedWaylineEntity existing = getExisting(workspaceId, id);
+        if (!StringUtils.hasText(existing.getFlightId())) {
+            throw new IllegalArgumentException("Task has not been prepared yet.");
+        }
+
+        boolean isDockPath = StringUtils.hasText(existing.getDockSn());
+        if (isDockPath) {
+            invokeDockControl(existing, op);
+        } else {
+            invokeAgentControl(existing, op);
+        }
+
+        long now = System.currentTimeMillis();
+        switch (op) {
+            case PAUSE:
+                existing.setTaskStatus(STATUS_PAUSED);
+                break;
+            case RECOVERY:
+                existing.setTaskStatus(STATUS_EXECUTING);
+                break;
+            case STOP:
+                existing.setTaskStatus(STATUS_STOPPED);
+                break;
+            case QUERY_BREAKPOINT:
+                // 不动状态;agent/dock 返回断点会异步到 progress 事件,持久化到 break_point_json
+                break;
+        }
+        existing.setUpdateTime(now);
+        updateTaskFields(existing);
+        return entity2Dto(existing);
+    }
+
+    private void invokeAgentControl(PlannedWaylineEntity entity, ControlOp op) {
+        if (waylineAgentService == null) {
+            throw new IllegalStateException("Agent service unavailable; cannot route control command.");
+        }
+        String droneSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : "RC_PLUS_LOCAL";
+        com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO data =
+                new com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO().setMissionId(entity.getFlightId());
+        switch (op) {
+            case PAUSE:           waylineAgentService.pauseMission(droneSn, data); break;
+            case RECOVERY:        waylineAgentService.resumeMission(droneSn, data); break;
+            case STOP:            waylineAgentService.stopMission(droneSn, data); break;
+            case QUERY_BREAKPOINT: waylineAgentService.queryBreakpoint(droneSn, data); break;
+        }
+    }
+
+    private void invokeDockControl(PlannedWaylineEntity entity, ControlOp op) {
+        // Dock 路径预留接口,P3 真飞 deferred:接通 sdkWaylineService.flighttaskPause/Recovery/Undo
+        // + SDKManager.getDeviceSDK(dockSn);现阶段无机场,fail-fast 显式提示。
+        throw new IllegalStateException(
+                "Dock path control (" + op + ") not yet wired — pending P3 commit + dock availability.");
     }
 
     @Override
