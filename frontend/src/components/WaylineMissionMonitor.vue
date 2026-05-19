@@ -82,9 +82,7 @@ const props = defineProps<{
   pollIntervalMs?: number
 }>()
 
-const emit = defineEmits<{
-  (e: 'change', record: PlannedWaylineRecord): void
-}>()
+const emit = defineEmits<{ change: [record: PlannedWaylineRecord] }>()
 
 const busy = ref(false)
 let pollTimer: number | null = null
@@ -114,18 +112,18 @@ const progressStatus = computed(() => {
 })
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  draft:           { label: '草稿', cls: 'mm-status-draft' },
-  file_generated:  { label: '已生成 KMZ', cls: 'mm-status-ready' },
-  publishing:      { label: '准备中', cls: 'mm-status-publishing' },
-  ready:           { label: '就绪', cls: 'mm-status-ready' },
-  executing:       { label: '执行中', cls: 'mm-status-executing' },
-  paused:          { label: '已暂停', cls: 'mm-status-paused' },
-  broken:          { label: '中断', cls: 'mm-status-broken' },
-  stopped:         { label: '已停止', cls: 'mm-status-stopped' },
-  canceled:        { label: '已取消', cls: 'mm-status-stopped' },
-  finished:        { label: '完成', cls: 'mm-status-finished' },
-  completed:       { label: '完成', cls: 'mm-status-finished' },
-  failed:          { label: '失败', cls: 'mm-status-failed' },
+  draft: { label: '草稿', cls: 'mm-status-draft' },
+  file_generated: { label: '已生成 KMZ', cls: 'mm-status-ready' },
+  publishing: { label: '准备中', cls: 'mm-status-publishing' },
+  ready: { label: '就绪', cls: 'mm-status-ready' },
+  executing: { label: '执行中', cls: 'mm-status-executing' },
+  paused: { label: '已暂停', cls: 'mm-status-paused' },
+  broken: { label: '中断', cls: 'mm-status-broken' },
+  stopped: { label: '已停止', cls: 'mm-status-stopped' },
+  canceled: { label: '已取消', cls: 'mm-status-stopped' },
+  finished: { label: '完成', cls: 'mm-status-finished' },
+  completed: { label: '完成', cls: 'mm-status-finished' },
+  failed: { label: '失败', cls: 'mm-status-failed' },
 }
 const statusLabel = computed(() => STATUS_LABEL[taskStatus.value]?.label || taskStatus.value || '未知')
 const statusClass = computed(() => STATUS_LABEL[taskStatus.value]?.cls || 'mm-status-draft')
@@ -169,8 +167,8 @@ async function wrap (fn: () => Promise<any>, label: string) {
     busy.value = false
   }
 }
-function onExecute ()  { wrap(() => executePlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '执行') }
-function onPause ()    { wrap(() => pausePlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '暂停') }
+function onExecute () { wrap(() => executePlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '执行') }
+function onPause () { wrap(() => pausePlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '暂停') }
 function onRecovery () {
   wrap(async () => {
     if (canResumeBreakpoint.value) {
@@ -179,8 +177,8 @@ function onRecovery () {
     return recoveryPlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId)
   }, '恢复')
 }
-function onStop ()    { wrap(() => stopPlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '中止') }
-function onCancel ()  { wrap(() => cancelPlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '取消') }
+function onStop () { wrap(() => stopPlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '中止') }
+function onCancel () { wrap(() => cancelPlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '取消') }
 
 onMounted(startPolling)
 onBeforeUnmount(stopPolling)

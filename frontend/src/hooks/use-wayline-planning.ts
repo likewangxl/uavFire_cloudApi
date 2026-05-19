@@ -282,13 +282,15 @@ function normalizePlannedWaypoint (wp: PlannedWaypoint): PlannedWaypoint {
     poiAlt: Number.isFinite(Number(raw.poiAlt)) ? Number(raw.poiAlt) : undefined,
     turnMode: typeof raw.turnMode === 'string' ? raw.turnMode as WaypointTurnMode : undefined,
     turnDamping: Number.isFinite(Number(raw.turnDamping)) ? Number(raw.turnDamping) : undefined,
-    actions: Array.isArray(raw.actions) ? raw.actions.map((a: any) => ({
-      actionId: Number.isFinite(Number(a?.actionId)) ? Number(a.actionId) : undefined,
-      actionTrigger: typeof a?.actionTrigger === 'string' ? a.actionTrigger : undefined,
-      actionTriggerParam: Number.isFinite(Number(a?.actionTriggerParam)) ? Number(a.actionTriggerParam) : undefined,
-      actuatorFunc: a?.actuatorFunc,
-      params: a?.params && typeof a.params === 'object' ? { ...a.params } : undefined,
-    })) : undefined,
+    actions: Array.isArray(raw.actions)
+      ? raw.actions.map((a: any) => ({
+        actionId: Number.isFinite(Number(a?.actionId)) ? Number(a.actionId) : undefined,
+        actionTrigger: typeof a?.actionTrigger === 'string' ? a.actionTrigger : undefined,
+        actionTriggerParam: Number.isFinite(Number(a?.actionTriggerParam)) ? Number(a.actionTriggerParam) : undefined,
+        actuatorFunc: a?.actuatorFunc,
+        params: a?.params && typeof a.params === 'object' ? { ...a.params } : undefined,
+      }))
+      : undefined,
   }
 }
 

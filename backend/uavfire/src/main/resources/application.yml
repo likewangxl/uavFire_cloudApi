@@ -54,7 +54,7 @@ mqtt:
   # BASIC parameters are required.
   BASIC:
     protocol: MQTT # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.31.51
+    host: 192.168.2.34
     port: 1883
     username: JavaServer
     password: 123456
@@ -63,7 +63,7 @@ mqtt:
     path:
   DRC:
     protocol: WS # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.31.51
+    host: 192.168.2.34
     port: 8083
     path: /mqtt
     username: JavaServer
@@ -90,17 +90,18 @@ url:
   wayline-agent:
     prefix: wayline-agent
     version: /api/v1
+  control:
+    prefix: control
+    version: /api/v1
 
 wayline-agent:
   shared-secret: change-me-in-production
   token-ttl-seconds: 86400
+  server-url: http://192.168.2.34:6789
   mqtt:
     event-topic: uavfire/agent/+/events/#
   storage:
     prefix: storage
-    version: /api/v1
-  control:
-    prefix: control
     version: /api/v1
 
 # Tutorial: https://www.alibabacloud.com/help/en/object-storage-service/latest/use-a-temporary-credential-provided-by-sts-to-access-oss
@@ -156,7 +157,7 @@ logging:
 pilot2:
   # Pilot 2 设备通过此 URL 跳转到 frontend pilot 入口。
   # 注意:Pilot 上的 localhost 指向 Pilot 自己,必须用 server 实际可达 IP。
-  web-entry: http://192.168.31.51:8080/pilot-login
+  web-entry: http://192.168.2.34:8080/pilot-login
 
 ntp:
   server:
@@ -175,12 +176,12 @@ cloud-server:
 
 livestream:
   playback:
-    webrtc-host: 192.168.31.51
+    webrtc-host: 192.168.2.34
     webrtc-port: 58925
   url:
     # RTMP  Note: This IP is the address of the streaming server. If you want to see livestream on web page, you need to convert the RTMP stream to WebRTC stream.
     rtmp:
-      url: rtmp://192.168.31.51:1935/live/  # Example: 'rtmp://192.168.1.1/live/'
+      url: rtmp://192.168.2.34:1935/live/  # Example: 'rtmp://192.168.1.1/live/'
     rtsp:
       username: test
       password: test
@@ -188,7 +189,7 @@ livestream:
 
     # GB28181 Note:If you don't know what these parameters mean, you can go to Pilot2 and select the GB28181 page in the cloud platform. Where the parameters same as these parameters.
     gb28181:
-      serverIP: 192.168.31.51
+      serverIP: 192.168.2.34
       serverPort: 10001
       serverID: 1001
       agentID: 2001
@@ -198,7 +199,7 @@ livestream:
 
     # Webrtc: Only supports using whip standard
     whip:
-      url: http://192.168.31.51:58925/index/api/whip?app=live&stream=  # ZLMediaKit WHIP path on HTTP port; SRS template would be http://host:1985/rtc/v1/whip/?app=live&stream=
+      url: http://192.168.2.34:58925/index/api/whip?app=live&stream=  # ZLMediaKit WHIP path on HTTP port; SRS template would be http://host:1985/rtc/v1/whip/?app=live&stream=
 
 # ---------------------------------------------------------------------------
 # fc100 灭火模块(合并自 fc100-backend,2026-05-15 feature/fc100-merge 分支)

@@ -38,6 +38,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
@@ -75,6 +76,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private SDKWaylineService sdkWaylineService;
+
+    @org.springframework.beans.factory.annotation.Value("${wayline-agent.server-url:http://localhost:6789}")
+    private String waylineAgentServerUrl;
 
     @Override
     public PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize) {
@@ -492,12 +496,29 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             return;
         }
         String droneSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : "RC_PLUS_LOCAL";
+
+        // Load KMZ into memory so the agent can download it via the HTTP KMZ endpoint.
+        try {
+            byte[] kmzBytes;
+            try (InputStream is = new URL(entity.getKmzUrl()).openStream()) {
+                kmzBytes = is.readAllBytes();
+            }
+            waylineAgentService.prepareKmz(droneSn, entity.getFlightId(), kmzBytes);
+        } catch (Exception e) {
+            log.warn("Failed to cache KMZ for flight {}: {}", entity.getFlightId(), e.getMessage());
+            return;
+        }
+
+        String httpKmzUrl = waylineAgentServerUrl + "/wayline-agent/api/v1/agents/" + droneSn
+                + "/missions/" + entity.getFlightId() + "/kmz";
         com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO data =
                 new com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO()
                         .setMissionId(entity.getFlightId())
-                        .setKmzUrl(entity.getKmzUrl())
+                        .setKmzUrl(httpKmzUrl)
+                        .setKmzFilename(entity.getFlightId() + ".kmz")
                         .setKmzMd5(entity.getKmzMd5());
         waylineAgentService.dispatchWayline(droneSn, data);
+        log.info("Dispatched wayline to agent {} flight {} kmzUrl={}", droneSn, entity.getFlightId(), httpKmzUrl);
     }
 
     private void invokeAgentControl(PlannedWaylineEntity entity, ControlOp op) {

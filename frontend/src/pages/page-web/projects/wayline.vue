@@ -810,6 +810,18 @@ function buildPagePlannedWaypointBody (wp: any, idx: number, defaultHeight: numb
     wgsLng,
     wgsLat,
     height: positiveSaveNumber(wp?.height, defaultHeight),
+    // L1 per-航点定制字段透传 (null 时由后端默认值兜底)
+    speed: wp?.speed ?? undefined,
+    gimbalPitch: wp?.gimbalPitch ?? undefined,
+    gimbalYaw: wp?.gimbalYaw ?? undefined,
+    headingMode: wp?.headingMode ?? undefined,
+    headingAngle: wp?.headingAngle ?? undefined,
+    poiLng: wp?.poiLng ?? undefined,
+    poiLat: wp?.poiLat ?? undefined,
+    poiAlt: wp?.poiAlt ?? undefined,
+    turnMode: wp?.turnMode ?? undefined,
+    turnDamping: wp?.turnDamping ?? undefined,
+    actions: wp?.actions && wp.actions.length > 0 ? wp.actions : undefined,
   }
 }
 
@@ -823,6 +835,13 @@ function buildPagePlannedWaylineBody (name: string, aircraftModelKey: string): C
     aircraftSn: planningState.aircraftSn || '',
     defaultHeight,
     maxSpeed,
+    // L1 全局 mission 配置 (undefined 时由后端 entity 默认值兜底)
+    finishAction: planningState.finishAction ?? undefined,
+    exitOnRcLost: planningState.exitOnRcLost ?? undefined,
+    rcLostAction: planningState.rcLostAction ?? undefined,
+    takeoffSecurityHeight: planningState.takeoffSecurityHeight ?? undefined,
+    globalTransitionalSpeed: planningState.globalTransitionalSpeed ?? undefined,
+    rthAltitude: planningState.rthAltitude ?? undefined,
     waypoints: planningState.waypoints.map((wp, idx) => buildPagePlannedWaypointBody(wp, idx, defaultHeight)),
   }
 }
@@ -1125,18 +1144,20 @@ async function onGeneratePlannedWaylineFile (record: PlannedWaylineRecord) {
 }
 
 async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
-  if (!record.gatewaySn) {
-    message.warning('下发准备前需要选择或绑定目标机场/网关。')
-    return
+  // Agent 路径 (M4T + RC,无机场) 不需要 dockSn,后端按 dockSn 是否非空自动路由。
+  // 如果用户绑定了机场就走 dock 路径;否则走 agent 把 KMZ 推到 RC + MSDK。
+  const body: any = {
+    droneSn: record.aircraftSn,
+    executeTime: 0,
+    taskType: 'IMMEDIATE',
+  }
+  // 仅当 record.dockSn 存在 (用户显式选了机场) 才透传,gatewaySn 是 RC 的 SN,不能当 dockSn 用
+  if (record.dockSn) {
+    body.dockSn = record.dockSn
   }
   await runPlannedWaylineAction(
     record,
-    () => preparePlannedWaylineTask(workspaceId, record.plannedWaylineId, {
-      dockSn: record.gatewaySn,
-      droneSn: record.aircraftSn,
-      executeTime: 0,
-      taskType: 'IMMEDIATE',
-    }),
+    () => preparePlannedWaylineTask(workspaceId, record.plannedWaylineId, body),
     '航线任务已下发准备')
 }
 
@@ -1540,6 +1561,10 @@ const uploadFile = async () => {
 .planning-wp-unit {
   color: #8c8c8c;
   font-size: 11px;
+}
+.scrollbar {
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .planning-advanced {
   margin-top: 4px;

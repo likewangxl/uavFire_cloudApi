@@ -70,9 +70,9 @@ defineProps<{
 }>()
 
 defineEmits<{
-  (e: 'add', actuatorFunc: WaypointActuatorFunc): void
-  (e: 'remove', actionIdx: number): void
-  (e: 'updateParam', actionIdx: number, paramKey: string, value: any): void
+  add: [actuatorFunc: WaypointActuatorFunc]
+  remove: [actionIdx: number]
+  updateParam: [actionIdx: number, paramKey: string, value: any]
 }>()
 
 const expandedIdx = ref<number | null>(null)
