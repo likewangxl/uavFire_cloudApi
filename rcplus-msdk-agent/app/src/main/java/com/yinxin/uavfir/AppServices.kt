@@ -34,7 +34,9 @@ class AppServices(
     application: Application,
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val kmzCacheDir = File(application.cacheDir, "wayline-kmz")
+    // MSDK pushKMZFileToAircraft 在 internal app cache 下没读权限 (报 GENERATE_MISSION_FILE_FAILED
+    // desc=请检查权限)。Pilot 2 真机和 probe 都用 external-files-dir，对齐之。
+    private val kmzCacheDir = File(application.getExternalFilesDir(null), "wayline-kmz")
     private val api = AgentBackendApiFactory.create()
     private val backendClient = AgentBackendClient(api)
     private val reporter = AgentReporter(backendClient)

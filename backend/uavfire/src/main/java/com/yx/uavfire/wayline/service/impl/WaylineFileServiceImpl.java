@@ -283,11 +283,13 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
                 throw new RuntimeException("The file format is incorrect.");
             }
 
-            Node coordinateSystemNode = waylinesDocument.selectSingleNode("//" + KmzFileProperties.TAG_WPML_PREFIX + "waylineCoordinateSysParam");
-            // Pilot 2 真机导出 + 我们自己生成的 KMZ 都把 <kml> 设为默认命名空间，Placemark/coordinates
-            // 继承该命名空间；dom4j XPath 中无前缀名只匹配「无命名空间」元素，必须用 local-name() 兜底。
+            // 注意：waylineCoordinateSysParam 只应该在 template.kml 里出现，不在 waylines.wpml。
+            // Pilot 2 真机导出 (m4t_probe.kmz) 实测 waylines.wpml 不含该节点；若写入此节点会让
+            // MSDK pushKMZFileToAircraft 报 GENERATE_MISSION_FILE_FAILED。
+            // <kml> 设为默认命名空间，Placemark/coordinates 继承该命名空间；dom4j XPath 中无前缀名
+            // 只匹配「无命名空间」元素，必须用 local-name() 兜底。
             List<Node> placemarkNodes = waylinesDocument.selectNodes("//*[local-name()='Placemark']");
-            if (Objects.isNull(coordinateSystemNode) || placemarkNodes.isEmpty()) {
+            if (placemarkNodes.isEmpty()) {
                 throw new RuntimeException("The file format is incorrect.");
             }
             boolean hasCoordinates = placemarkNodes.stream()
@@ -297,7 +299,11 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
                 throw new RuntimeException("The file format is incorrect.");
             }
 
-            DeviceTypeEnum type = DeviceTypeEnum.find(Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_ENUM_VALUE)));
+            // M4 系列 drone 本体在 KMZ 离线导出里 droneEnumValue=100，但 Cloud API runtime 是 99；
+            // DeviceTypeEnum 只注册了 99 (M4_SERIES)，碰到 100 要先归一回 99 再 find，否则抛 CloudSDKException
+            // 让外层 @Transactional 回滚。详见 memory: m4-series-type-code-split。
+            int droneEnumRaw = Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_ENUM_VALUE));
+            DeviceTypeEnum type = DeviceTypeEnum.find(droneEnumRaw == 100 ? DeviceTypeEnum.M4_SERIES.getType() : droneEnumRaw);
             DeviceSubTypeEnum subType = DeviceSubTypeEnum.find(Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_SUB_ENUM_VALUE)));
             DeviceTypeEnum payloadType = DeviceTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_ENUM_VALUE)));
             DeviceSubTypeEnum payloadSubType = DeviceSubTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_SUB_ENUM_VALUE)));

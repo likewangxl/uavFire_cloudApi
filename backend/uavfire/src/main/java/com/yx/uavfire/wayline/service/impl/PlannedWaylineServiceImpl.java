@@ -80,6 +80,18 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     @org.springframework.beans.factory.annotation.Value("${wayline-agent.server-url:http://localhost:6789}")
     private String waylineAgentServerUrl;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.yx.uavfire.firedetection.AiServiceClient aiServiceClient;
+
+    @org.springframework.beans.factory.annotation.Value("${ai-service.zlm-rtsp-host:127.0.0.1}")
+    private String aiZlmRtspHost;
+
+    @org.springframework.beans.factory.annotation.Value("${ai-service.zlm-rtsp-port:8554}")
+    private int aiZlmRtspPort;
+
+    @org.springframework.beans.factory.annotation.Value("${ai-service.auto-trigger-on-wayline:true}")
+    private boolean aiAutoTriggerOnWayline;
+
     @Override
     public PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize) {
         Page<PlannedWaylineEntity> pageData = mapper.selectPage(
@@ -322,8 +334,33 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             invokeAgentDispatch(existing);
         }
 
+        // 自动触发火情识别 (trigger #3): 航线开始执行时拉起 ai-service 监测。
+        triggerFireDetectionForWayline(existing);
+
         updateTaskFields(existing);
         return entity2Dto(existing);
+    }
+
+    private String waylineDroneSn(PlannedWaylineEntity existing) {
+        if (StringUtils.hasText(existing.getDroneSn())) return existing.getDroneSn();
+        if (StringUtils.hasText(existing.getAircraftSn())) return existing.getAircraftSn();
+        return null;
+    }
+
+    private void triggerFireDetectionForWayline(PlannedWaylineEntity existing) {
+        if (!aiAutoTriggerOnWayline || aiServiceClient == null) return;
+        String droneSn = waylineDroneSn(existing);
+        if (!StringUtils.hasText(droneSn)) return;
+        String videoId = com.yx.uavfire.firedetection.AiServiceClient.defaultVideoIdForDrone(droneSn);
+        String rtspUrl = com.yx.uavfire.firedetection.AiServiceClient.rtspUrlForVideoId(videoId, aiZlmRtspHost, aiZlmRtspPort);
+        aiServiceClient.startDetection(aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, rtspUrl, "");
+    }
+
+    private void stopFireDetectionForWayline(PlannedWaylineEntity existing) {
+        if (!aiAutoTriggerOnWayline || aiServiceClient == null) return;
+        String droneSn = waylineDroneSn(existing);
+        if (!StringUtils.hasText(droneSn)) return;
+        aiServiceClient.stopDetection(aiServiceClient.fireTaskIdForDrone(droneSn));
     }
 
     @Override
@@ -352,6 +389,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setStatus(STATUS_CANCELED);
         existing.setTaskStatus(STATUS_CANCELED);
         existing.setUpdateTime(now);
+
+        stopFireDetectionForWayline(existing);
 
         updateTaskFields(existing);
         return entity2Dto(existing);
@@ -894,13 +933,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             elem(w, "executeHeightMode", "relativeToStartPoint");
             elem(w, "waylineId", "0");
 
-            // 校验侧 WaylineFileServiceImpl.validKmzBytes 在 waylines.wpml 中查找该元素，
-            // 缺失会以 "The file format is incorrect." 报错。Pilot 2 真机导出也包含此节点。
-            w.writeStartElement(NS_WPML, "waylineCoordinateSysParam");
-            elem(w, "coordinateMode", "WGS84");
-            elem(w, "heightMode", "relativeToStartPoint");
-            elem(w, "positioningType", "GPS");
-            w.writeEndElement();
+            // 不要在 waylines.wpml 写 waylineCoordinateSysParam。
+            // 旧注释说 Pilot 2 真机导出包含此节点 — 但用 m4t_probe.kmz (来自 Pilot 2) 对比，
+            // probe.waylines.wpml 实际**没有**这个节点；写了反而让 MSDK pushKMZFileToAircraft
+            // 报 GENERATE_MISSION_FILE_FAILED。template.kml 仍保留该节点（line 895）。
 
             double distance = totalDistanceMeters(waypoints);
             elem(w, "distance", String.valueOf(distance));
