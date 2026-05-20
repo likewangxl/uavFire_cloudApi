@@ -1,5 +1,6 @@
 package com.yx.uavfire.manage.service.impl;
 
+import com.yx.uavfire.firedetection.AiServiceClient;
 import com.yx.uavfire.manage.model.dto.*;
 import com.yx.uavfire.manage.model.param.DeviceQueryParam;
 import com.yx.uavfire.manage.service.*;
@@ -52,6 +53,18 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
 
     @Value("${livestream.playback.webrtc-port:#{null}}")
     private Integer webrtcPlaybackPort;
+
+    @Autowired
+    private AiServiceClient aiServiceClient;
+
+    @Value("${ai-service.zlm-rtsp-host:127.0.0.1}")
+    private String zlmRtspHost;
+
+    @Value("${ai-service.zlm-rtsp-port:8554}")
+    private int zlmRtspPort;
+
+    @Value("${ai-service.auto-trigger-on-livestream:true}")
+    private boolean aiAutoTriggerOnLivestream;
 
     @Override
     public List<CapacityDeviceDTO> getLiveCapacity(String workspaceId) {
@@ -127,6 +140,28 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
                 return HttpResultResponse.error(LiveErrorCodeEnum.URL_TYPE_NOT_SUPPORTED);
         }
 
+        // 自动触发火情识别 (trigger #2): 直播推流成功后，让 ai-service 拉 ZLM RTSP 跑 YOLO。
+        // ZLM 上的 stream 名是 <droneSn>-<payloadIndex>，不带 videoType 后缀；
+        // VideoId.toString() 会多拼一段 "/<videoType>-0"，必须丢掉，否则拼出的 RTSP URL 会 404。
+        // 注意：responseResult.getData() 在 RC 接管模式下 deviceSn 是 RC 的 SN，
+        // 真正的飞机 SN 在 childDeviceSn 字段 / VideoId.droneSn，必须用飞机 SN 才能命中 OSD 缓存。
+        if (aiAutoTriggerOnLivestream) {
+            VideoId vid = liveParam.getVideoId();
+            String droneSn;
+            String streamVideoId;
+            if (vid != null && vid.getPayloadIndex() != null) {
+                droneSn = vid.getDroneSn();
+                streamVideoId = vid.getDroneSn() + "/" + vid.getPayloadIndex().toString();
+            } else {
+                droneSn = StringUtils.hasText(responseResult.getData().getChildDeviceSn())
+                        ? responseResult.getData().getChildDeviceSn()
+                        : responseResult.getData().getDeviceSn();
+                streamVideoId = AiServiceClient.defaultVideoIdForDrone(droneSn);
+            }
+            String rtspUrl = AiServiceClient.rtspUrlForVideoId(streamVideoId, zlmRtspHost, zlmRtspPort);
+            aiServiceClient.startDetection(aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, rtspUrl, "");
+        }
+
         return HttpResultResponse.success(live);
     }
 
@@ -142,6 +177,11 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
                         .setVideoId(videoId));
         if (!response.getData().getResult().isSuccess()) {
             return HttpResultResponse.error(response.getData().getResult());
+        }
+
+        if (aiAutoTriggerOnLivestream) {
+            aiServiceClient.stopDetection(
+                    aiServiceClient.fireTaskIdForDrone(responseResult.getData().getDeviceSn()));
         }
 
         return HttpResultResponse.success();

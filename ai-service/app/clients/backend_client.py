@@ -85,12 +85,8 @@ class BackendClient:
             return ""
         assert self.transport is not None
         response = self.transport.post(
-            "/manage/api/v1/login",
-            json={
-                "username": self.username,
-                "password": self.password,
-                "flag": self.login_flag,
-            },
+            "/manage/api/v1/demo-login",
+            json={},
         )
         token = _extract_access_token(response)
         if not token:

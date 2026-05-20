@@ -160,6 +160,14 @@
             <div class="dual-stream-stage-head">
               <span class="section-meta">RC Plus Dual-Stream Runtime</span>
               <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
+              <button
+                class="fire-detect-btn"
+                :class="{ active: fireDetectionState.running }"
+                :disabled="fireDetectionState.loading"
+                @click="onToggleFireDetection"
+              >
+                {{ fireDetectionState.running ? '停止火情监测' : '开始火情监测' }}
+              </button>
             </div>
 
             <div class="dual-stream-player-stage">
@@ -198,6 +206,34 @@
                 >
                   {{ item }}
                 </span>
+              </div>
+
+              <div class="flight-hud-overlay">
+                <div class="flight-hud-row mode-row">
+                  <span class="mode" :class="{ warn: flightHud.modeWarn }">{{ flightHud.modeText }}</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item battery">⚡ {{ flightHud.battery }}%</span>
+                  <span class="flight-hud-item" :class="{ fixed: flightHud.isFixed, unfixed: !flightHud.isFixed }">
+                    <span class="dot"></span>{{ flightHud.isFixed ? '定点' : '浮动' }}
+                  </span>
+                  <span class="flight-hud-item">GPS {{ flightHud.gps }}</span>
+                  <span class="flight-hud-item">R {{ flightHud.rtk }}</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item">ASL {{ flightHud.asl }} m</span>
+                  <span class="flight-hud-item">H {{ flightHud.height }} m</span>
+                  <span class="flight-hud-item">返航点 {{ flightHud.homeDist }} 米</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item">纬度 {{ flightHud.lat }}</span>
+                  <span class="flight-hud-item">经度 {{ flightHud.lng }}</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item">H.S {{ flightHud.hSpeed }} m/s</span>
+                  <span class="flight-hud-item">V.S {{ flightHud.vSpeed }} m/s</span>
+                  <span class="flight-hud-item">W.S {{ flightHud.wSpeed }} m/s</span>
+                </div>
               </div>
 
               <button
@@ -396,17 +432,70 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { notification } from 'ant-design-vue'
 import {
   getDualStreamGroup,
   getDualStreamTaskEvents,
   getLiveCapacity,
   requestDualStreamFocus,
+  requestFireDetectionStart,
+  requestFireDetectionStop,
   requestPilotLiveStart,
   type DualStreamEvent,
   type DualStreamGroup
 } from '/@/api/manage'
+import { eventApi as fireEventApi } from '/@/api/fire/event'
+import type { FireEventDTO } from '/@/types/fire/event'
+import { useMyStore } from '/@/store'
+import { EModeCode } from '/@/types/device'
 import { buildLivePaneState, swapPrimaryPreference } from './leadership-cockpit-live-layout.mjs'
+
+const store = useMyStore()
+
+// Flight HUD: 复用 WorkspaceLivestreamPanel 同款 OSD 展示。sn 来源优先级：
+// fireDetectionState.droneSn -> store.currentSn -> deviceInfo 第一个可用。
+const fmtHud = (v: any, digits = 2) => {
+  const n = Number(v)
+  return Number.isFinite(n) ? n.toFixed(digits) : '—'
+}
+const flightHudSn = computed<string | undefined>(() => {
+  const fromFire = fireDetectionState?.droneSn
+  if (fromFire && store.state.deviceState.deviceInfo[fromFire]) return fromFire
+  const cur = store.state.deviceState.currentSn
+  if (cur && store.state.deviceState.deviceInfo[cur]) return cur
+  const keys = Object.keys(store.state.deviceState.deviceInfo || {})
+  return keys.length > 0 ? keys[0] : undefined
+})
+const flightHudVisible = computed(() => !!flightHudSn.value)
+const flightHud = computed(() => {
+  const sn = flightHudSn.value
+  const osd = sn ? store.state.deviceState.deviceInfo[sn] : undefined
+  const hasOsd = !!osd
+  const mode = osd?.mode_code
+  const modeText = !hasOsd
+    ? '等待 OSD 数据'
+    : (mode != null && EModeCode[mode] ? EModeCode[mode].replace(/_/g, ' ') : '—')
+  const modeWarn = !hasOsd || mode === EModeCode.Disconnected || mode === EModeCode.Forced_Landing
+  return {
+    sn,
+    hasOsd,
+    modeText,
+    modeWarn,
+    battery: osd?.battery?.capacity_percent ?? '—',
+    isFixed: osd?.position_state?.is_fixed === 1,
+    gps: osd?.position_state?.gps_number ?? '—',
+    rtk: osd?.position_state?.rtk_number ?? '—',
+    asl: fmtHud(osd?.elevation),
+    height: fmtHud(osd?.height),
+    homeDist: fmtHud(osd?.home_distance),
+    lat: fmtHud(osd?.latitude, 6),
+    lng: fmtHud(osd?.longitude, 6),
+    hSpeed: fmtHud(osd?.horizontal_speed),
+    vSpeed: fmtHud(osd?.vertical_speed),
+    wSpeed: fmtHud(osd?.wind_speed),
+  }
+})
 
 const AI_EVENT_TASK_ID = 'manual-ai-001'
 
@@ -724,6 +813,33 @@ const syncLivePlayers = async () => {
 // 让原有视频渲染管线直接拉 Cloud API 流，无需改 video 元素逻辑。
 const pilotLiveUrl = ref<string>('')
 
+// 火情识别手动开关 (#4)
+const fireDetectionState = reactive({ running: false, loading: false, droneSn: '' })
+
+const onToggleFireDetection = async () => {
+  if (fireDetectionState.loading) return
+  try {
+    fireDetectionState.loading = true
+    if (!fireDetectionState.droneSn) {
+      const cap = await getLiveCapacity({} as any)
+      const dev: any = (cap.data || [])[0]
+      if (dev?.sn) fireDetectionState.droneSn = dev.sn
+    }
+    if (!fireDetectionState.droneSn) return
+    if (fireDetectionState.running) {
+      await requestFireDetectionStop(fireDetectionState.droneSn)
+      fireDetectionState.running = false
+    } else {
+      await requestFireDetectionStart(fireDetectionState.droneSn)
+      fireDetectionState.running = true
+    }
+  } catch (e) {
+    console.warn('[cockpit] fire-detection toggle failed', e)
+  } finally {
+    fireDetectionState.loading = false
+  }
+}
+
 const startPilotLivestreamOnce = async () => {
   try {
     const cap = await getLiveCapacity()
@@ -801,13 +917,90 @@ const ensureThermalPreviewMode = async () => {
   // Do not auto-switch RC Plus to thermal/PIP just to populate the web preview.
 }
 
+// 火情事件弹窗：每 3 秒拉一次 backend /api/fire/events，新出现的 MEDIUM/HIGH
+// 火情弹 antd notification 带带框的标注图缩略图。lastSeenFireEventId 防止首次进
+// 页面把历史事件全弹出来。
+let fireEventNotifyTimer: number | null = null
+const lastSeenFireEventId = ref(0)
+const fireEventsBootstrapped = ref(false)
+
+async function loadNewFireEvents (): Promise<void> {
+  let events: FireEventDTO[] = []
+  try {
+    const res = await fireEventApi.list()
+    events = res.data.data ?? []
+  } catch (e) {
+    console.warn('[cockpit] fire event poll failed', e)
+    return
+  }
+  if (events.length === 0) return
+  const maxId = events.reduce((m, e) => (e.id > m ? e.id : m), 0)
+  if (!fireEventsBootstrapped.value) {
+    lastSeenFireEventId.value = maxId
+    fireEventsBootstrapped.value = true
+    return
+  }
+  const fresh = events
+    .filter((e) => e.id > lastSeenFireEventId.value)
+    .filter((e) => {
+      const level = (e.fireLevel || '').toUpperCase()
+      return level === 'MEDIUM' || level === 'HIGH'
+    })
+    .sort((a, b) => a.id - b.id)
+  for (const evt of fresh) {
+    const level = (evt.fireLevel || '').toUpperCase()
+    const conf = Number(evt.confidence) || 0
+    const imageUrl = evt.thermalImageUrl || evt.visibleImageUrl
+    const imageKind = evt.thermalImageUrl ? '红外' : '可见光'
+    notification.warning({
+      message: `检测到${level === 'HIGH' ? '高' : '中等'}风险火情`,
+      description: h('div', { style: 'display:flex;gap:12px;align-items:flex-start' }, [
+        imageUrl
+          ? h('a', {
+            href: imageUrl,
+            target: '_blank',
+            rel: 'noopener',
+            style: 'flex:none; display:block; position:relative'
+          }, [
+            h('img', {
+              src: imageUrl,
+              alt: imageKind + '识别图',
+              style: 'width:120px;height:68px;object-fit:cover;border:1px solid #555;border-radius:4px;display:block;cursor:zoom-in'
+            }),
+            h('span', {
+              style: 'position:absolute; top:2px; left:2px; padding:1px 6px; font-size:10px; background:rgba(0,0,0,0.6); color:#fff; border-radius:3px'
+            }, imageKind)
+          ])
+          : null,
+        h('div', { style: 'font-size:12px;line-height:1.6' }, [
+          h('div', `事件: ${evt.eventId}`),
+          h('div', `置信度: ${conf.toFixed(2)}`),
+          h('div', `位置: ${evt.lat?.toFixed(4) ?? '-'}, ${evt.lng?.toFixed(4) ?? '-'}`),
+          h('div', `状态: ${evt.status}`),
+          h('a', {
+            href: '/fire-events',
+            target: '_blank',
+            rel: 'noopener',
+            style: 'color:#69b1ff'
+          }, '查看完整列表 →')
+        ])
+      ]),
+      duration: 12,
+      placement: 'topRight'
+    })
+  }
+  lastSeenFireEventId.value = maxId
+}
+
 onMounted(async () => {
   // 路线 A：让 Pilot 2 自己推 RTMP 到 ZLM（Cloud API），URL patch 到 group.visiblePlayUrl
   await startPilotLivestreamOnce()
   loadDualStreamState()
   loadAiRiskEvents()
+  loadNewFireEvents()
   dualStreamTimer = window.setInterval(loadDualStreamState, 5000)
   aiRiskEventTimer = window.setInterval(loadAiRiskEvents, 2000)
+  fireEventNotifyTimer = window.setInterval(loadNewFireEvents, 3000)
 })
 
 onBeforeUnmount(() => {
@@ -816,6 +1009,9 @@ onBeforeUnmount(() => {
   }
   if (aiRiskEventTimer != null) {
     window.clearInterval(aiRiskEventTimer)
+  }
+  if (fireEventNotifyTimer != null) {
+    window.clearInterval(fireEventNotifyTimer)
   }
   destroyAllPlayers()
 })
@@ -1520,6 +1716,29 @@ const focusItems = [
   align-items: center;
 }
 
+.fire-detect-btn {
+  background: rgba(69, 221, 255, 0.12);
+  border: 1px solid rgba(69, 221, 255, 0.35);
+  color: #9be7ff;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.fire-detect-btn:hover:not(:disabled) {
+  background: rgba(69, 221, 255, 0.22);
+}
+.fire-detect-btn.active {
+  background: rgba(255, 99, 71, 0.18);
+  border-color: rgba(255, 99, 71, 0.55);
+  color: #ffb3a3;
+}
+.fire-detect-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
 .dual-stream-player-stage {
   position: relative;
   width: 100%;
@@ -1648,6 +1867,67 @@ const focusItems = [
   font-size: 12px;
   line-height: 1.4;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+/* 左下角飞行 HUD（与 WorkspaceLivestreamPanel 同款），不拦截点击 */
+.flight-hud-overlay {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 6px;
+  color: #e6e9ef;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  max-width: 85%;
+
+  .flight-hud-row {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .mode-row .mode {
+    color: #53d492;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+
+    &.warn {
+      color: #ff7875;
+    }
+  }
+
+  .flight-hud-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+
+    &.battery {
+      color: #ffd666;
+    }
+
+    &.fixed .dot {
+      background: #52c41a;
+    }
+
+    &.unfixed .dot {
+      background: #ff4d4f;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+  }
 }
 
 .dual-stream-preview {

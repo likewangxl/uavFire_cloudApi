@@ -9,7 +9,12 @@ class DualStreamFusionService:
         source_ts: int,
         analysis_channel: str | None = None,
     ) -> DualStreamEvent:
-        fusion_score = round((visible_score * 0.6) + (thermal_score * 0.4), 3)
+        if analysis_channel == "visible":
+            fusion_score = round(visible_score, 3)
+        elif analysis_channel == "thermal":
+            fusion_score = round(thermal_score, 3)
+        else:
+            fusion_score = round((visible_score * 0.6) + (thermal_score * 0.4), 3)
         risk_level = (
             "HIGH"
             if fusion_score >= 0.7
