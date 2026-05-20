@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING
 
 from app.clients.backend_client import BackendClient
 from app.config.settings import Settings
@@ -105,7 +105,15 @@ class TaskRegistry:
             raise KeyError(task_id)
         return task
 
-    def record_detection_event(self, task_id: str, event: DualStreamEvent) -> EventRecord:
+    def record_detection_event(
+        self,
+        task_id: str,
+        event: DualStreamEvent,
+        *,
+        visible_frame: Optional[Any] = None,
+        visible_boxes: Optional[list] = None,
+        thermal_frame: Optional[Any] = None,
+    ) -> EventRecord:
         task = self.get(task_id)
         record = EventRecord(
             task_id=task_id,
@@ -143,7 +151,13 @@ class TaskRegistry:
             )
         if self._fire_event_reporter is not None:
             try:
-                self._fire_event_reporter.maybe_report(task, event)
+                self._fire_event_reporter.maybe_report(
+                    task,
+                    event,
+                    visible_frame=visible_frame,
+                    visible_boxes=visible_boxes,
+                    thermal_frame=thermal_frame,
+                )
             except Exception:
                 logger.exception(
                     "fire-event reporter raised unexpectedly task=%s", task_id
@@ -210,6 +224,7 @@ def build_registry() -> TaskRegistry:
         opencv_source_factory_from_task,
     )
     from app.services.fire_event_reporter import FireEventReporter
+    from app.services.snapshot_writer import SnapshotWriter
     from app.services.task_runner import (
         StreamScoreThermalAnalyzer,
         StreamScoreVisibleDetector,
@@ -218,8 +233,14 @@ def build_registry() -> TaskRegistry:
 
     settings = Settings()
     backend_client = _build_backend_client(settings)
+    snapshot_writer = SnapshotWriter(
+        snapshot_dir=settings.snapshot_dir,
+        public_base_url=settings.snapshot_public_base_url,
+    )
     fire_event_reporter = (
-        FireEventReporter(backend_client) if backend_client is not None else None
+        FireEventReporter(backend_client, snapshot_writer=snapshot_writer)
+        if backend_client is not None
+        else None
     )
     registry = TaskRegistry(
         backend_client=backend_client,

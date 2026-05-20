@@ -19,8 +19,12 @@ class Settings(BaseSettings):
     visible_fire_saturation_ratio: float = 0.01
     thermal_intensity_threshold: int = 200
     thermal_saturation_ratio: float = 0.05
+    snapshot_dir: str = "data/fire-snapshots"
+    snapshot_public_base_url: str = "http://127.0.0.1:9000/api/v1/snapshots"
 
     model_config = SettingsConfigDict(
         env_prefix="AI_SERVICE_",
         case_sensitive=False,
+        env_file=".env",
+        extra="ignore",
     )

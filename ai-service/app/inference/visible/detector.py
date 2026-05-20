@@ -82,12 +82,22 @@ class YoloVisibleDetector:
         self._confidence_floor = float(confidence_floor)
         self._model_factory = model_factory
         self._model: Optional[Any] = None
+        # 暴露最近一次 detect() 的检测框，供 snapshot_writer 在升级触发时画框。
+        self.last_boxes: list[dict] = []
 
     def detect(self, frame: FramePacket) -> float:
         if frame.channel != "visible" or frame.frame is None:
+            self.last_boxes = []
             return 0.0
         model = self._ensure_model()
         results = model.predict(frame.frame, verbose=False)
+        from app.services.snapshot_writer import boxes_from_yolo_results
+
+        self.last_boxes = boxes_from_yolo_results(
+            results,
+            target_class_names=self._target_class_names,
+            confidence_floor=self._confidence_floor,
+        )
         return _peak_target_confidence(
             results,
             target_class_names=self._target_class_names,

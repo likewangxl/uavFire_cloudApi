@@ -2,6 +2,7 @@ package com.yx.uavfire.fc100.event.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.dji.sdk.cloudapi.device.OsdDockDrone;
+import com.dji.sdk.cloudapi.device.OsdRcDrone;
 import com.yx.uavfire.fc100.common.Clock;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
@@ -150,22 +151,39 @@ public class FireEventServiceImpl implements FireEventService {
             throw new Fc100BusinessException(Fc100ErrorCode.MISSING_DEVICE_POSITION,
                 "deviceSn missing; cannot infer position");
         }
-        Optional<OsdDockDrone> osdOpt = deviceRedisService.getDeviceOsd(sn, OsdDockDrone.class);
-        if (osdOpt.isEmpty()) {
-            throw new Fc100BusinessException(Fc100ErrorCode.MISSING_DEVICE_POSITION,
-                "no OSD position cached for device: " + sn);
+        // M4T 飞 RC PLUS 直连时 OSD 缓存为 OsdRcDrone；Dock 飞机为 OsdDockDrone。两种都要兼容。
+        Float lat = null, lng = null, height = null;
+        try {
+            Optional<OsdDockDrone> dockOpt = deviceRedisService.getDeviceOsd(sn, OsdDockDrone.class);
+            if (dockOpt.isPresent()) {
+                OsdDockDrone osd = dockOpt.get();
+                lat = osd.getLatitude();
+                lng = osd.getLongitude();
+                height = osd.getHeight();
+            }
+        } catch (ClassCastException ignored) {
+            // 缓存类型不是 OsdDockDrone, 下一步用 OsdRcDrone 重试
         }
-        OsdDockDrone osd = osdOpt.get();
-        Float lat = osd.getLatitude();
-        Float lng = osd.getLongitude();
+        if (lat == null || lng == null) {
+            try {
+                Optional<OsdRcDrone> rcOpt = deviceRedisService.getDeviceOsd(sn, OsdRcDrone.class);
+                if (rcOpt.isPresent()) {
+                    OsdRcDrone osd = rcOpt.get();
+                    lat = osd.getLatitude();
+                    lng = osd.getLongitude();
+                    height = osd.getHeight();
+                }
+            } catch (ClassCastException ignored) {
+            }
+        }
         if (lat == null || lng == null) {
             throw new Fc100BusinessException(Fc100ErrorCode.MISSING_DEVICE_POSITION,
                 "OSD has no latitude/longitude for device: " + sn);
         }
         if (param.getLat() == null) param.setLat(lat.doubleValue());
         if (param.getLng() == null) param.setLng(lng.doubleValue());
-        if (param.getAlt() == null && osd.getHeight() != null) {
-            param.setAlt(osd.getHeight().doubleValue());
+        if (param.getAlt() == null && height != null) {
+            param.setAlt(height.doubleValue());
         }
     }
 

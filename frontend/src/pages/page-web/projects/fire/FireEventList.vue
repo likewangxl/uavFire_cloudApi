@@ -10,8 +10,56 @@
       :data-source="events"
       :loading="loading"
       :row-key="(r: FireEventDTO) => r.eventId"
-      :pagination="{ pageSize: 20 }"
-    />
+      :pagination="{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10','20','50','100'], showQuickJumper: true, showTotal: (total: number) => `共 ${total} 条` }"
+      :scroll="{ y: 'calc(100vh - 260px)' }"
+    >
+      <template #imageCell="{ record }">
+        <div
+          v-if="record.thermalImageUrl || record.visibleImageUrl"
+          style="display: flex; flex-direction: column; gap: 4px; align-items: flex-start"
+        >
+          <a-image
+            :src="record.thermalImageUrl || record.visibleImageUrl"
+            :width="88"
+            :height="50"
+            :preview="{ src: record.thermalImageUrl || record.visibleImageUrl }"
+            style="object-fit: cover; border: 1px solid #444; border-radius: 4px;"
+          />
+          <span style="font-size: 11px; color: #aaa">
+            {{ record.thermalImageUrl ? '红外' : '可见光' }}
+          </span>
+          <a
+            href="#"
+            style="font-size: 11px; color: #69b1ff"
+            @click.prevent="openPreview(record.thermalImageUrl || record.visibleImageUrl)"
+          >切换原图/标注</a>
+        </div>
+        <span v-else>-</span>
+      </template>
+    </a-table>
+
+    <a-modal
+      v-model:open="previewOpen"
+      :footer="null"
+      :title="`识别图 (${previewMode === 'annotated' ? '带框标注' : '原始帧'})`"
+      width="900px"
+    >
+      <div style="display: flex; gap: 8px; margin-bottom: 12px">
+        <a-radio-group v-model:value="previewMode" button-style="solid">
+          <a-radio-button value="annotated">带框标注</a-radio-button>
+          <a-radio-button value="raw">原始帧</a-radio-button>
+        </a-radio-group>
+        <a-button v-if="previewCurrentUrl" type="link" :href="previewCurrentUrl" target="_blank">
+          在新页签打开
+        </a-button>
+      </div>
+      <img
+        v-if="previewCurrentUrl"
+        :src="previewCurrentUrl"
+        alt="识别图"
+        style="display: block; max-width: 100%; max-height: 70vh; margin: 0 auto"
+      />
+    </a-modal>
 
     <a-modal
       v-model:open="showCreateModal"
@@ -51,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { eventApi } from '/@/api/fire/event'
@@ -75,6 +123,26 @@ const defaultForm = (): FireEventCreateRequest => ({
 })
 
 const form = ref<FireEventCreateRequest>(defaultForm())
+
+// 识别图预览：annotated 是带 YOLO 框的标注图，raw 是原始帧。
+// ai-service 文件命名约定 <eventId>-annotated.jpg / <eventId>-raw.jpg，
+// 数据库 visibleImageUrl 存的是 annotated，靠后缀替换得到 raw。
+const previewOpen = ref(false)
+const previewBaseUrl = ref<string | null>(null)
+const previewMode = ref<'annotated' | 'raw'>('annotated')
+const previewCurrentUrl = computed(() => {
+  if (!previewBaseUrl.value) return ''
+  const base = previewBaseUrl.value.replace(/-raw\.jpg$/, '-annotated.jpg')
+  return previewMode.value === 'raw'
+    ? base.replace(/-annotated\.jpg$/, '-raw.jpg')
+    : base
+})
+
+function openPreview (url: string) {
+  previewBaseUrl.value = url
+  previewMode.value = 'annotated'
+  previewOpen.value = true
+}
 
 function resetForm () {
   form.value = defaultForm()
@@ -129,6 +197,13 @@ const columns = [
       Number(record.confidence).toFixed(2),
   },
   { title: '火情等级', dataIndex: 'fireLevel', key: 'fireLevel', width: 100 },
+  {
+    title: '识别图',
+    key: 'visibleImageUrl',
+    dataIndex: 'visibleImageUrl',
+    width: 110,
+    slots: { customRender: 'imageCell' },
+  },
   {
     title: '坐标 (lat, lng)',
     key: 'coord',

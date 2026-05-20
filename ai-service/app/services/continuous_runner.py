@@ -58,6 +58,9 @@ class ContinuousTaskRunner:
         visible_score = (
             self._visible_detector.detect(visible_packet) if visible_packet is not None else 0.0
         )
+        # 仅在 detector 暴露了 last_boxes 时（如 YoloVisibleDetector）才有框信息，
+        # ColorFire / Stub detector 没有这个属性 — 直接 fallback 到 None。
+        visible_boxes = getattr(self._visible_detector, "last_boxes", None)
         thermal_score = (
             self._thermal_analyzer.analyze(thermal_packet) if thermal_packet is not None else 0.0
         )
@@ -73,7 +76,13 @@ class ContinuousTaskRunner:
             source_ts=source_ts,
             analysis_channel=analysis_channel,
         )
-        return self._registry.record_detection_event(task_id, event)
+        return self._registry.record_detection_event(
+            task_id,
+            event,
+            visible_frame=visible_packet.frame if visible_packet is not None else None,
+            visible_boxes=visible_boxes,
+            thermal_frame=thermal_packet.frame if thermal_packet is not None else None,
+        )
 
     def run(
         self,

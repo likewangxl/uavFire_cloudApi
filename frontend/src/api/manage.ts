@@ -188,6 +188,21 @@ export const getDualStreamTaskEvents = async function (taskId: string): Promise<
   }
 }
 
+// 手动触发火情识别 (#4): cockpit / 手动按钮调用
+export const requestFireDetectionStart = async function (droneSn: string, videoId?: string): Promise<IWorkspaceResponse<any>> {
+  const url = `${HTTP_PREFIX}/fire-detection/start`
+  const body: Record<string, string> = { drone_sn: droneSn }
+  if (videoId) body.video_id = videoId
+  const result = await request.post(url, body)
+  return result.data
+}
+
+export const requestFireDetectionStop = async function (droneSn: string): Promise<IWorkspaceResponse<any>> {
+  const url = `${HTTP_PREFIX}/fire-detection/stop`
+  const result = await request.post(url, { drone_sn: droneSn })
+  return result.data
+}
+
 export const getAllUsersInfo = async function (wid: string, body: IPage): Promise<CommonListResponse<any>> {
   const url = `${HTTP_PREFIX}/users/${wid}/users?&page=${body.page}&page_size=${body.page_size}`
   const result = await request.get(url)
