@@ -173,19 +173,28 @@ def _build_visible_detector(settings: Settings):
     if settings.visible_yolo_model_path:
         from app.inference.visible.detector import YoloVisibleDetector
 
-        return YoloVisibleDetector(
+        det = YoloVisibleDetector(
             model_path=settings.visible_yolo_model_path,
             target_class_names=[
                 name.strip() for name in settings.visible_target_classes.split(",") if name.strip()
             ],
             confidence_floor=settings.visible_confidence_floor,
         )
+        logger.info(
+            "visible_detector=YoloVisibleDetector model=%s floor=%s classes=%s",
+            settings.visible_yolo_model_path,
+            settings.visible_confidence_floor,
+            settings.visible_target_classes,
+        )
+        return det
     if settings.visible_detector_mode.lower() == "stub":
         from app.inference.visible.detector import StubVisibleDetector
 
+        logger.info("visible_detector=StubVisibleDetector")
         return StubVisibleDetector()
     from app.inference.visible.detector import ColorFireVisibleDetector
 
+    logger.info("visible_detector=ColorFireVisibleDetector saturation_ratio=%s", settings.visible_fire_saturation_ratio)
     return ColorFireVisibleDetector(
         saturation_ratio=settings.visible_fire_saturation_ratio,
     )

@@ -33,7 +33,7 @@ import java.util.Set;
 @Slf4j
 public class FireEventServiceImpl implements FireEventService {
 
-    private static final BigDecimal LOW = new BigDecimal("0.75");
+    private static final BigDecimal LOW = new BigDecimal("0.10");
     private static final BigDecimal HIGH = new BigDecimal("0.90");
 
     /** 已绑定活跃任务的 mission 状态集合（用于同 eventId 去重） */

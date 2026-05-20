@@ -1,10 +1,11 @@
-"""Risk-state-machine FireEvent reporter.
+"""Score-and-time-window FireEvent reporter.
 
 Translates per-frame DualStreamEvent into discrete FireEvent POSTs to backend:
-- POST when risk level upgrades (LOW -> MEDIUM, LOW -> HIGH, MEDIUM -> HIGH).
-- Same-or-downgrade levels do not POST.
-- Falling back to LOW resets the per-task state so the next upgrade fires again.
-- POST failures log ERROR but never retry; the next upgrade will try again.
+- POST whenever fusion score >= _REPORT_SCORE_FLOOR, irrespective of risk_level.
+  risk_level 仅作为业务展示标签（HIGH/MEDIUM/LOW），不再决定是否上报。
+- 同一 task 在 _REPORT_DEBOUNCE_S 秒内不重复 POST，避免高频帧刷屏。
+- score 跌回 floor 以下视作噪声，并 reset 时间窗，让下次抬升能立刻 POST。
+- POST failures log ERROR but never retry; the next window-eligible frame will try again.
 - 升级触发时若注入了 snapshot_writer，则把当前 visible frame 写出 raw + annotated JPG，
   并把 annotated 的公网 URL 放入 payload.visible_image_url。
 """
@@ -12,6 +13,7 @@ Translates per-frame DualStreamEvent into discrete FireEvent POSTs to backend:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Protocol
 
@@ -22,7 +24,13 @@ from app.models.task import TaskRecord
 logger = logging.getLogger(__name__)
 
 
-_RISK_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+# 低于此分数不上报（噪声）。risk_level 仍按 fusion 业务阈值 0.4/0.7 标签化，
+# 这个 floor 只决定"是否值得让后端记录/可能建 mission"。
+_REPORT_SCORE_FLOOR = 0.05
+
+# 同 task 两次 POST 之间的最小间隔（秒），用于去重避免刷屏。
+# 设成 10s：模型 ~3s/帧，约每 3-4 帧最多一次 POST。
+_REPORT_DEBOUNCE_S = 10.0
 
 
 class SupportsFireEventReporting(Protocol):
@@ -37,7 +45,7 @@ class FireEventReporter:
     ) -> None:
         self._backend_client = backend_client
         self._snapshot_writer = snapshot_writer
-        self._last_posted_risk: Dict[str, str] = {}
+        self._last_posted_ts: Dict[str, float] = {}
 
     def maybe_report(
         self,
@@ -48,12 +56,15 @@ class FireEventReporter:
         thermal_frame: Optional[Any] = None,
     ) -> bool:
         risk = (event.risk_level or "").upper()
-        last = self._last_posted_risk.get(task.task_id)
-        if risk == "LOW":
-            if last is not None:
-                self._last_posted_risk.pop(task.task_id, None)
+        score = max(float(event.visible_score), float(event.thermal_score))
+        # 1) 低于上报 floor 视作噪声：reset 时间窗并丢弃
+        if score < _REPORT_SCORE_FLOOR:
+            self._last_posted_ts.pop(task.task_id, None)
             return False
-        if last is not None and _RISK_RANK.get(risk, 0) <= _RISK_RANK.get(last, 0):
+        # 2) 时间窗去重：同 task 在 DEBOUNCE 秒内最多 POST 一次
+        now_ts = time.monotonic()
+        last_ts = self._last_posted_ts.get(task.task_id)
+        if last_ts is not None and (now_ts - last_ts) < _REPORT_DEBOUNCE_S:
             return False
         event_id = f"{task.task_id}-{event.source_ts}"
         # 按分析通道路由图片字段：visible -> visible_image_url, thermal -> thermal_image_url
@@ -86,7 +97,7 @@ class FireEventReporter:
                 risk,
             )
             return False
-        self._last_posted_risk[task.task_id] = risk
+        self._last_posted_ts[task.task_id] = now_ts
         logger.info(
             "fire-event POSTed task=%s eventId=%s risk=%s confidence=%.3f channel=%s image=%s",
             task.task_id,

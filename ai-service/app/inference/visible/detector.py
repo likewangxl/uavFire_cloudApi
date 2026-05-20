@@ -90,7 +90,7 @@ class YoloVisibleDetector:
             self.last_boxes = []
             return 0.0
         model = self._ensure_model()
-        results = model.predict(frame.frame, verbose=False)
+        results = model.predict(frame.frame, verbose=False, conf=self._confidence_floor, imgsz=1920)
         from app.services.snapshot_writer import boxes_from_yolo_results
 
         self.last_boxes = boxes_from_yolo_results(
