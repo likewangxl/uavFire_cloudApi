@@ -54,12 +54,8 @@ export default defineComponent({
     const root = getRoot()
     const options = [
       { key: 0, label: '综合态势', path: '/' + ERouterName.TSA, icon: 'TeamOutlined' },
-      { key: 1, label: '直播画面', path: '/' + ERouterName.LIVESTREAM, icon: 'VideoCameraOutlined' },
-      { key: 2, label: '标注图层', path: '/' + ERouterName.LAYER, icon: 'EnvironmentOutlined' },
-      { key: 3, label: '媒体文件', path: '/' + ERouterName.MEDIA, icon: 'PictureOutlined' },
       { key: 4, label: '航线库', path: '/' + ERouterName.WAYLINE, icon: 'NodeIndexOutlined' },
       { key: 5, label: '任务计划库', path: '/' + ERouterName.TASK, icon: 'CalendarOutlined' },
-      { key: 6, label: '飞行区域', path: '/' + ERouterName.FLIGHT_AREA, icon: 'GroupOutlined' },
       { key: 7, label: '火情事件', path: '/' + ERouterName.FIRE_EVENTS, icon: 'FireOutlined' },
       { key: 8, label: '灭火任务', path: '/' + ERouterName.FIRE_MISSIONS, icon: 'AlertOutlined' },
     ]
