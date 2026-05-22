@@ -3,7 +3,7 @@ package com.yinxin.uavfir
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import android.widget.Button
+import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.yinxin.uavfir.ui.ValidationConsoleController
@@ -16,10 +16,10 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var statusText: TextView
-    private lateinit var refreshButton: Button
-    private lateinit var startButton: Button
-    private lateinit var probeWaypointButton: Button
-    private lateinit var openSampleToolsButton: Button
+    private lateinit var refreshButton: View
+    private lateinit var startButton: View
+    private lateinit var probeWaypointButton: View
+    private lateinit var openSampleToolsButton: View
     private val controller: ValidationConsoleController
         get() = (application as App).services.validationController
     private val waypointProbe: com.yinxin.uavfir.wayline.WaypointProbeController
@@ -27,6 +27,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            )
+        supportActionBar?.hide()
         setContentView(R.layout.activity_main)
         statusText = findViewById(R.id.statusText)
         refreshButton = findViewById(R.id.refreshButton)
