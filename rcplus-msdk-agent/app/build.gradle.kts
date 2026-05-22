@@ -5,6 +5,7 @@ plugins {
 
 val djiMsdkVersion = providers.gradleProperty("djiMsdkVersion").orElse("5.17.0")
 val djiApiKey = providers.gradleProperty("djiApiKey").orElse("")
+val maplibreToken = providers.gradleProperty("maplibreToken").orElse("unused")
 val agentBackendBaseUrl = providers.gradleProperty("agentBackendBaseUrl").orElse("http://127.0.0.1:6789/")
 val agentMediaHost = providers.gradleProperty("agentMediaHost").orElse("127.0.0.1")
 val agentMediaRtmpPort = providers.gradleProperty("agentMediaRtmpPort").orElse("1935")
@@ -22,6 +23,8 @@ android {
 
     buildFeatures {
         buildConfig = true
+        viewBinding = true
+        dataBinding = true
     }
 
     defaultConfig {
@@ -33,6 +36,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["DJI_API_KEY"] = djiApiKey.get()
+        manifestPlaceholders["MAPLIBRE_TOKEN"] = maplibreToken.get()
         buildConfigField("String", "AGENT_BACKEND_BASE_URL", "\"${agentBackendBaseUrl.get()}\"")
         buildConfigField("String", "AGENT_MEDIA_HOST", "\"${agentMediaHost.get()}\"")
         buildConfigField("int", "AGENT_MEDIA_RTMP_PORT", agentMediaRtmpPort.get())
@@ -93,6 +97,18 @@ android {
 }
 
 dependencies {
+
+    implementation(project(":uxsdk"))
+    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation("androidx.legacy:legacy-support-v4:1.0.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.4")
+    implementation("androidx.lifecycle:lifecycle-livedata-ktx:2.8.4")
+    implementation("io.reactivex.rxjava3:rxandroid:3.0.2")
+    implementation("io.reactivex.rxjava3:rxkotlin:3.0.1")
+    implementation("org.dom4j:dom4j:2.1.4")
+    implementation("com.github.bumptech.glide:glide:4.16.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")

@@ -3,6 +3,10 @@ package com.yinxin.uavfir
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import dji.v5.common.utils.GeoidManager
+import dji.v5.ux.core.communication.DefaultGlobalPreferences
+import dji.v5.ux.core.communication.GlobalPreferencesManager
+import dji.v5.ux.core.util.UxSharedPreferencesUtil
 
 class App : Application() {
     lateinit var services: AppServices
@@ -20,6 +24,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContextHolder.initialize(this)
+        initializeUxSdkDefaults()
         services = AppServices(this)
         services.setActiveDroneSn(LOCAL_DRONE_SN)
         Log.i(TAG, "application created, runtime loop ready for ${LOCAL_DRONE_SN}")
@@ -29,6 +34,12 @@ class App : Application() {
             services.startDualStreamOnBoot(LOCAL_DRONE_SN)
             services.startReportersOnBoot()
         }
+    }
+
+    private fun initializeUxSdkDefaults() {
+        UxSharedPreferencesUtil.initialize(this)
+        GlobalPreferencesManager.initialize(DefaultGlobalPreferences(this))
+        GeoidManager.getInstance().init(this)
     }
 
     override fun onTerminate() {
