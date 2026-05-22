@@ -14,15 +14,28 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.LongSupplier;
 
 @Service
 public class MsdkDeviceStateService {
+
+    private static final long COMMAND_DISPATCH_TTL_MS = 15_000L;
+
+    private final LongSupplier clock;
 
     private final Map<String, MsdkDeviceStateDTO> latestByAircraftSn = new ConcurrentHashMap<>();
 
     private final Map<String, Queue<MsdkCommandDTO>> commandQueues = new ConcurrentHashMap<>();
 
     private final Map<String, MsdkCommandDTO> commandById = new ConcurrentHashMap<>();
+
+    public MsdkDeviceStateService() {
+        this(System::currentTimeMillis);
+    }
+
+    public MsdkDeviceStateService(LongSupplier clock) {
+        this.clock = clock;
+    }
 
     public void upsert(MsdkDeviceStateDTO state) {
         if (state == null || !StringUtils.hasText(state.getAircraftSn())) {
@@ -49,7 +62,7 @@ public class MsdkDeviceStateService {
     }
 
     public MsdkCommandDTO enqueueCommand(String aircraftSn, MsdkCommandParam param) {
-        long now = System.currentTimeMillis();
+        long now = clock.getAsLong();
         MsdkCommandDTO command = new MsdkCommandDTO()
                 .setCommandId("msdk-" + now + "-" + UUID.randomUUID().toString().substring(0, 8))
                 .setAircraftSn(aircraftSn)
@@ -68,10 +81,10 @@ public class MsdkDeviceStateService {
         if (queue == null) {
             return Optional.empty();
         }
-        MsdkCommandDTO command = queue.poll();
+        MsdkCommandDTO command = pollNextDispatchable(queue);
         if (command != null) {
             command.setStatus("DISPATCHED");
-            command.setUpdatedAt(System.currentTimeMillis());
+            command.setUpdatedAt(clock.getAsLong());
         }
         return Optional.ofNullable(command);
     }
@@ -90,8 +103,24 @@ public class MsdkDeviceStateService {
         }
         command.setStatus(StringUtils.hasText(status) ? status : "UNKNOWN");
         command.setMessage(message);
-        command.setUpdatedAt(System.currentTimeMillis());
+        command.setUpdatedAt(clock.getAsLong());
         return Optional.of(command);
+    }
+
+    private MsdkCommandDTO pollNextDispatchable(Queue<MsdkCommandDTO> queue) {
+        long now = clock.getAsLong();
+        while (true) {
+            MsdkCommandDTO command = queue.poll();
+            if (command == null) {
+                return null;
+            }
+            if (now - command.getCreatedAt() <= COMMAND_DISPATCH_TTL_MS) {
+                return command;
+            }
+            command.setStatus("EXPIRED");
+            command.setMessage("command-expired-before-dispatch");
+            command.setUpdatedAt(now);
+        }
     }
 
     private boolean isOnline(MsdkDeviceStateDTO state) {

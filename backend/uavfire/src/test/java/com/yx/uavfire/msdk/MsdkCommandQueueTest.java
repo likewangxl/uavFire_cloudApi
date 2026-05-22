@@ -6,6 +6,7 @@ import com.yx.uavfire.msdk.service.MsdkDeviceStateService;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -41,5 +42,23 @@ class MsdkCommandQueueTest {
         MsdkCommandDTO updated = service.getCommand(queued.getCommandId()).orElseThrow();
         assertEquals("APPLIED", updated.getStatus());
         assertEquals("ok", updated.getMessage());
+    }
+
+    @Test
+    void pollCommandExpiresStalePendingFlightCommandBeforeDispatch() {
+        AtomicLong now = new AtomicLong(1_000_000L);
+        MsdkDeviceStateService service = new MsdkDeviceStateService(now::get);
+        MsdkCommandParam param = new MsdkCommandParam();
+        param.setCommand("takeoff");
+        param.setParams(Map.of());
+
+        MsdkCommandDTO queued = service.enqueueCommand("AIRCRAFT-1", param);
+        now.addAndGet(16_000L);
+
+        assertTrue(service.pollCommand("AIRCRAFT-1").isEmpty());
+
+        MsdkCommandDTO expired = service.getCommand(queued.getCommandId()).orElseThrow();
+        assertEquals("EXPIRED", expired.getStatus());
+        assertEquals("command-expired-before-dispatch", expired.getMessage());
     }
 }
