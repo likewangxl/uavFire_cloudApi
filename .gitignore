@@ -32,3 +32,6 @@ vite-*.out.log
 
 # OMC tool state (local only)
 .omc/
+
+# Vendored DJI MSDK V5 sample (cloned for local exploration, not part of uavfire)
+Mobile-SDK-Android-V5/

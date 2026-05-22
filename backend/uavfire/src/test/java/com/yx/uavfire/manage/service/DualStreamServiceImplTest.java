@@ -8,8 +8,11 @@ import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
 import com.yx.uavfire.manage.service.impl.DualStreamServiceImpl;
+import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -20,7 +23,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DualStreamServiceImplTest {
@@ -266,6 +272,8 @@ class DualStreamServiceImplTest {
     @Test
     void acceptEvent_issuesThermalFocusWhenVisibleRiskIsSuspected() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
         service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
                 .setDroneSn("DRONE-001")
                 .setCurrentMode("VISIBLE")
@@ -288,6 +296,7 @@ class DualStreamServiceImplTest {
         assertEquals("focus-thermal", group.getLastCommandAction());
         assertEquals("pending", group.getLastCommandStatus());
         assertEquals("VISIBLE_SUSPECTED", events.get(0).getReviewStatus());
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
     @Test
@@ -315,6 +324,8 @@ class DualStreamServiceImplTest {
     @Test
     void acceptEvent_issuesVisibleFocusAndMarksConfirmedAfterThermalHighRisk() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
         service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
                 .setDroneSn("DRONE-001")
                 .setCurrentMode("VISIBLE")
@@ -332,6 +343,9 @@ class DualStreamServiceImplTest {
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
                 .setAnalysisChannel("thermal")
+                .setSourceTs(1779163200000L)
+                .setVisibleScore(0.7)
+                .setThermalScore(0.82)
                 .setFusionScore(0.82)
                 .setRiskLevel("HIGH"));
 
@@ -342,6 +356,14 @@ class DualStreamServiceImplTest {
         assertEquals("focus-visible", command.getAction());
         assertEquals("pending", command.getStatus());
         assertEquals("THERMAL_CONFIRMED", events.get(1).getReviewStatus());
+        ArgumentCaptor<FireEventCreateParam> fireEventCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
+        verify(fireEventService).create(fireEventCaptor.capture());
+        FireEventCreateParam fireEvent = fireEventCaptor.getValue();
+        assertEquals("task-001-1779163200000", fireEvent.getEventId());
+        assertEquals("M4T", fireEvent.getSource());
+        assertEquals("DRONE-001", fireEvent.getDeviceSn());
+        assertEquals("HIGH", fireEvent.getFireLevel());
+        assertEquals(0, fireEvent.getConfidence().compareTo(java.math.BigDecimal.valueOf(0.82)));
     }
 
     @Test
@@ -375,6 +397,8 @@ class DualStreamServiceImplTest {
     @Test
     void acceptEvent_issuesVisibleFocusAndMarksRejectedAfterThermalLowRisk() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
                 .setAnalysisChannel("visible")
@@ -397,6 +421,7 @@ class DualStreamServiceImplTest {
         assertNotNull(command);
         assertEquals("focus-visible", command.getAction());
         assertEquals("THERMAL_REJECTED", events.get(1).getReviewStatus());
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
     @Test

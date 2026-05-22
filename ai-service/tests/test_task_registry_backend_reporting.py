@@ -37,13 +37,18 @@ def test_record_detection_event_appends_local_event_and_reports_to_backend():
     assert backend.last_payload["drone_sn"] == "DRONE-100"
     assert backend.last_payload["risk_level"] == "HIGH"
     assert backend.last_payload["analysis_channel"] == "visible"
+    assert backend.fire_event_payloads == []
 
 
 class RecordingBackendClient:
     def __init__(self) -> None:
         self.last_task_id: Optional[str] = None
         self.last_payload: Optional[dict] = None
+        self.fire_event_payloads = []
 
     def report_event(self, task_id: str, payload: dict) -> None:
         self.last_task_id = task_id
         self.last_payload = payload
+
+    def report_fire_event(self, payload: dict) -> None:
+        self.fire_event_payloads.append(payload)

@@ -26,6 +26,8 @@ class App : Application() {
         if (runtimeLoopLifecyclePolicy.startOnApplicationCreate) {
             Log.i(TAG, "application created, starting runtime loop for ${LOCAL_DRONE_SN}")
             services.runtimeLoop.start(LOCAL_DRONE_SN)
+            services.startDualStreamOnBoot(LOCAL_DRONE_SN)
+            services.startReportersOnBoot()
         }
     }
 
@@ -36,6 +38,8 @@ class App : Application() {
 
     companion object {
         private const val TAG = "UavfireApp"
-        const val LOCAL_DRONE_SN = "RC_PLUS_LOCAL"
+        val LOCAL_DRONE_SN: String = BuildConfig.AGENT_AIRCRAFT_SN
+            .takeIf { it.isNotBlank() }
+            ?: "RC_PLUS_LOCAL"
     }
 }

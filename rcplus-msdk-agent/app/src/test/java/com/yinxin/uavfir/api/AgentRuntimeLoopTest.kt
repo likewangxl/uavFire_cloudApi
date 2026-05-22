@@ -3,6 +3,7 @@ package com.yinxin.uavfir.api
 import com.yinxin.uavfir.sdk.CameraCapability
 import com.yinxin.uavfir.sdk.DjiDeviceSessionAdapter
 import com.yinxin.uavfir.sdk.DjiDeviceState
+import com.yinxin.uavfir.sdk.DjiTelemetry
 import com.yinxin.uavfir.session.AgentConnectionState
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
 import com.yinxin.uavfir.session.DualStreamSessionManager
@@ -30,6 +31,15 @@ class AgentRuntimeLoopTest {
                         visibleSupported = true,
                         thermalSupported = true,
                     ),
+                    telemetry = DjiTelemetry(
+                        latitude = 34.123456,
+                        longitude = 108.123456,
+                        height = 12.5,
+                        elevation = 450.0,
+                        horizontalSpeed = 3.2,
+                        verticalSpeed = -0.4,
+                        batteryPercent = 86,
+                    ),
                 ),
             ),
             reporter = reporter,
@@ -48,6 +58,26 @@ class AgentRuntimeLoopTest {
         assertEquals("degraded", api.lastStatusBody?.thermalState)
         assertEquals("thermal-stream-source-unavailable", api.lastStatusBody?.statusReason)
         assertEquals("DRONE-001", api.lastCapabilityDroneSn)
+        assertEquals("DRONE-001", api.lastMsdkDeviceState?.aircraftSn)
+        assertEquals("RC_PLUS_LOCAL", api.lastMsdkDeviceState?.gatewaySn)
+        assertEquals(true, api.lastMsdkDeviceState?.online)
+        assertEquals("CAPABILITY_READY", api.lastMsdkDeviceState?.connectionState)
+        assertEquals(34.123456, api.lastMsdkDeviceState?.latitude)
+        assertEquals(108.123456, api.lastMsdkDeviceState?.longitude)
+        assertEquals(12.5, api.lastMsdkDeviceState?.height)
+        assertEquals(450.0, api.lastMsdkDeviceState?.elevation)
+        assertEquals(3.2, api.lastMsdkDeviceState?.horizontalSpeed)
+        assertEquals(-0.4, api.lastMsdkDeviceState?.verticalSpeed)
+        assertEquals(86, api.lastMsdkDeviceState?.batteryPercent)
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("visibleStream"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("thermalFocus"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("takeoff"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("land"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("returnHome"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("emergencyStop"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("hover"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("virtualStick"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("flyToPoint"))
         assertEquals(1, poller.pollCount)
     }
 
@@ -117,6 +147,7 @@ class AgentRuntimeLoopTest {
         var lastStatusBody: AgentStatusRequest? = null
         var lastCapabilityDroneSn: String? = null
         var lastCapabilityBody: CapabilityReportRequest? = null
+        var lastMsdkDeviceState: MsdkDeviceStateRequest? = null
 
         override suspend fun heartbeat(
             droneSn: String,
@@ -148,6 +179,17 @@ class AgentRuntimeLoopTest {
         override suspend fun ackCommand(
             droneSn: String,
             body: AgentCommandAckRequest,
+        ) = Unit
+
+        override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) {
+            lastMsdkDeviceState = body
+        }
+
+        override suspend fun pollMsdkCommand(aircraftSn: String): AgentApiEnvelope<MsdkCommandResponse>? = null
+
+        override suspend fun ackMsdkCommand(
+            aircraftSn: String,
+            body: MsdkCommandAckRequest,
         ) = Unit
     }
 }

@@ -69,6 +69,11 @@ const initStateFunc = () => ({
     currentSn: '',
     currentType: -1
   },
+  msdkDeviceState: {
+    devices: {} as {
+      [aircraftSn: string]: any
+    }
+  },
   osdVisible: { // osd 显示设备相关信息
     sn: '',
     callsign: '',
@@ -133,6 +138,15 @@ const mutations: MutationTree<RootStateType> = {
     if (info.host.job_number !== undefined) {
       dock.work_osd = info.host
     }
+  },
+  SET_MSDK_DEVICE_STATE (state, devices) {
+    const next: Record<string, any> = {}
+    ;(devices || []).forEach((device: any) => {
+      if (device.aircraftSn) {
+        next[device.aircraftSn] = device
+      }
+    })
+    state.msdkDeviceState.devices = next
   },
   SET_DRAW_VISIBLE_INFO (state, bool) {
     state.drawVisible = bool

@@ -34,4 +34,20 @@ interface DualStreamApi {
         @Path("droneSn") droneSn: String,
         @Body body: AgentCommandAckRequest,
     )
+
+    @POST("/manage/api/v1/msdk/devices/state")
+    suspend fun reportMsdkDeviceState(
+        @Body body: MsdkDeviceStateRequest,
+    )
+
+    @POST("/manage/api/v1/msdk/devices/{aircraftSn}/commands/poll")
+    suspend fun pollMsdkCommand(
+        @Path("aircraftSn") aircraftSn: String,
+    ): AgentApiEnvelope<MsdkCommandResponse>?
+
+    @POST("/manage/api/v1/msdk/devices/{aircraftSn}/commands/ack")
+    suspend fun ackMsdkCommand(
+        @Path("aircraftSn") aircraftSn: String,
+        @Body body: MsdkCommandAckRequest,
+    )
 }

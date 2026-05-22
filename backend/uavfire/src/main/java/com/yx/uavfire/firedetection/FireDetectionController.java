@@ -32,10 +32,18 @@ public class FireDetectionController {
         if (!StringUtils.hasText(droneSn)) {
             return HttpResultResponse.error("drone_sn required");
         }
-        String videoId = StringUtils.hasText(body.get("video_id"))
-                ? body.get("video_id")
-                : AiServiceClient.defaultVideoIdForDrone(droneSn);
-        String url = AiServiceClient.rtspUrlForVideoId(videoId, zlmRtspHost, zlmRtspPort);
+        // MSDK Migration Phase 1 (docs/MSDK_MIGRATION_PLAN.md):
+        // Default URL points at the MSDK Agent's RTMP push (ZLM stream-id
+        // "{drone_sn}-0", matching DjiLiveStreamController). When caller
+        // explicitly supplies a Cloud SDK video_id we honour it — this is
+        // the rollback rail for phase 1, removed in phase 2.
+        String videoId = body.get("video_id");
+        String url;
+        if (StringUtils.hasText(videoId)) {
+            url = AiServiceClient.rtspUrlForVideoId(videoId, zlmRtspHost, zlmRtspPort);
+        } else {
+            url = "rtsp://" + zlmRtspHost + ":" + zlmRtspPort + "/live/" + droneSn + "-0";
+        }
         boolean ok = aiServiceClient.startDetection(
                 aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, url, "");
         return ok ? HttpResultResponse.success() : HttpResultResponse.error("ai-service start failed");

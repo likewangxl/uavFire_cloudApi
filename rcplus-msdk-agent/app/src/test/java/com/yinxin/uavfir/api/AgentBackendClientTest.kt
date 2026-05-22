@@ -146,6 +146,64 @@ class AgentBackendClientTest {
     }
 
     @Test
+    fun buildMsdkDeviceStateRequest_mapsRuntimeStateAndControlCapabilities() {
+        val client = AgentBackendClient(api = RecordingDualStreamApi())
+
+        val payload = client.buildMsdkDeviceStateRequest(
+            aircraftSn = "AIRCRAFT-001",
+            gatewaySn = "RC-001",
+            online = true,
+            connectionState = "CAPABILITY_READY",
+            latitude = 34.123456,
+            longitude = 108.123456,
+            height = 120.5,
+            elevation = 411.0,
+            horizontalSpeed = 4.5,
+            verticalSpeed = -0.2,
+            batteryPercent = 82,
+            visibleSupported = true,
+            thermalSupported = true,
+        )
+
+        assertEquals("AIRCRAFT-001", payload.aircraftSn)
+        assertEquals("RC-001", payload.gatewaySn)
+        assertEquals(true, payload.online)
+        assertEquals("CAPABILITY_READY", payload.connectionState)
+        assertEquals(34.123456, payload.latitude)
+        assertEquals(108.123456, payload.longitude)
+        assertEquals(120.5, payload.height)
+        assertEquals(411.0, payload.elevation)
+        assertEquals(4.5, payload.horizontalSpeed)
+        assertEquals(-0.2, payload.verticalSpeed)
+        assertEquals(82, payload.batteryPercent)
+        assertEquals(true, payload.capabilities["visibleStream"])
+        assertEquals(true, payload.capabilities["thermalFocus"])
+        assertEquals(false, payload.capabilities["thermalSecondStream"])
+        assertEquals(false, payload.capabilities["takeoff"])
+        assertEquals(false, payload.capabilities["flyToPoint"])
+        assertEquals(false, payload.capabilities["returnHome"])
+    }
+
+    @Test
+    fun sendMsdkDeviceState_postsPayloadToMsdkStateApi() = runTest {
+        val api = RecordingDualStreamApi()
+        val client = AgentBackendClient(api = api)
+        val payload = client.buildMsdkDeviceStateRequest(
+            aircraftSn = "AIRCRAFT-002",
+            gatewaySn = "RC-002",
+            online = true,
+            connectionState = "SDK_READY",
+            batteryPercent = 76,
+        )
+
+        client.sendMsdkDeviceState(payload)
+
+        assertEquals("AIRCRAFT-002", api.lastMsdkDeviceState?.aircraftSn)
+        assertEquals("RC-002", api.lastMsdkDeviceState?.gatewaySn)
+        assertEquals(76, api.lastMsdkDeviceState?.batteryPercent)
+    }
+
+    @Test
     fun pollCommand_returnsCommandFromApi() = runTest {
         val api = RecordingDualStreamApi().apply {
             nextCommand = AgentApiEnvelope(
@@ -183,6 +241,47 @@ class AgentBackendClientTest {
         assertEquals("session running", api.lastAckBody?.message)
     }
 
+    @Test
+    fun pollMsdkCommand_returnsCommandAndParamsFromMsdkApi() = runTest {
+        val api = RecordingDualStreamApi().apply {
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-1",
+                    aircraftSn = "AIRCRAFT-003",
+                    command = "fly_to_point",
+                    params = mapOf("latitude" to 34.1, "longitude" to 108.1),
+                    status = "PENDING",
+                ),
+            )
+        }
+        val client = AgentBackendClient(api = api)
+
+        val command = client.pollMsdkCommand("AIRCRAFT-003")
+
+        assertEquals("AIRCRAFT-003", api.lastMsdkPollAircraftSn)
+        assertEquals("msdk-1", command?.commandId)
+        assertEquals("fly_to_point", command?.command)
+        assertEquals(34.1, command?.params?.get("latitude"))
+    }
+
+    @Test
+    fun ackMsdkCommand_postsUppercaseStatusToMsdkAckApi() = runTest {
+        val api = RecordingDualStreamApi()
+        val client = AgentBackendClient(api = api)
+
+        client.ackMsdkCommand(
+            aircraftSn = "AIRCRAFT-004",
+            commandId = "msdk-2",
+            status = "APPLIED",
+            message = "focus-visible applied",
+        )
+
+        assertEquals("AIRCRAFT-004", api.lastMsdkAckAircraftSn)
+        assertEquals("msdk-2", api.lastMsdkAckBody?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAckBody?.status)
+        assertEquals("focus-visible applied", api.lastMsdkAckBody?.message)
+    }
+
     private class RecordingDualStreamApi : DualStreamApi {
         var lastHeartbeatDroneSn: String? = null
         var lastHeartbeatBody: AgentHeartbeatRequest? = null
@@ -193,6 +292,11 @@ class AgentBackendClientTest {
         var nextCommand: AgentApiEnvelope<AgentCommandResponse>? = null
         var lastAckDroneSn: String? = null
         var lastAckBody: AgentCommandAckRequest? = null
+        var lastMsdkDeviceState: MsdkDeviceStateRequest? = null
+        var nextMsdkCommand: AgentApiEnvelope<MsdkCommandResponse>? = null
+        var lastMsdkPollAircraftSn: String? = null
+        var lastMsdkAckAircraftSn: String? = null
+        var lastMsdkAckBody: MsdkCommandAckRequest? = null
 
         override suspend fun heartbeat(
             droneSn: String,
@@ -226,6 +330,23 @@ class AgentBackendClientTest {
         ) {
             lastAckDroneSn = droneSn
             lastAckBody = body
+        }
+
+        override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) {
+            lastMsdkDeviceState = body
+        }
+
+        override suspend fun pollMsdkCommand(aircraftSn: String): AgentApiEnvelope<MsdkCommandResponse>? {
+            lastMsdkPollAircraftSn = aircraftSn
+            return nextMsdkCommand
+        }
+
+        override suspend fun ackMsdkCommand(
+            aircraftSn: String,
+            body: MsdkCommandAckRequest,
+        ) {
+            lastMsdkAckAircraftSn = aircraftSn
+            lastMsdkAckBody = body
         }
     }
 }

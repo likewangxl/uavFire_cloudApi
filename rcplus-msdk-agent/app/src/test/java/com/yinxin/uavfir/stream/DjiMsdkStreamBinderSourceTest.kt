@@ -51,4 +51,22 @@ class DjiMsdkStreamBinderSourceTest {
                 focusThermalBody.contains("focusThermal failed to set thermal-only display mode"),
         )
     }
+
+    @Test
+    fun bindThermal_reportsM4tSingleComponentLimitationInsteadOfMsdkWideLimitation() {
+        val source = String(Files.readAllBytes(
+            Paths.get("src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt"),
+        ))
+        val bindThermalBody = source.substringAfter("override suspend fun bindThermal")
+            .substringBefore("override suspend fun focusVisible")
+
+        assertTrue(
+            "bindThermal should explain the tested M4T single-gimbal/single-component limitation",
+            bindThermalBody.contains("m4t-single-gimbal-only-exposes-single-component-index"),
+        )
+        assertTrue(
+            "bindThermal should not claim the whole MSDK v5 camera stream manager lacks simultaneous stream support",
+            !bindThermalBody.contains("msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding"),
+        )
+    }
 }

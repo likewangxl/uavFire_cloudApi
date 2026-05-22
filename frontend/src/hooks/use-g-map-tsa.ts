@@ -1,8 +1,6 @@
 import store from '/@/store'
 import { getRoot } from '/@/root'
-import { ELocalStorageKey, EDeviceTypeName } from '/@/types'
-import { getDeviceBySn } from '/@/api/manage'
-import { message } from 'ant-design-vue'
+import { EDeviceTypeName } from '/@/types'
 import dockIcon from '/@/assets/icons/dock.png'
 import rcIcon from '/@/assets/icons/rc.png'
 import droneIcon from '/@/assets/icons/drone.png'
@@ -81,21 +79,14 @@ export function deviceTsaUpdate () {
     delete paths[sn]
   }
 
-  function addMarker (sn: string, lng?: number, lat?: number) {
-    getDeviceBySn(localStorage.getItem(ELocalStorageKey.WorkspaceId)!, sn)
-      .then(data => {
-        if (data.code !== 0) {
-          message.error(data.message)
-          return
-        }
-        initMarker(data.data.domain, data.data.nickname, sn, lng, lat)
-      })
+  function addMarker (sn: string, lng?: number, lat?: number, type = EDeviceTypeName.Aircraft, name = sn) {
+    initMarker(type, name, sn, lng, lat)
   }
 
-  function moveTo (sn: string, lng: number, lat: number) {
+  function moveTo (sn: string, lng: number, lat: number, type?: number, name?: string) {
     let marker = markers[sn]
     if (!marker) {
-      addMarker(sn, lng, lat)
+      addMarker(sn, lng, lat, type, name)
       marker = markers[sn]
       return
     }

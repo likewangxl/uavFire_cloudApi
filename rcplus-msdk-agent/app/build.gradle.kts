@@ -13,6 +13,8 @@ val agentMqttBrokerUrl = providers.gradleProperty("agentMqttBrokerUrl").orElse("
 val agentMqttBrokerUsername = providers.gradleProperty("agentMqttBrokerUsername").orElse("")
 val agentMqttBrokerPassword = providers.gradleProperty("agentMqttBrokerPassword").orElse("")
 val agentWaylineSharedSecret = providers.gradleProperty("agentWaylineSharedSecret").orElse("change-me-in-production")
+val agentAircraftSn = providers.gradleProperty("agentAircraftSn").orElse("")
+val agentGatewaySn = providers.gradleProperty("agentGatewaySn").orElse("")
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -39,6 +41,8 @@ android {
         buildConfigField("String", "AGENT_MQTT_BROKER_USERNAME", "\"${agentMqttBrokerUsername.get()}\"")
         buildConfigField("String", "AGENT_MQTT_BROKER_PASSWORD", "\"${agentMqttBrokerPassword.get()}\"")
         buildConfigField("String", "AGENT_WAYLINE_SHARED_SECRET", "\"${agentWaylineSharedSecret.get()}\"")
+        buildConfigField("String", "AGENT_AIRCRAFT_SN", "\"${agentAircraftSn.get()}\"")
+        buildConfigField("String", "AGENT_GATEWAY_SN", "\"${agentGatewaySn.get()}\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

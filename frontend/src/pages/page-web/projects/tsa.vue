@@ -217,12 +217,16 @@
               <div class="aircraft-action-panel">
                 <div class="aircraft-osd-title">飞行控制</div>
                 <div class="aircraft-action-tips">
-                  {{ hasActiveDrcControl(device)
-                    ? '遥控链路已连接，可执行遥控和飞行指令。'
+                  {{ hasActiveDrcControl(device) && !hasMsdkCommandCapability(device, 'takeoff')
+                    ? 'MSDK 控制通道已就绪；起飞/航点飞行执行器尚未接入，当前不会发送起飞指令。'
+                    : hasActiveDrcControl(device) && hasMsdkCommandCapability(device, 'takeoff') && !hasMsdkCommandCapability(device, 'flyToPoint')
+                    ? 'MSDK 基础飞控已接入：可执行原生起飞和返航；航点飞行暂未接入。'
+                    : hasActiveDrcControl(device)
+                    ? 'MSDK 控制通道已就绪，可执行已接入的遥控和飞行指令。'
                     : hasRemoteSession(device) && !remoteControlState.cloudControlAuthorized
-                      ? '云控会话仍在，但飞行授权已释放，请重新申请授权。'
+                      ? 'MSDK 控制通道仍在，但飞行授权已释放，请重新进入控制。'
                       : hasRemoteSession(device)
-                      ? '云控会话仍在，但 DRC/摇杆当前不可用。'
+                      ? 'MSDK 控制通道仍在，但遥控输入当前不可用。'
                       : '请先进入遥控模式，再发送官方起飞和其他飞行指令。' }}
                 </div>
                 <div class="aircraft-action-section">
@@ -235,7 +239,7 @@
                       :loading="actionLoading[device.gateway.sn] === 'connect'"
                       :disabled="hasRemoteSession(device) && remoteControlState.cloudControlAuthorized"
                       @click="connectRemoteControl(device)">
-                      {{ hasRemoteSession(device) && !remoteControlState.cloudControlAuthorized ? '重新申请授权' : '申请遥控' }}
+                      {{ hasRemoteSession(device) && !remoteControlState.cloudControlAuthorized ? '重新进入控制' : '进入控制' }}
                     </a-button>
                     <a-button
                       size="small"
@@ -256,7 +260,7 @@
                       type="primary"
                       class="aircraft-action-btn aircraft-action-btn--primary"
                       :loading="actionLoading[device.gateway.sn] === 'takeoff'"
-                      :disabled="!canOfficialTakeoff(device)"
+                      :disabled="!canTakeoff(device)"
                       @click="handleTakeoff(device)">
                       起飞
                     </a-button>
@@ -264,7 +268,7 @@
                       size="small"
                       class="aircraft-action-btn"
                       :loading="actionLoading[device.gateway.sn] === 'land'"
-                      :disabled="!hasActiveDrcControl(device)"
+                      :disabled="!canLand(device)"
                       @click="handleLanding(device)">
                       降落
                     </a-button>
@@ -272,7 +276,7 @@
                       size="small"
                       class="aircraft-action-btn"
                       :loading="actionLoading[device.gateway.sn] === 'hover'"
-                      :disabled="!hasActiveDrcControl(device)"
+                      :disabled="!canHover(device)"
                       @click="handleAxisControl(device, 'hover')">
                       悬停
                     </a-button>
@@ -307,7 +311,7 @@
                         size="small"
                         class="aircraft-action-btn"
                         :loading="actionLoading[device.gateway.sn] === 'up'"
-                        :disabled="!hasActiveDrcControl(device)"
+                        :disabled="!canVirtualStick(device)"
                         @click="openAxisDistanceControl(device, 'up')">
                         <span class="aircraft-action-btn-inner"><ArrowUpOutlined /><span>上升</span></span>
                       </a-button>
@@ -337,7 +341,7 @@
                         size="small"
                         class="aircraft-action-btn"
                         :loading="actionLoading[device.gateway.sn] === 'north'"
-                        :disabled="!hasActiveDrcControl(device)"
+                        :disabled="!canVirtualStick(device)"
                         @click="openAxisDistanceControl(device, 'north')">
                         <span class="aircraft-action-btn-inner"><UpOutlined /><span>向前</span></span>
                       </a-button>
@@ -367,7 +371,7 @@
                         size="small"
                         class="aircraft-action-btn"
                         :loading="actionLoading[device.gateway.sn] === 'down'"
-                        :disabled="!hasActiveDrcControl(device)"
+                        :disabled="!canVirtualStick(device)"
                         @click="openAxisDistanceControl(device, 'down')">
                         <span class="aircraft-action-btn-inner"><ArrowDownOutlined /><span>下降</span></span>
                       </a-button>
@@ -397,7 +401,7 @@
                         size="small"
                         class="aircraft-action-btn"
                         :loading="actionLoading[device.gateway.sn] === 'west'"
-                        :disabled="!hasActiveDrcControl(device)"
+                        :disabled="!canVirtualStick(device)"
                         @click="openAxisDistanceControl(device, 'west')">
                         <span class="aircraft-action-btn-inner"><LeftOutlined /><span>向左</span></span>
                       </a-button>
@@ -427,7 +431,7 @@
                         size="small"
                         class="aircraft-action-btn"
                         :loading="actionLoading[device.gateway.sn] === 'south'"
-                        :disabled="!hasActiveDrcControl(device)"
+                        :disabled="!canVirtualStick(device)"
                         @click="openAxisDistanceControl(device, 'south')">
                         <span class="aircraft-action-btn-inner"><DownOutlined /><span>向后</span></span>
                       </a-button>
@@ -457,7 +461,7 @@
                         size="small"
                         class="aircraft-action-btn"
                         :loading="actionLoading[device.gateway.sn] === 'east'"
-                        :disabled="!hasActiveDrcControl(device)"
+                        :disabled="!canVirtualStick(device)"
                         @click="openAxisDistanceControl(device, 'east')">
                         <span class="aircraft-action-btn-inner"><RightOutlined /><span>向右</span></span>
                       </a-button>
@@ -473,7 +477,7 @@
                       danger
                       class="aircraft-action-btn aircraft-action-btn--danger aircraft-action-btn--danger-strong"
                       :loading="actionLoading[device.gateway.sn] === 'stop'"
-                      :disabled="!hasActiveDrcControl(device)"
+                      :disabled="!canEmergencyStop(device)"
                       @click="sendEmergencyStop(device)">
                       急停
                     </a-button>
@@ -482,7 +486,7 @@
                       danger
                       class="aircraft-action-btn aircraft-action-btn--danger aircraft-action-btn--danger-strong"
                       :loading="actionLoading[device.gateway.sn] === 'flyStop'"
-                      :disabled="!hasActiveDrcControl(device)"
+                      :disabled="!canEmergencyStop(device)"
                       @click="handleStopFlyToPoint(device)">
                       停止飞行
                     </a-button>
@@ -499,7 +503,7 @@
                       size="small"
                       class="aircraft-action-btn"
                       :loading="actionLoading[device.gateway.sn] === 'cancelReturnHome'"
-                      :disabled="!hasActiveDrcControl(device)"
+                      :disabled="!canCancelReturnHome(device)"
                       @click="handleCancelReturnHome(device)">
                       取消返航
                     </a-button>
@@ -567,7 +571,8 @@ import noData from '/@/assets/icons/no-data.png'
 import rc from '/@/assets/icons/rc.png'
 import { OnlineDevice, EModeCode, OSDVisible, EDockModeCode, DeviceOsd, DrcStateEnum } from '/@/types/device'
 import { useMyStore } from '/@/store'
-import { getDeviceTopo, getUnreadDeviceHms, updateDeviceHms } from '/@/api/manage'
+import { getUnreadDeviceHms, updateDeviceHms } from '/@/api/manage'
+import { listMsdkDevices, sendMsdkCommand, type MsdkDeviceState } from '/@/api/msdk-device'
 import {
   RocketOutlined,
   EyeInvisibleOutlined,
@@ -583,25 +588,7 @@ import {
 } from '@ant-design/icons-vue'
 import { EHmsLevel } from '/@/types/enums'
 import { message, Modal } from 'ant-design-vue'
-import {
-  postFlightAuth,
-  postFlyToPoint,
-  deleteFlyToPoint,
-  postReturnHome,
-  postReturnHomeCancel,
-  postTakeoffToPoint,
-  LostControlActionInCommandFLight,
-  WaylineLostControlActionInCommandFlight,
-  ERthMode,
-  ECommanderModeLostAction,
-  ECommanderFlightMode,
-} from '/@/api/drone-control/drone'
-import { postDrc, postDrcEnter, postDrcExit } from '/@/api/drc'
-import { UranusMqtt } from '/@/mqtt'
-import { DRC_METHOD } from '/@/types/drc'
-import { useMqtt, DeviceTopicInfo } from '/@/components/g-map/use-mqtt'
-import { useManualControl, KeyCode } from '/@/components/g-map/use-manual-control'
-import EventBus from '/@/event-bus/'
+import { DeviceTopicInfo } from '/@/components/g-map/use-mqtt'
 import {
   CloudControlAuthMessage,
   FlyToPointMessage,
@@ -636,6 +623,16 @@ import {
   isOfficialTakeoffProgressFailureStatus,
   isOfficialTakeoffProgressSuccessStatus,
 } from './official-takeoff-flow.mjs'
+import { deviceTsaUpdate } from '/@/hooks/use-g-map-tsa'
+
+enum KeyCode {
+  ARROW_UP = 'ArrowUp',
+  ARROW_DOWN = 'ArrowDown',
+  KEY_W = 'KeyW',
+  KEY_A = 'KeyA',
+  KEY_S = 'KeyS',
+  KEY_D = 'KeyD',
+}
 
 const store = useMyStore()
 const username = ref(localStorage.getItem(ELocalStorageKey.Username))
@@ -651,6 +648,11 @@ const onlineDevices = reactive({
 const onlineDocks = reactive({
   data: [] as OnlineDevice[]
 })
+const msdkOnlineDevices = computed<MsdkDeviceState[]>(() => {
+  return Object.values(store.state.msdkDeviceState.devices || {}) as MsdkDeviceState[]
+})
+const tsaMap = deviceTsaUpdate()
+let msdkDeviceTimer: ReturnType<typeof window.setInterval> | undefined
 const actionLoading = reactive({} as Record<string, string>)
 const officialTakeoffFlow = reactive({
   gatewaySn: '',
@@ -668,7 +670,7 @@ const remoteControlState = reactive({
   cloudControlAuthorized: false,
   drcLinkState: DRC_LINK_STATE.DISCONNECT,
   joystickAvailable: false,
-  mqttClient: null as UranusMqtt | null
+  mqttClient: null as any
 })
 const drcDisconnectState = reactive({
   pending: false,
@@ -693,12 +695,8 @@ const isRemoteControlConnected = computed(() => (
   remoteControlState.drcLinkState === DRC_LINK_STATE.CONNECT &&
   remoteControlState.joystickAvailable
 ))
-const mqttHooks = useMqtt(remoteTopicInfo)
-const {
-  handleKeyup,
-  handleEmergencyStop: triggerEmergencyStop,
-  resetControlState,
-} = useManualControl(remoteTopicInfo, isRemoteControlConnected)
+function resetControlState () {
+}
 const hmsInfo = computed({
   get: () => store.state.hmsInfo,
   set: (val) => {
@@ -706,9 +704,9 @@ const hmsInfo = computed({
   }
 })
 
-// DJI official docs separate cloud authorization, DRC link state, and joystick
-// validity. These events must not directly destroy the whole cloud-control
-// session unless the transport itself actually breaks.
+// DJI runtime exposes authorization, link state, and joystick availability as independent
+// signals. These events must not directly destroy the whole MSDK control session unless
+// the transport itself actually breaks.
 function onDroneControlWsEvent (payload: any) {
   if (!payload) return
   if (payload.biz_code === EBizCode.TakeoffToPointProgress) {
@@ -784,7 +782,7 @@ function onDroneControlWsEvent (payload: any) {
       clearPendingCloudControlReleaseNotice()
       finishCloudControlReconnectAttempt()
       if (authChanged || recoveredFromPending) {
-        message.success('云控授权已恢复。')
+        message.success('MSDK 控制授权已恢复。')
       }
       return
     }
@@ -792,7 +790,7 @@ function onDroneControlWsEvent (payload: any) {
     clearPendingCloudControlReleaseNotice()
     finishCloudControlReconnectAttempt()
     if (authChanged) {
-      message.warning('云控授权已释放，请重新申请授权。')
+      message.warning('MSDK 控制授权已释放，请重新进入控制。')
     }
     return
   }
@@ -827,20 +825,20 @@ function onDroneControlWsEvent (payload: any) {
       remoteControlState.joystickAvailable = decision.updateJoystickAvailable
     }
     if (data?.drcState === DrcStateEnum.DISCONNECT) {
-      message.warning(data.message || 'DRC 链路未连接，已暂停摇杆控制。')
+      message.warning(data.message || 'MSDK 控制通道未连接，已暂停遥控输入。')
     } else if (data?.drcState === DrcStateEnum.CONNECTED) {
-      message.success('DRC 链路已连接。')
+      message.success('MSDK 控制通道已连接。')
     }
   }
 }
 
 onMounted(() => {
-  getOnlineTopo()
-  EventBus.on('droneControlWs', onDroneControlWsEvent)
+  refreshMsdkDevices()
+  msdkDeviceTimer = window.setInterval(refreshMsdkDevices, 2000)
   setTimeout(() => {
     watch(() => store.state.deviceStatusEvent,
       data => {
-        getOnlineTopo()
+        refreshMsdkDevices()
         if (data.deviceOnline.sn) {
           getUnreadHms(data.deviceOnline.sn)
         }
@@ -856,49 +854,83 @@ onMounted(() => {
   scorllHeight.value = parent?.clientHeight - parent?.firstElementChild?.clientHeight
 })
 
-function getOnlineTopo () {
-  getDeviceTopo(workspaceId.value).then((res) => {
-    if (res.code !== 0) {
-      return
+function toOnlineDeviceFromMsdk (device: MsdkDeviceState): OnlineDevice {
+  const callsign = device.model || device.aircraftSn
+  return {
+    model: device.model || 'MSDK Aircraft',
+    callsign,
+    sn: device.aircraftSn,
+    mode: device.online ? EModeCode.Manual : EModeCode.Disconnected,
+    gateway: {
+      model: 'RC Plus MSDK Agent',
+      callsign: device.gatewaySn || 'MSDK Agent',
+      sn: device.gatewaySn || device.aircraftSn,
+      domain: String(EDeviceTypeName.Gateway)
+    },
+    payload: []
+  }
+}
+
+function toDeviceOsdFromMsdk (device: MsdkDeviceState): DeviceOsd {
+  const batteryPercent = device.batteryPercent ?? 0
+  return {
+    longitude: Number(device.longitude ?? 0),
+    latitude: Number(device.latitude ?? 0),
+    gear: -1,
+    mode_code: device.online ? EModeCode.Manual : EModeCode.Disconnected,
+    height: String(device.height ?? 0),
+    home_distance: String(device.homeDistance ?? 0),
+    horizontal_speed: String(device.horizontalSpeed ?? 0),
+    vertical_speed: String(device.verticalSpeed ?? 0),
+    wind_speed: String(device.windSpeed ?? 0),
+    wind_direction: '--',
+    elevation: String(device.elevation ?? 0),
+    position_state: {
+      gps_number: String(device.gpsCount ?? '--'),
+      is_fixed: device.positionFixed ? 1 : 0,
+      rtk_number: String(device.rtkCount ?? '--')
+    },
+    battery: {
+      capacity_percent: String(batteryPercent),
+      landing_power: '0',
+      remain_flight_time: 0,
+      return_home_power: '0'
     }
-    onlineDevices.data = []
-    onlineDocks.data = []
-    res.data.forEach((gateway: any) => {
-      const child = gateway.children
-      const device: OnlineDevice = {
-        model: child?.device_name,
-        callsign: child?.nickname,
-        sn: child?.device_sn,
-        mode: EModeCode.Disconnected,
-        gateway: {
-          model: gateway?.device_name,
-          callsign: gateway?.nickname,
-          sn: gateway?.device_sn,
-          domain: gateway?.domain
-        },
-        payload: []
-      }
-      child?.payloads_list.forEach((payload: any) => {
-        device.payload.push({
-          index: payload.index,
-          model: payload.model,
-          payload_name: payload.payload_name,
-          payload_sn: payload.payload_sn,
-          control_source: payload.control_source,
-          payload_index: payload.payload_index
-        })
-      })
-      if (EDeviceTypeName.Dock === gateway.domain) {
-        hmsVisible.set(device.sn, false)
-        hmsVisible.set(device.gateway.sn, false)
-        onlineDocks.data.push(device)
-      }
-      if (gateway.status && EDeviceTypeName.Gateway === gateway.domain) {
-        onlineDevices.data.push(device)
-      }
+  }
+}
+
+function syncMsdkDevicesToPage () {
+  onlineDevices.data = msdkOnlineDevices.value.map(toOnlineDeviceFromMsdk)
+  onlineDocks.data = []
+  msdkOnlineDevices.value.forEach(device => {
+    if (!device.aircraftSn) return
+    store.commit('SET_DEVICE_INFO', {
+      sn: device.aircraftSn,
+      host: toDeviceOsdFromMsdk(device)
     })
+    if (device.longitude && device.latitude) {
+      tsaMap.moveTo(device.aircraftSn, device.longitude, device.latitude, EDeviceTypeName.Aircraft, device.model || device.aircraftSn)
+    }
   })
 }
+
+async function refreshMsdkDevices () {
+  const res = await listMsdkDevices()
+  if (res.code !== 0) {
+    return
+  }
+  store.commit('SET_MSDK_DEVICE_STATE', res.data || [])
+  syncMsdkDevicesToPage()
+}
+
+watch(msdkOnlineDevices, (devices) => {
+  for (const device of devices) {
+    if (!device.aircraftSn || !device.longitude || !device.latitude) {
+      continue
+    }
+    tsaMap.moveTo(device.aircraftSn, device.longitude, device.latitude, EDeviceTypeName.Aircraft, device.model || device.aircraftSn)
+  }
+}, { deep: true })
 
 function switchVisible (e: any, device: OnlineDevice, isDock: boolean, isClick: boolean) {
   if (!isClick) {
@@ -984,7 +1016,27 @@ function sleep (ms: number) {
 }
 
 function canOfficialTakeoff (device: OnlineDevice) {
-  return isCurrentRemoteGateway(device)
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'takeoff') && hasMsdkCommandCapability(device, 'flyToPoint')
+}
+
+function canTakeoff (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'takeoff')
+}
+
+function canLand (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'land')
+}
+
+function canHover (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'hover')
+}
+
+function canVirtualStick (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'virtualStick')
+}
+
+function canEmergencyStop (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'emergencyStop')
 }
 
 function clearPendingDrcDisconnectNotice () {
@@ -1007,7 +1059,7 @@ function finishCloudControlReconnectAttempt () {
   authReleaseState.reconnecting = false
 }
 
-function scheduleDrcDisconnect (mqttClient: UranusMqtt) {
+function scheduleDrcDisconnect (mqttClient: any) {
   if (drcDisconnectState.pending) return
   drcDisconnectState.pending = true
   message.warning(`遥控链路波动，等待 ${DRC_DISCONNECT_GRACE_MS / 1000} 秒内自动恢复...`)
@@ -1026,7 +1078,7 @@ function scheduleDrcDisconnect (mqttClient: UranusMqtt) {
 function scheduleCloudControlReleaseNotice () {
   if (authReleaseState.pending) return
   authReleaseState.pending = true
-  message.warning(`云控授权波动，等待 ${CLOUD_CONTROL_AUTH_RELEASE_GRACE_MS / 1000} 秒内自动恢复...`)
+  message.warning(`MSDK 控制授权波动，等待 ${CLOUD_CONTROL_AUTH_RELEASE_GRACE_MS / 1000} 秒内自动恢复...`)
   authReleaseState.timer = setTimeout(() => {
     authReleaseState.timer = null
     authReleaseState.pending = false
@@ -1035,7 +1087,7 @@ function scheduleCloudControlReleaseNotice () {
       return
     }
     remoteControlState.cloudControlAuthorized = false
-    message.warning('云控授权已释放，请重新申请授权。')
+    message.warning('MSDK 控制授权已释放，请重新进入控制。')
   }, CLOUD_CONTROL_AUTH_RELEASE_GRACE_MS)
 }
 
@@ -1163,6 +1215,11 @@ function isGatewayControllable (device: OnlineDevice) {
   return Boolean(deviceInfo.value[device.sn] && deviceInfo.value[device.sn].mode_code !== EModeCode.Disconnected)
 }
 
+function hasMsdkCommandCapability (device: OnlineDevice, capability: string) {
+  const msdkDevice = store.state.msdkDeviceState.devices?.[device.sn] as MsdkDeviceState | undefined
+  return msdkDevice?.capabilities?.[capability] === true
+}
+
 function hasRemoteSession (device: OnlineDevice) {
   return remoteControlState.connected && remoteControlState.gatewaySn === device.gateway.sn
 }
@@ -1244,97 +1301,21 @@ async function connectRemoteControl (device: OnlineDevice) {
   if (hasRemoteSession(device) && remoteControlState.cloudControlAuthorized) {
     return true
   }
-  const reconnectDecision = getRemoteReconnectDecision({
-    remoteConnected: remoteControlState.connected,
-    currentGatewaySn: remoteControlState.gatewaySn,
-    targetGatewaySn: device.gateway.sn,
-  })
-  if (reconnectDecision === 'disconnect_before_connect') {
-    await disconnectRemoteControl('reconnect_before_new_enter')
-  }
-
   setActionLoading(device.gateway.sn, 'connect')
   try {
-    let mqttClient = remoteControlState.mqttClient
-    let clientId = store.state.clientId
-
-    if (reconnectDecision !== 'reuse_existing_session') {
-      const authRes = await postDrc({})
-      if (authRes.code !== 0) {
-        return false
-      }
-      const { address, client_id, username, password } = authRes.data
-      clientId = client_id
-      mqttClient = new UranusMqtt(address, {
-        clientId: client_id,
-        username,
-        password,
-      })
-      mqttClient.initMqtt()
-      await mqttClient.waitForConnected()
-      store.commit('SET_MQTT_STATE', mqttClient)
-      store.commit('SET_CLIENT_ID', client_id)
-    } else if (!mqttClient || !clientId) {
-      return false
-    }
-
-    authReleaseState.reconnecting = true
-    const enterRes = await postDrcEnter({
-      client_id: clientId,
-      gateway_sn: device.gateway.sn,
-    })
-    if (enterRes.code !== 0) {
-      finishCloudControlReconnectAttempt()
-      if (reconnectDecision !== 'reuse_existing_session' && mqttClient) {
-        mqttClient.destroyed()
-        store.commit('SET_MQTT_STATE', null)
-        store.commit('SET_CLIENT_ID', '')
-      }
-      return false
-    }
-
     remoteControlState.gatewaySn = device.gateway.sn
     remoteControlState.aircraftSn = device.sn
     remoteControlState.connected = true
     remoteControlState.cloudControlAuthorized = true
     remoteControlState.drcLinkState = DRC_LINK_STATE.CONNECT
     remoteControlState.joystickAvailable = true
-    remoteControlState.mqttClient = mqttClient
+    remoteControlState.mqttClient = null
     remoteTopicInfo.sn = device.gateway.sn
-    remoteTopicInfo.pubTopic = enterRes.data.pub?.[0] || ''
-    remoteTopicInfo.subTopic = enterRes.data.sub?.[0] || ''
-
-    // Monitor for unexpected MQTT disconnects and reset UI state automatically.
-    if (reconnectDecision !== 'reuse_existing_session' && mqttClient) {
-      mqttClient.on('onStatus', (statusOptions: any) => {
-        const decision = getDrcMqttDisconnectDecision({
-          status: statusOptions?.status,
-          remoteConnected: remoteControlState.connected,
-          sameClient: remoteControlState.mqttClient === mqttClient,
-          officialTakeoffLocked: false,
-        })
-        if (decision === 'clear_pending_disconnect') {
-          if (drcDisconnectState.pending) {
-            clearPendingDrcDisconnectNotice()
-            message.success('遥控链路已恢复。')
-          }
-          return
-        }
-        if (decision === 'defer_disconnect') {
-          scheduleDrcDisconnect(mqttClient)
-        }
-      })
-    }
-
-    const authResult = await postFlightAuth(device.gateway.sn)
-    if (authResult.code !== 0) {
-      message.warning('已进入遥控模式，但未成功获取飞行控制权。')
-    } else {
-      message.success('遥控模式已就绪。')
-    }
+    remoteTopicInfo.pubTopic = ''
+    remoteTopicInfo.subTopic = ''
+    message.success('MSDK 控制通道已就绪。')
     return true
   } finally {
-    finishCloudControlReconnectAttempt()
     setActionLoading(device.gateway.sn)
   }
 }
@@ -1346,16 +1327,9 @@ async function disconnectRemoteControl (source = 'unknown') {
   const gatewaySn = remoteControlState.gatewaySn
   setActionLoading(gatewaySn, 'disconnect')
   try {
-    const clientId = store.state.clientId
     logRemoteSessionDisconnect(source)
-    if (clientId) {
-      await postDrcExit({
-        client_id: clientId,
-        gateway_sn: gatewaySn,
-      })
-    }
     destroyRemoteControlClient()
-    message.success('已退出遥控模式。')
+    message.success('已退出 MSDK 控制通道。')
   } finally {
     setActionLoading(gatewaySn)
   }
@@ -1363,56 +1337,43 @@ async function disconnectRemoteControl (source = 'unknown') {
 
 async function holdVerticalControl (device: OnlineDevice, key: KeyCode, durationMs: number, action: string, successText: string) {
   await withAircraftAction(device, action, async () => {
-    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
-      throw new Error('遥控链路未连接。')
+    if (!canVirtualStick(device)) {
+      throw new Error('MSDK 虚拟摇杆执行器未就绪。')
     }
-    handleKeyup(key)
-    await sleep(durationMs)
-    resetControlState()
-    return { code: 0 }
+    return await sendMsdkCommand(device.sn, 'virtual_stick', {
+      key,
+      duration_ms: durationMs
+    })
   }, successText, { successTiming: 'immediate' })
 }
 
 async function holdDirectionalControl (device: OnlineDevice, key: KeyCode, durationMs: number, action: string, successText: string) {
   await withAircraftAction(device, action, async () => {
-    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
-      throw new Error('遥控链路未连接。')
+    if (!canVirtualStick(device)) {
+      throw new Error('MSDK 虚拟摇杆执行器未就绪。')
     }
-    handleKeyup(key)
-    await sleep(durationMs)
-    resetControlState()
-    return { code: 0 }
+    return await sendMsdkCommand(device.sn, 'virtual_stick', {
+      key,
+      duration_ms: durationMs
+    })
   }, successText, { successTiming: 'immediate' })
 }
 
 async function publishHover (device: OnlineDevice) {
   await withAircraftAction(device, 'hover', async () => {
-    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
-      throw new Error('Remote control is not connected.')
+    if (!canHover(device)) {
+      throw new Error('MSDK 悬停执行器未就绪。')
     }
-    resetControlState()
-    mqttHooks.publishMqtt(remoteTopicInfo.pubTopic, {
-      seq: createSeq(),
-      method: DRC_METHOD.STICK_CONTROL,
-      data: {
-        roll: 1024,
-        pitch: 1024,
-        throttle: 1024,
-        yaw: 1024,
-        gimbal_pitch: 1024
-      }
-    }, { qos: 0 })
-    return { code: 0 }
+    return await sendMsdkCommand(device.sn, 'hover')
   }, '悬停指令已发送。')
 }
 
 async function sendEmergencyStop (device: OnlineDevice) {
   await withAircraftAction(device, 'stop', async () => {
-    if (!hasActiveDrcControl(device) || !remoteTopicInfo.pubTopic) {
-      throw new Error('遥控链路未连接。')
+    if (!canEmergencyStop(device)) {
+      throw new Error('MSDK 急停执行器未就绪。')
     }
-    triggerEmergencyStop()
-    return { code: 0 }
+    return await sendMsdkCommand(device.sn, 'emergency_stop')
   }, '急停指令已发送。')
 }
 
@@ -1460,13 +1421,11 @@ async function dispatchOfficialTakeoffStage2South (device: OnlineDevice) {
   })
   officialTakeoffFlow.phase = 'flying_stage2_south'
   await withAircraftAction(device, 'takeoff', async () => {
-    return await postFlyToPoint(device.gateway.sn, {
-      max_speed: plan.stage2South.maxSpeed,
-      points: [{
-        latitude: plan.stage2South.targetLatitude,
-        longitude: plan.stage2South.targetLongitude,
-        height: plan.stage2South.targetHeight,
-      }]
+    return await sendMsdkCommand(device.sn, 'fly_to_point', {
+      speed: plan.stage2South.maxSpeed,
+      latitude: plan.stage2South.targetLatitude,
+      longitude: plan.stage2South.targetLongitude,
+      height: plan.stage2South.targetHeight
     })
   }, '官方起飞第二阶段已发送：向南约 200 米。')
 }
@@ -1479,104 +1438,73 @@ async function dispatchOfficialTakeoffStage2North (device: OnlineDevice) {
   })
   officialTakeoffFlow.phase = 'flying_stage2_north'
   await withAircraftAction(device, 'takeoff', async () => {
-    return await postFlyToPoint(device.gateway.sn, {
-      max_speed: plan.stage2North.maxSpeed,
-      points: [{
-        latitude: plan.stage2North.targetLatitude,
-        longitude: plan.stage2North.targetLongitude,
-        height: plan.stage2North.targetHeight,
-      }]
+    return await sendMsdkCommand(device.sn, 'fly_to_point', {
+      speed: plan.stage2North.maxSpeed,
+      latitude: plan.stage2North.targetLatitude,
+      longitude: plan.stage2North.targetLongitude,
+      height: plan.stage2North.targetHeight
     })
   }, '官方起飞第三阶段已发送：向北返回起点。')
 }
 
 async function handleTakeoff (device: OnlineDevice) {
-  const osd = deviceInfo.value[device.sn]
-  const latitude = Number(osd?.latitude)
-  const longitude = Number(osd?.longitude)
-  const absoluteHeight = Number(osd?.height)
-  if (!isGatewayControllable(device)) {
-    message.warning('飞机离线，或遥测数据尚未就绪。')
+  if (!canTakeoff(device)) {
+    message.warning('MSDK 起飞执行器尚未就绪。')
     return
   }
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude === 0 || longitude === 0 || !Number.isFinite(absoluteHeight)) {
-    message.warning('飞机经纬度或高度遥测尚未就绪。')
-    return
-  }
-  const plan = buildOfficialTakeoffPlan({
-    latitude,
-    longitude,
-    absoluteHeight,
-  })
   const confirmed = await confirmTsaModal({
-    title: `确认对 ${device.callsign} 执行官方起飞吗？`,
+    title: `确认对 ${device.callsign} 执行 MSDK 原生起飞吗？`,
     gatewaySn: device.gateway.sn,
     action: 'takeoff',
-    subtitle: `${device.callsign} · 当前 DRC 会话保持中`,
+    subtitle: `${device.callsign} · 当前 MSDK 控制通道保持中`,
     summary: [
-      { label: '当前位置', value: `${latitude}, ${longitude}` },
-      { label: '目标高度', value: `${OFFICIAL_TAKEOFF_TARGET_HEIGHT} m` },
-      { label: '阶段 1 目标点', value: `${plan.stage1.targetLatitude}, ${plan.stage1.targetLongitude}` },
-      { label: '阶段 2 高度', value: `${plan.stage2South.targetHeight} m (abs)` },
+      { label: '目标设备', value: device.callsign },
+      { label: '控制动作', value: 'MSDK KeyStartTakeoff' },
     ],
     notice: [
-      `第一阶段：调用 takeoff_to_point，爬升到 ${OFFICIAL_TAKEOFF_TARGET_HEIGHT} 米并进入悬停。`,
-      `第二阶段：先自动向南约 200 米，再自动向北约 200 米返回，保持 ${OFFICIAL_TAKEOFF_TARGET_HEIGHT} 米高度。`,
+      '该动作只发送 DJI 飞控原生起飞指令，不执行航点位移。',
+      '起飞后的高度和悬停策略由 DJI 飞控按当前安全策略执行。',
     ],
     warning: [
-      '该命令会先执行官方起飞，再进入 fly_to_point 航段。',
+      '请确认现场环境、桨叶和返航点状态安全后再执行。',
     ],
-    okText: '开始起飞',
-    tone: 'confirm',
+    okText: '确认起飞',
+    tone: 'danger',
   })
   if (!confirmed) return
   await withAircraftAction(device, 'takeoff', async () => {
-    officialTakeoffFlow.gatewaySn = device.gateway.sn
-    officialTakeoffFlow.aircraftSn = device.sn
-    officialTakeoffFlow.phase = 'climbing_stage1'
-    officialTakeoffFlow.originLatitude = latitude
-    officialTakeoffFlow.originLongitude = longitude
-    officialTakeoffFlow.originAbsoluteHeight = absoluteHeight
-    officialTakeoffFlow.startedAt = Date.now()
-    return await postTakeoffToPoint(device.gateway.sn, {
-      target_latitude: plan.stage1.targetLatitude,
-      target_longitude: plan.stage1.targetLongitude,
-      target_height: plan.stage1.targetHeight,
-      security_takeoff_height: plan.stage1.securityTakeoffHeight,
-      max_speed: plan.stage1.maxSpeed,
-      rc_lost_action: LostControlActionInCommandFLight.RETURN_HOME,
-      rth_altitude: 100,
-      exit_wayline_when_rc_lost: WaylineLostControlActionInCommandFlight.EXEC_LOST_ACTION,
-      rth_mode: ERthMode.SETTING,
-      commander_mode_lost_action: ECommanderModeLostAction.CONTINUE,
-      commander_flight_mode: ECommanderFlightMode.SETTING,
-      commander_flight_height: plan.stage1.commanderFlightHeight,
-    })
-  }, '官方起飞第一阶段已开始：等待 takeoff_to_point 完成。')
+    return await sendMsdkCommand(device.sn, 'takeoff')
+  }, 'MSDK 原生起飞指令已发送。')
 }
 
 async function handleLanding (device: OnlineDevice) {
+  if (!canLand(device)) {
+    message.warning('MSDK 降落执行器尚未就绪。')
+    return
+  }
   const confirmed = await confirmTsaModal({
-    title: `确认对 ${device.callsign} 执行遥控降落预设吗？`,
+    title: `确认对 ${device.callsign} 执行 MSDK 原生降落吗？`,
     gatewaySn: device.gateway.sn,
     action: 'land',
-    subtitle: `${device.callsign} · 当前 DRC 会话保持中`,
+    subtitle: `${device.callsign} · 当前 MSDK 控制通道保持中`,
     summary: [
       { label: '目标设备', value: device.callsign },
-      { label: '控制动作', value: '遥控降落预设' },
+      { label: '控制动作', value: 'MSDK KeyStartAutoLanding' },
     ],
     notice: [
-      '将向下持续发送降落摇杆指令 2200 毫秒。',
-      '该操作保持现有 DRC 连接，不会断开遥控链路。',
+      '该动作会发送 DJI 飞控原生自动降落指令。',
+      '降落保护和确认逻辑由当前 DJI 飞控安全策略处理。',
     ],
     warning: [
-      '确认后飞机会执行降落预设，请确保当前区域适合降落。',
+      '确认后飞机会进入自动降落流程，请确保当前区域适合降落。',
     ],
-    okText: '继续降落',
+    okText: '确认降落',
     tone: 'warning',
   })
   if (!confirmed) return
-  await holdVerticalControl(device, KeyCode.ARROW_DOWN, 2200, 'land', '降落摇杆预设已发送。')
+  await withAircraftAction(device, 'land', async () => {
+    return await sendMsdkCommand(device.sn, 'land')
+  }, 'MSDK 原生降落指令已发送。')
 }
 
 async function handleAxisControl (device: OnlineDevice, direction: 'up' | 'hover' | 'down') {
@@ -1593,7 +1521,7 @@ async function handleAxisControl (device: OnlineDevice, direction: 'up' | 'hover
   )
 }
 
-// ---------- fly_to_point (RC Plus 2 + DRC feasibility probe, see WORK_RECORD.md §8) ----------
+// ---------- fly_to_point (RC Plus 2 + MSDK control feasibility probe, see WORK_RECORD.md §8) ----------
 
 // ~20 m north of current OSD position. 0.00018° of latitude ≈ 20 m anywhere on Earth.
 const FLY_FORWARD_LAT_OFFSET_DEG = 0.00018
@@ -1633,12 +1561,16 @@ function canFlyToPoint (device: OnlineDevice) {
 }
 
 function canReturnHome (device: OnlineDevice) {
-  return isCurrentRemoteGateway(device) && isAircraftAirborne(device)
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'returnHome') && isAircraftAirborne(device)
+}
+
+function canCancelReturnHome (device: OnlineDevice) {
+  return isCurrentRemoteGateway(device) && hasMsdkCommandCapability(device, 'returnHome')
 }
 
 async function handleReturnHome (device: OnlineDevice) {
   if (!canReturnHome(device)) {
-    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已连接 DRC。`)
+    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已进入 MSDK 控制通道。`)
     return
   }
   const osd = deviceInfo.value[device.sn]
@@ -1668,7 +1600,7 @@ async function handleReturnHome (device: OnlineDevice) {
     return
   }
   await withAircraftAction(device, 'returnHome', async () => {
-    return await postReturnHome(device.gateway.sn)
+    return await sendMsdkCommand(device.sn, 'return_home')
   }, '返航指令已发送。')
 }
 
@@ -1699,7 +1631,7 @@ async function handleCancelReturnHome (device: OnlineDevice) {
     return
   }
   await withAircraftAction(device, 'cancelReturnHome', async () => {
-    return await postReturnHomeCancel(device.gateway.sn)
+    return await sendMsdkCommand(device.sn, 'cancel_return_home')
   }, '取消返航指令已发送。')
 }
 
@@ -1758,8 +1690,8 @@ async function submitAxisDistanceControl () {
   closeAxisDistanceControl()
 
   if (direction === 'up' || direction === 'down') {
-    if (!hasActiveDrcControl(device)) {
-      message.warning('遥控链路未连接。')
+    if (!canVirtualStick(device)) {
+      message.warning('MSDK 虚拟摇杆执行器未就绪。')
       return
     }
     await holdVerticalControl(
@@ -1772,8 +1704,8 @@ async function submitAxisDistanceControl () {
     return
   }
 
-  if (!hasActiveDrcControl(device)) {
-    message.warning('遥控链路未连接。')
+  if (!canVirtualStick(device)) {
+    message.warning('MSDK 虚拟摇杆执行器未就绪。')
     return
   }
   const key =
@@ -1795,7 +1727,7 @@ async function submitAxisDistanceControl () {
 
 async function handleFlyForwardTest (device: OnlineDevice) {
   if (!canFlyToPoint(device)) {
-    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已连接 DRC。`)
+    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已进入 MSDK 控制通道。`)
     return
   }
   const osd = deviceInfo.value[device.sn]
@@ -1830,13 +1762,11 @@ async function handleFlyForwardTest (device: OnlineDevice) {
   })
   if (!confirmed) return
   await withAircraftAction(device, 'flyForward', async () => {
-    return await postFlyToPoint(device.gateway.sn, {
-      max_speed: 5,
-      points: [{
-        latitude: targetLat,
-        longitude: targetLon,
-        height: targetHeight,
-      }]
+    return await sendMsdkCommand(device.sn, 'fly_to_point', {
+      speed: 5,
+      latitude: targetLat,
+      longitude: targetLon,
+      height: targetHeight
     })
   }, '前飞 20 米指令已发送。')
 }
@@ -1849,7 +1779,7 @@ async function submitFlyToPointManual () {
     return
   }
   if (!canFlyToPoint(device)) {
-    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已连接 DRC。`)
+    message.warning(`飞机需已起飞且高度不低于 ${MIN_AIRBORNE_HEIGHT_M} 米，并已进入 MSDK 控制通道。`)
     return
   }
   const { latitude, longitude, height, maxSpeed } = flyToPointFormState
@@ -1872,25 +1802,30 @@ async function submitFlyToPointManual () {
   const safeMaxSpeed = Number.isFinite(maxSpeed) && maxSpeed > 0 ? Math.min(maxSpeed, 15) : 5
   closeFlyToPointManual()
   await withAircraftAction(device, 'flyManual', async () => {
-    return await postFlyToPoint(device.gateway.sn, {
-      max_speed: safeMaxSpeed,
-      points: [{ latitude, longitude, height }]
+    return await sendMsdkCommand(device.sn, 'fly_to_point', {
+      speed: safeMaxSpeed,
+      latitude,
+      longitude,
+      height
     })
   }, '手动目标点指令已发送。')
 }
 
 async function handleStopFlyToPoint (device: OnlineDevice) {
-  if (!isCurrentRemoteGateway(device)) {
-    message.warning('遥控链路未连接。')
+  if (!canEmergencyStop(device)) {
+    message.warning('MSDK 急停执行器未就绪。')
     return
   }
   await withAircraftAction(device, 'flyStop', async () => {
-    return await deleteFlyToPoint(device.gateway.sn)
+    return await sendMsdkCommand(device.sn, 'stop_fly_to_point')
   }, '停止飞向目标点指令已发送。')
 }
 
 onUnmounted(() => {
-  EventBus.off('droneControlWs', onDroneControlWsEvent)
+  if (msdkDeviceTimer) {
+    window.clearInterval(msdkDeviceTimer)
+    msdkDeviceTimer = undefined
+  }
   resetOfficialTakeoffFlow()
   destroyRemoteControlClient()
 })

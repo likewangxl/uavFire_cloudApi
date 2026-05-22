@@ -20,6 +20,7 @@ class AgentRuntimeLoop(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
+    private val gatewaySn: String = DEFAULT_GATEWAY_SN,
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) {
     private var loopJob: Job? = null
@@ -78,6 +79,7 @@ class AgentRuntimeLoop(
                 debug("capability reported for $droneSn visible=${capability.visibleSupported} thermal=${capability.thermalSupported}")
             }
         }
+        safeReportMsdkDeviceState(droneSn, deviceState)
         runCatching { commandPoller.pollOnce(droneSn) }
             .onFailure { onError("command-poll", it) }
     }
@@ -123,12 +125,52 @@ class AgentRuntimeLoop(
             .onFailure { onError("capability", it) }
     }
 
+    private suspend fun safeReportMsdkDeviceState(
+        droneSn: String,
+        deviceState: com.yinxin.uavfir.sdk.DjiDeviceState,
+    ) {
+        val capability = deviceState.capability
+        val telemetry = deviceState.telemetry
+        runCatching {
+            reporter.reportMsdkDeviceState(
+                MsdkDeviceStateRequest(
+                    gatewaySn = gatewaySn,
+                    aircraftSn = droneSn,
+                    online = deviceState.connectionState != AgentConnectionState.ERROR,
+                    connectionState = deviceState.connectionState.name,
+                    latitude = telemetry?.latitude,
+                    longitude = telemetry?.longitude,
+                    height = telemetry?.height,
+                    elevation = telemetry?.elevation,
+                    horizontalSpeed = telemetry?.horizontalSpeed,
+                    verticalSpeed = telemetry?.verticalSpeed,
+                    batteryPercent = telemetry?.batteryPercent,
+                    capabilities = mapOf(
+                        "takeoff" to true,
+                        "land" to true,
+                        "returnHome" to true,
+                        "emergencyStop" to true,
+                        "hover" to true,
+                        "virtualStick" to true,
+                        "flyToPoint" to true,
+                        "gimbal" to false,
+                        "camera" to false,
+                        "visibleStream" to (capability?.visibleSupported == true),
+                        "thermalFocus" to (capability?.thermalSupported == true),
+                        "thermalSecondStream" to false,
+                    ),
+                ),
+            )
+        }.onFailure { onError("msdk-device-state", it) }
+    }
+
     private fun buildStatusMessage(connectionState: AgentConnectionState): String {
         return "runtime-loop connection=$connectionState session=${sessionManager.sessionState.name}"
     }
 
     companion object {
         private const val TAG = "AgentRuntimeLoop"
+        const val DEFAULT_GATEWAY_SN: String = "RC_PLUS_LOCAL"
         const val DEFAULT_INTERVAL_MS: Long = 5_000
     }
 }

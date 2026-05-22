@@ -33,4 +33,10 @@ class AgentReporter(
     ) {
         client.sendCapability(droneSn, capability)
     }
+
+    suspend fun reportMsdkDeviceState(
+        request: MsdkDeviceStateRequest,
+    ) {
+        client.sendMsdkDeviceState(request)
+    }
 }

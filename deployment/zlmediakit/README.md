@@ -22,13 +22,13 @@ RC Plus -> LiveKit
 
 - `docker-compose.yml`: local/private deployment entrypoint
 - `.env.example`: host, port and stream naming template
-- URL rules for visible/thermal push and playback
+- URL rules for the current single visible stream and future dual-stream variants
 
 ## What It Does Not Do
 
-- It does not start on this machine automatically because `docker` is not installed here.
-- It does not yet wire RC Plus publish code or cockpit player code.
+- It does not start on this machine automatically.
 - It does not generate SSL certificates for public internet exposure.
+- It does not create a true independent thermal stream. Current M4T/MSDK work uses one stream and explicit thermal degradation unless a future composite-slicing path is added.
 
 ## Expected Ports
 
@@ -50,32 +50,31 @@ Official references:
 
 ## Stream Naming
 
-The project design already fixed the stream ids:
+Current implementation uses one ZLM stream per aircraft/agent:
 
-- stream group: `{droneSn}`
-- visible stream: `{droneSn}_visible`
-- thermal stream: `{droneSn}_thermal`
+- stream group: `{droneSn}` or configured aircraft SN
+- current visible/main stream: `{effectiveSn}-0`
 
-For the current default `droneSn = RC_PLUS_LOCAL`, the publish targets become:
+`DjiLiveStreamController` computes `effectiveSn` as:
 
-- visible RTMP:
-  `rtmp://{ZLM_PUBLIC_HOST}:{ZLM_RTMP_PORT}/{ZLM_STREAM_APP}/RC_PLUS_LOCAL_visible`
-- thermal RTMP:
-  `rtmp://{ZLM_PUBLIC_HOST}:{ZLM_RTMP_PORT}/{ZLM_STREAM_APP}/RC_PLUS_LOCAL_thermal`
+1. `BuildConfig.AGENT_AIRCRAFT_SN`, when non-empty.
+2. The command/runtime `droneSn`, otherwise.
 
-Browser playback targets should follow ZLMediaKit WebRTC URL format:
+For the current LAN baseline:
 
-- visible WebRTC:
-  `webrtc://{ZLM_PUBLIC_HOST}:{ZLM_HTTP_PORT}/{ZLM_STREAM_APP}/RC_PLUS_LOCAL_visible`
-- thermal WebRTC:
-  `webrtc://{ZLM_PUBLIC_HOST}:{ZLM_HTTP_PORT}/{ZLM_STREAM_APP}/RC_PLUS_LOCAL_thermal`
+- RTMP publish:
+  `rtmp://192.168.2.34:1935/live/{effectiveSn}-0`
+- WebRTC playback:
+  `webrtc://192.168.2.34:58925/live/{effectiveSn}-0`
+- RTSP pull for ai-service:
+  `rtsp://192.168.2.34:8554/live/{effectiveSn}-0`
 
-If the frontend chooses to use HTTP-FLV as fallback:
+Historical docs mention `{droneSn}_visible` / `{droneSn}_thermal`. Treat those as the original design target, not the current implementation.
 
-- visible HTTP-FLV:
-  `http://{ZLM_PUBLIC_HOST}:{ZLM_HTTP_PORT}/{ZLM_STREAM_APP}/RC_PLUS_LOCAL_visible.live.flv`
-- thermal HTTP-FLV:
-  `http://{ZLM_PUBLIC_HOST}:{ZLM_HTTP_PORT}/{ZLM_STREAM_APP}/RC_PLUS_LOCAL_thermal.live.flv`
+Future variants may add:
+
+- `{effectiveSn}-visible-slice` and `{effectiveSn}-thermal-slice` if backend or ai-service exposes side-by-side composite slicing as separate outputs.
+- Cloud SDK dual-stream names if the future `video-demand-aux-manual` PoC proves true dual streams.
 
 ## How To Start On A Real Host
 
@@ -110,9 +109,8 @@ To complete the end-to-end media path, you still need one reachable host:
 
 ## Next Repo Steps After ZLMediaKit Is Running
 
-1. Point RC Plus publish config at the visible/thermal RTMP URLs above.
-2. Let `rcplus-msdk-agent` report:
-   - `playbackStatus = ready`
-   - `visiblePlayUrl = webrtc://.../RC_PLUS_LOCAL_visible`
-   - `thermalPlayUrl = webrtc://.../RC_PLUS_LOCAL_thermal`
-3. Replace the cockpit runtime placeholder with a real WebRTC player.
+1. Confirm `rcplus-msdk-agent/gradle.properties` points at the active ZLM host.
+2. Start the agent and confirm ZLM sees `live/{effectiveSn}-0`.
+3. Confirm backend DualStream group exposes `visiblePlayUrl = webrtc://.../{effectiveSn}-0`.
+4. Open cockpit live tab and verify `ZLMRTCClient.Endpoint` playback.
+5. If thermal AI is required, choose and implement one of the current fallback paths in `docs/MSDK_V5_THERMAL_DUAL_STREAM_RESEARCH.md`.

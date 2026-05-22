@@ -152,10 +152,269 @@ class CommandPollingCoordinatorTest {
         assertEquals("INIT", manager.state.value.name)
     }
 
+    @Test
+    fun pollOnce_msdkFocusVisibleCommandExecutesMappedDualStreamCommand_andAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-focus-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "focus_visible",
+                    params = emptyMap(),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val executor = RecordingMsdkCommandExecutor(
+            result = MsdkCommandExecutionResult(
+                status = "APPLIED",
+                message = "focus-visible applied",
+            ),
+        )
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = executor,
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals("AIRCRAFT-001", executor.lastAircraftSn)
+        assertEquals("focus_visible", executor.lastCommand?.command)
+        assertEquals("msdk-focus-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("focus-visible applied", api.lastMsdkAck?.message)
+        assertNull(api.lastAck)
+    }
+
+    @Test
+    fun pollOnce_msdkTakeoffWithFlightExecutorAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-takeoff-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "takeoff",
+                    params = emptyMap(),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val flightControlClient = RecordingFlightControlActionClient()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = flightControlClient,
+            ),
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("takeoff"), flightControlClient.actions)
+        assertEquals("msdk-takeoff-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("takeoff applied", api.lastMsdkAck?.message)
+    }
+
+    @Test
+    fun pollOnce_msdkReturnHomeWithFlightExecutorAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-rth-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "return_home",
+                    params = emptyMap(),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val flightControlClient = RecordingFlightControlActionClient()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = flightControlClient,
+            ),
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("return_home"), flightControlClient.actions)
+        assertEquals("msdk-rth-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("return_home applied", api.lastMsdkAck?.message)
+    }
+
+    @Test
+    fun pollOnce_msdkCancelReturnHomeWithFlightExecutorAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-cancel-rth-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "cancel_return_home",
+                    params = emptyMap(),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val flightControlClient = RecordingFlightControlActionClient()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = flightControlClient,
+            ),
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("cancel_return_home"), flightControlClient.actions)
+        assertEquals("msdk-cancel-rth-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("cancel_return_home applied", api.lastMsdkAck?.message)
+    }
+
+    @Test
+    fun pollOnce_msdkLandingWithFlightExecutorAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-land-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "land",
+                    params = emptyMap(),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val flightControlClient = RecordingFlightControlActionClient()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = flightControlClient,
+            ),
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("land"), flightControlClient.actions)
+        assertEquals("msdk-land-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("land applied", api.lastMsdkAck?.message)
+    }
+
+    @Test
+    fun pollOnce_msdkEmergencyStopWithFlightExecutorAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-stop-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "emergency_stop",
+                    params = emptyMap(),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val flightControlClient = RecordingFlightControlActionClient()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = flightControlClient,
+            ),
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("emergency_stop"), flightControlClient.actions)
+        assertEquals("msdk-stop-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("emergency_stop applied", api.lastMsdkAck?.message)
+    }
+
+    @Test
+    fun pollOnce_msdkVirtualStickWithFlightExecutorAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-stick-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "virtual_stick",
+                    params = mapOf("key" to "ArrowUp", "duration_ms" to 800.0),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val flightControlClient = RecordingFlightControlActionClient()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = flightControlClient,
+            ),
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("virtual_stick:ArrowUp:800"), flightControlClient.actions)
+        assertEquals("msdk-stick-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("virtual_stick applied", api.lastMsdkAck?.message)
+    }
+
+    @Test
+    fun pollOnce_msdkFlyToPointWithFlightExecutorAcknowledgesApplied() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = null,
+            nextMsdkCommand = AgentApiEnvelope(
+                data = MsdkCommandResponse(
+                    commandId = "msdk-fly-to-1",
+                    aircraftSn = "AIRCRAFT-001",
+                    command = "fly_to_point",
+                    params = mapOf(
+                        "latitude" to 34.1,
+                        "longitude" to 108.9,
+                        "height" to 50.0,
+                        "speed" to 5.0,
+                    ),
+                    status = "PENDING",
+                ),
+            ),
+        )
+        val flightControlClient = RecordingFlightControlActionClient()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = flightControlClient,
+            ),
+        )
+
+        coordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("fly_to_point:34.1:108.9:50.0:5.0"), flightControlClient.actions)
+        assertEquals("msdk-fly-to-1", api.lastMsdkAck?.commandId)
+        assertEquals("APPLIED", api.lastMsdkAck?.status)
+        assertEquals("fly_to_point applied", api.lastMsdkAck?.message)
+    }
+
     private class RecordingDualStreamApi(
         private val nextCommand: AgentApiEnvelope<AgentCommandResponse>?,
+        private val nextMsdkCommand: AgentApiEnvelope<MsdkCommandResponse>? = null,
     ) : DualStreamApi {
         var lastAck: AgentCommandAckRequest? = null
+        var lastMsdkAck: MsdkCommandAckRequest? = null
 
         override suspend fun heartbeat(
             droneSn: String,
@@ -179,6 +438,77 @@ class CommandPollingCoordinatorTest {
             body: AgentCommandAckRequest,
         ) {
             lastAck = body
+        }
+
+        override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) = Unit
+
+        override suspend fun pollMsdkCommand(aircraftSn: String): AgentApiEnvelope<MsdkCommandResponse>? = nextMsdkCommand
+
+        override suspend fun ackMsdkCommand(
+            aircraftSn: String,
+            body: MsdkCommandAckRequest,
+        ) {
+            lastMsdkAck = body
+        }
+    }
+
+    private class RecordingMsdkCommandExecutor(
+        private val result: MsdkCommandExecutionResult,
+    ) : MsdkCommandExecutor {
+        var lastAircraftSn: String? = null
+        var lastCommand: MsdkCommandResponse? = null
+
+        override suspend fun execute(
+            aircraftSn: String,
+            command: MsdkCommandResponse,
+        ): MsdkCommandExecutionResult {
+            lastAircraftSn = aircraftSn
+            lastCommand = command
+            return result
+        }
+    }
+
+    private class RecordingFlightControlActionClient : FlightControlActionClient {
+        val actions = mutableListOf<String>()
+
+        override suspend fun startTakeoff() {
+            actions += "takeoff"
+        }
+
+        override suspend fun startGoHome() {
+            actions += "return_home"
+        }
+
+        override suspend fun stopGoHome() {
+            actions += "cancel_return_home"
+        }
+
+        override suspend fun startAutoLanding() {
+            actions += "land"
+        }
+
+        override suspend fun stopAutoLanding() {
+            actions += "stop_landing"
+        }
+
+        override suspend fun emergencyStop() {
+            actions += "emergency_stop"
+        }
+
+        override suspend fun sendVirtualStick(
+            key: String,
+            durationMs: Long,
+        ) {
+            actions += "virtual_stick:$key:$durationMs"
+        }
+
+        override suspend fun flyToPoint(
+            latitude: Double,
+            longitude: Double,
+            height: Double,
+            speed: Double,
+        ) {
+            actions += "fly_to_point:$latitude:$longitude:$height:$speed"
         }
     }
 

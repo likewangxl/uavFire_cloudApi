@@ -47,8 +47,14 @@ if ! [[ "$NEW_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
 fi
 
 OLD_IP="$(grep -E '^agentMediaHost=' rcplus-msdk-agent/gradle.properties | sed -E 's/^agentMediaHost=//')"
+if [[ "$OLD_IP" == "127.0.0.1" ]]; then
+  # USB adb-reverse mode intentionally uses localhost in the Agent APK. Do not use
+  # that as the global replacement source, otherwise the script would rewrite
+  # unrelated localhost-only settings such as the MySQL JDBC URL.
+  OLD_IP="$(grep -E "192\\.168\\.[0-9]+\\.[0-9]+" frontend/src/api/http/config.ts | head -n 1 | grep -Eo "192\\.168\\.[0-9]+\\.[0-9]+" | head -n 1 || true)"
+fi
 if [[ -z "$OLD_IP" ]]; then
-  echo "❌ 无法从 rcplus-msdk-agent/gradle.properties 读出旧 IP（缺 agentMediaHost= 行）" >&2
+  echo "❌ 无法读出旧 LAN IP（agentMediaHost=127.0.0.1 时会从 frontend/src/api/http/config.ts 回退读取）" >&2
   exit 1
 fi
 
@@ -93,6 +99,12 @@ echo "✏️  替换中..."
 for f in "${FILES[@]}"; do
   sed -i '' "s/${OLD_IP}/${NEW_IP}/g" "$f"
 done
+
+if grep -q '^agentMediaHost=127\.0\.0\.1$' rcplus-msdk-agent/gradle.properties; then
+  sed -i '' "s#^agentBackendBaseUrl=.*#agentBackendBaseUrl=http://${NEW_IP}:6789/#" rcplus-msdk-agent/gradle.properties
+  sed -i '' "s#^agentMediaHost=.*#agentMediaHost=${NEW_IP}#" rcplus-msdk-agent/gradle.properties
+  sed -i '' "s#^agentMqttBrokerUrl=.*#agentMqttBrokerUrl=tcp://${NEW_IP}:1883#" rcplus-msdk-agent/gradle.properties
+fi
 
 remnant=$(git grep -F "$OLD_IP" -- "${FILES[@]}" 2>/dev/null || true)
 if [[ -n "$remnant" ]]; then

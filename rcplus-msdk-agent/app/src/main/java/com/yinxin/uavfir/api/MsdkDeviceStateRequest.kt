@@ -1,0 +1,24 @@
+package com.yinxin.uavfir.api
+
+data class MsdkDeviceStateRequest(
+    val gatewaySn: String,
+    val aircraftSn: String,
+    val online: Boolean,
+    val connectionState: String,
+    val model: String? = null,
+    val mode: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val height: Double? = null,
+    val elevation: Double? = null,
+    val homeDistance: Double? = null,
+    val horizontalSpeed: Double? = null,
+    val verticalSpeed: Double? = null,
+    val windSpeed: Double? = null,
+    val batteryPercent: Int? = null,
+    val gpsCount: Int? = null,
+    val rtkCount: Int? = null,
+    val positionFixed: Boolean? = null,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val capabilities: Map<String, Boolean> = emptyMap(),
+)

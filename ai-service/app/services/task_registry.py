@@ -232,8 +232,6 @@ def build_registry() -> TaskRegistry:
         ContinuousTaskSupervisor,
         opencv_source_factory_from_task,
     )
-    from app.services.fire_event_reporter import FireEventReporter
-    from app.services.snapshot_writer import SnapshotWriter
     from app.services.task_runner import (
         StreamScoreThermalAnalyzer,
         StreamScoreVisibleDetector,
@@ -242,18 +240,9 @@ def build_registry() -> TaskRegistry:
 
     settings = Settings()
     backend_client = _build_backend_client(settings)
-    snapshot_writer = SnapshotWriter(
-        snapshot_dir=settings.snapshot_dir,
-        public_base_url=settings.snapshot_public_base_url,
-    )
-    fire_event_reporter = (
-        FireEventReporter(backend_client, snapshot_writer=snapshot_writer)
-        if backend_client is not None
-        else None
-    )
     registry = TaskRegistry(
         backend_client=backend_client,
-        fire_event_reporter=fire_event_reporter,
+        fire_event_reporter=None,
     )
     fusion = DualStreamFusionService()
     registry.bind_runner(

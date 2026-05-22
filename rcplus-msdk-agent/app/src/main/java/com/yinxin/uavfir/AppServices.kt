@@ -9,8 +9,12 @@ import com.yinxin.uavfir.api.AgentReporter
 import com.yinxin.uavfir.api.AgentRuntimeLoop
 import com.yinxin.uavfir.api.CommandPollingCoordinator
 import com.yinxin.uavfir.api.CompositeCommandPoller
+import com.yinxin.uavfir.api.DjiFlightControlActionClient
+import com.yinxin.uavfir.api.DualStreamMsdkCommandExecutor
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
+import com.yinxin.uavfir.sdk.HmsReporter
+import com.yinxin.uavfir.sdk.OsdReporter
 import com.yinxin.uavfir.session.DualStreamSessionManager
 import com.yinxin.uavfir.stream.RealMsdkStreamProvider
 import com.yinxin.uavfir.ui.ValidationConsoleController
@@ -29,6 +33,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class AppServices(
     application: Application,
@@ -42,7 +48,15 @@ class AppServices(
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val sessionManager = DualStreamSessionManager(RealMsdkStreamProvider())
-    private val dualStreamPoller = CommandPollingCoordinator(backendClient, sessionManager)
+    private val msdkCommandExecutor = DualStreamMsdkCommandExecutor(
+        dualStreamExecutor = sessionManager,
+        flightControlClient = DjiFlightControlActionClient(),
+    )
+    private val dualStreamPoller = CommandPollingCoordinator(
+        client = backendClient,
+        sessionManager = sessionManager,
+        commandExecutor = msdkCommandExecutor,
+    )
 
     // Wayline-agent control plane (HTTP) + event plane (MQTT).
     private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
@@ -65,6 +79,20 @@ class AppServices(
         .build()
     private val kmzDownloader = WaylineKmzDownloader(kmzHttpClient, kmzCacheDir)
     private val waylineRouter = WaylineAgentCommandRouter(waylineClient, waypointExecutor, kmzDownloader, eventForwarder)
+
+    /**
+     * Periodically publishes aircraft OSD telemetry on the Cloud SDK topic
+     * `thing/product/{aircraftSn}/osd` so the backend treats the agent as a
+     * drop-in Pilot 2 replacement. Disabled when AGENT_AIRCRAFT_SN is empty
+     * (e.g. unit/dev builds without a paired aircraft).
+     */
+    private val osdReporter = OsdReporter(mqttPublisher, appScope)
+
+    /**
+     * Periodically publishes HMS heartbeat (empty list) on the Cloud SDK
+     * events topic. Real alarm translation is a phase-2 TODO; see HmsReporter.
+     */
+    private val hmsReporter = HmsReporter(mqttPublisher, appScope)
 
     val waypointProbe = WaypointProbeController(
         executor = waypointExecutor,
@@ -104,7 +132,46 @@ class AppServices(
         mqttPublisher.setDefaultDroneSn(droneSn)
     }
 
+    /**
+     * Start Cloud SDK protocol reporters (OSD now, HMS coming in Task #4)
+     * so backend sees device telemetry from the agent the same way it sees
+     * it from Pilot 2. No-op if BuildConfig SN fields are empty.
+     */
+    fun startReportersOnBoot() {
+        val aircraftSn = BuildConfig.AGENT_AIRCRAFT_SN
+        val gatewaySn = BuildConfig.AGENT_GATEWAY_SN
+        if (aircraftSn.isBlank() || gatewaySn.isBlank()) {
+            Log.i(TAG, "OSD reporter disabled — AGENT_AIRCRAFT_SN/AGENT_GATEWAY_SN not configured")
+            return
+        }
+        Log.i(TAG, "starting OSD+HMS reporters aircraftSn=$aircraftSn gatewaySn=$gatewaySn")
+        osdReporter.start(aircraftSn, gatewaySn)
+        hmsReporter.start(aircraftSn, gatewaySn)
+    }
+
+    /**
+     * Auto-start dual-stream session shortly after boot so the agent begins
+     * pushing RTMP to ZLM without needing a manual UI tap. Failure is
+     * non-fatal — backend command queue or operator can still start it later.
+     *
+     * The 6s delay gives RuntimeLoop one tick to finish DjiDeviceSession
+     * initialize() and reach CONNECTED before we try to bind streams.
+     */
+    fun startDualStreamOnBoot(droneSn: String) {
+        appScope.launch {
+            delay(AUTO_START_DELAY_MS)
+            val outcome = runCatching { sessionManager.executeCommand(droneSn, "start") }
+            outcome.onSuccess { result ->
+                Log.i(TAG, "auto-start dual-stream droneSn=$droneSn status=${result.status} message=${result.message ?: "(ok)"}")
+            }.onFailure { throwable ->
+                Log.w(TAG, "auto-start dual-stream failed droneSn=$droneSn: ${throwable.message}", throwable)
+            }
+        }
+    }
+
     fun shutdown() {
+        osdReporter.stop()
+        hmsReporter.stop()
         waypointExecutor.detach()
         runtimeLoop.stop()
         mqttPublisher.disconnect()
@@ -113,5 +180,6 @@ class AppServices(
 
     companion object {
         private const val TAG = "AppServices"
+        private const val AUTO_START_DELAY_MS: Long = 6_000
     }
 }

@@ -95,5 +95,14 @@ class AgentReporterTest {
             droneSn: String,
             body: AgentCommandAckRequest,
         ) = Unit
+
+        override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) = Unit
+
+        override suspend fun pollMsdkCommand(aircraftSn: String): AgentApiEnvelope<MsdkCommandResponse>? = null
+
+        override suspend fun ackMsdkCommand(
+            aircraftSn: String,
+            body: MsdkCommandAckRequest,
+        ) = Unit
     }
 }

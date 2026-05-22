@@ -22,7 +22,13 @@ class DjiLiveStreamController(
     private val streamApp: String = BuildConfig.AGENT_MEDIA_STREAM_APP,
 ) : LiveStreamController {
     override suspend fun start(droneSn: String) {
-        val streamUrl = "rtmp://$host:$rtmpPort/$streamApp/${droneSn}-0"
+        // Stream-id must match what backend expects on ZLM. Backend's
+        // FireDetectionController uses `drone_sn-0`, where drone_sn is the
+        // real aircraft SN tracked by Cloud SDK. We honour AGENT_AIRCRAFT_SN
+        // from BuildConfig so the agent advertises that same SN; the droneSn
+        // arg is kept for unit-test seams that pass synthetic SNs.
+        val effectiveSn = BuildConfig.AGENT_AIRCRAFT_SN.takeIf { it.isNotBlank() } ?: droneSn
+        val streamUrl = "rtmp://$host:$rtmpPort/$streamApp/${effectiveSn}-0"
         liveStreamManager.setLiveStreamSettings(
             LiveStreamSettings.Builder()
                 .setLiveStreamType(LiveStreamType.RTMP)
