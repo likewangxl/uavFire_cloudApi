@@ -19,6 +19,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
@@ -1552,6 +1554,50 @@ class PlannedWaylineServiceTest {
                 () -> assertFalse(waylines.contains("<wpml:actionGroup>"), "no actionGroup in waylines"));
     }
 
+    @Test
+    void executeAgentWaylineStartsAiDetectionFromAgentStreamUrl() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        com.yx.uavfire.firedetection.AiServiceClient aiServiceClient =
+                mock(com.yx.uavfire.firedetection.AiServiceClient.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3001)
+                .plannedWaylineId("pw-agent-ai")
+                .workspaceId("workspace-001")
+                .flightId("flight-agent-ai")
+                .name("Agent AI")
+                .aircraftModelKey("M4T")
+                .droneSn("M4T-SN-001")
+                .aircraftSn("M4T-SN-001")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[]")
+                .status("ready")
+                .taskStatus("ready")
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(aiServiceClient.fireTaskIdForDrone("M4T-SN-001")).thenReturn("fire-M4T-SN-001");
+        when(aiServiceClient.startDetection(any(), any(), any(), any())).thenReturn(true);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+        setField(service, "waylineAgentService", waylineAgentService);
+        setField(service, "aiServiceClient", aiServiceClient);
+        setField(service, "aiZlmRtspHost", "192.168.2.34");
+        setField(service, "aiZlmRtspPort", 8554);
+        setField(service, "aiAutoTriggerOnWayline", true);
+
+        service.executeTask("workspace-001", "pw-agent-ai");
+
+        verify(aiServiceClient).startDetection(
+                eq("fire-M4T-SN-001"),
+                eq("M4T-SN-001"),
+                eq("rtsp://192.168.2.34:8554/live/M4T-SN-001-0"),
+                eq(""));
+    }
+
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
             ZipEntry entry = zipInputStream.getNextEntry();
@@ -1578,5 +1624,11 @@ class PlannedWaylineServiceTest {
             }
         }
         throw new AssertionError("Missing zip entry: " + entryName);
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }

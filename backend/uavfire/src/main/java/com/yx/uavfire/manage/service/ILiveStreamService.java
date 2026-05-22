@@ -11,7 +11,12 @@ import java.util.List;
  * @author sean.zhou
  * @date 2021/11/19
  * @version 0.1
+ *
+ * NOTE (2026-05-21, MSDK Migration Phase 1): Cloud SDK livestream service.
+ * Deprecated; superseded by DualStream agent pipeline. Kept as fallback
+ * during phase 1. See docs/MSDK_MIGRATION_PLAN.md.
  */
+@Deprecated
 public interface ILiveStreamService {
 
     /**

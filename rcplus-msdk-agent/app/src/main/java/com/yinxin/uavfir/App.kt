@@ -3,6 +3,10 @@ package com.yinxin.uavfir
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import dji.v5.common.utils.GeoidManager
+import dji.v5.ux.core.communication.DefaultGlobalPreferences
+import dji.v5.ux.core.communication.GlobalPreferencesManager
+import dji.v5.ux.core.util.UxSharedPreferencesUtil
 
 class App : Application() {
     lateinit var services: AppServices
@@ -20,13 +24,22 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContextHolder.initialize(this)
+        initializeUxSdkDefaults()
         services = AppServices(this)
         services.setActiveDroneSn(LOCAL_DRONE_SN)
         Log.i(TAG, "application created, runtime loop ready for ${LOCAL_DRONE_SN}")
         if (runtimeLoopLifecyclePolicy.startOnApplicationCreate) {
             Log.i(TAG, "application created, starting runtime loop for ${LOCAL_DRONE_SN}")
             services.runtimeLoop.start(LOCAL_DRONE_SN)
+            services.startDualStreamOnBoot(LOCAL_DRONE_SN)
+            services.startReportersOnBoot()
         }
+    }
+
+    private fun initializeUxSdkDefaults() {
+        UxSharedPreferencesUtil.initialize(this)
+        GlobalPreferencesManager.initialize(DefaultGlobalPreferences(this))
+        GeoidManager.getInstance().init(this)
     }
 
     override fun onTerminate() {
@@ -36,6 +49,8 @@ class App : Application() {
 
     companion object {
         private const val TAG = "UavfireApp"
-        const val LOCAL_DRONE_SN = "RC_PLUS_LOCAL"
+        val LOCAL_DRONE_SN: String = BuildConfig.AGENT_AIRCRAFT_SN
+            .takeIf { it.isNotBlank() }
+            ?: "RC_PLUS_LOCAL"
     }
 }

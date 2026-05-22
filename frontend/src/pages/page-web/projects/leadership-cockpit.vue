@@ -441,7 +441,6 @@ import {
   requestDualStreamFocus,
   requestFireDetectionStart,
   requestFireDetectionStop,
-  requestPilotLiveStart,
   type DualStreamEvent,
   type DualStreamGroup
 } from '/@/api/manage'
@@ -452,6 +451,7 @@ import { EModeCode } from '/@/types/device'
 import { buildLivePaneState, swapPrimaryPreference } from './leadership-cockpit-live-layout.mjs'
 
 const store = useMyStore()
+const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
 
 // Flight HUD: 复用 WorkspaceLivestreamPanel 同款 OSD 展示。sn 来源优先级：
 // fireDetectionState.droneSn -> store.currentSn -> deviceInfo 第一个可用。
@@ -728,7 +728,10 @@ const mountPlayerInstance = async (
     video.addEventListener('playing', markPlaying, { once: true })
     video.addEventListener('error', () => {
       state.loading = false
-      state.playing = false
+      if (state.playing) {
+        console.warn('[cockpit] ignore non-fatal video error after playback started', url)
+        return
+      }
       state.error = 'zlm-video-element-error'
     }, { once: true })
 
@@ -748,14 +751,20 @@ const mountPlayerInstance = async (
       }
       if (connectionState === 'failed' || connectionState === 'disconnected' || connectionState === 'closed') {
         state.loading = false
-        state.playing = false
+        if (state.playing) {
+          console.warn('[cockpit] ignore transient zlm connection state after playback started', connectionState, url)
+          return
+        }
         state.error = `zlm-connection-${connectionState}`
       }
     })
 
     endpoint.on?.(ZLMRTCClient.Events.WEBRTC_OFFER_ANWSER_EXCHANGE_FAILED, (payload: any) => {
       state.loading = false
-      state.playing = false
+      if (state.playing) {
+        console.warn('[cockpit] ignore late zlm offer/answer error after playback started', payload)
+        return
+      }
       state.error = payload?.msg || payload?.message || 'zlm-offer-answer-exchange-failed'
     })
     return endpoint
@@ -808,66 +817,92 @@ const syncLivePlayers = async () => {
   )
 }
 
-// Cloud API 直播（路线 A）的播放 URL —— Pilot 2 推流后由 backend 返回。
-// 5s 轮询的 loadDualStreamState() 会把它 patch 到 group.visiblePlayUrl，
-// 让原有视频渲染管线直接拉 Cloud API 流，无需改 video 元素逻辑。
-const pilotLiveUrl = ref<string>('')
-
 // 火情识别手动开关 (#4)
 const fireDetectionState = reactive({ running: false, loading: false, droneSn: '' })
+
+const resolveFireDetectionDroneSn = async () => {
+  const candidateSns = [
+    fireDetectionState.droneSn,
+    dualStreamState.group?.droneSn,
+    FIELD_AGENT_AIRCRAFT_SN,
+    store.state.deviceState.currentSn,
+    flightHudSn.value,
+    ...Object.keys(store.state.deviceState.deviceInfo || {})
+  ].filter((sn, index, arr): sn is string => !!sn && sn !== 'RC_PLUS_LOCAL' && arr.indexOf(sn) === index)
+
+  if (candidateSns.length > 0) {
+    return candidateSns[0]
+  }
+
+  const cap = await getLiveCapacity({} as any)
+  const dev: any = (cap.data || [])[0]
+  return dev?.sn || ''
+}
 
 const onToggleFireDetection = async () => {
   if (fireDetectionState.loading) return
   try {
     fireDetectionState.loading = true
     if (!fireDetectionState.droneSn) {
-      const cap = await getLiveCapacity({} as any)
-      const dev: any = (cap.data || [])[0]
-      if (dev?.sn) fireDetectionState.droneSn = dev.sn
+      fireDetectionState.droneSn = await resolveFireDetectionDroneSn()
     }
-    if (!fireDetectionState.droneSn) return
+    if (!fireDetectionState.droneSn) {
+      notification.warning({
+        message: '无法启动火情监测',
+        description: '未找到可用无人机 SN，请确认遥控器 Agent 已连接并上报状态。'
+      })
+      return
+    }
     if (fireDetectionState.running) {
-      await requestFireDetectionStop(fireDetectionState.droneSn)
+      const res = await requestFireDetectionStop(fireDetectionState.droneSn)
+      if (res.code !== 0) {
+        throw new Error(res.message || 'ai-service stop failed')
+      }
       fireDetectionState.running = false
     } else {
-      await requestFireDetectionStart(fireDetectionState.droneSn)
+      const res = await requestFireDetectionStart(fireDetectionState.droneSn)
+      if (res.code !== 0) {
+        throw new Error(res.message || 'ai-service start failed')
+      }
       fireDetectionState.running = true
     }
   } catch (e) {
     console.warn('[cockpit] fire-detection toggle failed', e)
+    notification.error({
+      message: fireDetectionState.running ? '停止火情监测失败' : '启动火情监测失败',
+      description: (e as any)?.message || '请检查后端和 ai-service 是否正常运行。'
+    })
   } finally {
     fireDetectionState.loading = false
-  }
-}
-
-const startPilotLivestreamOnce = async () => {
-  try {
-    const cap = await getLiveCapacity()
-    const dev: any = (cap.data || [])[0]
-    const cam = dev?.cameras_list?.[0]
-    const vid = cam?.videos_list?.[0]
-    if (!dev || !cam || !vid) {
-      console.warn('[cockpit] live capacity empty, Pilot 2 not in flight mode?')
-      return
-    }
-    const videoId = `${dev.sn}/${cam.index}/${vid.index}`
-    const r = await requestPilotLiveStart(videoId)
-    pilotLiveUrl.value = r.data?.url || ''
-    console.info('[cockpit] pilot live started, url=', pilotLiveUrl.value)
-  } catch (e) {
-    console.warn('[cockpit] pilot live-start failed', e)
   }
 }
 
 const loadDualStreamState = async () => {
   dualStreamState.loading = true
   try {
-    const response = await getDualStreamGroup('RC_PLUS_LOCAL')
-    dualStreamState.group = response.data ?? null
-    if (dualStreamState.group && pilotLiveUrl.value) {
-      // 用 Cloud API 推流 URL 覆盖 agent 链路的 visible_play_url
-      dualStreamState.group.visiblePlayUrl = pilotLiveUrl.value
+    const candidateSns = [
+      flightHudSn.value,
+      FIELD_AGENT_AIRCRAFT_SN,
+      store.state.deviceState.currentSn,
+      fireDetectionState.droneSn,
+      'RC_PLUS_LOCAL'
+    ].filter((sn, index, arr): sn is string => !!sn && arr.indexOf(sn) === index)
+
+    let lastError: any = null
+    let selectedGroup: DualStreamGroup | null = null
+    for (const sn of candidateSns) {
+      try {
+        const response = await getDualStreamGroup(sn)
+        if (response.data) {
+          selectedGroup = response.data
+          break
+        }
+      } catch (error: any) {
+        lastError = error
+      }
     }
+    dualStreamState.group = selectedGroup
+    if (!selectedGroup && lastError) throw lastError
     dualStreamState.error = ''
   } catch (error: any) {
     dualStreamState.error = error?.message || 'dual-stream-state-unavailable'
@@ -993,8 +1028,6 @@ async function loadNewFireEvents (): Promise<void> {
 }
 
 onMounted(async () => {
-  // 路线 A：让 Pilot 2 自己推 RTMP 到 ZLM（Cloud API），URL patch 到 group.visiblePlayUrl
-  await startPilotLivestreamOnce()
   loadDualStreamState()
   loadAiRiskEvents()
   loadNewFireEvents()
@@ -1879,11 +1912,12 @@ const focusItems = [
   flex-direction: column;
   gap: 4px;
   padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.32);
   border-radius: 6px;
   color: #e6e9ef;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
   pointer-events: none;
   max-width: 85%;
 
@@ -1937,11 +1971,11 @@ const focusItems = [
   width: 210px;
   height: 132px;
   padding: 0;
-  border: 2px solid rgba(95, 165, 255, 0.32);
+  border: 2px solid rgba(95, 165, 255, 0.42);
   border-radius: 18px;
   overflow: hidden;
-  background: rgba(6, 16, 28, 0.88);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+  background: rgba(6, 16, 28, 0.28);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
   cursor: default;
   z-index: 4;
 }
@@ -2013,8 +2047,9 @@ const focusItems = [
   justify-content: flex-end;
   gap: 4px;
   padding: 12px;
-  background: linear-gradient(180deg, rgba(5, 14, 24, 0.2) 0%, rgba(5, 14, 24, 0.92) 100%);
+  background: linear-gradient(180deg, rgba(5, 14, 24, 0.08) 0%, rgba(5, 14, 24, 0.42) 100%);
   color: #f4f8ff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.76);
 }
 
 .dual-stream-preview-overlay.error {
@@ -2023,8 +2058,8 @@ const focusItems = [
 
 .dual-stream-preview-overlay.placeholder {
   background:
-    radial-gradient(circle at 50% 20%, rgba(255, 122, 122, 0.16), transparent 35%),
-    linear-gradient(180deg, rgba(38, 25, 28, 0.65) 0%, rgba(15, 12, 16, 0.96) 100%);
+    radial-gradient(circle at 50% 20%, rgba(255, 122, 122, 0.08), transparent 35%),
+    linear-gradient(180deg, rgba(38, 25, 28, 0.18) 0%, rgba(15, 12, 16, 0.5) 100%);
   border: 1px solid rgba(255, 122, 122, 0.14);
 }
 
@@ -2057,9 +2092,10 @@ const focusItems = [
   flex-direction: column;
   gap: 2px;
   padding: 10px 12px;
-  background: linear-gradient(180deg, rgba(5, 14, 24, 0) 0%, rgba(5, 14, 24, 0.92) 100%);
+  background: linear-gradient(180deg, rgba(5, 14, 24, 0) 0%, rgba(5, 14, 24, 0.46) 100%);
   color: #ffffff;
   text-align: left;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.76);
   pointer-events: none;
 }
 

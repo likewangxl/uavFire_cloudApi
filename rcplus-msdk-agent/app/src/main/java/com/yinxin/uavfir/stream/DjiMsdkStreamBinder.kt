@@ -50,7 +50,7 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
         }
 
         throw UnsupportedOperationException(
-            "msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding",
+            "m4t-single-gimbal-only-exposes-single-component-index",
         )
     }
 

@@ -9,4 +9,5 @@
     <string name="action_refresh_device_status">读取设备状态</string>
     <string name="action_start_dual_stream">启动双流</string>
     <string name="action_probe_waypoint">探针:推 KMZ 到 M4T</string>
+    <string name="action_open_sample_tools">打开 MSDK 默认飞行页面</string>
 </resources>

@@ -28,9 +28,14 @@ import java.util.stream.Collectors;
  * @author sean.zhou
  * @date 2021/11/22
  * @version 0.1
+ *
+ * NOTE (2026-05-21, MSDK Migration Phase 1): Cloud SDK livestream impl.
+ * Deprecated; superseded by DualStream agent pipeline. Kept as fallback
+ * during phase 1. See docs/MSDK_MIGRATION_PLAN.md. Phase 2 removes this.
  */
 @Service
 @Transactional
+@Deprecated
 public class LiveStreamServiceImpl implements ILiveStreamService {
 
     @Autowired

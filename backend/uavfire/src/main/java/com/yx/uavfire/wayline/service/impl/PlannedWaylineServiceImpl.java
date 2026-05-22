@@ -351,8 +351,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!aiAutoTriggerOnWayline || aiServiceClient == null) return;
         String droneSn = waylineDroneSn(existing);
         if (!StringUtils.hasText(droneSn)) return;
-        String videoId = com.yx.uavfire.firedetection.AiServiceClient.defaultVideoIdForDrone(droneSn);
-        String rtspUrl = com.yx.uavfire.firedetection.AiServiceClient.rtspUrlForVideoId(videoId, aiZlmRtspHost, aiZlmRtspPort);
+        String rtspUrl = "rtsp://" + aiZlmRtspHost + ":" + aiZlmRtspPort + "/live/" + droneSn + "-0";
         aiServiceClient.startDetection(aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, rtspUrl, "");
     }
 

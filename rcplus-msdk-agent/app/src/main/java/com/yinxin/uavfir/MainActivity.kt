@@ -1,5 +1,6 @@
 package com.yinxin.uavfir
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
@@ -18,6 +19,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var refreshButton: Button
     private lateinit var startButton: Button
     private lateinit var probeWaypointButton: Button
+    private lateinit var openSampleToolsButton: Button
     private val controller: ValidationConsoleController
         get() = (application as App).services.validationController
     private val waypointProbe: com.yinxin.uavfir.wayline.WaypointProbeController
@@ -30,6 +32,7 @@ class MainActivity : AppCompatActivity() {
         refreshButton = findViewById(R.id.refreshButton)
         startButton = findViewById(R.id.startButton)
         probeWaypointButton = findViewById(R.id.probeWaypointButton)
+        openSampleToolsButton = findViewById(R.id.openSampleToolsButton)
 
         refreshButton.setOnClickListener {
             runAction("refresh-device-status") {
@@ -46,6 +49,9 @@ class MainActivity : AppCompatActivity() {
                 val r = waypointProbe.probePush()
                 ValidationConsoleController.UiResult(statusText = r.message)
             }
+        }
+        openSampleToolsButton.setOnClickListener {
+            startActivity(Intent(this, dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity::class.java))
         }
 
         runAction("refresh-device-status") {
@@ -65,6 +71,7 @@ class MainActivity : AppCompatActivity() {
         refreshButton.isEnabled = false
         startButton.isEnabled = false
         probeWaypointButton.isEnabled = false
+        openSampleToolsButton.isEnabled = false
         statusText.text = getString(R.string.app_status_running, action)
         uiScope.launch {
             runCatching { work() }
@@ -81,6 +88,7 @@ class MainActivity : AppCompatActivity() {
             refreshButton.isEnabled = true
             startButton.isEnabled = true
             probeWaypointButton.isEnabled = true
+            openSampleToolsButton.isEnabled = true
         }
     }
 

@@ -1,12 +1,13 @@
 # ai-service
 
-`ai-service/` 是面向双流火情识别 PoC 的独立 Python 服务工程骨架，当前提供了最小 FastAPI 服务入口、运行配置默认值和本地开发启动脚本。
+`ai-service/` 是面向 M4T 直播流火情识别 PoC 的独立 Python 服务。它已经具备 FastAPI task lifecycle、连续视频消费、可见光启发式/YOLO 检测、热成像热点分析、融合事件、截图和 backend fire-event 回传能力。
 
 ## 当前定位
 
-- 承载 FastAPI + OpenCV + YOLO 的 AI 服务工程级配置和本地运行入口。
-- 为双流视频源抽象、推理任务管理、火情事件输出与本地验证提供最小骨架。
-- 当前推理逻辑仍以占位实现和接口契约为主，不代表真实模型能力已接入。
+- 从 ZLMediaKit RTSP 或本地视频/图片读取 visible/thermal 输入。
+- 输出 dual-stream detection event 到 backend `DualStreamServiceImpl`。
+- 对达到阈值的事件生成 `FireEvent`，触发消防任务流。
+- 在无 thermal 独立流时支持单可见光降级运行。
 
 ## 目录结构
 
@@ -144,8 +145,21 @@ curl http://localhost:9000/api/v1/dual-stream/tasks/zlm-demo/events
 - `log_level=INFO`
 - `max_concurrent_tasks=2`
 
+## 当前 MSDK 迁移注意事项
+
+- 当前 backend / frontend 仍会显式传入 stream URL；`ai-service` 尚未按 `droneSn` 主动查询 backend DualStream group。
+- MSDK agent 当前默认流名是 `{droneSn}-0` 或 `{agentAircraftSn}-0`，不是旧设计中的 `{droneSn}_visible` / `{droneSn}_thermal`。
+- 如果要监测 agent 推到 ZLM 的单路可见光，visible URL 应为：
+
+```text
+rtsp://192.168.2.34:8554/live/{streamId}
+```
+
+其中 `streamId` 当前通常是 `{aircraftSn}-0` 或 `RC_PLUS_LOCAL-0`，取决于 agent build config。
+- 还没有 `CompositeSliceVideoSource`。如果后续采用 MSDK side-by-side/PIP 复合流，需要新增一层视频源装饰器，把单帧按布局切成 visible/thermal 两路 `FramePacket`。
+
 ## 当前不承诺项
 
-- 不承诺本阶段已提供真实模型推理、GPU 优化或生产级并发控制。
-- 不承诺已集成模型权重、视频流接入、GPU 加速或多路融合逻辑。
+- 不承诺模型效果达到生产级；YOLO 权重和阈值仍需现场数据标定。
+- 不承诺 GPU 优化或生产级并发控制。
 - 不承诺提供生产级部署、监控、鉴权、任务队列和性能指标。

@@ -3,6 +3,8 @@
 > 版本：v0.1 (2026-05-19) — 草案，开工时定稿
 > 目标范围：把"司空式"航点定制 + 任务编排能力做到 uavfire，覆盖 M4T 真机（MSDK Agent 路径全验证）+ Dock 路径代码完工 deferred 真机
 > 单一事实源：本文档定义所有 L1+L2 涉及的字段、XML 片段、API 形态、状态机。前后端/DB migration/单测全部以此为准
+>
+> 2026-05-21 状态校准：本文是 L1+L2 目标契约，不代表全部已实现。当前 MSDK 数据面迁移、Pilot 2 PoC 和 agent runtime 状态见 `docs/CURRENT_PROJECT_STATUS_2026-05-21.md`、`docs/MSDK_MIGRATION_PLAN.md`、`docs/poc/pilot2-composite-stream.md`。
 
 ---
 

@@ -19,10 +19,21 @@ import static com.yx.uavfire.component.AuthInterceptor.TOKEN_CLAIM;
  * @author sean.zhou
  * @version 0.1
  * @date 2021/11/19
+ *
+ * NOTE (2026-05-21, MSDK Migration Phase 1):
+ * Cloud SDK livestream path is being superseded by the MSDK Agent dual-stream
+ * pipeline (see docs/MSDK_MIGRATION_PLAN.md). This controller is kept as a
+ * fallback during phase 1 so we can roll back if the agent path breaks in
+ * production. Phase 2 will delete this controller and its service impls
+ * after the agent path has been validated on real hardware.
+ *
+ * Do not add new functionality here — extend the DualStream agent pipeline
+ * instead.
  */
 
 @RestController
 @Slf4j
+@Deprecated
 @RequestMapping("${url.manage.prefix}${url.manage.version}/live")
 public class LiveStreamController {
 

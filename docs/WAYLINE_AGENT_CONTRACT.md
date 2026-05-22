@@ -3,6 +3,8 @@
 > 版本:v0.1 (2026-05-15)
 > 状态:草案,等 M4T 兼容性真机验证回报后定稿
 > 适用范围:Matrice 4T(M4T)经 RC Plus 2 上的 `rcplus-msdk-agent` 执行 KMZ 航线任务
+>
+> 2026-05-21 状态校准：本文的字段契约仍有参考价值，但 §8 里程碑状态已经落后。当前代码已包含 agent Paho MQTT publisher、`WaypointMissionExecutor`、`WaylineAgentCommandRouter`、KMZ downloader、event forwarder、probe controller 等实现；最新全局状态以 `docs/CURRENT_PROJECT_STATUS_2026-05-21.md` 和当前代码为准。
 
 ## 0. 一句话目标
 

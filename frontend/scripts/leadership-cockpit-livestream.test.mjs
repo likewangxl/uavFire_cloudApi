@@ -58,6 +58,28 @@ test('cockpit does not auto request RC thermal focus because it changes Pilot2 p
   )
 })
 
+test('cockpit does not auto start Cloud SDK Pilot livestream fallback on mount', () => {
+  assert.doesNotMatch(cockpitSource, /requestPilotLiveStart/)
+  assert.doesNotMatch(cockpitSource, /startPilotLivestreamOnce/)
+  assert.doesNotMatch(cockpitSource, /pilotLiveUrl/)
+  assert.doesNotMatch(cockpitSource, /visiblePlayUrl\s*=\s*pilotLiveUrl\.value/)
+})
+
+test('cockpit fetches dual-stream group from the active aircraft sn when available', () => {
+  assert.doesNotMatch(cockpitSource, /getDualStreamGroup\('RC_PLUS_LOCAL'\)/)
+  assert.match(cockpitSource, /FIELD_AGENT_AIRCRAFT_SN/)
+  assert.match(cockpitSource, /for \(const sn of candidateSns\)/)
+  assert.match(cockpitSource, /getDualStreamGroup\(sn\)/)
+})
+
+test('cockpit fire detection start uses the agent aircraft sn before live capacity fallback', () => {
+  assert.match(cockpitSource, /resolveFireDetectionDroneSn/)
+  assert.match(cockpitSource, /dualStreamState\.group\?\.droneSn/)
+  assert.match(cockpitSource, /FIELD_AGENT_AIRCRAFT_SN/)
+  assert.match(cockpitSource, /await getLiveCapacity/)
+  assert.match(cockpitSource, /fireDetectionState\.droneSn = await resolveFireDetectionDroneSn\(\)/)
+})
+
 test('cockpit uses the preview window as the only visible thermal switch control', () => {
   assert.match(cockpitSource, /'focus-visible'/)
   assert.match(cockpitSource, /'focus-thermal'/)

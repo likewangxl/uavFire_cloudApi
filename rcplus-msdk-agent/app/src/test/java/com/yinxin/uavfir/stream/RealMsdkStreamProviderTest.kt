@@ -30,7 +30,7 @@ class RealMsdkStreamProviderTest {
     fun start_fallsBackToVisibleOnlyWhenThermalBindingFails() = runTest {
         val binder = RecordingMsdkStreamBinder(
             bindThermalFailure = IllegalStateException(
-                "msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding",
+                "m4t-single-gimbal-only-exposes-single-component-index",
             ),
         )
         val liveStreamController = RecordingLiveStreamController()
@@ -48,7 +48,7 @@ class RealMsdkStreamProviderTest {
         assertEquals(BoundStreamState.BOUND, result.visibleState)
         assertEquals(BoundStreamState.IDLE, result.thermalState)
         assertEquals(
-            "msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding",
+            "m4t-single-gimbal-only-exposes-single-component-index",
             result.thermalFailureMessage,
         )
         assertEquals("visible-live-ready", result.playbackStatus)

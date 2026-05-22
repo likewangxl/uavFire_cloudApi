@@ -2,6 +2,7 @@ package com.yinxin.uavfir.wayline
 
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.MqttCallback
 import org.eclipse.paho.client.mqttv3.MqttClient
@@ -26,7 +27,7 @@ class WaylineMqttPublisher(
     private val clientIdPrefix: String,
     private val username: String?,
     private val password: String?,
-    private val gson: Gson = Gson(),
+    private val gson: Gson = GsonBuilder().serializeNulls().create(),
 ) {
     private var client: MqttClient? = null
 
@@ -92,6 +93,55 @@ class WaylineMqttPublisher(
         }
     }
 
+    /**
+     * Publish an OSD payload to the Cloud SDK standard topic
+     * `thing/product/{aircraftSn}/osd`. This impersonates the Pilot 2 ↔ Cloud SDK
+     * protocol so the unchanged backend can consume it. See OsdReporter.
+     */
+    fun publishCloudOsd(aircraftSn: String, gatewaySn: String, data: Map<String, Any?>) {
+        try {
+            connect()
+            val topic = "thing/product/$aircraftSn/osd"
+            val envelope = buildCloudOsdEnvelope(
+                gatewaySn = gatewaySn,
+                timestamp = System.currentTimeMillis(),
+                bid = java.util.UUID.randomUUID().toString(),
+                tid = java.util.UUID.randomUUID().toString(),
+                data = data,
+            )
+            val bytes = gson.toJson(envelope).toByteArray()
+            // QoS 0 — OSD is high-frequency telemetry; loss tolerance is fine.
+            val msg = MqttMessage(bytes).apply { qos = 0 }
+            client?.publish(topic, msg)
+        } catch (e: MqttException) {
+            Log.w(TAG, "publishCloudOsd failed sn=$aircraftSn", e)
+        }
+    }
+
+    /**
+     * Publish an events payload (method=hms or others) to the Cloud SDK standard
+     * topic `thing/product/{aircraftSn}/events`. See HmsReporter.
+     */
+    fun publishCloudEvent(aircraftSn: String, gatewaySn: String, method: String, data: Map<String, Any?>) {
+        try {
+            connect()
+            val topic = "thing/product/$aircraftSn/events"
+            val envelope = buildCloudEventEnvelope(
+                gatewaySn = gatewaySn,
+                method = method,
+                timestamp = System.currentTimeMillis(),
+                bid = java.util.UUID.randomUUID().toString(),
+                tid = java.util.UUID.randomUUID().toString(),
+                data = data,
+            )
+            val bytes = gson.toJson(envelope).toByteArray()
+            val msg = MqttMessage(bytes).apply { qos = 1 }
+            client?.publish(topic, msg)
+        } catch (e: MqttException) {
+            Log.w(TAG, "publishCloudEvent failed sn=$aircraftSn method=$method", e)
+        }
+    }
+
     @Synchronized
     fun disconnect() {
         runCatching { client?.disconnect() }
@@ -100,5 +150,36 @@ class WaylineMqttPublisher(
 
     companion object {
         private const val TAG = "WaylineMqttPublisher"
+
+        fun buildCloudOsdEnvelope(
+            gatewaySn: String,
+            timestamp: Long,
+            bid: String,
+            tid: String,
+            data: Map<String, Any?>,
+        ): Map<String, Any?> = mapOf(
+            "bid" to bid,
+            "tid" to tid,
+            "timestamp" to timestamp,
+            "gateway" to gatewaySn,
+            "data" to data,
+        )
+
+        fun buildCloudEventEnvelope(
+            gatewaySn: String,
+            method: String,
+            timestamp: Long,
+            bid: String,
+            tid: String,
+            data: Map<String, Any?>,
+        ): Map<String, Any?> = mapOf(
+            "bid" to bid,
+            "tid" to tid,
+            "timestamp" to timestamp,
+            "gateway" to gatewaySn,
+            "method" to method,
+            "data" to data,
+            "need_reply" to 0,
+        )
     }
 }

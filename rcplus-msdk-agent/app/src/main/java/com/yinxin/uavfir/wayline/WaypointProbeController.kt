@@ -36,17 +36,22 @@ class WaypointProbeController(
         val outcome = withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<ProbeResult> { cont ->
                 val missionId = "msdk-probe-${System.currentTimeMillis()}"
-                executor.pushKmz(missionId, file.absolutePath) { ok, err ->
+                executor.pushKmz(missionId, file.absolutePath) { pushOk, pushErr ->
                     if (!cont.isActive) return@pushKmz
-                    val msg = if (ok) {
-                        "pushKMZFileToAircraft: SUCCESS — M4T accepts MSDK waypoint3"
-                    } else {
-                        val code = err?.errorCode() ?: "?"
-                        val desc = err?.description() ?: "(no desc)"
-                        "pushKMZFileToAircraft: FAILURE — code=$code desc=$desc"
+                    if (!pushOk) {
+                        val code = pushErr?.errorCode() ?: "?"
+                        val desc = pushErr?.description() ?: "(no desc)"
+                        val msg = "push FAILURE code=$code desc=$desc"
+                        Log.i(TAG, msg)
+                        cont.resume(ProbeResult(false, msg))
+                        return@pushKmz
                     }
-                    Log.i(TAG, msg)
-                    cont.resume(ProbeResult(ok, msg))
+                    Log.i(TAG, "push SUCCESS — now trying startMission")
+                    // Diagnostic: also call startMission to isolate whether MSDK accepts the KMZ
+                    // for execution. WaypointMissionExecutor.startMission is fire-and-forget,
+                    // so we synthesize a result via a side-channel listener attached at construction.
+                    executor.startMission(missionId, "m4t_probe.kmz", null)
+                    cont.resume(ProbeResult(true, "push SUCCESS; startMission fired — watch logcat for WaylineEventForwarder"))
                 }
             }
         }

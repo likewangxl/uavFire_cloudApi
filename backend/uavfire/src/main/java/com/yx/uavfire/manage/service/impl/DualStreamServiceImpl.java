@@ -1,5 +1,7 @@
 package com.yx.uavfire.manage.service.impl;
 
+import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentCapabilityDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentHeartbeatDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentStatusDTO;
@@ -16,6 +18,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
@@ -49,6 +53,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     @Autowired(required = false)
     private StreamSplitterService streamSplitterService;
+
+    @Autowired(required = false)
+    private FireEventService fireEventService;
 
     @Override
     public void acceptHeartbeat(String droneSn, DualStreamAgentHeartbeatDTO heartbeat) {
@@ -124,7 +131,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
             if (events == null) {
                 events = new CopyOnWriteArrayList<>();
             }
-            DualStreamEventDTO reviewedEvent = applySingleStreamReview(event).setTaskId(taskId);
+            DualStreamEventDTO reviewedEvent = applySingleStreamReview(copyEvent(event).setTaskId(taskId));
             events.add(reviewedEvent);
             persistEvents(taskId, events);
             return events;
@@ -271,17 +278,11 @@ public class DualStreamServiceImpl implements IDualStreamService {
                     && "running".equalsIgnoreCase(group.getThermalState());
 
             if (isSharedSbs) {
-                String splitThermalStreamId = streamSplitterService == null
-                        ? null
-                        : streamSplitterService.startSplit(droneSn, sourceStreamId);
-                if (splitThermalStreamId == null) {
-                    group.setThermalPlayUrl(group.getVisiblePlayUrl());
-                } else {
-                    group.setVisiblePlayUrl(buildPlaybackUrl(
-                            StreamSplitterService.getVisibleStreamId(sourceStreamId)));
-                    group.setThermalPlayUrl(buildPlaybackUrl(
-                            StreamSplitterService.getThermalStreamId(sourceStreamId)));
+                if (streamSplitterService != null) {
+                    streamSplitterService.stopSplit(droneSn);
                 }
+                group.setVisiblePlayUrl(buildPlaybackUrl(sourceStreamId));
+                group.setThermalPlayUrl(group.getVisiblePlayUrl());
             } else {
                 if (streamSplitterService != null) {
                     streamSplitterService.stopSplit(droneSn);
@@ -443,11 +444,51 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
         if ("thermal".equals(channel)) {
             reviewed.setReviewStatus(isRiskAtLeastMedium(reviewed) ? "THERMAL_CONFIRMED" : "THERMAL_REJECTED");
+            if ("THERMAL_CONFIRMED".equals(reviewed.getReviewStatus())) {
+                createConfirmedFireEvent(reviewed);
+            }
             if (shouldIssueFocus(droneSn, "focus-visible")) {
                 issueCommand(droneSn, "focus-visible");
             }
         }
         return reviewed;
+    }
+
+    private void createConfirmedFireEvent(DualStreamEventDTO event) {
+        if (fireEventService == null || event == null || !StringUtils.hasText(event.getTaskId())) {
+            return;
+        }
+        FireEventCreateParam param = new FireEventCreateParam();
+        Long sourceTs = event.getSourceTs() != null ? event.getSourceTs() : System.currentTimeMillis();
+        param.setEventId(event.getTaskId() + "-" + sourceTs);
+        param.setSource("M4T");
+        param.setDeviceSn(event.getDroneSn());
+        param.setConfidence(BigDecimal.valueOf(resolveConfirmedConfidence(event)));
+        param.setFireLevel(StringUtils.hasText(event.getRiskLevel()) ? event.getRiskLevel() : "UNKNOWN");
+        param.setTimestamp(Instant.ofEpochMilli(sourceTs).toString());
+        fireEventService.create(param);
+    }
+
+    private double resolveConfirmedConfidence(DualStreamEventDTO event) {
+        Double thermalScore = event.getThermalScore();
+        if (thermalScore != null) {
+            return clampConfidence(thermalScore);
+        }
+        Double fusionScore = event.getFusionScore();
+        if (fusionScore != null) {
+            return clampConfidence(fusionScore);
+        }
+        return 0.0;
+    }
+
+    private double clampConfidence(double value) {
+        if (value < 0.0) {
+            return 0.0;
+        }
+        if (value > 1.0) {
+            return 1.0;
+        }
+        return value;
     }
 
     private String inferChannelFromGroup(String droneSn) {

@@ -2085,3 +2085,137 @@ cd frontend && npm run build
 1. 用本地图片/短视频跑 `ai-service/scripts/run-online-media-smoke.sh`，确认正负样本事件分数符合预期
 2. backend 启动后，带 `AI_SERVICE_BACKEND_BASE_URL` 做一次真实事件回传验证
 3. 等 RC Plus 可用时，把驾驶舱 `RC_PLUS_LOCAL-0` 可见光流与 `ai-service` visible 输入串起来做端到端验证
+
+## 17. 2026-05-21 Claude 最新资料校准与文档入口更新
+
+本轮按 Claude Code 最新 memory 摘要、`docs/MSDK_MIGRATION_PLAN.md`、`docs/poc/pilot2-composite-stream.md`、当前代码和配置重新校准项目口径。
+
+已确认的最新结论：
+
+- Pilot 2 PIP 复合推流方案 B 已判定不可行：
+  - Pilot 2 当前安装版本找不到自定义 RTMP 入口
+  - 可用的是 Cloud SDK livestream UI
+  - Cloud SDK livestream 只推当前主镜头 raw feed，PIP 小窗和 HUD 不进流
+- Cloud SDK livestream 在 RC Plus + Pilot 2 + 手飞模式下单路可见光可用，但双流仍未确认。
+- M4T + MSDK v5 当前测试组合不暴露 visible + thermal 两路独立 raw stream；同一个 `ComponentIndexType.LEFT_OR_MAIN` 下通过 `CameraVideoStreamSourceType` 切换镜头。
+- 第一阶段方向是 MSDK Agent 数据面迁移，范围限定在直播、航线和 OSD/HMS；飞控迁移延后。
+- 当前工作区配置基准已是 `192.168.2.34`，不是旧文档中的 `192.168.50.254` / `172.20.10.7`。
+
+本轮文档更新：
+
+- 新增 `docs/CURRENT_PROJECT_STATUS_2026-05-21.md` 作为当前接手入口。
+- 更新 `README.md`，把项目范围从“仅前后端”改为包含 frontend/backend/agent/ai-service/ZLM/docs。
+- 更新 `RUNBOOK.md`，补齐 ZLM、ai-service、RC Plus agent 启动方式和当前 IP 基准。
+- 更新 `rcplus-msdk-agent/README.md`，移除“只有骨架 / Java 17 阻塞”旧描述。
+- 更新 `ai-service/README.md`，修正为“真实视频输入 + 启发式/YOLO PoC”，并记录 MSDK 迁移注意事项。
+- 更新 `deployment/zlmediakit/README.md`，把旧 `{droneSn}_visible` / `{droneSn}_thermal` 命名改为当前 `{effectiveSn}-0`。
+- 更新 `docs/COCKPIT_VISIBLE_LIVESTREAM_E2E_CHECKLIST.md`，把 E2E 清单同步到 `192.168.2.34` 和当前 stream id 语义。
+- 更新 `docs/MSDK_MIGRATION_PLAN.md`，补充“已落地 / 未落地”状态边界。
+
+代码评审中发现的当前重点调整项：
+
+1. `leadership-cockpit.vue` 仍保留 `startPilotLivestreamOnce()` 和 `pilotLiveUrl` patch，会让 cockpit 在打开时继续触发 Cloud SDK livestream fallback；这与 MSDK agent 优先路线冲突，应改为显式 fallback 开关或移除自动启动。
+2. `PlannedWaylineServiceImpl.triggerFireDetectionForWayline()` 仍通过 `AiServiceClient.defaultVideoIdForDrone()` 拼 Cloud SDK 风格 RTSP URL；航线触发 AI 时还没切到 agent stream。
+3. `DjiMsdkStreamBinder.bindThermal()` 仍使用旧错误字符串，会误导成 “MSDK v5 不支持”，更准确应表达为 “M4T 单 gimbal / 单 ComponentIndex 下无独立双 raw stream”，并为 side-by-side slicing 留出状态。
+4. `DjiLiveStreamController` 用 `AGENT_AIRCRAFT_SN` 生成 ZLM stream id，但 backend/cockpit 仍常以 `RC_PLUS_LOCAL` 查询 group；需要确认 `visiblePlayUrl` 中的 stream id 是否和 ZLM 实际 source 一致。
+5. `OsdReporter`、`HmsReporter`、`WaylineMqttPublisher.publishCloudOsd/publishCloudEvent` 缺单测，JSON 字段名错误会直接导致 backend 无法消费。
+
+## 18. 2026-05-21 MSDK Agent 数据面收口第一轮
+
+本轮按上一节建议顺序完成了前四项代码收口，真机 E2E 仍需连接 RC Plus + M4T 后执行。
+
+已完成：
+
+- 移除 `leadership-cockpit.vue` 挂载时自动调用 Cloud SDK / Pilot 2 开播的 fallback hack；cockpit 现在只消费 backend DualStream group 返回的播放 URL。
+- `PlannedWaylineServiceImpl.triggerFireDetectionForWayline()` 已从 Cloud SDK videoId URL 切换为 agent stream：`rtsp://<zlm-host>:8554/live/{droneSn}-0`。
+- `DjiMsdkStreamBinder.bindThermal()` 的降级原因改为 `m4t-single-gimbal-only-exposes-single-component-index`，避免继续误导为 MSDK v5 全局不支持。
+- `WaylineMqttPublisher` 新增 Cloud SDK OSD / event envelope builder，并用 `GsonBuilder().serializeNulls()` 保留 `mode_code:null`。
+- 补充聚焦测试：
+  - `frontend/scripts/leadership-cockpit-livestream.test.mjs`
+  - `backend/uavfire/src/test/java/com/yx/uavfire/wayline/PlannedWaylineServiceTest.java`
+  - `rcplus-msdk-agent/app/src/test/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinderSourceTest.kt`
+  - `rcplus-msdk-agent/app/src/test/java/com/yinxin/uavfir/wayline/WaylineMqttPublisherCloudPayloadTest.kt`
+
+验证结果：
+
+```bash
+node --test frontend/scripts/leadership-cockpit-livestream.test.mjs
+JAVA_HOME=/usr/local/opt/openjdk@11 mvn -pl uavfire -Dtest=PlannedWaylineServiceTest#executeAgentWaylineStartsAiDetectionFromAgentStreamUrl -Dsurefire.failIfNoSpecifiedTests=false test
+JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=/usr/local/share/android-commandlinetools ANDROID_SDK_ROOT=/usr/local/share/android-commandlinetools ./gradlew :app:testDebugUnitTest --tests "com.yinxin.uavfir.stream.DjiMsdkStreamBinderSourceTest" --tests "com.yinxin.uavfir.stream.RealMsdkStreamProviderTest.start_fallsBackToVisibleOnlyWhenThermalBindingFails" --tests "com.yinxin.uavfir.wayline.WaylineMqttPublisherCloudPayloadTest"
+```
+
+结果：
+
+- frontend cockpit livestream tests: `16 pass, 0 fail`
+- backend wayline AI URL test: `1 pass, 0 fail`
+- rcplus-msdk-agent focused tests: `BUILD SUCCESSFUL`
+
+下一步真机 E2E 顺序：
+
+1. 启动基础服务：MySQL / Redis / ZLM / backend / frontend / ai-service，确认全部使用 `192.168.2.34`。
+2. 安装并启动 RC Plus agent，确认 `AGENT_AIRCRAFT_SN`、`AGENT_MEDIA_HOST=192.168.2.34`、MQTT broker 均正确。
+3. 在 agent UI 启动双流，确认 ZLM 出现 `live/{effectiveSn}-0`，backend DualStream group 的 `visiblePlayUrl` 指向同一 stream。
+4. 打开 cockpit 直播 tab，确认 WebRTC 出画且没有 Cloud SDK 自动开播请求。
+5. 执行一条 agent wayline，确认 backend 触发 ai-service 的 RTSP URL 为 `rtsp://192.168.2.34:8554/live/{droneSn}-0`。
+6. 对准火焰/测试视频源完成 ai-service event 回传，确认 backend `/fire-events` 和 cockpit 风险事件面板出现记录。
+
+## 19. 2026-05-21 真机 ADB 联调进展
+
+RC Plus 2 已通过 ADB 识别：
+
+```text
+9N9CMA500100B8  DJI_RC_PLUS_2
+```
+
+现场网络发现：
+
+- RC Plus Wi-Fi 地址是 `192.168.0.20/24`
+- Mac 当前基准地址是 `192.168.2.34/24`
+- RC Plus 无到 `192.168.2.34` 的路由，`ping 192.168.2.34` 100% 丢包
+
+本轮采用 USB ADB reverse 联调：
+
+```bash
+adb reverse tcp:6789 tcp:6789
+adb reverse tcp:1883 tcp:1883
+adb reverse tcp:1935 tcp:1935
+```
+
+agent 以如下运行参数安装：
+
+```bash
+./gradlew :app:installDebug \
+  -PagentBackendBaseUrl=http://127.0.0.1:6789/ \
+  -PagentMediaHost=127.0.0.1 \
+  -PagentMqttBrokerUrl=tcp://127.0.0.1:1883 \
+  -PagentAircraftSn=1581F7K3D249E00AM3Q3 \
+  -PagentGatewaySn=9N9CMA500100B8
+```
+
+验证结果：
+
+- agent runtime 已用真实 aircraft SN `1581F7K3D249E00AM3Q3` 上报 heartbeat/status/capability。
+- ZLM 已收到真实 M4T RTMP 源：`live/1581F7K3D249E00AM3Q3-0`，H264 1920x1080。
+- backend DualStream group 已对齐同一 SN：
+  - `session_state=RUNNING`
+  - `live_status=RUNNING`
+  - `visible_state=running`
+  - `thermal_state=degraded`
+  - `status_reason=m4t-single-gimbal-only-exposes-single-component-index`
+  - `visible_play_url=webrtc://192.168.2.34:58925/live/1581F7K3D249E00AM3Q3-0`
+- ai-service 已直接拉取真实 ZLM RTSP：
+  - `rtsp://127.0.0.1:8554/live/1581F7K3D249E00AM3Q3-0`
+  - task `fire-1581F7K3D249E00AM3Q3` 状态为 `running`
+  - detection events 持续产生，当前画面为 `fusion_score=0.0` / `risk_level=LOW`
+
+本轮发现并修正：
+
+- agent 原先 runtime/group 使用 `RC_PLUS_LOCAL`，但 RTMP stream 使用 `AGENT_AIRCRAFT_SN`，导致 backend/cockpit URL 指向不存在的 `RC_PLUS_LOCAL-0`。
+- 已改为：配置了 `AGENT_AIRCRAFT_SN` 时，agent runtime `LOCAL_DRONE_SN` 使用真实 aircraft SN。
+- cockpit 查询 DualStream group 时优先使用当前 OSD/设备状态里的 SN，避免继续硬编码 `RC_PLUS_LOCAL`。
+
+剩余 E2E 缺口：
+
+1. cockpit 需要浏览器实测 WebRTC 画面；当前命令行已确认 frontend 200、ZLM source 存在、backend URL 正确。
+2. 当前真实画面没有触发火情，ai-service 只产生 LOW 事件；需要对准火源/测试火焰图，或注入高风险样本，才能验证 `/api/fire/events` 和 cockpit 风险面板。
+3. 若后续不用 USB reverse，应把 RC Plus 和 Mac 放回同一网段，或更新所有 IP 配置。
