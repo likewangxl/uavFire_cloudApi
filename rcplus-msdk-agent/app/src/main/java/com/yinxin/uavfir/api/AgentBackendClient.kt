@@ -66,6 +66,7 @@ class AgentBackendClient(
         playbackStatus = runtimeStatus.playbackStatus ?: "awaiting-media-url",
         visiblePlayUrl = null,
         thermalPlayUrl = null,
+        thermalCenterTemperatureC = runtimeStatus.thermalCenterTemperatureC,
     )
 
     suspend fun sendCapability(
@@ -162,6 +163,10 @@ class AgentBackendClient(
         commandId: String,
         status: String,
         message: String? = null,
+        taskId: String? = null,
+        sourceTs: Long? = null,
+        thermalTemperature: Double? = null,
+        thermalMeasureRoi: Map<String, Double>? = null,
     ) {
         debug("ack request drone=$droneSn command=$commandId status=$status")
         api.ackCommand(
@@ -170,6 +175,10 @@ class AgentBackendClient(
                 commandId = commandId,
                 status = status,
                 message = message,
+                taskId = taskId,
+                sourceTs = sourceTs,
+                thermalTemperature = thermalTemperature,
+                thermalMeasureRoi = thermalMeasureRoi,
             ),
         )
         debug("ack response drone=$droneSn command=$commandId")

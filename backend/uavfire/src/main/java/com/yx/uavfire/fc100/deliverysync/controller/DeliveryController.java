@@ -8,11 +8,15 @@ import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.common.idempotency.Idempotent;
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
 import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncProperties;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceProperties;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskRef;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
@@ -32,7 +36,13 @@ import org.springframework.web.bind.annotation.RestController;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import javax.validation.constraints.NotBlank;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /** spec §4.5 — 5 个 Delivery 相关端点（spec API 路径已扁平到 /api/fire/...） */
 @RestController
@@ -65,6 +75,9 @@ public class DeliveryController {
     @Data
     public static class CreateTaskParam {
         @NotBlank private String operatorId;
+        private String taskName;
+        private String remark;
+        private List<String> notifies;
     }
 
     @PostMapping("/missions/{no}/delivery/create-task")
@@ -79,10 +92,21 @@ public class DeliveryController {
         if (file == null) throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
             "no route file exported");
 
+        String routeKml = extractTemplateKml(routeService.downloadById(file.getId()));
+        adapter.importWayline(WaylineImportRequest.builder()
+            .missionNo(no)
+            .waylineId(no)
+            .kml(routeKml)
+            .build());
+
         DeliveryTaskRef ref = adapter.createTask(CreateTaskRequest.builder()
             .workspaceId(m.getWorkspaceId())
             .deviceSn(m.getAircraftSn())
             .missionNo(no)
+            .taskName(p.getTaskName() != null ? p.getTaskName() : "火情任务-" + no)
+            .missionId(no)
+            .remark(p.getRemark())
+            .notifies(p.getNotifies())
             .waylineKmzObjectKey(file.getObjectKey())
             .waylineKmzSha256(file.getSign())
             .build());
@@ -132,5 +156,85 @@ public class DeliveryController {
         if (m == null) throw new Fc100BusinessException(Fc100ErrorCode.MISSION_NOT_FOUND, no);
         if (m.getDjiTaskId() == null) return ApiResult.success(null);
         return ApiResult.success(adapter.queryTaskStatus(m.getDjiTaskId()));
+    }
+
+    @Data
+    public static class DeviceCommandParam {
+        @NotBlank private String operatorId;
+        private Map<String, Object> data;
+    }
+
+    @PostMapping("/missions/{no}/delivery/emergency-stop")
+    @Idempotent("delivery.command.emergency-stop")
+    public ApiResult<DeliveryCommandRef> emergencyStop(@PathVariable("no") String no,
+                                                        @Valid @RequestBody DeviceCommandParam p) {
+        return ApiResult.success(sendMissionCommand(no, "drone_emergency_stop", p));
+    }
+
+    @PostMapping("/missions/{no}/delivery/return-home")
+    @Idempotent("delivery.command.return-home")
+    public ApiResult<DeliveryCommandRef> returnHome(@PathVariable("no") String no,
+                                                     @Valid @RequestBody DeviceCommandParam p) {
+        return ApiResult.success(sendMissionCommand(no, "return_home", p));
+    }
+
+    @PostMapping("/missions/{no}/delivery/land")
+    @Idempotent("delivery.command.land")
+    public ApiResult<DeliveryCommandRef> land(@PathVariable("no") String no,
+                                               @Valid @RequestBody DeviceCommandParam p) {
+        return ApiResult.success(sendMissionCommand(no, "drone_landing", p));
+    }
+
+    @PostMapping("/missions/{no}/delivery/commands/{method}")
+    @Idempotent("delivery.command.custom")
+    public ApiResult<DeliveryCommandRef> command(@PathVariable("no") String no,
+                                                  @PathVariable("method") String method,
+                                                  @Valid @RequestBody DeviceCommandParam p) {
+        return ApiResult.success(sendMissionCommand(no, method, p));
+    }
+
+    @GetMapping("/missions/{no}/delivery/commands/status")
+    public ApiResult<DeliveryCommandStatus> commandStatus(@PathVariable("no") String no) {
+        FireMissionEntity m = findMission(no);
+        return ApiResult.success(adapter.queryDeviceCommandStatus(m.getAircraftSn()));
+    }
+
+    private DeliveryCommandRef sendMissionCommand(String no, String method, DeviceCommandParam p) {
+        FireMissionEntity m = findMission(no);
+        return adapter.sendDeviceCommand(DeviceCommandRequest.builder()
+            .missionNo(no)
+            .deviceSn(m.getAircraftSn())
+            .deviceCmdMethod(method)
+            .deviceCmdData(p.getData() != null ? p.getData() : Map.of())
+            .build());
+    }
+
+    private FireMissionEntity findMission(String no) {
+        FireMissionEntity m = missionMapper.selectOne(
+            new QueryWrapper<FireMissionEntity>().eq("mission_no", no).eq("deleted", 0));
+        if (m == null) throw new Fc100BusinessException(Fc100ErrorCode.MISSION_NOT_FOUND, no);
+        return m;
+    }
+
+    private String extractTemplateKml(byte[] kmz) {
+        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(kmz))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if ("wpmz/template.kml".equals(entry.getName())) {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] buf = new byte[4096];
+                    int len;
+                    while ((len = zis.read(buf)) >= 0) {
+                        out.write(buf, 0, len);
+                    }
+                    return out.toString(StandardCharsets.UTF_8.name());
+                }
+            }
+            throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM, "template.kml not found in KMZ");
+        } catch (Fc100BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM, "invalid KMZ: " + e.getMessage());
+        }
     }
 }

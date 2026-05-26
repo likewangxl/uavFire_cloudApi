@@ -14,8 +14,8 @@ Backend: ZLMediaKit (Docker) on Mac, HTTP API :58925, RTMP :1935
 
 ## Setup used
 
-- Mac LAN IP: `192.168.2.34`
-- RTMP URL (后端自动签发，不可改): `rtmp://192.168.2.34:1935/live/RC_PLUS_LOCAL-0`
+- Mac LAN IP: `192.168.0.30`
+- RTMP URL (后端自动签发，不可改): `rtmp://192.168.0.30:1935/live/RC_PLUS_LOCAL-0`
 - ZLM HTTP API: `http://localhost:58925`（secret `psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy`）
 - Pilot 2 直播入口：第三方云平台 → 手动直播（即 Cloud Api Platform）
 - 三种直播模式选项（dropdown）：`video-on-demand` / `video-by-manual` / `video-demand-aux-manual`

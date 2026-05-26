@@ -27,6 +27,10 @@ CREATE TABLE `fire_event` (
   `thermal_image_url` text,
   `visible_image_url` text,
   `event_timestamp` bigint NOT NULL COMMENT 'M4T 检测时刻 (ms epoch)',
+  `last_seen_time` bigint NOT NULL COMMENT '最近一次识别命中时刻 (ms epoch)',
+  `report_count` int NOT NULL DEFAULT 1 COMMENT '同一火情聚合命中次数',
+  `last_source_event_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT '最近一次 AI 原始事件编号',
+  `notification_version` int NOT NULL DEFAULT 1 COMMENT '事件级通知版本，风险升级时递增',
   `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'NEW / LOW_CONFIDENCE / MISSION_CREATED / IGNORED',
   `deleted` tinyint(1) NOT NULL DEFAULT 0,
   `created_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
@@ -36,8 +40,39 @@ CREATE TABLE `fire_event` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `UNI_EVENT_ID` (`event_id`),
   KEY `idx_workspace_status` (`workspace_id`,`status`),
-  KEY `idx_event_timestamp` (`event_timestamp`)
+  KEY `idx_event_timestamp` (`event_timestamp`),
+  KEY `idx_fire_event_merge` (`workspace_id`,`device_sn`,`deleted`,`last_seen_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='火情事件';
+
+-- ---------------------------------------------------------------------------
+-- 1.1 fire_event_history — 火情事件命中历史快照
+-- ---------------------------------------------------------------------------
+DROP TABLE IF EXISTS `fire_event_history`;
+CREATE TABLE `fire_event_history` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `fire_event_id` bigint unsigned NOT NULL COMMENT '父火情事件 ID',
+  `event_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT '父火情事件编号',
+  `source_event_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT '本次 AI 原始事件编号',
+  `workspace_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT 'DEFAULT',
+  `source` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `device_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `confidence` decimal(5,4) NOT NULL,
+  `fire_level` varchar(16) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `lat` double NOT NULL,
+  `lng` double NOT NULL,
+  `alt` double DEFAULT NULL,
+  `altitude_reference` varchar(16) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `thermal_temperature` double DEFAULT NULL,
+  `temperature_unit` varchar(8) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `thermal_image_url` text,
+  `visible_image_url` text,
+  `event_timestamp` bigint NOT NULL,
+  `action` varchar(16) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'CREATED / MERGED',
+  `create_time` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_fire_event_history_parent` (`fire_event_id`,`event_timestamp`),
+  KEY `idx_fire_event_history_source` (`source_event_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='火情事件命中历史快照';
 
 -- ---------------------------------------------------------------------------
 -- 2. fc100_fire_mission — 灭火任务主表 + 状态机

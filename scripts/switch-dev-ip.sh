@@ -41,31 +41,6 @@ if [[ -z "$NEW_IP" ]]; then
   exit 1
 fi
 
-if ! [[ "$NEW_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-  echo "❌ 非法 IP 格式: $NEW_IP" >&2
-  exit 1
-fi
-
-OLD_IP="$(grep -E '^agentMediaHost=' rcplus-msdk-agent/gradle.properties | sed -E 's/^agentMediaHost=//')"
-if [[ "$OLD_IP" == "127.0.0.1" ]]; then
-  # USB adb-reverse mode intentionally uses localhost in the Agent APK. Do not use
-  # that as the global replacement source, otherwise the script would rewrite
-  # unrelated localhost-only settings such as the MySQL JDBC URL.
-  OLD_IP="$(grep -E "192\\.168\\.[0-9]+\\.[0-9]+" frontend/src/api/http/config.ts | head -n 1 | grep -Eo "192\\.168\\.[0-9]+\\.[0-9]+" | head -n 1 || true)"
-fi
-if [[ -z "$OLD_IP" ]]; then
-  echo "❌ 无法读出旧 LAN IP（agentMediaHost=127.0.0.1 时会从 frontend/src/api/http/config.ts 回退读取）" >&2
-  exit 1
-fi
-
-echo "🔍 检测到新 IP: $NEW_IP"
-echo "📌 仓库当前记录的旧 IP: $OLD_IP"
-
-if [[ "$OLD_IP" == "$NEW_IP" ]]; then
-  echo "✅ 已在 $NEW_IP 上，无需切换"
-  exit 0
-fi
-
 FILES=(
   "backend/uavfire/src/main/resources/application.yml"
   "deployment/zlmediakit/config/config.ini"
@@ -81,10 +56,55 @@ for f in "${FILES[@]}"; do
   fi
 done
 
+if ! [[ "$NEW_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+  echo "❌ 非法 IP 格式: $NEW_IP" >&2
+  exit 1
+fi
+
+OLD_IP="$(grep -E '^agentMediaHost=' rcplus-msdk-agent/gradle.properties | sed -E 's/^agentMediaHost=//')"
+OLD_IPS=()
+
+add_old_ip() {
+  local ip="$1"
+  [[ -z "$ip" || "$ip" == "127.0.0.1" || "$ip" == "$NEW_IP" ]] && return
+  for existing in ${OLD_IPS[@]+"${OLD_IPS[@]}"}; do
+    [[ "$existing" == "$ip" ]] && return
+  done
+  OLD_IPS+=("$ip")
+}
+
+add_old_ip "$OLD_IP"
+
+# Collect stale host IPs from the concrete dev settings. Avoid broad file-wide
+# matching because config examples and CIDR/range allow-lists also contain IPs.
+while IFS= read -r ip; do
+  add_old_ip "$ip"
+done < <(
+  {
+    grep -E '^agent(BackendBaseUrl|MediaHost|MqttBrokerUrl)=' rcplus-msdk-agent/gradle.properties || true
+    grep -Ev '^[[:space:]]*#' backend/uavfire/src/main/resources/application.yml | sed -E 's/[[:space:]]+#.*$//' || true
+    grep -E '^externIP=' deployment/zlmediakit/config/config.ini || true
+    grep -E '^ZLM_PUBLIC_HOST=' deployment/zlmediakit/.env || true
+    grep -E '^VITE_APP_APIGATEWAY_BACKEND_HOST=' frontend/env/.env || true
+    grep -E '^(const backendHost|[[:space:]]+rtmpURL:)' frontend/src/api/http/config.ts | sed -E 's#// Example:.*##' || true
+  } | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' || true
+)
+
+echo "🔍 检测到新 IP: $NEW_IP"
+if [[ ${#OLD_IPS[@]} -eq 0 ]]; then
+  echo "✅ 已在 $NEW_IP 上，无需切换"
+  exit 0
+fi
+echo "📌 仓库当前记录的旧 IP: ${OLD_IPS[*]}"
+
 echo ""
-echo "📋 计划改动 (旧 IP $OLD_IP -> 新 IP $NEW_IP):"
+echo "📋 计划改动 (旧 IP ${OLD_IPS[*]} -> 新 IP $NEW_IP):"
 for f in "${FILES[@]}"; do
-  count=$(grep -F -c "$OLD_IP" "$f" || true)
+  count=0
+  for old_ip in "${OLD_IPS[@]}"; do
+    n=$(grep -F -c "$old_ip" "$f" || true)
+    count=$((count + n))
+  done
   echo "  - $f  ($count 处)"
 done
 
@@ -97,7 +117,9 @@ fi
 echo ""
 echo "✏️  替换中..."
 for f in "${FILES[@]}"; do
-  sed -i '' "s/${OLD_IP}/${NEW_IP}/g" "$f"
+  for old_ip in "${OLD_IPS[@]}"; do
+    sed -i '' "s/${old_ip}/${NEW_IP}/g" "$f"
+  done
 done
 
 if grep -q '^agentMediaHost=127\.0\.0\.1$' rcplus-msdk-agent/gradle.properties; then
@@ -106,12 +128,14 @@ if grep -q '^agentMediaHost=127\.0\.0\.1$' rcplus-msdk-agent/gradle.properties; 
   sed -i '' "s#^agentMqttBrokerUrl=.*#agentMqttBrokerUrl=tcp://${NEW_IP}:1883#" rcplus-msdk-agent/gradle.properties
 fi
 
-remnant=$(git grep -F "$OLD_IP" -- "${FILES[@]}" 2>/dev/null || true)
-if [[ -n "$remnant" ]]; then
-  echo "❌ 替换后仍发现旧 IP 残留:" >&2
-  echo "$remnant" >&2
-  exit 1
-fi
+for old_ip in "${OLD_IPS[@]}"; do
+  remnant=$(git grep -F "$old_ip" -- "${FILES[@]}" 2>/dev/null || true)
+  if [[ -n "$remnant" ]]; then
+    echo "❌ 替换后仍发现旧 IP 残留:" >&2
+    echo "$remnant" >&2
+    exit 1
+  fi
+done
 echo "✅ 6 个配置文件已切到 $NEW_IP"
 
 if $SKIP_APK; then
@@ -158,4 +182,4 @@ echo "   - backend:   JAVA_HOME=/usr/local/opt/openjdk@11 mvn spring-boot:run -p
 echo "   - frontend:  cd frontend && npm run serve"
 echo "   - ZLM:       docker restart \$(docker ps -qf name=zlm)   # 仅当 ICE externIP 走的是 container env"
 echo ""
-echo "🎉 IP 切换完成: $OLD_IP -> $NEW_IP"
+echo "🎉 IP 切换完成: ${OLD_IPS[*]} -> $NEW_IP"

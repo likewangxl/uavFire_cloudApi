@@ -160,6 +160,7 @@ class DualStreamSessionManagerTest {
                     thermalState = BoundStreamState.BOUND,
                     playbackStatus = "shared-side-by-side-preview",
                     thermalFailureMessage = "single-liveview-source-shared-side-by-side-preview",
+                    thermalCenterTemperatureC = 88.5,
                 )
 
                 override suspend fun stop() = Unit
@@ -175,5 +176,6 @@ class DualStreamSessionManagerTest {
         assertEquals(BoundStreamState.BOUND, result.thermalState)
         assertEquals("shared-side-by-side-preview", runtimeStatus.playbackStatus)
         assertEquals("single-liveview-source-shared-side-by-side-preview", runtimeStatus.failureReason)
+        assertEquals(88.5, runtimeStatus.thermalCenterTemperatureC)
     }
 }

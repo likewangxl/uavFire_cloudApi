@@ -104,6 +104,29 @@ def test_open_is_idempotent_and_does_not_recreate_capture():
     assert factory_calls["count"] == 1
 
 
+def test_read_periodically_reopens_capture_to_follow_source_switches():
+    factory_calls = {"count": 0}
+
+    def factory(url):
+        factory_calls["count"] += 1
+        return _FakeCap(frames=[_FakeNdarray(height=48, width=64)])
+
+    source = OpenCvVideoSource(
+        url="rtsp://example.com",
+        channel="visible",
+        capture_factory=factory,
+        max_reads_before_reopen=1,
+    )
+
+    source.open()
+    first = source.read()
+    second = source.read()
+
+    assert first is not None
+    assert second is not None
+    assert factory_calls["count"] == 2
+
+
 def test_read_passes_through_zero_sized_frame_without_shape_attribute():
     cap = _FakeCap(frames=[object()])
     source = OpenCvVideoSource(

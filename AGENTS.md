@@ -1,7 +1,7 @@
 <claude-mem-context>
 # Memory Context
 
-# [uavfire] recent context, 2026-05-22 11:36am GMT+8
+# [uavfire] recent context, 2026-05-25 5:12pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
@@ -42,7 +42,7 @@ Stats: 50 obs (20,947t read) | 2,096,266t work | 99% savings
 2129 " 🟣 AI Service Full Pipeline: ContinuousTaskRunner with YOLO, Fusion, Snapshot, and FireEvent Reporting
 2130 " 🔵 Backend DualStreamServiceImpl: Auto URL Generation and Single-Stream Review Logic
 2131 " 🟣 Leadership Cockpit: Full Dual-Stream WebRTC Player with AI Risk Panel and Fire Notification
-2132 " 🔵 Current IP Baseline Changed: All Services Now on 192.168.2.34
+2132 " 🔵 Current IP Baseline Changed: All Services Now on 192.168.0.30
 2133 " 🟣 Wayline Agent Contract and KMZ Format Verified Against Real M4T Hardware
 2134 " 🔵 Cockpit Dual Livestream Strategy: Cloud API Plan C' as Primary Override for Agent Stream
 2135 " 🔵 Project CLAUDE.md Coding Standards and Backend Start Command

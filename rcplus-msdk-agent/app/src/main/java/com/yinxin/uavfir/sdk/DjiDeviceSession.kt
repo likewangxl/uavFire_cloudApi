@@ -34,6 +34,8 @@ class DjiDeviceSession(
                 connectionState = AgentConnectionState.CAPABILITY_READY,
                 capability = djiSdkGateway.loadCapability(),
                 telemetry = loadTelemetry(),
+                aircraftModel = djiSdkGateway.loadAircraftModel(),
+                flightLimit = djiSdkGateway.loadFlightLimit(),
             )
         }
     }

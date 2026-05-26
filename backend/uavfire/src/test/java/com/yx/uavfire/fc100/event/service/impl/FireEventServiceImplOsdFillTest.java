@@ -5,6 +5,7 @@ import com.yx.uavfire.fc100.common.Clock;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.common.MissionNoGenerator;
+import com.yx.uavfire.fc100.event.dao.FireEventHistoryMapper;
 import com.yx.uavfire.fc100.event.dao.FireEventMapper;
 import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
@@ -23,16 +24,18 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 class FireEventServiceImplOsdFillTest {
 
     private FireEventServiceImpl build(IDeviceRedisService redis, FireEventMapper events) {
         FireMissionMapper missions = mock(FireMissionMapper.class);
         MissionNoGenerator noGen = mock(MissionNoGenerator.class);
+        FireEventHistoryMapper histories = mock(FireEventHistoryMapper.class);
         Clock clock = mock(Clock.class);
         when(clock.now()).thenReturn(1779163200000L);
         when(noGen.next()).thenReturn("M-001");
-        return new FireEventServiceImpl(events, missions, noGen, clock, redis);
+        return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis);
     }
 
     private FireEventCreateParam paramWithoutPosition() {
@@ -103,6 +106,37 @@ class FireEventServiceImplOsdFillTest {
         Fc100BusinessException ex = assertThrows(Fc100BusinessException.class,
             () -> service.create(paramWithoutPosition()));
         assertEquals(Fc100ErrorCode.MISSING_DEVICE_POSITION, ex.getErrorCode());
+    }
+
+    @Test
+    void fallsBackToLatestKnownDevicePositionWhenOsdNotCached() {
+        IDeviceRedisService redis = mock(IDeviceRedisService.class);
+        FireEventMapper events = mock(FireEventMapper.class);
+        FireEventEntity latest = new FireEventEntity();
+        latest.setLat(34.6586);
+        latest.setLng(109.3406);
+        latest.setAlt(346.7);
+
+        when(redis.getDeviceOsd(any(), eq(OsdDockDrone.class))).thenReturn(Optional.empty());
+        when(events.selectOne(any()))
+            .thenReturn(latest)
+            .thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(3L);
+            return 1;
+        });
+
+        FireEventServiceImpl service = build(redis, events);
+        service.create(paramWithoutPosition());
+
+        ArgumentCaptor<FireEventEntity> captor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).insert(captor.capture());
+        FireEventEntity persisted = captor.getValue();
+        assertEquals(34.6586, persisted.getLat(), 1e-4);
+        assertEquals(109.3406, persisted.getLng(), 1e-4);
+        assertEquals(346.7, persisted.getAlt(), 1e-2);
+        verify(events, times(2)).selectOne(any());
     }
 
     @Test

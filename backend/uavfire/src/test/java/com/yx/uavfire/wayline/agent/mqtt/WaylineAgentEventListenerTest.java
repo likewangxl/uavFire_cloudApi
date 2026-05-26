@@ -3,23 +3,35 @@ package com.yx.uavfire.wayline.agent.mqtt;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.yx.uavfire.wayline.agent.model.WaylineEventRecord;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchResultDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineProgressDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineStateChangeDTO;
 import com.yx.uavfire.wayline.agent.service.WaylineEventStore;
+import com.yx.uavfire.wayline.dao.IPlannedWaylineMapper;
+import com.yx.uavfire.wayline.model.entity.PlannedWaylineEntity;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class WaylineAgentEventListenerTest {
 
@@ -57,6 +69,24 @@ class WaylineAgentEventListenerTest {
         WaylineStateChangeDTO sc = assertInstanceOf(WaylineStateChangeDTO.class, rec.getData());
         assertEquals("EXECUTING", sc.getMsdkState());
         assertEquals("ENTER_WAYLINE", sc.getPreviousMsdkState());
+    }
+
+    @Test
+    void onEvent_persistsErrorStateAsFailedTaskStatus() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":1000,"
+                + "\"data\":{\"mission_id\":\"m-error\",\"msdk_state\":\"ERROR\","
+                + "\"error\":\"startMission:GPS_INVALID:GPS信号弱，任务暂停\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue("failed"));
+        assertTrue(params.containsValue("startMission:GPS_INVALID:GPS信号弱，任务暂停"));
     }
 
     @Test
@@ -136,5 +166,11 @@ class WaylineAgentEventListenerTest {
         listener.onEvent(message);
 
         assertTrue(store.getByMission("any").isEmpty());
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }

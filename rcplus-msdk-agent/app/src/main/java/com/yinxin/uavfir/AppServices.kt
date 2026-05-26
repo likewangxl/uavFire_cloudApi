@@ -26,6 +26,8 @@ import com.yinxin.uavfir.wayline.WaylineKmzDownloader
 import com.yinxin.uavfir.wayline.WaylineMqttPublisher
 import com.yinxin.uavfir.wayline.WaypointMissionExecutor
 import com.yinxin.uavfir.wayline.WaypointProbeController
+import com.yinxin.uavfir.wayline.LocalKmzMissionController
+import com.yinxin.uavfir.wayline.WaypointLocalKmzExecutor
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -40,9 +42,8 @@ class AppServices(
     application: Application,
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    // MSDK pushKMZFileToAircraft 在 internal app cache 下没读权限 (报 GENERATE_MISSION_FILE_FAILED
-    // desc=请检查权限)。Pilot 2 真机和 probe 都用 external-files-dir，对齐之。
     private val kmzCacheDir = File(application.getExternalFilesDir(null), "wayline-kmz")
+    private val localKmzDir = File(application.filesDir, "wayline-local")
     private val api = AgentBackendApiFactory.create()
     private val backendClient = AgentBackendClient(api)
     private val reporter = AgentReporter(backendClient)
@@ -99,6 +100,11 @@ class AppServices(
         probeKmzBytes = application.resources.openRawResource(R.raw.m4t_probe).use { it.readBytes() },
         // External app dir (Pilot 2 / MSDK can reach here without legacy storage perms).
         cacheDir = File(application.getExternalFilesDir(null), "wayline-probe"),
+    )
+    val localKmzMission = LocalKmzMissionController(
+        executor = WaypointLocalKmzExecutor(waypointExecutor),
+        stagingDir = localKmzDir,
+        defaultKmzFile = File(localKmzDir, "Kmz2.kmz"),
     )
 
     private val commandPoller = CompositeCommandPoller(listOf(dualStreamPoller, waylineRouter))

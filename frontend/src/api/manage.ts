@@ -109,6 +109,7 @@ export interface DualStreamGroup {
   lastCommandStatus?: string
   visibleSupported?: boolean
   thermalSupported?: boolean
+  thermalCenterTemperatureC?: number
 }
 
 export interface DualStreamEvent {

@@ -128,6 +128,67 @@ class WaylineFileServiceImplTest {
     }
 
     @Test
+    void createPublishedWaylineShouldImportM4tKmzWithPilotPayload89() throws IOException {
+        WaylineFileServiceImpl service = new WaylineFileServiceImpl();
+        IWaylineFileMapper mapper = mock(IWaylineFileMapper.class);
+        OssServiceContext ossService = mock(OssServiceContext.class);
+        ReflectionTestUtils.setField(service, "mapper", mapper);
+        ReflectionTestUtils.setField(service, "ossService", ossService);
+        OssConfiguration.bucket = "bucket-001";
+        OssConfiguration.objectDirPrefix = "wayline";
+
+        when(mapper.insert(any(WaylineFileEntity.class))).thenAnswer(invocation -> {
+            WaylineFileEntity entity = invocation.getArgument(0);
+            entity.setId(1);
+            return 1;
+        });
+
+        service.createPublishedWayline("workspace-001", PublishedWaylineCreateDTO.builder()
+                .filename("Test2.kmz")
+                .objectKey("wayline/test2.kmz")
+                .username("alice")
+                .content(buildM4tPilotPayload89Kmz())
+                .build());
+
+        ArgumentCaptor<WaylineFileEntity> entityCaptor = ArgumentCaptor.forClass(WaylineFileEntity.class);
+        verify(mapper).insert(entityCaptor.capture());
+        assertAll(
+                () -> assertEquals("0-99-1", entityCaptor.getValue().getDroneModelKey()),
+                () -> assertEquals("1-99-0", entityCaptor.getValue().getPayloadModelKeys()));
+    }
+
+    @Test
+    void createPublishedWaylineShouldFallbackUnknownTemplateTypeToWaypoint() throws IOException {
+        WaylineFileServiceImpl service = new WaylineFileServiceImpl();
+        IWaylineFileMapper mapper = mock(IWaylineFileMapper.class);
+        OssServiceContext ossService = mock(OssServiceContext.class);
+        ReflectionTestUtils.setField(service, "mapper", mapper);
+        ReflectionTestUtils.setField(service, "ossService", ossService);
+        OssConfiguration.bucket = "bucket-001";
+        OssConfiguration.objectDirPrefix = "wayline";
+
+        when(mapper.insert(any(WaylineFileEntity.class))).thenAnswer(invocation -> {
+            WaylineFileEntity entity = invocation.getArgument(0);
+            entity.setId(1);
+            return 1;
+        });
+
+        service.createPublishedWayline("workspace-001", PublishedWaylineCreateDTO.builder()
+                .filename("xlhx2.kmz")
+                .objectKey("wayline/xlhx2.kmz")
+                .username("alice")
+                .content(buildM4tPilotPayload89Kmz("targetdetection"))
+                .build());
+
+        ArgumentCaptor<WaylineFileEntity> entityCaptor = ArgumentCaptor.forClass(WaylineFileEntity.class);
+        verify(mapper).insert(entityCaptor.capture());
+        assertAll(
+                () -> assertEquals("0-99-1", entityCaptor.getValue().getDroneModelKey()),
+                () -> assertEquals("1-99-0", entityCaptor.getValue().getPayloadModelKeys()),
+                () -> assertEquals("0", entityCaptor.getValue().getTemplateTypes()));
+    }
+
+    @Test
     void createPublishedWaylineShouldFailWhenKmzIsInvalid() {
         WaylineFileServiceImpl service = new WaylineFileServiceImpl();
         ReflectionTestUtils.setField(service, "mapper", mock(IWaylineFileMapper.class));
@@ -234,6 +295,33 @@ class WaylineFileServiceImplTest {
                     + "<Document><name>Survey A</name><wpml:waylineCoordinateSysParam/>"
                     + "<Folder><Placemark><name>1</name><Point><coordinates>120.0,30.1,80.0</coordinates></Point></Placemark></Folder>"
                     + "</Document>"
+                    + "</kml>").getBytes(StandardCharsets.UTF_8));
+            zipOutputStream.closeEntry();
+        }
+        return outputStream.toByteArray();
+    }
+
+    private static byte[] buildM4tPilotPayload89Kmz() throws IOException {
+        return buildM4tPilotPayload89Kmz("waypoint");
+    }
+
+    private static byte[] buildM4tPilotPayload89Kmz(String templateType) throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
+            zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
+            zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\">"
+                    + "<Document>"
+                    + "<wpml:templateType>" + templateType + "</wpml:templateType>"
+                    + "<wpml:droneInfo><wpml:droneEnumValue>99</wpml:droneEnumValue><wpml:droneSubEnumValue>1</wpml:droneSubEnumValue></wpml:droneInfo>"
+                    + "<wpml:payloadInfo><wpml:payloadEnumValue>89</wpml:payloadEnumValue><wpml:payloadSubEnumValue>0</wpml:payloadSubEnumValue></wpml:payloadInfo>"
+                    + "</Document>"
+                    + "</kml>").getBytes(StandardCharsets.UTF_8));
+            zipOutputStream.closeEntry();
+            zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
+            zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\">"
+                    + "<Document><Folder><Placemark><Point><coordinates>120.0,30.1,80.0</coordinates></Point></Placemark></Folder></Document>"
                     + "</kml>").getBytes(StandardCharsets.UTF_8));
             zipOutputStream.closeEntry();
         }

@@ -81,6 +81,25 @@ class AgentBackendClientTest {
     }
 
     @Test
+    fun buildStatusRequest_includesLatestThermalCenterTemperature() {
+        val client = AgentBackendClient(api = RecordingDualStreamApi())
+
+        val payload = client.buildStatusRequest(
+            droneSn = "DRONE-THERMAL",
+            connectionState = AgentConnectionState.CAPABILITY_READY,
+            message = "thermal-center-temperature-ready",
+            runtimeStatus = DualStreamCommandExecutor.RuntimeStatus(
+                sessionState = DualStreamSessionState.RUNNING,
+                visibleState = BoundStreamState.BOUND,
+                thermalState = BoundStreamState.BOUND,
+                thermalCenterTemperatureC = 87.6,
+            ),
+        )
+
+        assertEquals(87.6, payload.thermalCenterTemperatureC ?: -1.0, 1e-6)
+    }
+
+    @Test
     fun buildCapabilityReportRequest_mapsVisibleAndThermalFlags() {
         val client = AgentBackendClient(api = RecordingDualStreamApi())
 

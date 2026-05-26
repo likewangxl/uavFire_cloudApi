@@ -1,17 +1,22 @@
 package com.yx.uavfire.fc100.deliverysync.impl;
 
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceProperties;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskRef;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
 import com.yx.uavfire.fc100.deliverysync.service.DeliverySyncLogService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -59,6 +64,16 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
     }
 
     @Override
+    public void importWayline(WaylineImportRequest req) {
+        long t0 = System.currentTimeMillis();
+        log.info("MOCK Delivery importWayline: mission={} waylineId={} size={}",
+            req.getMissionNo(), req.getWaylineId(), req.getKml() == null ? 0 : req.getKml().length());
+        logService.recordSuccess("importWayline", null, "POST", "/waylines/kml/import",
+            "wayline_id=" + req.getWaylineId(), 200, "ok", null,
+            (int) (System.currentTimeMillis() - t0));
+    }
+
+    @Override
     public DeliveryTaskRef createTask(CreateTaskRequest req) {
         long t0 = System.currentTimeMillis();
         String taskId = "MOCK-TASK-" + UUID.randomUUID();
@@ -103,5 +118,35 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
             "/tasks/" + taskId, "", 200, s.toString(),
             null, (int) (System.currentTimeMillis() - t0));
         return s;
+    }
+
+    @Override
+    public DeliveryCommandRef sendDeviceCommand(DeviceCommandRequest req) {
+        long t0 = System.currentTimeMillis();
+        DeliveryCommandRef ref = new DeliveryCommandRef();
+        ref.setBid("MOCK-CMD-" + UUID.randomUUID());
+        ref.setDeviceSn(req.getDeviceSn());
+        ref.setDeviceCmdMethod(req.getDeviceCmdMethod());
+        ref.setStatus("sent");
+        ref.setDeviceCmdData(req.getDeviceCmdData() != null ? req.getDeviceCmdData() : Map.of());
+        ref.setCreateTime(System.currentTimeMillis());
+        ref.setUpdateTime(ref.getCreateTime());
+        log.info("MOCK Delivery sendDeviceCommand: mission={} aircraft={} method={}",
+            req.getMissionNo(), req.getDeviceSn(), req.getDeviceCmdMethod());
+        logService.recordSuccess("sendDeviceCommand", null, "POST", "/cmds",
+            req.toString(), 200, ref.toString(), null, (int) (System.currentTimeMillis() - t0));
+        return ref;
+    }
+
+    @Override
+    public DeliveryCommandStatus queryDeviceCommandStatus(String deviceSn) {
+        long t0 = System.currentTimeMillis();
+        DeliveryCommandStatus status = new DeliveryCommandStatus();
+        status.setDeviceSn(deviceSn);
+        status.setServices(Map.of());
+        logService.recordSuccess("queryDeviceCommandStatus", null, "GET",
+            "/cmds?device_sn=" + deviceSn, "", 200, status.toString(),
+            null, (int) (System.currentTimeMillis() - t0));
+        return status;
     }
 }

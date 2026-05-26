@@ -5,6 +5,7 @@ import com.yinxin.uavfir.stream.BoundStreamState
 import com.yinxin.uavfir.stream.MockStreamProvider
 import com.yinxin.uavfir.stream.StreamProvider
 import com.yinxin.uavfir.stream.StreamStartResult
+import com.yinxin.uavfir.stream.ThermalMeasureRegion
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -100,6 +101,69 @@ class CommandPollingCoordinatorTest {
         assertEquals("applied", api.lastAck?.status)
         assertNull(api.lastAck?.message)
     }
+
+    @Test
+    fun pollOnce_focusThermalImmediatelyReportsRuntimeStatusWithTemperature() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-thermal",
+                    droneSn = "DRONE-001",
+                    action = "focus-thermal",
+                    status = "pending",
+                ),
+            ),
+        )
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = DualStreamSessionManager(ThermalTemperatureStreamProvider()),
+        )
+
+        coordinator.pollOnce("DRONE-001")
+
+        assertEquals("cmd-thermal", api.lastAck?.commandId)
+        assertEquals("applied", api.lastAck?.status)
+        assertEquals(89.4, api.lastStatusBody?.thermalCenterTemperatureC ?: -1.0, 1e-6)
+    }
+
+    @Test
+    fun pollOnce_measureThermalRegionCommandAcknowledgesMeasuredTemperaturePayload() = runTest {
+        val roi = mapOf(
+            "x" to 0.25,
+            "y" to 0.30,
+            "width" to 0.20,
+            "height" to 0.15,
+        )
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-measure",
+                    droneSn = "DRONE-001",
+                    action = "measure-thermal-region",
+                    status = "pending",
+                    taskId = "task-001",
+                    sourceTs = 1779163200000L,
+                    thermalMeasureRoi = roi,
+                ),
+            ),
+        )
+        val streamProvider = RegionTemperatureStreamProvider()
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = DualStreamSessionManager(streamProvider),
+        )
+
+        coordinator.pollOnce("DRONE-001")
+
+        assertEquals("cmd-measure", api.lastAck?.commandId)
+        assertEquals("applied", api.lastAck?.status)
+        assertEquals("task-001", api.lastAck?.taskId)
+        assertEquals(1779163200000L, api.lastAck?.sourceTs)
+        assertEquals(57.6, api.lastAck?.thermalTemperature ?: -1.0, 1e-6)
+        assertEquals(roi, api.lastAck?.thermalMeasureRoi)
+        assertEquals(ThermalMeasureRegion(0.25, 0.30, 0.20, 0.15), streamProvider.lastRequestedRoi)
+    }
+
 
     @Test
     fun pollOnce_hangingCommandAcknowledgesFailedTimeout() = runTest {
@@ -415,6 +479,7 @@ class CommandPollingCoordinatorTest {
     ) : DualStreamApi {
         var lastAck: AgentCommandAckRequest? = null
         var lastMsdkAck: MsdkCommandAckRequest? = null
+        var lastStatusBody: AgentStatusRequest? = null
 
         override suspend fun heartbeat(
             droneSn: String,
@@ -424,7 +489,9 @@ class CommandPollingCoordinatorTest {
         override suspend fun status(
             droneSn: String,
             body: AgentStatusRequest,
-        ) = Unit
+        ) {
+            lastStatusBody = body
+        }
 
         override suspend fun capability(
             droneSn: String,
@@ -450,6 +517,59 @@ class CommandPollingCoordinatorTest {
         ) {
             lastMsdkAck = body
         }
+    }
+
+    private class ThermalTemperatureStreamProvider : StreamProvider {
+        override suspend fun start(droneSn: String): StreamStartResult = StreamStartResult(
+            visibleState = BoundStreamState.BOUND,
+            thermalState = BoundStreamState.IDLE,
+        )
+
+        override suspend fun focusVisible(droneSn: String): StreamStartResult = StreamStartResult(
+            visibleState = BoundStreamState.BOUND,
+            thermalState = BoundStreamState.IDLE,
+        )
+
+        override suspend fun focusThermal(droneSn: String): StreamStartResult = StreamStartResult(
+            visibleState = BoundStreamState.BOUND,
+            thermalState = BoundStreamState.BOUND,
+            thermalCenterTemperatureC = 89.4,
+        )
+
+        override suspend fun stop() = Unit
+    }
+
+    private class RegionTemperatureStreamProvider : StreamProvider {
+        var lastRequestedRoi: ThermalMeasureRegion? = null
+
+        override suspend fun start(droneSn: String): StreamStartResult = StreamStartResult(
+            visibleState = BoundStreamState.BOUND,
+            thermalState = BoundStreamState.IDLE,
+        )
+
+        override suspend fun focusVisible(droneSn: String): StreamStartResult = StreamStartResult(
+            visibleState = BoundStreamState.BOUND,
+            thermalState = BoundStreamState.IDLE,
+        )
+
+        override suspend fun focusThermal(droneSn: String): StreamStartResult {
+            return focusThermal(droneSn, null)
+        }
+
+        override suspend fun focusThermal(
+            droneSn: String,
+            thermalMeasureRegion: ThermalMeasureRegion?,
+        ): StreamStartResult {
+            lastRequestedRoi = thermalMeasureRegion
+            return StreamStartResult(
+                visibleState = BoundStreamState.BOUND,
+                thermalState = BoundStreamState.BOUND,
+                thermalCenterTemperatureC = 57.6,
+                thermalMeasureRegion = ThermalMeasureRegion(0.42, 0.46, 0.08, 0.08),
+            )
+        }
+
+        override suspend fun stop() = Unit
     }
 
     private class RecordingMsdkCommandExecutor(

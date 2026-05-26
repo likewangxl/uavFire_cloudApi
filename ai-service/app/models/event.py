@@ -5,6 +5,13 @@ from pydantic import BaseModel
 from app.models.task import DualStreamTaskStatus
 
 
+class ThermalMeasureRoi(BaseModel):
+    x: float
+    y: float
+    width: float
+    height: float
+
+
 class EventRecord(BaseModel):
     task_id: str
     event_type: str
@@ -14,6 +21,10 @@ class EventRecord(BaseModel):
     fusion_score: Optional[float] = None
     risk_level: Optional[str] = None
     analysis_channel: Optional[str] = None
+    visible_image_url: Optional[str] = None
+    thermal_image_url: Optional[str] = None
+    thermal_temperature: Optional[float] = None
+    thermal_measure_roi: Optional[ThermalMeasureRoi] = None
 
 
 class DualStreamEvent(BaseModel):
@@ -23,3 +34,7 @@ class DualStreamEvent(BaseModel):
     fusion_score: float
     risk_level: str
     analysis_channel: Optional[str] = None
+    visible_image_url: Optional[str] = None
+    thermal_image_url: Optional[str] = None
+    thermal_temperature: Optional[float] = None
+    thermal_measure_roi: Optional[ThermalMeasureRoi] = None

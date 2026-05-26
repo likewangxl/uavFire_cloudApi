@@ -68,11 +68,12 @@ class BackendClient:
     def report_fire_event(self, payload: Dict[str, Any]) -> None:
         assert self.transport is not None
         headers = self._auth_headers()
-        self.transport.post(
+        response = self.transport.post(
             "/api/fire/events",
             json=payload,
             headers=headers or None,
         )
+        _raise_for_business_error(response, "backend-fire-event-rejected")
 
     def _auth_headers(self) -> Dict[str, str]:
         token = self._ensure_access_token()
@@ -85,10 +86,20 @@ class BackendClient:
             return ""
         assert self.transport is not None
         response = self.transport.post(
-            "/manage/api/v1/demo-login",
-            json={},
+            "/manage/api/v1/login",
+            json={
+                "username": self.username,
+                "password": self.password,
+                "flag": self.login_flag,
+            },
         )
         token = _extract_access_token(response)
+        if not token:
+            response = self.transport.post(
+                "/manage/api/v1/demo-login",
+                json={},
+            )
+            token = _extract_access_token(response)
         if not token:
             raise RuntimeError("backend-login-missing-access-token")
         self.access_token = token
@@ -111,3 +122,13 @@ def _extract_access_token(response: Any) -> str:
         return ""
     token = data.get("access_token")
     return token if isinstance(token, str) else ""
+
+
+def _raise_for_business_error(response: Any, prefix: str) -> None:
+    if not isinstance(response, dict):
+        return
+    code = response.get("code")
+    if code in (None, 0):
+        return
+    message = response.get("message") or response.get("msg") or "unknown"
+    raise RuntimeError(f"{prefix}: code={code} message={message}")

@@ -63,11 +63,11 @@ Current implementation uses one ZLM stream per aircraft/agent:
 For the current LAN baseline:
 
 - RTMP publish:
-  `rtmp://192.168.2.34:1935/live/{effectiveSn}-0`
+  `rtmp://192.168.0.30:1935/live/{effectiveSn}-0`
 - WebRTC playback:
-  `webrtc://192.168.2.34:58925/live/{effectiveSn}-0`
+  `webrtc://192.168.0.30:58925/live/{effectiveSn}-0`
 - RTSP pull for ai-service:
-  `rtsp://192.168.2.34:8554/live/{effectiveSn}-0`
+  `rtsp://192.168.0.30:8554/live/{effectiveSn}-0`
 
 Historical docs mention `{droneSn}_visible` / `{droneSn}_thermal`. Treat those as the original design target, not the current implementation.
 

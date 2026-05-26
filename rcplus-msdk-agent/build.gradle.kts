@@ -13,8 +13,8 @@ extra["KOTLIN_VERSION"] = "2.1.21"
 
 @Suppress("UNCHECKED_CAST")
 val sampleDeps = mapOf(
-    "aircraft" to "com.dji:dji-sdk-v5-aircraft:5.17.0",
-    "aircraftProvided" to "com.dji:dji-sdk-v5-aircraft-provided:5.17.0",
+    "aircraft" to "com.dji:dji-sdk-v5-aircraft:5.18.0",
+    "aircraftProvided" to "com.dji:dji-sdk-v5-aircraft-provided:5.18.0",
     "annotation" to "androidx.annotation:annotation:1.8.2",
     "appcompat" to "androidx.appcompat:appcompat:1.7.0",
     "multidex" to "androidx.multidex:multidex:2.0.1",
@@ -31,7 +31,7 @@ val sampleDeps = mapOf(
     "ktxCore" to "androidx.core:core-ktx:1.13.1",
     "rx3Android" to "io.reactivex.rxjava3:rxandroid:3.0.2",
     "rx3Kt" to "io.reactivex.rxjava3:rxkotlin:3.0.1",
-    "wpmzSdk" to "com.dji:wpmzsdk:1.0.4.0",
+    "wpmzSdk" to "com.dji:wpmzsdk:1.0.5.0",
     "lottie" to "com.airbnb.android:lottie:6.4.1",
     "cardview" to "androidx.cardview:cardview:1.0.0",
     "mikepenzCommunityMaterial" to "com.mikepenz:community-material-typeface:3.5.95.1-kotlin@aar",

@@ -1,6 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import {
+  buildDualStreamCandidateSns,
+  buildLivePaneState,
+  buildLivePlaybackKey,
+  resolveAppliedFocusPreference
+} from '../src/pages/page-web/projects/leadership-cockpit-live-layout.mjs'
 
 const cockpitPath = new URL('../src/pages/page-web/projects/leadership-cockpit.vue', import.meta.url)
 const panelPath = new URL('../src/components/WorkspaceLivestreamPanel.vue', import.meta.url)
@@ -50,6 +56,38 @@ test('cockpit avoids duplicate playback when visible and thermal share one strea
   assert.match(cockpitSource, /focusAction/)
 })
 
+test('cockpit does not label visible-only playback as thermal when thermal url is missing', () => {
+  const state = buildLivePaneState({
+    visiblePlayUrl: 'webrtc://localhost/live/drone-0',
+    thermalPlayUrl: '',
+    primaryPreference: 'thermal',
+    allowSharedThermalPreview: true
+  })
+
+  assert.equal(state.primary.kind, 'visible')
+  assert.equal(state.primary.url, 'webrtc://localhost/live/drone-0')
+  assert.equal(state.preview.kind, 'thermal-placeholder')
+  assert.equal(state.preview.url, '')
+  assert.equal(state.preview.focusAction, 'focus-thermal')
+})
+
+test('cockpit treats a backend-applied thermal focus as shared thermal playback', () => {
+  const state = buildLivePaneState({
+    visiblePlayUrl: 'webrtc://localhost/live/drone-0',
+    thermalPlayUrl: '',
+    primaryPreference: 'thermal',
+    appliedFocusAction: 'focus-thermal',
+    appliedFocusStatus: 'applied',
+    allowSharedThermalPreview: true
+  })
+
+  assert.equal(state.primary.kind, 'thermal-shared')
+  assert.equal(state.primary.url, 'webrtc://localhost/live/drone-0')
+  assert.equal(state.preview.kind, 'visible')
+  assert.equal(state.preview.url, '')
+  assert.equal(state.preview.focusAction, 'focus-visible')
+})
+
 test('cockpit does not auto request RC thermal focus because it changes Pilot2 preview', () => {
   assert.match(cockpitSource, /requestDualStreamFocus/)
   assert.doesNotMatch(
@@ -70,6 +108,15 @@ test('cockpit fetches dual-stream group from the active aircraft sn when availab
   assert.match(cockpitSource, /FIELD_AGENT_AIRCRAFT_SN/)
   assert.match(cockpitSource, /for \(const sn of candidateSns\)/)
   assert.match(cockpitSource, /getDualStreamGroup\(sn\)/)
+})
+
+test('cockpit prefers a real aircraft stream over stale RC_PLUS_LOCAL group state', () => {
+  assert.deepEqual(buildDualStreamCandidateSns({
+    flightHudSn: 'RC_PLUS_LOCAL',
+    agentAircraftSn: '1581F7K3D249E00AM3Q3',
+    currentSn: 'RC_PLUS_LOCAL',
+    fireDetectionSn: ''
+  }), ['1581F7K3D249E00AM3Q3', 'RC_PLUS_LOCAL'])
 })
 
 test('cockpit fire detection start uses the agent aircraft sn before live capacity fallback', () => {
@@ -108,6 +155,51 @@ test('cockpit waits for focus command ack before changing the primary stream pre
   assert.match(cockpitSource, /const focusApplied = await waitForFocusCommandApplied/)
   assert.match(cockpitSource, /if \(!focusApplied\) \{/)
   assert.match(cockpitSource, /primaryPreference\.value = action === 'focus-thermal' \? 'thermal' : 'visible'/)
+})
+
+test('cockpit mirrors backend-applied focus commands into the primary preference', () => {
+  assert.equal(resolveAppliedFocusPreference({
+    currentPreference: 'visible',
+    lastCommandAction: 'focus-thermal',
+    lastCommandStatus: 'applied'
+  }), 'thermal')
+  assert.equal(resolveAppliedFocusPreference({
+    currentPreference: 'thermal',
+    lastCommandAction: 'focus-visible',
+    lastCommandStatus: 'applied'
+  }), 'visible')
+  assert.equal(resolveAppliedFocusPreference({
+    currentPreference: 'visible',
+    lastCommandAction: 'focus-thermal',
+    lastCommandStatus: 'pending'
+  }), 'visible')
+})
+
+test('cockpit rebuilds shared-url playback when backend focus changes', () => {
+  const visibleKey = buildLivePlaybackKey({
+    primaryKind: 'visible',
+    primaryUrl: 'webrtc://localhost/live/drone-0',
+    primaryCrop: null,
+    previewKind: 'thermal-placeholder',
+    previewUrl: '',
+    previewCrop: null,
+    lastCommandAction: 'focus-visible',
+    lastCommandStatus: 'applied',
+    currentMode: 'VISIBLE'
+  })
+  const thermalKey = buildLivePlaybackKey({
+    primaryKind: 'thermal-shared',
+    primaryUrl: 'webrtc://localhost/live/drone-0',
+    primaryCrop: null,
+    previewKind: 'visible',
+    previewUrl: '',
+    previewCrop: null,
+    lastCommandAction: 'focus-thermal',
+    lastCommandStatus: 'applied',
+    currentMode: 'DUAL'
+  })
+
+  assert.notEqual(visibleKey, thermalKey)
 })
 
 test('cockpit shows a loading animation while switching the live stream source', () => {

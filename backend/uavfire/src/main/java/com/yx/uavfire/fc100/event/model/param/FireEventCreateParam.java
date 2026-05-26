@@ -9,6 +9,7 @@ import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Pattern;
 import javax.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.Map;
 
 @Data
 public class FireEventCreateParam {
@@ -40,6 +41,8 @@ public class FireEventCreateParam {
     private String altitudeReference;
 
     private Double thermalTemperature;
+
+    private Map<String, Double> thermalMeasureRoi;
 
     @Pattern(regexp = "K|C")
     private String temperatureUnit;

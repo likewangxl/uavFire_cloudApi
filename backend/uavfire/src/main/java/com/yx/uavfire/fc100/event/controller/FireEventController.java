@@ -5,6 +5,7 @@ import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
 import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
+import com.yx.uavfire.fc100.event.model.dto.FireEventHistoryDTO;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,5 +50,12 @@ public class FireEventController {
                 "fire event not found: " + eventId);
         }
         return ApiResult.success(dto);
+    }
+
+    @GetMapping("/{eventId}/history")
+    public ApiResult<List<FireEventHistoryDTO>> history(
+            @PathVariable String eventId,
+            @RequestParam(defaultValue = "100") int limit) {
+        return ApiResult.success(service.listHistory(eventId, limit));
     }
 }

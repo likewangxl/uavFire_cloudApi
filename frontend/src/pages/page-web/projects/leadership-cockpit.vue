@@ -449,7 +449,13 @@ import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
 import type { FireEventDTO } from '/@/types/fire/event'
 import { useMyStore } from '/@/store'
 import { EModeCode } from '/@/types/device'
-import { buildLivePaneState, swapPrimaryPreference } from './leadership-cockpit-live-layout.mjs'
+import {
+  buildDualStreamCandidateSns,
+  buildLivePaneState,
+  buildLivePlaybackKey,
+  resolveAppliedFocusPreference,
+  swapPrimaryPreference
+} from './leadership-cockpit-live-layout.mjs'
 
 const store = useMyStore()
 const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
@@ -625,6 +631,10 @@ const aiRiskState = reactive({
   error: '',
   events: [] as DualStreamEvent[]
 })
+const lastSeenAiRiskEventTs = ref(0)
+const aiRiskEventsBootstrapped = ref(false)
+const AI_RISK_NOTIFY_SUPPRESS_MS = 5 * 60 * 1000
+const lastAiRiskNotificationByKey = new Map<string, number>()
 
 const primaryPlayerState = reactive({
   loading: false,
@@ -647,6 +657,7 @@ let livePlayerRetryTimer: number | undefined
 let primaryPlayer: any = null
 let previewPlayer: any = null
 let zlmClientLoader: Promise<any> | null = null
+let lastMirroredFocusCommand = ''
 
 const loadZlmRtcClient = (streamUrl: string) => {
   const existing = (window as any).ZLMRTCClient
@@ -923,13 +934,12 @@ const onToggleFireDetection = async () => {
 const loadDualStreamState = async () => {
   dualStreamState.loading = true
   try {
-    const candidateSns = [
-      flightHudSn.value,
-      FIELD_AGENT_AIRCRAFT_SN,
-      store.state.deviceState.currentSn,
-      fireDetectionState.droneSn,
-      'RC_PLUS_LOCAL'
-    ].filter((sn, index, arr): sn is string => !!sn && arr.indexOf(sn) === index)
+    const candidateSns = buildDualStreamCandidateSns({
+      flightHudSn: flightHudSn.value,
+      agentAircraftSn: FIELD_AGENT_AIRCRAFT_SN,
+      currentSn: store.state.deviceState.currentSn,
+      fireDetectionSn: fireDetectionState.droneSn
+    })
 
     let lastError: any = null
     let selectedGroup: DualStreamGroup | null = null
@@ -945,6 +955,7 @@ const loadDualStreamState = async () => {
       }
     }
     dualStreamState.group = selectedGroup
+    mirrorAppliedFocusCommand(selectedGroup)
     if (!selectedGroup && lastError) throw lastError
     dualStreamState.error = ''
   } catch (error: any) {
@@ -954,17 +965,100 @@ const loadDualStreamState = async () => {
   }
 }
 
+const mirrorAppliedFocusCommand = (group: DualStreamGroup | null) => {
+  if (!group?.lastCommandAction || group.lastCommandStatus?.toLowerCase() !== 'applied') {
+    return
+  }
+  const commandKey = [
+    group.droneSn || '',
+    group.lastCommandAction,
+    group.lastCommandStatus,
+    group.currentMode || '',
+    group.visiblePlayUrl || '',
+    group.thermalPlayUrl || ''
+  ].join('|')
+  if (commandKey === lastMirroredFocusCommand) {
+    return
+  }
+  const nextPreference = resolveAppliedFocusPreference({
+    currentPreference: primaryPreference.value,
+    lastCommandAction: group.lastCommandAction,
+    lastCommandStatus: group.lastCommandStatus
+  })
+  lastMirroredFocusCommand = commandKey
+  if (nextPreference !== primaryPreference.value) {
+    primaryPreference.value = nextPreference
+  }
+}
+
 const loadAiRiskEvents = async () => {
   aiRiskState.loading = true
   try {
     const response = await getDualStreamTaskEvents(AI_EVENT_TASK_ID)
-    aiRiskState.events = response.data ?? []
+    const events = response.data ?? []
+    notifyNewAiRiskEvents(events)
+    aiRiskState.events = events
     aiRiskState.error = ''
   } catch (error: any) {
     aiRiskState.error = error?.message || 'ai-risk-events-unavailable'
   } finally {
     aiRiskState.loading = false
   }
+}
+
+function notifyNewAiRiskEvents (events: DualStreamEvent[]) {
+  if (events.length === 0) return
+
+  const maxTs = events.reduce((max, event) => Math.max(max, Number(event.sourceTs) || 0), lastSeenAiRiskEventTs.value)
+  if (!aiRiskEventsBootstrapped.value) {
+    lastSeenAiRiskEventTs.value = maxTs
+    aiRiskEventsBootstrapped.value = true
+    return
+  }
+
+  const fresh = events
+    .filter(event => (Number(event.sourceTs) || 0) > lastSeenAiRiskEventTs.value)
+    .filter(event => {
+      const level = (event.riskLevel || '').toUpperCase()
+      return level === 'LOW' || level === 'MEDIUM' || level === 'HIGH'
+    })
+    .filter(event => Number(event.fusionScore) > 0)
+    .sort((a, b) => (Number(a.sourceTs) || 0) - (Number(b.sourceTs) || 0))
+
+  for (const event of fresh) {
+    const level = (event.riskLevel || '').toUpperCase()
+    const notifyTs = normalizeAiEventTimestamp(event.sourceTs)
+    const notifyKey = buildAiRiskNotificationKey(event)
+    const lastNotifiedTs = lastAiRiskNotificationByKey.get(notifyKey)
+    if (lastNotifiedTs != null && notifyTs - lastNotifiedTs < AI_RISK_NOTIFY_SUPPRESS_MS) {
+      continue
+    }
+    lastAiRiskNotificationByKey.set(notifyKey, notifyTs)
+    const levelLabel = level === 'HIGH' ? '高风险' : level === 'MEDIUM' ? '中等风险' : '低风险'
+    notification.warning({
+      message: `AI 识别提示：${levelLabel}火情`,
+      description: `融合分数 ${formatAiScore(event.fusionScore)}，通道 ${formatAiChannel(event.analysisChannel)}，时间 ${formatAiEventTime(event.sourceTs)}`,
+      duration: 8,
+      placement: 'topRight'
+    })
+  }
+
+  lastSeenAiRiskEventTs.value = maxTs
+}
+
+function normalizeAiEventTimestamp (sourceTs?: number) {
+  const ts = Number(sourceTs) || Date.now()
+  return ts > 10_000_000_000 ? ts : ts * 1000
+}
+
+function buildAiRiskNotificationKey (event: DualStreamEvent) {
+  const level = (event.riskLevel || 'UNKNOWN').toUpperCase()
+  return [
+    event.taskId || AI_EVENT_TASK_ID,
+    event.droneSn || fireDetectionState.droneSn || FIELD_AGENT_AIRCRAFT_SN,
+    event.analysisChannel || 'unknown',
+    level
+  ].join(':')
 }
 
 const wait = (durationMs: number) => new Promise(resolve => {
@@ -995,12 +1089,13 @@ const ensureThermalPreviewMode = async () => {
   // Do not auto-switch RC Plus to thermal/PIP just to populate the web preview.
 }
 
-// 火情事件弹窗：每 3 秒拉一次 backend /api/fire/events，新出现的 MEDIUM/HIGH
+// 火情事件弹窗：每 3 秒拉一次 backend /api/fire/events，新出现的 LOW/MEDIUM/HIGH
 // 火情弹 antd notification 带带框的标注图缩略图。lastSeenFireEventId 防止首次进
 // 页面把历史事件全弹出来。
 let fireEventNotifyTimer: number | null = null
 const lastSeenFireEventId = ref(0)
 const fireEventsBootstrapped = ref(false)
+const lastNotifiedFireEventVersions = new Map<number, number>()
 
 async function loadNewFireEvents (): Promise<void> {
   let events: FireEventDTO[] = []
@@ -1015,23 +1110,27 @@ async function loadNewFireEvents (): Promise<void> {
   const maxId = events.reduce((m, e) => (e.id > m ? e.id : m), 0)
   if (!fireEventsBootstrapped.value) {
     lastSeenFireEventId.value = maxId
+    for (const evt of events) {
+      lastNotifiedFireEventVersions.set(evt.id, evt.notificationVersion ?? 1)
+    }
     fireEventsBootstrapped.value = true
     return
   }
   const fresh = events
-    .filter((e) => e.id > lastSeenFireEventId.value)
     .filter((e) => {
       const level = (e.fireLevel || '').toUpperCase()
-      return level === 'MEDIUM' || level === 'HIGH'
+      return level === 'LOW' || level === 'MEDIUM' || level === 'HIGH'
     })
+    .filter(shouldNotifyFireEvent)
     .sort((a, b) => a.id - b.id)
   for (const evt of fresh) {
     const level = (evt.fireLevel || '').toUpperCase()
     const conf = Number(evt.confidence) || 0
     const imageUrl = evt.thermalImageUrl || evt.visibleImageUrl
     const imageKind = evt.thermalImageUrl ? '红外' : '可见光'
+    const levelLabel = level === 'HIGH' ? '高' : level === 'MEDIUM' ? '中等' : '低'
     notification.warning({
-      message: `检测到${level === 'HIGH' ? '高' : '中等'}风险火情`,
+      message: `检测到${levelLabel}风险火情`,
       description: h('div', { style: 'display:flex;gap:12px;align-items:flex-start' }, [
         imageUrl
           ? h('a', {
@@ -1055,6 +1154,7 @@ async function loadNewFireEvents (): Promise<void> {
           h('div', `置信度: ${conf.toFixed(2)}`),
           h('div', `位置: ${evt.lat?.toFixed(4) ?? '-'}, ${evt.lng?.toFixed(4) ?? '-'}`),
           h('div', `状态: ${evt.status}`),
+          h('div', `通知版本: ${evt.notificationVersion ?? 1}`),
           h('a', {
             href: '/fire-events',
             target: '_blank',
@@ -1066,8 +1166,18 @@ async function loadNewFireEvents (): Promise<void> {
       duration: 12,
       placement: 'topRight'
     })
+    lastNotifiedFireEventVersions.set(evt.id, evt.notificationVersion ?? 1)
   }
   lastSeenFireEventId.value = maxId
+}
+
+function shouldNotifyFireEvent (evt: FireEventDTO) {
+  const version = evt.notificationVersion ?? 1
+  const lastVersion = lastNotifiedFireEventVersions.get(evt.id)
+  if (lastVersion == null) {
+    return evt.id > lastSeenFireEventId.value
+  }
+  return version > lastVersion
 }
 
 onMounted(async () => {
@@ -1111,6 +1221,7 @@ const dualStreamSummary = computed(() => {
     rawThermalPlayUrl: group?.thermalPlayUrl || '',
     visiblePlayUrl: group?.visiblePlayUrl || '未提供',
     thermalPlayUrl: group?.thermalPlayUrl || '未提供',
+    thermalCenterTemperatureC: group?.thermalCenterTemperatureC,
     reason: group?.statusReason || dualStreamState.error || '',
     playbackHint: group?.visiblePlayUrl
       ? '驾驶舱已拿到可见光 WebRTC 地址，当前主画面直接从本机 ZLMediaKit 拉流。'
@@ -1144,7 +1255,21 @@ const livePaneState = computed(() => buildLivePaneState({
   visiblePlayUrl: dualStreamSummary.value.rawVisiblePlayUrl,
   thermalPlayUrl: dualStreamSummary.value.rawThermalPlayUrl,
   primaryPreference: primaryPreference.value,
+  appliedFocusAction: dualStreamState.group?.lastCommandAction,
+  appliedFocusStatus: dualStreamState.group?.lastCommandStatus,
   allowSharedThermalPreview: true
+}))
+
+const livePlaybackKey = computed(() => buildLivePlaybackKey({
+  primaryKind: livePaneState.value.primary.kind,
+  primaryUrl: livePaneState.value.primary.url,
+  primaryCrop: livePaneState.value.primary.crop,
+  previewKind: livePaneState.value.preview.kind,
+  previewUrl: livePaneState.value.preview.url,
+  previewCrop: livePaneState.value.preview.crop,
+  lastCommandAction: dualStreamState.group?.lastCommandAction,
+  lastCommandStatus: dualStreamState.group?.lastCommandStatus,
+  currentMode: dualStreamState.group?.currentMode
 }))
 
 const primaryPaneMeta = computed(() => {
@@ -1178,8 +1303,14 @@ const liveHudItems = computed(() => [
   dualStreamSummary.value.droneSn,
   `模式 ${dualStreamSummary.value.mode}`,
   `主通道 ${primaryPaneMeta.value.status}`,
+  `中心温度 ${formatThermalTemperature(dualStreamSummary.value.thermalCenterTemperatureC)}`,
   `播放 ${dualStreamSummary.value.playbackStatus}`
 ])
+
+const formatThermalTemperature = (value?: number) => {
+  const n = Number(value)
+  return Number.isFinite(n) ? `${n.toFixed(1)} °C` : '--'
+}
 
 const focusSwitchLabel = computed(() => (
   focusSwitchAction.value === 'focus-thermal' ? '红外画面加载中' : '可见光画面加载中'
@@ -1195,7 +1326,7 @@ const aiRiskPillText = computed(() => {
 
 const aiRiskPillClass = computed(() => {
   if (aiRiskState.error) return 'danger'
-  return recentAiRiskEvents.value.some(event => ['MEDIUM', 'HIGH'].includes((event.riskLevel || '').toUpperCase()))
+  return recentAiRiskEvents.value.some(event => ['LOW', 'MEDIUM', 'HIGH'].includes((event.riskLevel || '').toUpperCase()))
     ? 'danger'
     : 'default'
 })
@@ -1232,7 +1363,7 @@ const formatAiReviewStatus = (status?: string) => {
 const aiRiskLevelClass = (riskLevel?: string) => {
   const normalized = (riskLevel || '').toUpperCase()
   if (normalized === 'HIGH' || normalized === 'MEDIUM') return 'danger'
-  if (normalized === 'LOW') return 'default'
+  if (normalized === 'LOW') return 'danger'
   return 'safe'
 }
 
@@ -1244,7 +1375,7 @@ const aiReviewStatusClass = (status?: string) => {
 
 const aiRiskCardClass = (event: DualStreamEvent) => {
   const riskLevel = (event.riskLevel || '').toUpperCase()
-  if (event.reviewStatus === 'THERMAL_CONFIRMED' || riskLevel === 'HIGH' || riskLevel === 'MEDIUM') {
+  if (event.reviewStatus === 'THERMAL_CONFIRMED' || riskLevel === 'HIGH' || riskLevel === 'MEDIUM' || riskLevel === 'LOW') {
     return 'attention'
   }
   if (event.reviewStatus === 'THERMAL_REJECTED') {
@@ -1281,12 +1412,7 @@ const handlePreviewSwap = async () => {
 watch(
   [
     activeVisualTab,
-    () => livePaneState.value.primary.kind,
-    () => livePaneState.value.primary.url,
-    () => livePaneState.value.primary.crop,
-    () => livePaneState.value.preview.kind,
-    () => livePaneState.value.preview.url,
-    () => livePaneState.value.preview.crop
+    livePlaybackKey
   ],
   () => {
     syncLivePlayers()

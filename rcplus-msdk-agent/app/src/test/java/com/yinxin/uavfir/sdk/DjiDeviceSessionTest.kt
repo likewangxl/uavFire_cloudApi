@@ -16,11 +16,18 @@ class DjiDeviceSessionTest {
             visibleSupported = true,
             thermalSupported = true,
         )
+        val flightLimit = DjiFlightLimit(
+            heightLimitMeters = 120,
+            distanceLimitEnabled = true,
+            distanceLimitMeters = 500,
+        )
         val session = DjiDeviceSession(
             djiSdkGateway = FakeDjiSdkGateway(
                 initializeResult = true,
                 connected = true,
                 capability = capability,
+                aircraftModel = "MATRICE 4T",
+                flightLimit = flightLimit,
             ),
         )
 
@@ -28,6 +35,8 @@ class DjiDeviceSessionTest {
 
         assertEquals(AgentConnectionState.CAPABILITY_READY, state.connectionState)
         assertEquals(capability, state.capability)
+        assertEquals("MATRICE 4T", state.aircraftModel)
+        assertEquals(flightLimit, state.flightLimit)
     }
 
     @Test
@@ -88,12 +97,18 @@ class DjiDeviceSessionTest {
             visibleSupported = false,
             thermalSupported = false,
         ),
+        private val aircraftModel: String? = null,
+        private val flightLimit: DjiFlightLimit = DjiFlightLimit(),
     ) : DjiSdkGateway {
         override suspend fun initialize(): Boolean = initializeResult
 
         override suspend fun isAircraftConnected(): Boolean = connected
 
         override suspend fun loadCapability(): CameraCapability = capability
+
+        override suspend fun loadAircraftModel(): String? = aircraftModel
+
+        override suspend fun loadFlightLimit(): DjiFlightLimit = flightLimit
     }
 
     private class BlockingDjiSdkGateway : DjiSdkGateway {
@@ -131,6 +146,10 @@ class DjiDeviceSessionTest {
         override suspend fun isAircraftConnected(): Boolean = true
 
         override suspend fun loadCapability(): CameraCapability = capability
+
+        override suspend fun loadAircraftModel(): String? = "MATRICE 4T"
+
+        override suspend fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit()
 
         suspend fun awaitInitializeEntered() {
             initializeEntered.await()

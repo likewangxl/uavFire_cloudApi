@@ -305,23 +305,46 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
             int droneEnumRaw = Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_ENUM_VALUE));
             DeviceTypeEnum type = DeviceTypeEnum.find(droneEnumRaw == 100 ? DeviceTypeEnum.M4_SERIES.getType() : droneEnumRaw);
             DeviceSubTypeEnum subType = DeviceSubTypeEnum.find(Integer.parseInt(droneNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_DRONE_SUB_ENUM_VALUE)));
-            DeviceTypeEnum payloadType = DeviceTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_ENUM_VALUE)));
+            int payloadEnumRaw = Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_ENUM_VALUE));
             DeviceSubTypeEnum payloadSubType = DeviceSubTypeEnum.find(Integer.parseInt(payloadNode.valueOf(KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_PAYLOAD_SUB_ENUM_VALUE)));
             String templateType = templateDocument.valueOf("//" + KmzFileProperties.TAG_WPML_PREFIX + KmzFileProperties.TAG_TEMPLATE_TYPE);
+            DeviceEnum droneDevice = DeviceEnum.find(DeviceDomainEnum.DRONE, type, subType);
+            DeviceEnum payloadDevice = resolveKmzPayloadDevice(droneDevice, payloadEnumRaw, payloadSubType);
 
             return Optional.of(WaylineFileDTO.builder()
-                    .droneModelKey(DeviceEnum.find(DeviceDomainEnum.DRONE, type, subType).getDevice())
-                    .payloadModelKeys(List.of(DeviceEnum.find(DeviceDomainEnum.PAYLOAD, payloadType, payloadSubType).getDevice()))
+                    .droneModelKey(droneDevice.getDevice())
+                    .payloadModelKeys(List.of(payloadDevice.getDevice()))
                     .objectKey(buildObjectKey(filename))
                     .name(filename.substring(0, filename.lastIndexOf(WAYLINE_FILE_SUFFIX)))
                     .sign(DigestUtils.md5DigestAsHex(content))
-                    .templateTypes(List.of(WaylineTypeEnum.find(templateType).getValue()))
+                    .templateTypes(List.of(resolveKmzTemplateTypeValue(templateType)))
                     .favorited(Boolean.FALSE)
                     .build());
         } catch (IOException | DocumentException e) {
             e.printStackTrace();
         }
         return Optional.empty();
+    }
+
+    private DeviceEnum resolveKmzPayloadDevice(DeviceEnum droneDevice, int payloadEnumRaw, DeviceSubTypeEnum payloadSubType) {
+        if ((DeviceEnum.M4E == droneDevice || DeviceEnum.M4T == droneDevice)
+                && payloadEnumRaw == 89
+                && DeviceSubTypeEnum.ZERO == payloadSubType) {
+            return DeviceEnum.M4T_CAMERA;
+        }
+        DeviceTypeEnum payloadType = DeviceTypeEnum.find(payloadEnumRaw);
+        return DeviceEnum.find(DeviceDomainEnum.PAYLOAD, payloadType, payloadSubType);
+    }
+
+    private int resolveKmzTemplateTypeValue(String templateType) {
+        if (!StringUtils.hasText(templateType)) {
+            return WaylineTypeEnum.WAYPOINT.getValue();
+        }
+        try {
+            return WaylineTypeEnum.find(templateType).getValue();
+        } catch (RuntimeException ignored) {
+            return WaylineTypeEnum.WAYPOINT.getValue();
+        }
     }
 
     private Map<String, byte[]> unzipEntries(byte[] content) throws IOException {

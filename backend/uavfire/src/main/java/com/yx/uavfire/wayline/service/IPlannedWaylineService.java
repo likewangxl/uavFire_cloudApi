@@ -6,6 +6,7 @@ import com.yx.uavfire.wayline.model.param.PreparePlannedWaylineTaskParam;
 import com.yx.uavfire.wayline.model.param.PublishPlannedWaylineResponse;
 import com.yx.uavfire.wayline.model.param.UpdatePlannedWaylineParam;
 import com.dji.sdk.common.PaginationData;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Optional;
 
@@ -14,6 +15,8 @@ public interface IPlannedWaylineService {
     PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize);
 
     PlannedWaylineDTO create(String workspaceId, String username, CreatePlannedWaylineParam param);
+
+    PlannedWaylineDTO importKmzFile(String workspaceId, String username, MultipartFile file);
 
     PlannedWaylineDTO update(String workspaceId, String id, UpdatePlannedWaylineParam param);
 

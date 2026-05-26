@@ -27,5 +27,9 @@ class CapabilityRepositoryTest {
             visibleSupported = visible,
             thermalSupported = thermal,
         )
+
+        override suspend fun loadAircraftModel(): String? = null
+
+        override suspend fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit()
     }
 }

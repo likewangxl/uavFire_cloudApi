@@ -24,6 +24,8 @@ class DjiSdkGatewayImplTest {
         assertTrue(gateway.initialize())
         assertTrue(gateway.isAircraftConnected())
         assertEquals(capability, gateway.loadCapability())
+        assertEquals("MATRICE 4T", gateway.loadAircraftModel())
+        assertEquals(DjiFlightLimit(heightLimitMeters = 120), gateway.loadFlightLimit())
     }
 
     @Test
@@ -54,5 +56,9 @@ class DjiSdkGatewayImplTest {
         override suspend fun isAircraftConnected(): Boolean = connected
 
         override suspend fun loadCapability(): CameraCapability = capability
+
+        override suspend fun loadAircraftModel(): String? = "MATRICE 4T"
+
+        override suspend fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit(heightLimitMeters = 120)
     }
 }

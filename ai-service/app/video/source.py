@@ -53,11 +53,14 @@ class OpenCvVideoSource:
         channel: Literal["visible", "thermal"],
         capture_factory: Optional[CaptureFactory] = None,
         clock: Callable[[], float] = time.time,
+        max_reads_before_reopen: int = 8,
     ) -> None:
         self._url = url
         self._channel = channel
         self._capture_factory = capture_factory
         self._clock = clock
+        self._max_reads_before_reopen = int(max_reads_before_reopen)
+        self._reads_since_open = 0
         self._cap: Optional[_CaptureLike] = None
 
     @property
@@ -77,13 +80,21 @@ class OpenCvVideoSource:
             cap.release()
             raise VideoSourceOpenError(f"video-source-open-failed:{self._url}")
         self._cap = cap
+        self._reads_since_open = 0
 
     def read(self) -> Optional[FramePacket]:
         if self._cap is None:
             raise VideoSourceNotOpenError("video-source-not-open")
+        if (
+            self._max_reads_before_reopen > 0
+            and self._reads_since_open >= self._max_reads_before_reopen
+        ):
+            self.close()
+            self.open()
         ok, frame = self._cap.read()
         if not ok or frame is None:
             return None
+        self._reads_since_open += 1
         shape = getattr(frame, "shape", None)
         if shape is not None and len(shape) >= 2:
             height, width = int(shape[0]), int(shape[1])
@@ -101,6 +112,7 @@ class OpenCvVideoSource:
         if self._cap is not None:
             self._cap.release()
             self._cap = None
+            self._reads_since_open = 0
 
 
 def _default_capture_factory() -> CaptureFactory:

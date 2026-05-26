@@ -2,6 +2,7 @@ package com.yx.uavfire.fc100.event.service;
 
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
 import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
+import com.yx.uavfire.fc100.event.model.dto.FireEventHistoryDTO;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 
 import java.util.List;
@@ -29,4 +30,6 @@ public interface FireEventService {
      * @param limit       最多返回条数，默认 50
      */
     List<FireEventDTO> list(String workspaceId, String status, int limit);
+
+    List<FireEventHistoryDTO> listHistory(String eventId, int limit);
 }

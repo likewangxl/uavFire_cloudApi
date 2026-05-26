@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class WaypointMissionExecutor(
     private val listener: Listener,
+    private val diagnostics: WaypointMissionDiagnostics = DjiWaypointMissionDiagnostics(),
 ) {
 
     interface Listener {
@@ -57,6 +58,14 @@ class WaypointMissionExecutor(
 
     fun pushKmz(missionId: String, kmzPath: String, onComplete: (Boolean, IDJIError?) -> Unit) {
         Log.i(TAG, "pushKmz missionId=$missionId path=$kmzPath")
+        Log.i(
+            TAG,
+            WaypointMissionDiagnosticFormatter.formatValidationResult(
+                missionId,
+                kmzPath,
+                diagnostics.validationErrors(kmzPath),
+            ),
+        )
         WaypointMissionManager.getInstance().pushKMZFileToAircraft(
             kmzPath,
             object : CommonCallbacks.CompletionCallbackWithProgress<Double> {
@@ -79,6 +88,14 @@ class WaypointMissionExecutor(
     fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
         activeMissionId.set(missionId)
         activeMissionFileName.set(missionFileName)
+        Log.i(
+            TAG,
+            WaypointMissionDiagnosticFormatter.formatAvailableWaylineIds(
+                missionId,
+                missionFileName,
+                diagnostics.availableWaylineIds(missionFileName),
+            ),
+        )
         val callback = simpleCallback(missionId, "startMission")
         if (waylineIds.isNullOrEmpty()) {
             WaypointMissionManager.getInstance().startMission(missionFileName, callback)

@@ -1,6 +1,9 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.session.DualStreamSessionManager
+import com.yinxin.uavfir.session.AgentConnectionState
+import com.yinxin.uavfir.session.DualStreamSessionState
+import com.yinxin.uavfir.stream.ThermalMeasureRegion
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
@@ -33,7 +36,11 @@ class CommandPollingCoordinator(
 
         val result = runCatching {
             withTimeout(commandTimeoutMs) {
-                sessionManager.executeCommand(droneSn, command.action)
+                sessionManager.executeCommand(
+                    droneSn,
+                    command.action,
+                    command.thermalMeasureRoi?.toThermalMeasureRegion(),
+                )
             }
         }.getOrElse { throwable ->
             if (throwable is TimeoutCancellationException) {
@@ -53,7 +60,32 @@ class CommandPollingCoordinator(
             commandId = command.commandId,
             status = result.status,
             message = result.message,
+            taskId = command.taskId,
+            sourceTs = command.sourceTs,
+            thermalTemperature = result.thermalCenterTemperatureC
+                .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
+            thermalMeasureRoi = command.thermalMeasureRoi
+                .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
         )
+        client.sendStatus(
+            droneSn = droneSn,
+            connectionState = connectionStateAfterLegacyCommand(result),
+            message = result.message ?: "command-${command.action}-${result.status}",
+            runtimeStatus = sessionManager.runtimeStatus(),
+        )
+    }
+
+    private fun connectionStateAfterLegacyCommand(
+        result: DualStreamSessionManager.CommandExecutionResult,
+    ): AgentConnectionState {
+        if (!result.status.equals("applied", ignoreCase = true)) {
+            return AgentConnectionState.DEGRADED
+        }
+        return when (sessionManager?.sessionState) {
+            DualStreamSessionState.RUNNING -> AgentConnectionState.STREAMING
+            DualStreamSessionState.STOPPED -> AgentConnectionState.CAPABILITY_READY
+            else -> AgentConnectionState.CAPABILITY_READY
+        }
     }
 
     private suspend fun pollMsdkCommand(aircraftSn: String) {
@@ -100,6 +132,14 @@ class CommandPollingCoordinator(
     }
 
     companion object {
-        const val DEFAULT_COMMAND_TIMEOUT_MS: Long = 15_000
+        const val DEFAULT_COMMAND_TIMEOUT_MS: Long = 180_000
     }
+}
+
+private fun Map<String, Double>.toThermalMeasureRegion(): ThermalMeasureRegion? {
+    val x = this["x"] ?: return null
+    val y = this["y"] ?: return null
+    val width = this["width"] ?: return null
+    val height = this["height"] ?: return null
+    return ThermalMeasureRegion(x = x, y = y, width = width, height = height)
 }

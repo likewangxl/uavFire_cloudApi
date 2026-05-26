@@ -43,4 +43,4 @@
 - M4T + MSDK v5 当前不暴露 visible + thermal 两路独立 raw stream；热成像需要走降级路线。
 - 第一阶段迁移方向是 MSDK Agent 数据面，Cloud SDK livestream 暂保留为 fallback。
 
-当前配置基准是 `192.168.2.34`，如果切换 WiFi 或网卡，需要同步更新 backend、frontend、agent、ZLM 配置。
+当前配置基准是 `192.168.0.30`，如果切换 WiFi 或网卡，需要同步更新 backend、frontend、agent、ZLM 配置。

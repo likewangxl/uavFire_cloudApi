@@ -1,5 +1,7 @@
 from typing import Optional
 
+import pytest
+
 from app.clients.backend_client import BackendClient
 
 
@@ -117,6 +119,50 @@ def test_backend_client_logs_in_once_when_credentials_are_configured():
     }
     assert transport.posts[1]["headers"] == {"x-auth-token": "login-token"}
     assert transport.posts[2]["headers"] == {"x-auth-token": "login-token"}
+
+
+def test_backend_client_falls_back_to_demo_login_when_captcha_login_fails():
+    transport = RecordingTransport(
+        responses={
+            "/manage/api/v1/login": {
+                "code": 401,
+                "message": "验证码不能为空",
+            },
+            "/manage/api/v1/demo-login": {
+                "code": 0,
+                "data": {
+                    "access_token": "demo-token",
+                },
+            },
+        }
+    )
+    client = BackendClient(
+        base_url="http://backend",
+        username="adminPC",
+        password="adminPC",
+        login_flag=1,
+        transport=transport,
+    )
+
+    client.report_fire_event(payload={"eventId": "x", "fireLevel": "LOW"})
+
+    assert transport.paths[:2] == ["/manage/api/v1/login", "/manage/api/v1/demo-login"]
+    assert transport.posts[2]["headers"] == {"x-auth-token": "demo-token"}
+
+
+def test_backend_client_raises_when_fire_event_business_response_fails():
+    transport = RecordingTransport(
+        responses={
+            "/api/fire/events": {
+                "code": -1,
+                "message": "OSD has no latitude/longitude for device: DRONE-1",
+            }
+        }
+    )
+    client = BackendClient(base_url="http://backend", transport=transport)
+
+    with pytest.raises(RuntimeError, match="backend-fire-event-rejected"):
+        client.report_fire_event(payload={"eventId": "x", "fireLevel": "HIGH"})
 
 
 class RecordingTransport:

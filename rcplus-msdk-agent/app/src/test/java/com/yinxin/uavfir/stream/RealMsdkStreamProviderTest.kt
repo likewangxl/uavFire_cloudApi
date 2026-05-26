@@ -1,5 +1,7 @@
 package com.yinxin.uavfir.stream
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -90,6 +92,83 @@ class RealMsdkStreamProviderTest {
     }
 
     @Test
+    fun focusThermal_measuresCenterRegionTemperatureAfterSwitchingThermalSource() = runTest {
+        val binder = RecordingMsdkStreamBinder(centerTemperatureC = 92.4)
+        val liveStreamController = RecordingLiveStreamController()
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = liveStreamController,
+        )
+
+        val result = provider.focusThermal("DRONE-001")
+
+        assertTrue(binder.centerTemperatureMeasured)
+        assertEquals(0, binder.hotspotMeasureCalls)
+        assertEquals(92.4, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
+    }
+
+    @Test
+    fun focusThermal_measuresRequestedRegionTemperatureAfterSwitchingThermalSource() = runTest {
+        val requestedRegion = ThermalMeasureRegion(x = 0.20, y = 0.30, width = 0.25, height = 0.20)
+        val binder = RecordingMsdkStreamBinder(regionTemperatureC = 68.5)
+        val liveStreamController = RecordingLiveStreamController()
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = liveStreamController,
+        )
+
+        val result = provider.focusThermal("DRONE-001", requestedRegion)
+
+        assertEquals(requestedRegion, binder.lastMeasuredRegion)
+        assertEquals(68.5, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
+    }
+
+    @Test
+    fun focusThermal_usesAgentHotspotMeasurementResultInsteadOfRequestedRegion() = runTest {
+        val requestedRegion = ThermalMeasureRegion(x = 0.20, y = 0.30, width = 0.25, height = 0.20)
+        val measuredRegion = ThermalMeasureRegion(x = 0.42, y = 0.46, width = 0.08, height = 0.08)
+        val binder = RecordingMsdkStreamBinder(
+            hotspotMeasurement = ThermalMeasurementResult(
+                temperatureC = 153.0,
+                region = measuredRegion,
+            ),
+        )
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = RecordingLiveStreamController(),
+        )
+
+        val result = provider.focusThermal("DRONE-001", requestedRegion)
+
+        assertEquals(requestedRegion, binder.lastHotspotSeedRegion)
+        assertEquals(153.0, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
+        assertEquals(measuredRegion, result.thermalMeasureRegion)
+    }
+
+    @Test
+    fun focusThermal_restoresVisibleSourceAfterRegionMeasurement() = runTest {
+        val requestedRegion = ThermalMeasureRegion(x = 0.20, y = 0.30, width = 0.25, height = 0.20)
+        val binder = RecordingMsdkStreamBinder(
+            hotspotMeasurement = ThermalMeasurementResult(
+                temperatureC = 153.0,
+                region = ThermalMeasureRegion(x = 0.42, y = 0.46, width = 0.08, height = 0.08),
+            ),
+        )
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = RecordingLiveStreamController(),
+        )
+
+        val result = provider.focusThermal("DRONE-001", requestedRegion)
+
+        assertTrue(binder.visibleFocused)
+        assertEquals(BoundStreamState.BOUND, result.visibleState)
+        assertEquals(BoundStreamState.IDLE, result.thermalState)
+        assertEquals("visible-live-ready", result.playbackStatus)
+        assertEquals(153.0, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
+    }
+
+    @Test
     fun focusThermal_restartsRtmpPushAfterSwitchingThermalSource() = runTest {
         val invocationOrder = mutableListOf<String>()
         val binder = object : MsdkStreamBinder {
@@ -97,6 +176,8 @@ class RealMsdkStreamProviderTest {
             override suspend fun bindThermal(droneSn: String) = Unit
             override suspend fun focusVisible(droneSn: String) = Unit
             override suspend fun focusThermal(droneSn: String) { invocationOrder += "focusThermal" }
+            override suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double? = null
+            override suspend fun measureThermalCenterTemperatureC(): Double? = null
             override suspend fun unbindAll() = Unit
         }
         val liveStreamController = object : LiveStreamController {
@@ -121,6 +202,8 @@ class RealMsdkStreamProviderTest {
             override suspend fun bindThermal(droneSn: String) = Unit
             override suspend fun focusVisible(droneSn: String) { invocationOrder += "focusVisible" }
             override suspend fun focusThermal(droneSn: String) = Unit
+            override suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double? = null
+            override suspend fun measureThermalCenterTemperatureC(): Double? = null
             override suspend fun unbindAll() = Unit
         }
         val liveStreamController = object : LiveStreamController {
@@ -137,6 +220,37 @@ class RealMsdkStreamProviderTest {
         assertEquals(listOf("focusVisible", "rtmp.stop", "rtmp.start"), invocationOrder)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun focusVisible_waitsForMsdkStopDrainBeforeStartingRtmpAgain() = runTest {
+        val scope = this
+        val startTimes = mutableListOf<Long>()
+        val binder = object : MsdkStreamBinder {
+            override suspend fun bindVisible(droneSn: String) = Unit
+            override suspend fun bindThermal(droneSn: String) = Unit
+            override suspend fun focusVisible(droneSn: String) = Unit
+            override suspend fun focusThermal(droneSn: String) = Unit
+            override suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double? = null
+            override suspend fun measureThermalCenterTemperatureC(): Double? = null
+            override suspend fun unbindAll() = Unit
+        }
+        val liveStreamController = object : LiveStreamController {
+            override suspend fun start(droneSn: String) {
+                startTimes += scope.currentTime
+            }
+
+            override suspend fun stop() = Unit
+        }
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = liveStreamController,
+        )
+
+        provider.focusVisible("DRONE-001")
+
+        assertEquals(listOf(800L), startTimes)
+    }
+
     @Test
     fun start_invokesBindVisibleBeforeRtmpPush() = runTest {
         val invocationOrder = mutableListOf<String>()
@@ -145,6 +259,8 @@ class RealMsdkStreamProviderTest {
             override suspend fun bindThermal(droneSn: String) { invocationOrder += "bindThermal" }
             override suspend fun focusVisible(droneSn: String) = Unit
             override suspend fun focusThermal(droneSn: String) = Unit
+            override suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double? = null
+            override suspend fun measureThermalCenterTemperatureC(): Double? = null
             override suspend fun unbindAll() = Unit
         }
         val liveStreamController = object : LiveStreamController {
@@ -208,11 +324,19 @@ class RealMsdkStreamProviderTest {
     private class RecordingMsdkStreamBinder(
         private val bindThermalFailure: Throwable? = null,
         private val bindVisibleFailure: Throwable? = null,
+        private val centerTemperatureC: Double? = null,
+        private val regionTemperatureC: Double? = null,
+        private val hotspotMeasurement: ThermalMeasurementResult? = null,
     ) : MsdkStreamBinder {
         var visibleBound = false
         var thermalBound = false
+        var visibleFocused = false
         var thermalFocused = false
         var unbound = false
+        var centerTemperatureMeasured = false
+        var hotspotMeasureCalls = 0
+        var lastMeasuredRegion: ThermalMeasureRegion? = null
+        var lastHotspotSeedRegion: ThermalMeasureRegion? = null
 
         override suspend fun bindVisible(droneSn: String) {
             bindVisibleFailure?.let { throw it }
@@ -224,10 +348,44 @@ class RealMsdkStreamProviderTest {
             thermalBound = true
         }
 
-        override suspend fun focusVisible(droneSn: String) = Unit
+        override suspend fun focusVisible(droneSn: String) {
+            visibleFocused = true
+        }
 
         override suspend fun focusThermal(droneSn: String) {
             thermalFocused = true
+        }
+
+        override suspend fun measureThermalCenterTemperatureC(): Double? {
+            centerTemperatureMeasured = true
+            return centerTemperatureC
+        }
+
+        override suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double? {
+            lastMeasuredRegion = region
+            return regionTemperatureC
+        }
+
+        override suspend fun locateAndMeasureThermalHotspotC(
+            seedRegion: ThermalMeasureRegion?,
+        ): ThermalMeasurementResult? {
+            hotspotMeasureCalls += 1
+            lastHotspotSeedRegion = seedRegion
+            if (hotspotMeasurement != null) {
+                return hotspotMeasurement
+            }
+            val region = seedRegion ?: ThermalMeasureRegion.CENTER
+            val temperature = if (seedRegion == null) {
+                measureThermalCenterTemperatureC()
+            } else {
+                measureThermalRegionTemperatureC(region)
+            }
+            return temperature?.let {
+                ThermalMeasurementResult(
+                    temperatureC = it,
+                    region = region,
+                )
+            }
         }
 
         override suspend fun unbindAll() {

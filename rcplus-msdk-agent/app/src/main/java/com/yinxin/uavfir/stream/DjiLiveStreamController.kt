@@ -29,6 +29,11 @@ class DjiLiveStreamController(
         // arg is kept for unit-test seams that pass synthetic SNs.
         val effectiveSn = BuildConfig.AGENT_AIRCRAFT_SN.takeIf { it.isNotBlank() } ?: droneSn
         val streamUrl = "rtmp://$host:$rtmpPort/$streamApp/${effectiveSn}-0"
+        if (liveStreamManager.isStreaming) {
+            awaitCompletion { callback ->
+                liveStreamManager.stopStream(callback)
+            }
+        }
         liveStreamManager.setLiveStreamSettings(
             LiveStreamSettings.Builder()
                 .setLiveStreamType(LiveStreamType.RTMP)
@@ -42,9 +47,6 @@ class DjiLiveStreamController(
         liveStreamManager.setCameraIndex(ComponentIndexType.LEFT_OR_MAIN)
         liveStreamManager.setLiveStreamQuality(StreamQuality.FULL_HD)
         liveStreamManager.setLiveAudioEnabled(false)
-        if (liveStreamManager.isStreaming) {
-            return
-        }
         awaitCompletion { callback ->
             liveStreamManager.startStream(callback)
         }

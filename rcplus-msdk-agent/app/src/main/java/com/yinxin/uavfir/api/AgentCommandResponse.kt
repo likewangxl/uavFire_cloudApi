@@ -6,4 +6,7 @@ data class AgentCommandResponse(
     val action: String,
     val status: String,
     val message: String? = null,
+    val taskId: String? = null,
+    val sourceTs: Long? = null,
+    val thermalMeasureRoi: Map<String, Double>? = null,
 )

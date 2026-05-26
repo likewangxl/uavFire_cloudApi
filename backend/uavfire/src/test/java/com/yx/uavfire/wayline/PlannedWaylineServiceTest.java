@@ -13,19 +13,27 @@ import com.yx.uavfire.wayline.model.param.UpdatePlannedWaylineParam;
 import com.yx.uavfire.wayline.service.impl.PlannedWaylineServiceImpl;
 import com.yx.uavfire.wayline.service.IWaylineFileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.dji.sdk.cloudapi.device.DeviceEnum;
+import com.dji.sdk.cloudapi.wayline.GetWaylineListResponse;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -83,6 +91,65 @@ class PlannedWaylineServiceTest {
         assertEquals("alice", dto.getCreator());
         assertNotNull(inserted.get());
         assertEquals("draft", inserted.get().getStatus());
+    }
+
+    @Test
+    void importKmzFileShouldCreateExecutableFileGeneratedPlannedWayline() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
+        ArgumentCaptor<PublishedWaylineCreateDTO> publishedCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        byte[] kmzBytes = Files.readAllBytes(Path.of("../../rcplus-msdk-agent/app/src/main/res/raw/m4t_probe.kmz"));
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "M4T Official.kmz",
+                "application/vnd.google-earth.kmz",
+                kmzBytes);
+
+        when(waylineFileService.createPublishedWayline(eq("workspace-001"), publishedCaptor.capture()))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-file-001")
+                        .name("M4T Official")
+                        .objectKey("planned-imports/imported.kmz")
+                        .build());
+        when(waylineFileService.getWaylineByWaylineId("workspace-001", "wayline-file-001"))
+                .thenReturn(java.util.Optional.of(new GetWaylineListResponse()
+                        .setId("wayline-file-001")
+                        .setName("M4T Official")
+                        .setDroneModelKey(DeviceEnum.M4T)
+                        .setObjectKey("planned-imports/imported.kmz")
+                        .setSign("0123456789abcdef0123456789abcdef")));
+        when(waylineFileService.getObjectUrl("workspace-001", "wayline-file-001"))
+                .thenReturn(new URL("http://localhost:6789/kmz/imported.kmz"));
+        when(mapper.insert(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
+            PlannedWaylineEntity entity = invocation.getArgument(0);
+            entity.setId(1);
+            inserted.set(entity);
+            return 1;
+        });
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        PlannedWaylineDTO dto = service.importKmzFile("workspace-001", "alice", file);
+
+        assertAll(
+                () -> assertEquals("file_generated", dto.getStatus()),
+                () -> assertEquals("file_generated", dto.getTaskStatus()),
+                () -> assertEquals("workspace-001", dto.getWorkspaceId()),
+                () -> assertEquals("alice", dto.getCreator()),
+                () -> assertEquals("M4T Official", dto.getName()),
+                () -> assertEquals("M4T", dto.getAircraftModelKey()),
+                () -> assertEquals("wayline-file-001", dto.getPublishedWaylineId()),
+                () -> assertEquals("http://localhost:6789/kmz/imported.kmz", dto.getKmzUrl()),
+                () -> assertEquals("0123456789abcdef0123456789abcdef", dto.getKmzMd5()),
+                () -> assertEquals("planned-imports/imported.kmz", dto.getKmzObjectKey()),
+                () -> assertTrue(dto.getWaypoints().isEmpty()),
+                () -> assertNotNull(dto.getFileGeneratedTime()),
+                () -> assertNotNull(dto.getPlannedWaylineId()),
+                () -> assertEquals("M4T Official.kmz", publishedCaptor.getValue().getFilename()),
+                () -> assertEquals(kmzBytes.length, publishedCaptor.getValue().getContent().length),
+                () -> assertTrue(publishedCaptor.getValue().getObjectKey().endsWith(".kmz")),
+                () -> assertNotNull(inserted.get()));
     }
 
     @Test
@@ -1563,6 +1630,8 @@ class PlannedWaylineServiceTest {
                 mock(com.yx.uavfire.firedetection.AiServiceClient.class);
         com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService =
                 mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        Path kmzPath = Files.createTempFile("pw-agent-ai", ".kmz");
+        Files.write(kmzPath, new byte[]{1, 2, 3});
         PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
                 .id(3001)
                 .plannedWaylineId("pw-agent-ai")
@@ -1577,6 +1646,8 @@ class PlannedWaylineServiceTest {
                 .waypointsJson("[]")
                 .status("ready")
                 .taskStatus("ready")
+                .kmzUrl(kmzPath.toUri().toURL().toString())
+                .kmzMd5("md5-agent-ai")
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
@@ -1585,7 +1656,7 @@ class PlannedWaylineServiceTest {
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
         setField(service, "aiServiceClient", aiServiceClient);
-        setField(service, "aiZlmRtspHost", "192.168.2.34");
+        setField(service, "aiZlmRtspHost", "192.168.0.30");
         setField(service, "aiZlmRtspPort", 8554);
         setField(service, "aiAutoTriggerOnWayline", true);
 
@@ -1594,8 +1665,169 @@ class PlannedWaylineServiceTest {
         verify(aiServiceClient).startDetection(
                 eq("fire-M4T-SN-001"),
                 eq("M4T-SN-001"),
-                eq("rtsp://192.168.2.34:8554/live/M4T-SN-001-0"),
+                eq("rtsp://192.168.0.30:8554/live/M4T-SN-001-0"),
                 eq(""));
+    }
+
+    @Test
+    void executeAgentWaylineShouldRejectMissingAircraftTarget() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        Path kmzPath = Files.createTempFile("pw-agent-no-target", ".kmz");
+        Files.write(kmzPath, new byte[]{1, 2, 3});
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3002)
+                .plannedWaylineId("pw-agent-no-target")
+                .workspaceId("workspace-001")
+                .flightId("flight-agent-no-target")
+                .name("Agent No Target")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[]")
+                .status("ready")
+                .taskStatus("ready")
+                .kmzUrl(kmzPath.toUri().toURL().toString())
+                .kmzMd5("md5-no-target")
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+        setField(service, "waylineAgentService", waylineAgentService);
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.executeTask("workspace-001", "pw-agent-no-target"));
+
+        assertEquals("执行航线前需要选择在线飞行器。", thrown.getMessage());
+        verify(waylineAgentService, never()).prepareKmz(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(byte[].class));
+        verify(waylineAgentService, never()).dispatchWayline(
+                org.mockito.ArgumentMatchers.anyString(),
+                any(com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO.class));
+        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+    }
+
+    @Test
+    void executeAgentWaylineShouldUseSingleOnlineMsdkAircraftWhenTargetMissing() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        com.yx.uavfire.msdk.service.MsdkDeviceStateService msdkDeviceStateService =
+                new com.yx.uavfire.msdk.service.MsdkDeviceStateService();
+        msdkDeviceStateService.upsert(new com.yx.uavfire.msdk.model.MsdkDeviceStateDTO()
+                .setGatewaySn("RC-001")
+                .setAircraftSn("M4T-SN-ONLINE")
+                .setOnline(true)
+                .setConnectionState("CONNECTED"));
+        Path kmzPath = Files.createTempFile("pw-agent-online", ".kmz");
+        Files.write(kmzPath, new byte[]{1, 2, 3});
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3003)
+                .plannedWaylineId("pw-agent-online")
+                .workspaceId("workspace-001")
+                .flightId("flight-agent-online")
+                .name("Agent Online")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[]")
+                .status("ready")
+                .taskStatus("ready")
+                .kmzUrl(kmzPath.toUri().toURL().toString())
+                .kmzMd5("md5-online")
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+        setField(service, "waylineAgentService", waylineAgentService);
+        setField(service, "msdkDeviceStateService", msdkDeviceStateService);
+
+        service.executeTask("workspace-001", "pw-agent-online");
+
+        verify(waylineAgentService).prepareKmz(
+                eq("M4T-SN-ONLINE"),
+                eq("flight-agent-online"),
+                org.mockito.ArgumentMatchers.any(byte[].class));
+        verify(waylineAgentService).dispatchWayline(
+                eq("M4T-SN-ONLINE"),
+                any(com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO.class));
+        ArgumentCaptor<PlannedWaylineEntity> updateCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
+        verify(mapper).updateById(updateCaptor.capture());
+        assertEquals("M4T-SN-ONLINE", updateCaptor.getValue().getDroneSn());
+    }
+
+    @Test
+    void executeAgentWaylineShouldNormalizePilotM4tKmzBeforeDispatch() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        Path kmzPath = Files.createTempFile("pw-agent-m4t-normalize", ".kmz");
+        Files.write(kmzPath, buildM4tPilotRuntimeKmz());
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3004)
+                .plannedWaylineId("pw-agent-m4t-normalize")
+                .workspaceId("workspace-001")
+                .flightId("flight-agent-m4t-normalize")
+                .name("Agent M4T Normalize")
+                .aircraftModelKey("M4T")
+                .droneSn("M4T-SN-001")
+                .aircraftSn("M4T-SN-001")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[]")
+                .status("ready")
+                .taskStatus("ready")
+                .kmzUrl(kmzPath.toUri().toURL().toString())
+                .kmzMd5("original-md5")
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+        setField(service, "waylineAgentService", waylineAgentService);
+
+        service.executeTask("workspace-001", "pw-agent-m4t-normalize");
+
+        ArgumentCaptor<byte[]> kmzCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(waylineAgentService).prepareKmz(eq("M4T-SN-001"), eq("flight-agent-m4t-normalize"), kmzCaptor.capture());
+        String normalizedTemplate = readZipEntry(kmzCaptor.getValue(), "wpmz/template.kml");
+        String normalizedWaylines = readZipEntry(kmzCaptor.getValue(), "wpmz/waylines.wpml");
+        ArgumentCaptor<com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO> dispatchCaptor =
+                ArgumentCaptor.forClass(com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO.class);
+        verify(waylineAgentService).dispatchWayline(eq("M4T-SN-001"), dispatchCaptor.capture());
+        double normalizedTurnDamping = firstTurnDamping(normalizedWaylines);
+
+        assertAll("M4T KMZ runtime normalization",
+                () -> assertTrue(normalizedTemplate.contains("<wpml:droneEnumValue>99</wpml:droneEnumValue>")),
+                () -> assertTrue(normalizedTemplate.contains("<wpml:payloadEnumValue>89</wpml:payloadEnumValue>")),
+                () -> assertFalse(normalizedTemplate.contains("<wpml:droneEnumValue>100</wpml:droneEnumValue>")),
+                () -> assertFalse(normalizedTemplate.contains("<wpml:payloadEnumValue>99</wpml:payloadEnumValue>")),
+                () -> assertTrue(normalizedWaylines.contains("<wpml:droneEnumValue>99</wpml:droneEnumValue>")),
+                () -> assertTrue(normalizedWaylines.contains("<wpml:payloadEnumValue>89</wpml:payloadEnumValue>")),
+                () -> assertTrue(normalizedWaylines.contains("<wpml:exitOnRCLost>goContinue</wpml:exitOnRCLost>")),
+                () -> assertTrue(normalizedWaylines.contains("<wpml:globalTransitionalSpeed>5</wpml:globalTransitionalSpeed>")),
+                () -> assertFalse(normalizedTemplate.contains("<wpml:payloadParam>")),
+                () -> assertFalse(normalizedWaylines.contains("<wpml:realTimeFollowSurfaceByFov>")),
+                () -> assertTrue(normalizedTemplate.contains("<wpml:globalWaypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:globalWaypointTurnMode>")),
+                () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnParam>")),
+                () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>")),
+                () -> assertFalse(normalizedTemplate.contains("<wpml:useGlobalTurnParam>")),
+                () -> assertFalse(normalizedTemplate.contains("<wpml:useGlobalHeight>")),
+                () -> assertTrue(normalizedWaylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>")),
+                () -> assertTrue(normalizedTurnDamping > 0, "turn damping must be positive per DJI WPML"),
+                () -> assertTrue(normalizedTurnDamping * 2 < 15.0, "two turn intercepts must fit short segment"),
+                () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnDampingDist>" + formatTurnDamping(normalizedTurnDamping) + "</wpml:waypointTurnDampingDist>")),
+                () -> assertTrue(normalizedWaylines.contains("<wpml:useStraightLine>1</wpml:useStraightLine>")),
+                () -> assertEquals(org.springframework.util.DigestUtils.md5DigestAsHex(kmzCaptor.getValue()),
+                        dispatchCaptor.getValue().getKmzMd5()));
     }
 
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {
@@ -1624,6 +1856,64 @@ class PlannedWaylineServiceTest {
             }
         }
         throw new AssertionError("Missing zip entry: " + entryName);
+    }
+
+    private static double firstTurnDamping(String wpml) {
+        Matcher matcher = Pattern.compile("<wpml:waypointTurnDampingDist>([^<]+)</wpml:waypointTurnDampingDist>")
+                .matcher(wpml);
+        if (!matcher.find()) {
+            throw new AssertionError("Missing waypointTurnDampingDist");
+        }
+        return Double.parseDouble(matcher.group(1));
+    }
+
+    private static String formatTurnDamping(double value) {
+        if (value == Math.floor(value)) {
+            return String.valueOf((long) value);
+        }
+        return String.valueOf(value);
+    }
+
+    private static byte[] buildM4tPilotRuntimeKmz() throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
+            zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
+            zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\"><Document><wpml:missionConfig>"
+                    + "<wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost><wpml:globalTransitionalSpeed>15</wpml:globalTransitionalSpeed>"
+                    + "<wpml:droneInfo><wpml:droneEnumValue>99</wpml:droneEnumValue><wpml:droneSubEnumValue>1</wpml:droneSubEnumValue></wpml:droneInfo>"
+                    + "<wpml:payloadInfo><wpml:payloadEnumValue>89</wpml:payloadEnumValue><wpml:payloadSubEnumValue>0</wpml:payloadSubEnumValue></wpml:payloadInfo>"
+                    + "</wpml:missionConfig><Folder><wpml:templateType>waypoint</wpml:templateType>"
+                    + "<wpml:globalWaypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:globalWaypointTurnMode>"
+                    + "<Placemark><Point><coordinates>120.0,30.1</coordinates></Point><wpml:index>0</wpml:index>"
+                    + "<wpml:height>100</wpml:height><wpml:useGlobalHeight>1</wpml:useGlobalHeight>"
+                    + "<wpml:useGlobalTurnParam>1</wpml:useGlobalTurnParam><wpml:useStraightLine>0</wpml:useStraightLine></Placemark>"
+                    + "<Placemark><Point><coordinates>120.0001,30.1001</coordinates></Point><wpml:index>1</wpml:index>"
+                    + "<wpml:height>100</wpml:height><wpml:useGlobalHeight>1</wpml:useGlobalHeight>"
+                    + "<wpml:useGlobalTurnParam>1</wpml:useGlobalTurnParam><wpml:useStraightLine>0</wpml:useStraightLine></Placemark>"
+                    + "<wpml:payloadParam><wpml:imageFormat>visable,ir</wpml:imageFormat></wpml:payloadParam>"
+                    + "</Folder></Document></kml>")
+                    .getBytes(StandardCharsets.UTF_8));
+            zipOutputStream.closeEntry();
+            zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
+            zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\"><Document><wpml:missionConfig>"
+                    + "<wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost><wpml:globalTransitionalSpeed>15</wpml:globalTransitionalSpeed>"
+                    + "<wpml:droneInfo><wpml:droneEnumValue>99</wpml:droneEnumValue><wpml:droneSubEnumValue>1</wpml:droneSubEnumValue></wpml:droneInfo>"
+                    + "<wpml:payloadInfo><wpml:payloadEnumValue>89</wpml:payloadEnumValue><wpml:payloadSubEnumValue>0</wpml:payloadSubEnumValue></wpml:payloadInfo>"
+                    + "</wpml:missionConfig><Folder><wpml:realTimeFollowSurfaceByFov>0</wpml:realTimeFollowSurfaceByFov>"
+                    + "<Placemark><Point><coordinates>120.0,30.1</coordinates></Point>"
+                    + "<wpml:waypointTurnParam><wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"
+                    + "<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist></wpml:waypointTurnParam>"
+                    + "<wpml:useStraightLine>0</wpml:useStraightLine></Placemark>"
+                    + "<Placemark><Point><coordinates>120.0001,30.1001</coordinates></Point>"
+                    + "<wpml:waypointTurnParam><wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"
+                    + "<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist></wpml:waypointTurnParam>"
+                    + "<wpml:useStraightLine>0</wpml:useStraightLine></Placemark></Folder></Document></kml>")
+                    .getBytes(StandardCharsets.UTF_8));
+            zipOutputStream.closeEntry();
+        }
+        return outputStream.toByteArray();
     }
 
     private static void setField(Object target, String name, Object value) throws Exception {

@@ -27,6 +27,10 @@ public class FireEventEntity {
     private String thermalImageUrl;
     private String visibleImageUrl;
     private Long eventTimestamp;
+    private Long lastSeenTime;
+    private Integer reportCount;
+    private String lastSourceEventId;
+    private Integer notificationVersion;
     private String status;
     private Integer deleted;
     private String createdBy;

@@ -61,6 +61,8 @@ class DjiMsdkRuntimeAdapterTest {
             ),
             adapter.loadCapability(),
         )
+        assertEquals("MATRICE 4T", adapter.loadAircraftModel())
+        assertEquals(DjiFlightLimit(heightLimitMeters = 120), adapter.loadFlightLimit())
     }
 
     private class FakeMsdkSdkClient(
@@ -83,5 +85,9 @@ class DjiMsdkRuntimeAdapterTest {
             visibleSupported = visibleSupported,
             thermalSupported = thermalSupported,
         )
+
+        override fun loadAircraftModel(): String? = "MATRICE 4T"
+
+        override fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit(heightLimitMeters = 120)
     }
 }

@@ -219,13 +219,13 @@ curl -s "http://localhost:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC
 当前 agent 推流命名为：
 
 ```text
-rtmp://192.168.2.34:1935/live/{droneSn}-0
+rtmp://192.168.0.30:1935/live/{droneSn}-0
 ```
 
 对应 cockpit WebRTC 播放地址由 backend 拼成：
 
 ```text
-webrtc://192.168.2.34:58925/live/{droneSn}-0
+webrtc://192.168.0.30:58925/live/{droneSn}-0
 ```
 
 ## 7. 启动 ai-service
@@ -318,7 +318,7 @@ adb shell am start -n com.yinxin.uavfir/.MainActivity
 驾驶舱直播无画面：
 
 - 先查 ZLM 是否有 `live/{droneSn}-0`：
-  `curl -s "http://192.168.2.34:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy"`
+  `curl -s "http://192.168.0.30:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy"`
 - 再查 backend dual-stream group 是否有 `visiblePlayUrl`。
 - 浏览器 Network 看 `/index/api/webrtc?app=live&stream=...&type=play` 是否成功。
 - 不要再用 `jswebrtc.Player` 排查；当前 cockpit 使用 `ZLMRTCClient.Endpoint`。

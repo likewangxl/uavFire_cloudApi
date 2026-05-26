@@ -31,13 +31,14 @@ class GlobalMVCConfigurerTest {
     }
 
     @Test
-    void addInterceptors_excludesDualStreamAgentEndpointsOnly() {
+    void addInterceptors_excludesDualStreamAgentAndAiEventIngestEndpointsOnly() {
         configurer.addInterceptors(new InterceptorRegistry());
 
         @SuppressWarnings("unchecked")
         List<String> excludePaths = (List<String>) ReflectionTestUtils.getField(GlobalMVCConfigurer.class, "EXCLUDE_PATHS");
 
         assertTrue(excludePaths.contains("/manage/api/v1/dual-stream/agents/**"));
+        assertTrue(excludePaths.contains("/manage/api/v1/dual-stream/tasks/*/events"));
         assertFalse(excludePaths.contains("/manage/api/v1/dual-stream/**"));
     }
 

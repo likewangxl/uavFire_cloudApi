@@ -1,6 +1,6 @@
 import client from './client'
 import type { ApiResult } from '/@/types/fire/api'
-import type { FireEventDTO } from '/@/types/fire/event'
+import type { FireEventDTO, FireEventHistoryDTO } from '/@/types/fire/event'
 
 export interface FireEventCreateRequest {
   eventId: string;
@@ -12,8 +12,15 @@ export interface FireEventCreateRequest {
 }
 
 export interface FireEventCreateResponse {
-  missionNo: string;
+  fireEventId: number;
+  missionNo: string | null;
   eventId: string;
+  missionCreated: boolean;
+  status: string;
+  created: boolean;
+  merged: boolean;
+  notificationRequired: boolean;
+  notificationReason: string | null;
 }
 
 export const eventApi = {
@@ -22,6 +29,11 @@ export const eventApi = {
 
   get: (eventId: string) =>
     client.get<ApiResult<FireEventDTO>>(`/api/fire/events/${eventId}`),
+
+  history: (eventId: string, limit = 100) =>
+    client.get<ApiResult<FireEventHistoryDTO[]>>(`/api/fire/events/${eventId}/history`, {
+      params: { limit },
+    }),
 
   createMock: (body: FireEventCreateRequest) =>
     client.post<ApiResult<FireEventCreateResponse>>('/api/fire/events', body),

@@ -6,6 +6,7 @@ import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncProperties;
 import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncSecretsValidator;
 import com.yx.uavfire.fc100.deliverysync.service.DeliverySyncLogService;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.FormBody;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -23,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * spec §5.7 — HTTP 模式下所有 Delivery Sync 请求的底层客户端。
- * 签名格式：HmacSHA256(AK+Method+X-DJI-Timestamp+X-DJI-Nonce, SK)，Base64。
+ * 签名格式：HmacSHA256(AK+Method+X-DJI-Timestamp+X-DJI-Nonce, SK)，hex。
  * 重试：纯 Java 循环，backoff 从 props.retry.backoffMs 读取，无需新依赖。
  */
 @Component
@@ -62,7 +63,25 @@ public class DeliverySyncHttpClient {
     public <T> T post(String path, Object body, Class<T> respType,
                       String idemKey, String missionNo) throws IOException, DeliverySyncException {
         String requestBody = serialize(body);
-        return executeWithRetry("POST", path, null, requestBody, respType, idemKey, missionNo);
+        return executeWithRetry("POST", path, null, requestBody,
+            RequestBody.create(requestBody, JSON), respType, idemKey, missionNo);
+    }
+
+    public <T> T post(String path, Map<String, String> query, Object body, Class<T> respType,
+                      String idemKey, String missionNo) throws IOException, DeliverySyncException {
+        String requestBody = serialize(body);
+        return executeWithRetry("POST", path, query, requestBody,
+            RequestBody.create(requestBody, JSON), respType, idemKey, missionNo);
+    }
+
+    public <T> T postForm(String path, Map<String, String> form, Class<T> respType,
+                          String idemKey, String missionNo) throws IOException, DeliverySyncException {
+        FormBody.Builder builder = new FormBody.Builder();
+        if (form != null) {
+            form.forEach((key, value) -> builder.add(key, value != null ? value : ""));
+        }
+        String requestBody = form == null ? "" : form.toString();
+        return executeWithRetry("POST", path, null, requestBody, builder.build(), respType, idemKey, missionNo);
     }
 
     /**
@@ -76,7 +95,7 @@ public class DeliverySyncHttpClient {
      */
     public <T> T get(String path, Map<String, String> query, Class<T> respType,
                      String idemKey, String missionNo) throws IOException, DeliverySyncException {
-        return executeWithRetry("GET", path, query, "", respType, idemKey, missionNo);
+        return executeWithRetry("GET", path, query, "", null, respType, idemKey, missionNo);
     }
 
     // -------------------------------------------------------------------------
@@ -84,7 +103,7 @@ public class DeliverySyncHttpClient {
     // -------------------------------------------------------------------------
 
     private <T> T executeWithRetry(String method, String path, Map<String, String> query,
-                                    String requestBody, Class<T> respType,
+                                    String requestBody, RequestBody okhttpBody, Class<T> respType,
                                     String idemKey, String missionNo)
             throws IOException, DeliverySyncException {
 
@@ -109,7 +128,7 @@ public class DeliverySyncHttpClient {
             String nonce = UUID.randomUUID().toString().replace("-", "");
             String signature = HmacSha256Signer.sign(props.getAk(), props.getSk(), method, timestamp, nonce);
 
-            Request request = buildRequest(method, path, query, requestBody, timestamp, nonce, signature, idemKey);
+            Request request = buildRequest(method, path, query, okhttpBody, timestamp, nonce, signature, idemKey);
             String urlStr = request.url().toString();
 
             try (Response response = httpClient.newCall(request).execute()) {
@@ -144,7 +163,7 @@ public class DeliverySyncHttpClient {
     }
 
     private Request buildRequest(String method, String path, Map<String, String> query,
-                                  String requestBody, String timestamp, String nonce,
+                                  RequestBody requestBody, String timestamp, String nonce,
                                   String signature, String idemKey) {
         String baseUrl = props.getBaseUrl();
         HttpUrl.Builder urlBuilder = HttpUrl.parse(baseUrl + path).newBuilder();
@@ -154,7 +173,6 @@ public class DeliverySyncHttpClient {
 
         Request.Builder rb = new Request.Builder()
             .url(urlBuilder.build())
-            .header("Content-Type", "application/json")
             .header("X-DJI-AK", props.getAk())
             .header("X-DJI-Timestamp", timestamp)
             .header("X-DJI-Nonce", nonce)
@@ -165,7 +183,7 @@ public class DeliverySyncHttpClient {
         }
 
         if ("POST".equals(method)) {
-            rb.post(RequestBody.create(requestBody, JSON));
+            rb.post(requestBody != null ? requestBody : RequestBody.create("", JSON));
         } else {
             rb.get();
         }

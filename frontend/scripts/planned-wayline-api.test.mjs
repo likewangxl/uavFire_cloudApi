@@ -23,6 +23,7 @@ test('frontend wayline API exposes planned-wayline CRUD and task action endpoint
     'createPlannedWayline',
     'updatePlannedWayline',
     'deletePlannedWayline',
+    'importPlannedWaylineKmzFile',
     'publishPlannedWayline',
     'generatePlannedWaylineFile',
     'preparePlannedWaylineTask',
@@ -36,6 +37,7 @@ test('frontend wayline API exposes planned-wayline CRUD and task action endpoint
   assert.match(source, /\/planned-waylines\/\$\{plannedWaylineId\}`\s*[\r\n]+\s*const result = await request\.get\(url\)/)
   assert.match(source, /\/planned-waylines`\s*[\r\n]+\s*const validatedBody = validatePlannedWaylineBody\(body\)[\r\n]+\s*const result = await request\.post\(url, validatedBody\)/)
   assert.match(source, /\/planned-waylines\/\$\{plannedWaylineId\}`\s*[\r\n]+\s*const validatedBody = validatePlannedWaylineBody\(body\)[\r\n]+\s*const result = await request\.put\(url, validatedBody\)/)
+  assert.match(source, /\/planned-waylines\/import-kmz/)
   assert.match(source, /\/planned-waylines\/\$\{plannedWaylineId\}\/publish/)
   assert.match(source, /\/planned-waylines\/\$\{plannedWaylineId\}\/generate-file/)
   assert.match(source, /\/planned-waylines\/\$\{plannedWaylineId\}\/prepare/)
@@ -55,7 +57,7 @@ test('planned-wayline types describe saved records, task states, and action payl
     'PublishPlannedWaylineResult',
     'PreparePlannedWaylineTaskBody',
   ]) {
-    assert.match(source, new RegExp(`export\\s+interface\\s+${typeName}\\b`))
+    assert.match(source, new RegExp(`export\\s+(?:interface|type)\\s+${typeName}\\b`))
   }
 
   for (const field of [
@@ -174,6 +176,7 @@ test('wayline page renders saved planned-wayline management and calls planned AP
     'createPlannedWayline',
     'updatePlannedWayline',
     'deletePlannedWayline',
+    'importPlannedWaylineKmzFile',
     'generatePlannedWaylineFile',
     'preparePlannedWaylineTask',
     'executePlannedWaylineTask',
@@ -190,6 +193,12 @@ test('wayline page renders saved planned-wayline management and calls planned AP
   assert.match(source, /plannedWaylinesCanRefresh/)
   assert.match(source, /onPlannedWaylinesScroll/)
   assert.match(source, /refreshWaylineFiles/)
+  assert.match(source, /KMZ同步/)
+  assert.match(source, /accept="\.kmz"/)
+  assert.match(source, /:custom-request="uploadFile"/)
+  assert.match(source, /const uploadFile = async \(options/)
+  assert.match(source, /options\?\.file/)
+  assert.match(source, /文件格式错误，请选择 KMZ 文件/)
   assert.match(source, /savePlannedWaylineModal/)
   assert.match(source, /plannedWaylineDetailVisible/)
   assert.match(source, /selectedPlannedWayline/)
@@ -198,8 +207,20 @@ test('wayline page renders saved planned-wayline management and calls planned AP
   assert.match(source, /canOverwritePlannedWayline/)
   assert.match(source, /onGeneratePlannedWaylineFile/)
   assert.match(source, /onPreparePlannedWaylineTask/)
+  assert.match(source, /function\s+resolvePrepareTargetDroneSn\b/)
+  assert.match(source, /listMsdkDevices/)
+  assert.match(source, /function\s+upsertOnlineAircraft\b/)
+  assert.match(source, /function\s+syncManagedTopoAircrafts\b/)
+  assert.match(source, /function\s+syncMsdkOnlineAircrafts\b/)
+  assert.match(source, /await\s+refreshOnlineAircrafts\(\)/)
+  assert.match(source, /onlineAircrafts\.value\.length\s*===\s*1/)
+  assert.match(source, /selectedAircraftSn\.value[\s\S]*record\.droneSn[\s\S]*record\.aircraftSn/)
+  assert.match(source, /检测到多台或未检测到在线飞行器/)
   assert.match(source, /onExecutePlannedWaylineTask/)
   assert.match(source, /onCancelPlannedWaylineTask/)
+  assert.match(source, /formatPlannedWaylineStatus\(record\)/)
+  assert.match(source, /planned-wayline-reason/)
+  assert.match(source, /record\.taskStatusReason/)
   assert.match(source, /Modal\.confirm/)
   assert.match(source, /生成航线文件后不可直接覆盖/)
   assert.doesNotMatch(source, /发布到航线库/)

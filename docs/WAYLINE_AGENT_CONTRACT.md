@@ -173,7 +173,7 @@ DTO 类:`WaylineControlDataDTO`。
 
 - 命名空间:`uavfire/`(不占用 DJI `thing/product/` 命名)
 - 主题模式:`uavfire/agent/{droneSn}/{kind}/{method}`
-- broker:复用 `192.168.50.10:1883`(`application.yml` 中 mqtt 配置)
+- broker:复用 `192.168.0.30:1883`(`application.yml` 中 mqtt 配置)
 
 ### 4.2 主题表
 

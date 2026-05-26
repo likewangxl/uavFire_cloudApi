@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -59,6 +60,15 @@ public class PlannedWaylineController {
         CustomClaim customClaim = resolveClaim(request);
         String trustedWorkspaceId = resolveWorkspaceId(workspaceId, customClaim);
         return HttpResultResponse.success(plannedWaylineService.create(trustedWorkspaceId, customClaim.getUsername(), param));
+    }
+
+    @PostMapping("/{workspace_id}/planned-waylines/import-kmz")
+    public HttpResultResponse<PlannedWaylineDTO> importKmz(HttpServletRequest request,
+                                                           @PathVariable("workspace_id") String workspaceId,
+                                                           MultipartFile file) {
+        CustomClaim customClaim = resolveClaim(request);
+        String trustedWorkspaceId = resolveWorkspaceId(workspaceId, customClaim);
+        return HttpResultResponse.success(plannedWaylineService.importKmzFile(trustedWorkspaceId, customClaim.getUsername(), file));
     }
 
     @PutMapping("/{workspace_id}/planned-waylines/{id}")

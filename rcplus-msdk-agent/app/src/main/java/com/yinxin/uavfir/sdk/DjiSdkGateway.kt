@@ -6,4 +6,8 @@ interface DjiSdkGateway {
     suspend fun isAircraftConnected(): Boolean
 
     suspend fun loadCapability(): CameraCapability
+
+    suspend fun loadAircraftModel(): String?
+
+    suspend fun loadFlightLimit(): DjiFlightLimit
 }

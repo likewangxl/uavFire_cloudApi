@@ -13,7 +13,14 @@ class MockStreamProvider : StreamProvider {
         playbackStatus = "visible-live-ready",
     )
 
-    override suspend fun focusThermal(droneSn: String): StreamStartResult = StreamStartResult(
+    override suspend fun focusThermal(droneSn: String): StreamStartResult {
+        return focusThermal(droneSn, null)
+    }
+
+    override suspend fun focusThermal(
+        droneSn: String,
+        thermalMeasureRegion: ThermalMeasureRegion?,
+    ): StreamStartResult = StreamStartResult(
         visibleState = BoundStreamState.BOUND,
         thermalState = BoundStreamState.BOUND,
         thermalFailureMessage = "single-liveview-source-shared-side-by-side-preview",

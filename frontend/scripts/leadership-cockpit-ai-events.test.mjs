@@ -46,6 +46,34 @@ test('leadership cockpit limits visible AI event records and handles empty state
   assert.match(cockpitSource, /formatAiEventTime/)
 })
 
+test('leadership cockpit notifies low risk fire events too', () => {
+  assert.match(
+    cockpitSource,
+    /return level === 'LOW' \|\| level === 'MEDIUM' \|\| level === 'HIGH'/,
+  )
+  assert.match(cockpitSource, /levelLabel = level === 'HIGH' \? '高' : level === 'MEDIUM' \? '中等' : '低'/)
+  assert.match(cockpitSource, /检测到\$\{levelLabel\}风险火情/)
+})
+
+test('leadership cockpit notifies low risk AI recognition events too', () => {
+  assert.match(cockpitSource, /lastSeenAiRiskEventTs/)
+  assert.match(cockpitSource, /aiRiskEventsBootstrapped/)
+  assert.match(cockpitSource, /AI_RISK_NOTIFY_SUPPRESS_MS = 5 \* 60 \* 1000/)
+  assert.match(cockpitSource, /lastAiRiskNotificationByKey/)
+  assert.match(cockpitSource, /buildAiRiskNotificationKey/)
+  assert.match(cockpitSource, /notifyNewAiRiskEvents/)
+  assert.match(cockpitSource, /level === 'LOW' \|\| level === 'MEDIUM' \|\| level === 'HIGH'/)
+  assert.match(cockpitSource, /Number\(event\.fusionScore\) > 0/)
+  assert.match(cockpitSource, /AI 识别提示：\$\{levelLabel\}火情/)
+})
+
+test('leadership cockpit suppresses duplicate fire event notifications by notification version', () => {
+  assert.match(cockpitSource, /lastNotifiedFireEventVersions/)
+  assert.match(cockpitSource, /notificationVersion/)
+  assert.match(cockpitSource, /shouldNotifyFireEvent/)
+  assert.match(cockpitSource, /通知版本: \$\{evt\.notificationVersion \?\? 1\}/)
+})
+
 test('right side column puts key alerts above resources', () => {
   const keyAlertIndex = cockpitSource.indexOf('<h3>重点告警与处置状态</h3>')
   const resourceIndex = cockpitSource.indexOf('<h3>力量与保障资源</h3>')

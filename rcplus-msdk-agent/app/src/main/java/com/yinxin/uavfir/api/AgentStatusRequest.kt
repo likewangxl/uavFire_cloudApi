@@ -12,4 +12,5 @@ data class AgentStatusRequest(
     val playbackStatus: String? = null,
     val visiblePlayUrl: String? = null,
     val thermalPlayUrl: String? = null,
+    val thermalCenterTemperatureC: Double? = null,
 )

@@ -15,4 +15,4 @@ mvn -pl uavfire `
   "-Dproject.build.sourceEncoding=UTF-8" `
   "-Dmaven.compiler.encoding=UTF-8" `
   spring-boot:run `
-  "-Dspring-boot.run.arguments=--mqtt.BASIC.host=192.168.50.10 --mqtt.BASIC.port=1883 --mqtt.DRC.host=192.168.50.10 --mqtt.DRC.port=8083"
+  "-Dspring-boot.run.arguments=--mqtt.BASIC.host=192.168.0.30 --mqtt.BASIC.port=1883 --mqtt.DRC.host=192.168.0.30 --mqtt.DRC.port=8083"

@@ -147,10 +147,18 @@ public class WaylineAgentEventListener {
 
     private void persistStateChange(String missionId, WaylineStateChangeDTO sc) {
         String mappedStatus = mapBusinessState(sc.getBusinessState());
+        if (mappedStatus == null) {
+            mappedStatus = mapMsdkState(sc.getMsdkState());
+        }
+        if ((sc.getError() != null && !sc.getError().isEmpty())
+                || "failed".equals(mappedStatus)) {
+            mappedStatus = "failed";
+        }
         LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
                 .eq(PlannedWaylineEntity::getFlightId, missionId)
                 .set(PlannedWaylineEntity::getLastProgressTime, System.currentTimeMillis());
         if (mappedStatus != null) {
+            update.set(PlannedWaylineEntity::getStatus, mappedStatus);
             update.set(PlannedWaylineEntity::getTaskStatus, mappedStatus);
         }
         if (sc.getError() != null && !sc.getError().isEmpty()) {
@@ -162,15 +170,35 @@ public class WaylineAgentEventListener {
     /** Agent businessState → planned_wayline.task_status (contract 6.1). */
     private static String mapBusinessState(String businessState) {
         if (businessState == null) return null;
-        switch (businessState) {
-            case "Dispatching": return "publishing";
-            case "Ready":       return "ready";
-            case "Executing":   return "executing";
-            case "Paused":      return "paused";
-            case "Stopped":     return "stopped";
-            case "Completed":   return "finished";
-            case "Error":       return "failed";
+        switch (businessState.toLowerCase()) {
+            case "dispatching": return "publishing";
+            case "ready":       return "ready";
+            case "executing":   return "executing";
+            case "paused":      return "paused";
+            case "stopped":     return "stopped";
+            case "completed":   return "finished";
+            case "error":       return "failed";
             default:            return null;
+        }
+    }
+
+    private static String mapMsdkState(String msdkState) {
+        if (msdkState == null) return null;
+        switch (msdkState.toUpperCase()) {
+            case "ERROR":
+            case "FAILED":
+                return "failed";
+            case "EXECUTING":
+                return "executing";
+            case "PAUSED":
+                return "paused";
+            case "STOPPED":
+                return "stopped";
+            case "FINISHED":
+            case "COMPLETED":
+                return "finished";
+            default:
+                return null;
         }
     }
 }

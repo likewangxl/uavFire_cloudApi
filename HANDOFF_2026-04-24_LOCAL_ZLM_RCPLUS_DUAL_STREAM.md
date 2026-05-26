@@ -2,12 +2,12 @@
 
 > 本文档记录 2026-04-24 这一轮联调的真实落地状态。
 > 重点覆盖三条线：
-> 1. 本机 ZLMediaKit + 前后端 IP 切换到 `172.20.10.7`
+> 1. 本机 ZLMediaKit + 前后端 IP 切换到 `192.168.0.30`
 > 2. `rcplus-msdk-agent` 与 backend 双流状态链路打通
 > 3. “真双流”当前仍卡在热成像第二路导出；但驾驶舱已补上可见光主通道真实播放器，不再只是状态页
 >
 > 【2026-04-25 勘误】下面这几条与仓库当前实际状态不符，已列在 §十 勘误：
-> - IP 切换到 `172.20.10.7` 已被回滚，仓库当前统一在 `192.168.50.254`（本机 wifi）
+> - 历史 IP 切换记录仅作背景；仓库当前统一在 `192.168.0.30`（本机 wifi）
 > - `leadership-cockpit.vue` 使用的是 `ZLMRTCClient.Endpoint`（WebRTC 信令），不是 `jswebrtc.Player`
 > - §四.2 / §四.3 关于"驾驶舱没有接真实播放器、不播放视频"的描述不成立，播放器已经接上并在 live tab 渲染 `<video>`
 
@@ -18,10 +18,10 @@
 截至当前工作区，以下结论已经被运行时证据确认：
 
 1. 本机 WebRTC/RTMP/前后端本地联调环境已经统一切到：
-   - 前端：`http://172.20.10.7:8080/`
-   - 后端：`http://172.20.10.7:6789/`
-   - ZLMediaKit RTMP：`rtmp://172.20.10.7:1935/live/<streamId>`
-   - ZLMediaKit WebRTC：`webrtc://172.20.10.7:58925/live/<streamId>`
+   - 前端：`http://192.168.0.30:8080/`
+   - 后端：`http://192.168.0.30:6789/`
+   - ZLMediaKit RTMP：`rtmp://192.168.0.30:1935/live/<streamId>`
+   - ZLMediaKit WebRTC：`webrtc://192.168.0.30:58925/live/<streamId>`
 
 2. `rcplus-msdk-agent -> backend` 这一条状态链路已经真正打通。
    - `RC_PLUS_LOCAL` 当前会写入 backend 的 `dual-stream:group:RC_PLUS_LOCAL`
@@ -40,7 +40,7 @@
      - `msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding`
 
 4. 驾驶舱现在已经具备“可见光主通道真实播放”能力，但不是真双流。
-   - backend 会在 `visible_state = running` 且 agent 尚未回传 URL 时，兜底生成 `webrtc://172.20.10.7:58925/live/{droneSn}-0`
+   - backend 会在 `visible_state = running` 且 agent 尚未回传 URL 时，兜底生成 `webrtc://192.168.0.30:58925/live/{droneSn}-0`
    - 驾驶舱 `leadership-cockpit.vue` 已接入 `jswebrtc.Player`，会直接拉 `visiblePlayUrl`
    - 热成像仍然只有状态，没有第二路真实视频 URL
 
@@ -54,9 +54,9 @@
 
 - 本机 Docker/Colima 已装好并可用
 - 本机 `deployment/zlmediakit` 已启动
-- 后端直播配置已切到本机地址 `172.20.10.7`
-- 前端 API / WS 地址已切到 `172.20.10.7`
-- 相关测试已同步改到 `172.20.10.7`
+- 后端直播配置已切到本机地址 `192.168.0.30`
+- 前端 API / WS 地址已切到 `192.168.0.30`
+- 相关测试已同步改到 `192.168.0.30`
 - 前后端进程已按新配置重启过
 
 关键文件：
@@ -102,7 +102,7 @@ curl -I http://127.0.0.1:58925/
 旧现象：
 
 - RC Plus logcat 持续报：
-  - `java.net.UnknownServiceException: CLEARTEXT communication to 192.168.50.254 not permitted by network security policy`
+  - `java.net.UnknownServiceException: CLEARTEXT communication to 192.168.0.30 not permitted by network security policy`
 
 已修：
 
@@ -113,7 +113,7 @@ curl -I http://127.0.0.1:58925/
 说明：
 
 - DJI SDK 自带 manifest 把 `usesCleartextTraffic` 设成了 `false`
-- 不 override 的话，agent 对本地 `http://172.20.10.7:6789/` 的请求会被系统直接拦掉
+- 不 override 的话，agent 对本地 `http://192.168.0.30:6789/` 的请求会被系统直接拦掉
 
 #### 3.2 Android agent 发到 backend 的 JSON 命名不匹配
 
@@ -201,7 +201,7 @@ curl -I http://127.0.0.1:58925/
 
 - `backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/DualStreamServiceImpl.java`
   - 在 `visible_state = running` 且 `visiblePlayUrl` 为空时，兜底生成：
-    - `webrtc://172.20.10.7:58925/live/{droneSn}-0`
+    - `webrtc://192.168.0.30:58925/live/{droneSn}-0`
   - 对应 `playback_status` 会从 `awaiting-media-url` 收敛为 `visible-playback-ready`
 - `frontend/src/pages/page-web/projects/leadership-cockpit.vue`
   - live tab 不再只是文本状态
@@ -475,7 +475,7 @@ JAVA_HOME=/usr/local/opt/openjdk@17 ./gradlew :app:assembleDebug
 
 ## 八、接手时不要重复排查的点
 
-- 不要再排查 `172.20.10.7` 是否已写进前后端，已经统一
+- 不要再排查 `192.168.0.30` 是否已写进前后端，已经统一
 - 不要再排查 RC Plus 是否能连 backend，已经通过
 - 不要再排查 cleartext HTTP 是否被 Android 拦，已经修掉
 - 不要再排查 dual-stream group 为什么只有 message，snake_case 序列化已经修掉
@@ -505,20 +505,20 @@ JAVA_HOME=/usr/local/opt/openjdk@17 ./gradlew :app:assembleDebug
 
 ## 十、2026-04-25 勘误（按节顺序）
 
-### §一.1 / §二.1 / §八 - IP 统一到 `172.20.10.7`
+### §一.1 / §二.1 / §八 - IP 统一到 `192.168.0.30`
 
-**事实更正**：该 IP 切换已经被回滚。仓库当前的真实统一基准是 `192.168.50.254`（Mac 当前 wifi 接口 en0），具体见：
+**事实更正**：历史 IP 切换记录仅作背景。仓库当前的真实统一基准是 `192.168.0.30`（Mac 当前 wifi 接口 en0），具体见：
 
-- `backend/uavfire/src/main/resources/application.yml`（MQTT host、pilot2 web-entry、livestream.playback.webrtc-host、RTMP、GB28181、WHIP 全部为 `192.168.50.254`）
-- `frontend/src/api/http/config.ts` + `frontend/env/.env`（baseURL / websocketURL / rtmpURL 全部为 `192.168.50.254`）
-- `rcplus-msdk-agent/gradle.properties`（`agentBackendBaseUrl` / `agentMediaHost` 为 `192.168.50.254`）
-- `deployment/zlmediakit/.env`、`deployment/zlmediakit/config/config.ini`（`ZLM_PUBLIC_HOST` / `externIP` 为 `192.168.50.254`）
+- `backend/uavfire/src/main/resources/application.yml`（MQTT host、pilot2 web-entry、livestream.playback.webrtc-host、RTMP、GB28181、WHIP 全部为 `192.168.0.30`）
+- `frontend/src/api/http/config.ts` + `frontend/env/.env`（baseURL / websocketURL / rtmpURL 全部为 `192.168.0.30`）
+- `rcplus-msdk-agent/gradle.properties`（`agentBackendBaseUrl` / `agentMediaHost` 为 `192.168.0.30`）
+- `deployment/zlmediakit/.env`、`deployment/zlmediakit/config/config.ini`（`ZLM_PUBLIC_HOST` / `externIP` 为 `192.168.0.30`）
 
-三方推流 / 信令路径在 `192.168.50.254` 上依然完整对齐：
+三方推流 / 信令路径在 `192.168.0.30` 上依然完整对齐：
 
-- Agent RTMP publish：`rtmp://192.168.50.254:1935/live/{droneSn}-0`
-- Backend 兜底播放地址：`webrtc://192.168.50.254:58925/live/{droneSn}-0`
-- 驾驶舱向 ZLM 发的信令：`http://192.168.50.254:58925/index/api/webrtc?app=live&stream={droneSn}-0&type=play`
+- Agent RTMP publish：`rtmp://192.168.0.30:1935/live/{droneSn}-0`
+- Backend 兜底播放地址：`webrtc://192.168.0.30:58925/live/{droneSn}-0`
+- 驾驶舱向 ZLM 发的信令：`http://192.168.0.30:58925/index/api/webrtc?app=live&stream={droneSn}-0&type=play`
 
 所以"链路 URL 不对齐"不是可见光出画失败的成因，**下一位不要再花时间在 IP 切换上**。
 
@@ -546,4 +546,3 @@ JAVA_HOME=/usr/local/opt/openjdk@17 ./gradlew :app:assembleDebug
 1. 本机起齐 backend + ZLM + frontend + RC Plus agent，做一次端到端可见光出画联调
 2. 如果失败，先抓 ZLM HTTP `/index/api/getMediaList` 和 WebRTC `/index/api/webrtc` 日志，判定是推流没入、还是信令失败、还是 SDP 候选地址不通
 3. 再往热成像第二路导出研究推进（§七.第二步，不变）
-

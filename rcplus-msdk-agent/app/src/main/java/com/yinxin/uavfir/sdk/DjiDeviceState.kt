@@ -6,6 +6,8 @@ data class DjiDeviceState(
     val connectionState: AgentConnectionState,
     val capability: CameraCapability? = null,
     val telemetry: DjiTelemetry? = null,
+    val aircraftModel: String? = null,
+    val flightLimit: DjiFlightLimit = DjiFlightLimit(),
 )
 
 data class DjiTelemetry(
@@ -16,4 +18,21 @@ data class DjiTelemetry(
     val horizontalSpeed: Double? = null,
     val verticalSpeed: Double? = null,
     val batteryPercent: Int? = null,
+)
+
+data class DjiFlightLimit(
+    val heightLimitMeters: Int? = null,
+    val distanceLimitEnabled: Boolean? = null,
+    val distanceLimitMeters: Int? = null,
+)
+
+data class DjiStorageStatus(
+    val freeBytes: Long?,
+    val totalBytes: Long?,
+)
+
+data class DjiHomeStatus(
+    val flightLimitText: String,
+    val taskSpaceText: String,
+    val aircraftStatusText: String,
 )

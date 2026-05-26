@@ -94,6 +94,11 @@ class WaylineAgentCommandRouter(
                 client.ack(droneSn, cmd.tid, RESULT_DOWNLOAD_FAILED, downloadResult.reason)
             }
             is WaylineKmzDownloader.Result.Success -> {
+                val resolvedWaylineIds = waylineIds
+                    ?: WaypointMissionKmzInspector.extractWaylineIds(downloadResult.file).takeIf { it.isNotEmpty() }
+                if (waylineIds.isNullOrEmpty() && !resolvedWaylineIds.isNullOrEmpty()) {
+                    Log.i(TAG, "inferred waylineIds mission=$missionId ids=${resolvedWaylineIds.joinToString(",")}")
+                }
                 executor.pushKmz(missionId, downloadResult.file.absolutePath) { ok, err ->
                     if (!ok) {
                         Log.w(TAG, "pushKmz failed mission=$missionId err=${err?.errorCode()}")
@@ -108,7 +113,7 @@ class WaylineAgentCommandRouter(
                     Log.i(TAG, "kmz pushed mission=$missionId path=${downloadResult.file.absolutePath}")
                     // Per contract §7.2 the agent should auto-start so the aircraft flies the
                     // KMZ that was just pushed; a manual UI gate can be added later if needed.
-                    executor.startMission(missionId, basename, waylineIds)
+                    executor.startMission(missionId, WaypointMissionFileNames.startMissionName(basename), resolvedWaylineIds)
                     forwarder.publishDispatchResult(missionId, RESULT_OK, "kmz-md5:${downloadResult.md5}", basename)
                 }
                 // ACK = command accepted; outcome via wayline_dispatch_result above.

@@ -8,13 +8,15 @@
         <a-col :span="8" v-if="importVisible" class="flex-row flex-justify-end flex-align-center">
           <a-upload
             name="file"
+            accept=".kmz"
             :multiple="false"
             :before-upload="beforeUpload"
             :show-upload-list="false"
-            :customRequest="uploadFile"
+            :custom-request="uploadFile"
           >
-            <a-button type="text" style="color: white;">
+            <a-button type="text" style="color: white;" :loading="loading">
               <SelectOutlined />
+              KMZ同步
             </a-button>
           </a-upload>
         </a-col>
@@ -393,12 +395,17 @@
               <a-tooltip :title="record.name">
                 <span class="planned-wayline-name">{{ record.name }}</span>
               </a-tooltip>
-              <span class="planned-wayline-status">{{ formatPlannedWaylineStatus(record.status) }}</span>
+              <span class="planned-wayline-status" :class="{ failed: normalizePlannedWaylineStatus(record) === PlannedWaylineStatus.FAILED }">
+                {{ formatPlannedWaylineStatus(record) }}
+              </span>
             </div>
             <div class="planned-wayline-meta">
               <span>航点 {{ record.waypoints?.length || 0 }}</span>
               <span>高度 {{ formatNumber(record.defaultHeight) }} m</span>
               <span>速度 {{ formatNumber(record.maxSpeed) }} m/s</span>
+            </div>
+            <div class="planned-wayline-reason" v-if="record.taskStatusReason">
+              {{ record.taskStatusReason }}
             </div>
             <div class="planned-wayline-meta muted">
               <span>机型 {{ record.aircraftModelKey || '-' }}</span>
@@ -533,7 +540,7 @@
         <div v-if="selectedPlannedWayline" class="planned-wayline-detail">
           <div class="planned-wayline-detail-grid">
             <span>名称</span><strong>{{ selectedPlannedWayline.name }}</strong>
-            <span>状态</span><strong>{{ formatPlannedWaylineStatus(selectedPlannedWayline.status) }}</strong>
+            <span>状态</span><strong>{{ formatPlannedWaylineStatus(selectedPlannedWayline) }}</strong>
             <span>机型</span><strong>{{ selectedPlannedWayline.aircraftModelKey || '-' }}</strong>
             <span>飞行器</span><strong>{{ selectedPlannedWayline.aircraftSn || '-' }}</strong>
             <span>网关</span><strong>{{ selectedPlannedWayline.gatewaySn || '-' }}</strong>
@@ -600,7 +607,7 @@ import {
   getPlannedWayline,
   getPlannedWaylines,
   getWaylineFiles,
-  importKmzFile,
+  importPlannedWaylineKmzFile,
   preparePlannedWaylineTask,
   updatePlannedWayline,
 } from '/@/api/wayline'
@@ -637,6 +644,7 @@ import {
   resetPlanningDraft,
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
+import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
 import WaypointActionEditor from '/@/components/WaypointActionEditor.vue'
 import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 
@@ -757,6 +765,71 @@ function normalizePlannedWaylineModel (model: string): string {
   return PLANNED_WAYLINE_MODEL_OPTIONS.includes(normalized) ? normalized : DEFAULT_PLANNED_WAYLINE_MODEL
 }
 
+function pickDeviceField (source: any, camelKey: string, snakeKey: string) {
+  if (!source || typeof source !== 'object') return undefined
+  return source[camelKey] !== undefined ? source[camelKey] : source[snakeKey]
+}
+
+function normalizeDeviceDomain (domain: any): string {
+  if (domain === null || domain === undefined) return ''
+  if (typeof domain === 'object') {
+    return normalizeDeviceDomain(domain.domain ?? domain.value ?? domain.name)
+  }
+  return String(domain).toLowerCase()
+}
+
+function isGatewayDomain (domain: any): boolean {
+  const value = normalizeDeviceDomain(domain)
+  return value === String(EDeviceTypeName.Gateway) ||
+    value === 'gateway' ||
+    value === 'remoter_control' ||
+    value === 'remote_control'
+}
+
+function isDeviceOnline (device: any): boolean {
+  return Boolean(pickDeviceField(device, 'status', 'status') ?? pickDeviceField(device, 'online', 'online') ?? true)
+}
+
+function upsertOnlineAircraft (seen: Set<string>, summary: AircraftSummary) {
+  if (!summary.sn) return
+  seen.add(summary.sn)
+  onlineAircraftMap[summary.sn] = summary
+}
+
+function syncManagedTopoAircrafts (devices: any[], seen: Set<string>) {
+  devices.forEach((gateway: any) => {
+    const children = pickDeviceField(gateway, 'children', 'children')
+    const childList = Array.isArray(children) ? children : (children ? [children] : [])
+    if (!isGatewayDomain(pickDeviceField(gateway, 'domain', 'domain')) && childList.length === 0) return
+    const gatewayOnline = isDeviceOnline(gateway)
+    childList.forEach((child: any) => {
+      const childSn = pickDeviceField(child, 'deviceSn', 'device_sn')
+      if (!childSn) return
+      if (!gatewayOnline && !isDeviceOnline(child)) return
+      upsertOnlineAircraft(seen, {
+        sn: childSn,
+        callsign: pickDeviceField(child, 'nickname', 'nickname') ||
+          pickDeviceField(child, 'deviceName', 'device_name') ||
+          childSn,
+        gatewaySn: pickDeviceField(gateway, 'deviceSn', 'device_sn') || pickDeviceField(child, 'parentSn', 'parent_sn') || '',
+        aircraftModelKey: inferAircraftModelKey(child) || DEFAULT_PLANNED_WAYLINE_MODEL,
+      })
+    })
+  })
+}
+
+function syncMsdkOnlineAircrafts (devices: MsdkDeviceState[], seen: Set<string>) {
+  devices.forEach((device) => {
+    if (!device.aircraftSn || !device.online) return
+    upsertOnlineAircraft(seen, {
+      sn: device.aircraftSn,
+      callsign: device.model || device.aircraftSn,
+      gatewaySn: device.gatewaySn || device.aircraftSn,
+      aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
+    })
+  })
+}
+
 function formatSafePlannedWaylineTimestamp (date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())} ${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
@@ -849,40 +922,36 @@ function buildPagePlannedWaylineBody (name: string, aircraftModelKey: string): C
 async function refreshOnlineAircrafts () {
   const workspaceIdForPlanning = localStorage.getItem(ELocalStorageKey.WorkspaceId) || ''
   if (!workspaceIdForPlanning) return
+  const seen = new Set<string>()
   try {
     const res = await getDeviceTopo(workspaceIdForPlanning)
-    if (res.code !== 0) return
-    const seen = new Set<string>()
-    res.data.forEach((gateway: any) => {
-      // Only consider Gateway domain (RC / RC2); Docks are handled separately elsewhere.
-      if (gateway.domain !== EDeviceTypeName.Gateway) return
-      if (!gateway.status) return
-      const child = gateway.children
-      if (!child?.device_sn) return
-      seen.add(child.device_sn)
-      onlineAircraftMap[child.device_sn] = {
-        sn: child.device_sn,
-        callsign: child.nickname || child.device_name || child.device_sn,
-        gatewaySn: gateway.device_sn,
-        aircraftModelKey: inferAircraftModelKey(child),
-      }
-    })
-    // Drop entries that have gone offline.
-    Object.keys(onlineAircraftMap).forEach(sn => {
-      if (!seen.has(sn)) delete onlineAircraftMap[sn]
-    })
-    // Keep the selection valid.
-    if (selectedAircraftSn.value && !onlineAircraftMap[selectedAircraftSn.value]) {
-      if (planningState.active && planningState.aircraftSn === selectedAircraftSn.value) {
-        planningStop()
-      }
-      if (!planningState.executing && planningState.aircraftSn === selectedAircraftSn.value) {
-        planningSetTarget('', '')
-      }
-      selectedAircraftSn.value = ''
+    if (res.code === 0 && Array.isArray(res.data)) {
+      syncManagedTopoAircrafts(res.data, seen)
+    }
+  } catch (e) {
+    // silent — MSDK state below and the next timer tick can still populate candidates.
+  }
+  try {
+    const msdkRes = await listMsdkDevices()
+    if (msdkRes.code === 0 && Array.isArray(msdkRes.data)) {
+      syncMsdkOnlineAircrafts(msdkRes.data, seen)
     }
   } catch (e) {
     // silent — topo will retry.
+  }
+  // Drop entries that have gone offline.
+  Object.keys(onlineAircraftMap).forEach(sn => {
+    if (!seen.has(sn)) delete onlineAircraftMap[sn]
+  })
+  // Keep the selection valid.
+  if (selectedAircraftSn.value && !onlineAircraftMap[selectedAircraftSn.value]) {
+    if (planningState.active && planningState.aircraftSn === selectedAircraftSn.value) {
+      planningStop()
+    }
+    if (!planningState.executing && planningState.aircraftSn === selectedAircraftSn.value) {
+      planningSetTarget('', '')
+    }
+    selectedAircraftSn.value = ''
   }
 }
 
@@ -1143,11 +1212,31 @@ async function onGeneratePlannedWaylineFile (record: PlannedWaylineRecord) {
   })
 }
 
+function resolvePrepareTargetDroneSn (record: PlannedWaylineRecord) {
+  const selectedSummary = selectedAircraftSn.value ? onlineAircraftMap[selectedAircraftSn.value] : null
+  if (selectedSummary?.sn) return selectedSummary.sn
+  if (record.droneSn) return record.droneSn
+  if (record.aircraftSn) return record.aircraftSn
+  if (onlineAircrafts.value.length === 1) {
+    const onlyAircraft = onlineAircrafts.value[0]
+    selectedAircraftSn.value = onlyAircraft.sn
+    planningSetTarget(onlyAircraft.gatewaySn, onlyAircraft.sn)
+    return onlyAircraft.sn
+  }
+  return ''
+}
+
 async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
+  await refreshOnlineAircrafts()
+  const targetDroneSn = resolvePrepareTargetDroneSn(record)
+  if (!targetDroneSn) {
+    message.warning('检测到多台或未检测到在线飞行器，请先在上方飞行器下拉框选择目标后再下发准备。')
+    return
+  }
   // Agent 路径 (M4T + RC,无机场) 不需要 dockSn,后端按 dockSn 是否非空自动路由。
   // 如果用户绑定了机场就走 dock 路径;否则走 agent 把 KMZ 推到 RC + MSDK。
   const body: any = {
-    droneSn: record.aircraftSn,
+    droneSn: targetDroneSn,
     executeTime: 0,
     taskType: 'IMMEDIATE',
   }
@@ -1165,7 +1254,7 @@ async function onExecutePlannedWaylineTask (record: PlannedWaylineRecord) {
   await runPlannedWaylineAction(
     record,
     () => executePlannedWaylineTask(workspaceId, record.plannedWaylineId),
-    '航线任务已开始执行')
+    '执行指令已发出，等待飞行器回传状态')
 }
 
 async function onCancelPlannedWaylineTask (record: PlannedWaylineRecord) {
@@ -1408,40 +1497,46 @@ function onScroll (e: any) {
   }
 }
 
-interface FileItem {
-  uid: string;
-  name?: string;
+interface FileItem extends File {
+  uid?: string;
   status?: string;
   response?: string;
   url?: string;
 }
 
-interface FileInfo {
-  file: FileItem;
-  fileList: FileItem[];
-}
-const fileList = ref<FileItem[]>([])
-
 function beforeUpload (file: FileItem) {
-  fileList.value = [file]
-  loading.value = true
+  if (!file.name || !file.name.toLowerCase().endsWith('.kmz')) {
+    message.error('文件格式错误，请选择 KMZ 文件。')
+    return false
+  }
   return true
 }
-const uploadFile = async () => {
-  fileList.value.forEach(async (file: FileItem) => {
-    const fileData = new FormData()
-    fileData.append('file', file, file.name)
-    await importKmzFile(workspaceId, fileData).then((res) => {
-      if (res.code === 0) {
-        message.success(`${file.name} 上传成功`)
-        canRefresh.value = true
-        refreshWaylineFiles(true)
-      }
-    }).finally(() => {
-      loading.value = false
-      fileList.value = []
-    })
-  })
+
+const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) => void; onError?: (err: any) => void }) => {
+  const file = options?.file
+  if (!file) {
+    message.error('请选择 KMZ 文件。')
+    return
+  }
+  loading.value = true
+  const fileData = new FormData()
+  fileData.append('file', file, file.name)
+  try {
+    const res = await importPlannedWaylineKmzFile(workspaceId, fileData)
+    if (res.code === 0) {
+      message.success(`${file.name} 已导入为可执行航线`)
+      canRefresh.value = true
+      refreshPlannedWaylines(true)
+      refreshWaylineFiles(true)
+      options?.onSuccess?.(res)
+    } else {
+      options?.onError?.(new Error(res.message || 'KMZ 导入失败'))
+    }
+  } catch (error) {
+    options?.onError?.(error)
+  } finally {
+    loading.value = false
+  }
 }
 
 </script>
@@ -1673,12 +1768,26 @@ const uploadFile = async () => {
   color: #faad14;
   font-size: 11px;
 }
+.planned-wayline-status.failed {
+  background: #cf1322;
+  color: #fff;
+}
 .planned-wayline-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
   color: hsla(0, 0%, 100%, 0.65);
   margin-bottom: 5px;
+}
+.planned-wayline-reason {
+  margin-bottom: 5px;
+  padding: 4px 6px;
+  border-left: 2px solid #cf1322;
+  background: rgba(207, 19, 34, 0.16);
+  color: #ffccc7;
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
 }
 .planned-wayline-meta.muted {
   color: hsla(0, 0%, 100%, 0.35);

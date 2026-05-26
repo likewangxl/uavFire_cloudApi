@@ -8,6 +8,8 @@ server:
       prefix: access
       suffix: .log
 spring:
+  config:
+    import: optional:classpath:application-fc100-local.yml
   main:
     allow-bean-definition-overriding: true
   application:
@@ -218,7 +220,7 @@ minio:
 
 ai-service:
   base-url: ${AI_SERVICE_BASE_URL:http://127.0.0.1:9000}
-  zlm-rtsp-host: ${AI_SERVICE_ZLM_RTSP_HOST:127.0.0.1}
+  zlm-rtsp-host: ${AI_SERVICE_ZLM_RTSP_HOST:192.168.0.30}
   zlm-rtsp-port: ${AI_SERVICE_ZLM_RTSP_PORT:8554}
   auto-trigger-on-livestream: ${AI_SERVICE_AUTO_TRIGGER_ON_LIVESTREAM:true}
   auto-trigger-on-wayline: ${AI_SERVICE_AUTO_TRIGGER_ON_WAYLINE:true}

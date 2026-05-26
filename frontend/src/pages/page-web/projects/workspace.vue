@@ -159,13 +159,23 @@ useConnectWebSocket(messageHandler)
     .left {
       width: 100%;
       flex: 1 1 auto;
+      min-width: 0;
 
       .main-content {
         flex: 1;
+        min-width: 0;
         width: auto;
+        overflow: hidden;
         background-color: #f6f8fa;
         color: #222;
       }
+    }
+
+    :deep(.demo-project-sidebar-wrapper) {
+      flex: 0 0 50px;
+      position: relative;
+      z-index: 20;
+      background-color: #232323;
     }
   }
 

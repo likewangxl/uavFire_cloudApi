@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yx.uavfire.component.oss.model.OssConfiguration;
+import com.yx.uavfire.msdk.model.MsdkDeviceStateDTO;
+import com.yx.uavfire.msdk.service.MsdkDeviceStateService;
 import com.yx.uavfire.wayline.dao.IPlannedWaylineMapper;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineFileDTO;
@@ -27,9 +29,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.DigestUtils;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -42,7 +47,10 @@ import java.io.InputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import javax.xml.stream.XMLOutputFactory;
@@ -73,6 +81,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MsdkDeviceStateService msdkDeviceStateService;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private SDKWaylineService sdkWaylineService;
@@ -118,6 +129,83 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         int inserted = mapper.insert(entity);
         if (inserted <= 0) {
             throw new IllegalArgumentException("Failed to create planned wayline.");
+        }
+        return entity2Dto(entity);
+    }
+
+    @Override
+    public PlannedWaylineDTO importKmzFile(String workspaceId, String username, MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("KMZ file is required.");
+        }
+
+        String plannedWaylineId = UUID.randomUUID().toString();
+        String filename = normalizeImportedKmzFilename(file.getOriginalFilename(), plannedWaylineId);
+        byte[] content;
+        try {
+            content = file.getBytes();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read KMZ file.", e);
+        }
+
+        PublishedWaylineFileDTO publishedWayline = waylineFileService.createPublishedWayline(
+                workspaceId,
+                PublishedWaylineCreateDTO.builder()
+                        .filename(filename)
+                        .objectKey(buildImportedKmzObjectKey(plannedWaylineId))
+                        .username(username)
+                        .content(content)
+                        .build());
+
+        com.dji.sdk.cloudapi.wayline.GetWaylineListResponse importedFile = waylineFileService
+                .getWaylineByWaylineId(workspaceId, publishedWayline.getWaylineId())
+                .orElseThrow(() -> new IllegalStateException("Imported KMZ metadata was not found."));
+
+        String kmzUrl;
+        try {
+            kmzUrl = waylineFileService.getObjectUrl(workspaceId, publishedWayline.getWaylineId()).toString();
+        } catch (SQLException e) {
+            rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
+            throw new IllegalStateException("Failed to get imported KMZ file URL.", e);
+        }
+
+        long now = System.currentTimeMillis();
+        PlannedWaylineEntity entity = PlannedWaylineEntity.builder()
+                .plannedWaylineId(plannedWaylineId)
+                .workspaceId(workspaceId)
+                .name(sanitizeDjiWaylineName(importedFile.getName(), plannedWaylineId))
+                .aircraftModelKey(importedFile.getDroneModelKey() != null
+                        ? importedFile.getDroneModelKey().name()
+                        : "M30T")
+                .gatewaySn("")
+                .aircraftSn("")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[]")
+                .status(STATUS_FILE_GENERATED)
+                .publishedWaylineId(publishedWayline.getWaylineId())
+                .kmzUrl(kmzUrl)
+                .kmzMd5(importedFile.getSign())
+                .kmzObjectKey(importedFile.getObjectKey())
+                .fileGeneratedTime(now)
+                .taskStatus(STATUS_FILE_GENERATED)
+                .creator(username)
+                .publisher(username)
+                .publishTime(now)
+                .createTime(now)
+                .updateTime(now)
+                .build();
+
+        int inserted;
+        try {
+            inserted = mapper.insert(entity);
+        } catch (RuntimeException e) {
+            rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
+            throw e;
+        }
+        if (inserted <= 0) {
+            rollbackPublishedWayline(workspaceId, publishedWayline.getWaylineId());
+            throw new IllegalArgumentException("Failed to import KMZ as planned wayline.");
         }
         return entity2Dto(entity);
     }
@@ -347,6 +435,26 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return null;
     }
 
+    private String resolveAgentAircraftTarget(PlannedWaylineEntity existing) {
+        String droneSn = waylineDroneSn(existing);
+        if (StringUtils.hasText(droneSn)) {
+            return droneSn;
+        }
+        if (msdkDeviceStateService == null) {
+            return null;
+        }
+        List<MsdkDeviceStateDTO> onlineAircrafts = msdkDeviceStateService.listOnline().stream()
+                .filter(state -> state != null && StringUtils.hasText(state.getAircraftSn()))
+                .collect(Collectors.toList());
+        if (onlineAircrafts.size() != 1) {
+            return null;
+        }
+        String aircraftSn = onlineAircrafts.get(0).getAircraftSn();
+        existing.setDroneSn(aircraftSn);
+        existing.setAircraftSn(aircraftSn);
+        return aircraftSn;
+    }
+
     private void triggerFireDetectionForWayline(PlannedWaylineEntity existing) {
         if (!aiAutoTriggerOnWayline || aiServiceClient == null) return;
         String droneSn = waylineDroneSn(existing);
@@ -530,21 +638,23 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             return;
         }
         if (!StringUtils.hasText(entity.getKmzUrl())) {
-            log.warn("KMZ url missing for flight {}, skipping agent dispatch", entity.getFlightId());
-            return;
+            throw new IllegalStateException("KMZ 地址缺失，请重新生成航线文件。");
         }
-        String droneSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : "RC_PLUS_LOCAL";
+        String droneSn = resolveAgentAircraftTarget(entity);
+        if (!StringUtils.hasText(droneSn)) {
+            throw new IllegalStateException("执行航线前需要选择在线飞行器。");
+        }
 
         // Load KMZ into memory so the agent can download it via the HTTP KMZ endpoint.
+        byte[] kmzBytes;
         try {
-            byte[] kmzBytes;
             try (InputStream is = new URL(entity.getKmzUrl()).openStream()) {
                 kmzBytes = is.readAllBytes();
             }
+            kmzBytes = normalizeAgentRuntimeKmz(kmzBytes);
             waylineAgentService.prepareKmz(droneSn, entity.getFlightId(), kmzBytes);
         } catch (Exception e) {
-            log.warn("Failed to cache KMZ for flight {}: {}", entity.getFlightId(), e.getMessage());
-            return;
+            throw new IllegalStateException("缓存 KMZ 失败，无法下发航线。", e);
         }
 
         String httpKmzUrl = waylineAgentServerUrl + "/wayline-agent/api/v1/agents/" + droneSn
@@ -554,16 +664,135 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                         .setMissionId(entity.getFlightId())
                         .setKmzUrl(httpKmzUrl)
                         .setKmzFilename(entity.getFlightId() + ".kmz")
-                        .setKmzMd5(entity.getKmzMd5());
+                        .setKmzMd5(DigestUtils.md5DigestAsHex(kmzBytes));
         waylineAgentService.dispatchWayline(droneSn, data);
         log.info("Dispatched wayline to agent {} flight {} kmzUrl={}", droneSn, entity.getFlightId(), httpKmzUrl);
+    }
+
+    private byte[] normalizeAgentRuntimeKmz(byte[] kmzBytes) throws IOException {
+        boolean changed = false;
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(kmzBytes), StandardCharsets.UTF_8);
+             ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
+            ZipEntry entry = zipInputStream.getNextEntry();
+            while (entry != null) {
+                if (entry.isDirectory()) {
+                    zipOutputStream.putNextEntry(new ZipEntry(entry.getName()));
+                    zipOutputStream.closeEntry();
+                    entry = zipInputStream.getNextEntry();
+                    continue;
+                }
+                ByteArrayOutputStream entryBytes = new ByteArrayOutputStream();
+                zipInputStream.transferTo(entryBytes);
+                byte[] content = entryBytes.toByteArray();
+                if ("wpmz/template.kml".equals(entry.getName()) || "wpmz/waylines.wpml".equals(entry.getName())) {
+                    String xml = entryBytes.toString(StandardCharsets.UTF_8);
+                    String normalized = normalizeM4tRuntimeWpml(xml);
+                    if (!normalized.equals(xml)) {
+                        changed = true;
+                        content = normalized.getBytes(StandardCharsets.UTF_8);
+                    }
+                }
+                zipOutputStream.putNextEntry(new ZipEntry(entry.getName()));
+                zipOutputStream.write(content);
+                zipOutputStream.closeEntry();
+                entry = zipInputStream.getNextEntry();
+            }
+        }
+        return changed ? outputStream.toByteArray() : kmzBytes;
+    }
+
+    private String normalizeM4tRuntimeWpml(String xml) {
+        boolean m4tLike = xml.contains("<wpml:droneEnumValue>99</wpml:droneEnumValue>")
+                && xml.contains("<wpml:droneSubEnumValue>1</wpml:droneSubEnumValue>")
+                && xml.contains("<wpml:payloadEnumValue>89</wpml:payloadEnumValue>");
+        if (!m4tLike) {
+            return xml;
+        }
+        String turnDamping = formatNumeric(resolveM4tRuntimeTurnDamping(xml));
+        String normalized = xml;
+        normalized = normalized.replace("<wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost>",
+                "<wpml:exitOnRCLost>goContinue</wpml:exitOnRCLost>");
+        normalized = normalized.replaceAll("<wpml:globalTransitionalSpeed>[^<]+</wpml:globalTransitionalSpeed>",
+                "<wpml:globalTransitionalSpeed>5</wpml:globalTransitionalSpeed>");
+        normalized = normalized.replaceAll("(?s)\\s*<wpml:payloadParam>.*?</wpml:payloadParam>", "");
+        normalized = normalized.replaceAll("(?s)\\s*<wpml:realTimeFollowSurfaceByFov>.*?</wpml:realTimeFollowSurfaceByFov>", "");
+        normalized = normalized.replaceAll("<wpml:globalWaypointTurnMode>[^<]+</wpml:globalWaypointTurnMode>",
+                "<wpml:globalWaypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:globalWaypointTurnMode>");
+        normalized = normalized.replaceAll("(?s)\\s*<wpml:useGlobalHeight>.*?</wpml:useGlobalHeight>", "");
+        normalized = normalized.replaceAll("(?s)\\s*<wpml:useGlobalTurnParam>.*?</wpml:useGlobalTurnParam>", "");
+        normalized = addM4tTemplateTurnParams(normalized, turnDamping);
+        normalized = normalized.replace("<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>",
+                "<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>");
+        normalized = normalized.replaceAll("<wpml:waypointTurnDampingDist>[^<]+</wpml:waypointTurnDampingDist>",
+                "<wpml:waypointTurnDampingDist>" + turnDamping + "</wpml:waypointTurnDampingDist>");
+        normalized = normalized.replace("<wpml:useStraightLine>0</wpml:useStraightLine>",
+                "<wpml:useStraightLine>1</wpml:useStraightLine>");
+        return normalized;
+    }
+
+    private String addM4tTemplateTurnParams(String xml, String turnDamping) {
+        Matcher matcher = Pattern.compile("(?s)<Placemark>(.*?)</Placemark>").matcher(xml);
+        StringBuffer buffer = new StringBuffer();
+        while (matcher.find()) {
+            String placemarkBody = matcher.group(1);
+            if (!placemarkBody.contains("<wpml:waypointTurnParam>")
+                    && placemarkBody.contains("</wpml:height>")) {
+                String turnParam = "<wpml:waypointTurnParam>"
+                        + "<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"
+                        + "<wpml:waypointTurnDampingDist>" + turnDamping + "</wpml:waypointTurnDampingDist>"
+                        + "</wpml:waypointTurnParam>";
+                String replacement = "<Placemark>"
+                        + placemarkBody.replaceFirst("</wpml:height>", "</wpml:height>" + turnParam)
+                        + "</Placemark>";
+                matcher.appendReplacement(buffer, Matcher.quoteReplacement(replacement));
+            }
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private double resolveM4tRuntimeTurnDamping(String xml) {
+        double minSegmentMeters = minAdjacentCoordinateDistanceMeters(xml);
+        if (minSegmentMeters > 0) {
+            return Math.min(10.0, Math.max(0.5, minSegmentMeters / 4.0));
+        }
+        return 10.0;
+    }
+
+    private double minAdjacentCoordinateDistanceMeters(String xml) {
+        Matcher matcher = Pattern.compile("(?s)<coordinates>\\s*([0-9.+\\-]+),([0-9.+\\-]+)(?:,[^<]*)?\\s*</coordinates>")
+                .matcher(xml);
+        List<double[]> coordinates = new ArrayList<>();
+        while (matcher.find()) {
+            try {
+                double lng = Double.parseDouble(matcher.group(1));
+                double lat = Double.parseDouble(matcher.group(2));
+                coordinates.add(new double[]{lat, lng});
+            } catch (NumberFormatException ignored) {
+                // Ignore malformed coordinates; structural validation runs elsewhere.
+            }
+        }
+        if (coordinates.size() < 2) {
+            return 0.0;
+        }
+        double min = Double.MAX_VALUE;
+        for (int i = 1; i < coordinates.size(); i++) {
+            double[] previous = coordinates.get(i - 1);
+            double[] current = coordinates.get(i);
+            min = Math.min(min, haversineMeters(previous[0], previous[1], current[0], current[1]));
+        }
+        return min == Double.MAX_VALUE ? 0.0 : min;
     }
 
     private void invokeAgentControl(PlannedWaylineEntity entity, ControlOp op) {
         if (waylineAgentService == null) {
             throw new IllegalStateException("Agent service unavailable; cannot route control command.");
         }
-        String droneSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : "RC_PLUS_LOCAL";
+        String droneSn = resolveAgentAircraftTarget(entity);
+        if (!StringUtils.hasText(droneSn)) {
+            throw new IllegalStateException("控制航线前需要选择在线飞行器。");
+        }
         com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO data =
                 new com.yx.uavfire.wayline.agent.model.dto.WaylineControlDataDTO().setMissionId(entity.getFlightId());
         switch (op) {
@@ -1187,6 +1416,24 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private String trimTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private String buildImportedKmzObjectKey(String plannedWaylineId) {
+        String filename = plannedWaylineId + ".kmz";
+        if (!StringUtils.hasText(OssConfiguration.objectDirPrefix)) {
+            return filename;
+        }
+        return trimTrailingSlash(OssConfiguration.objectDirPrefix) + "/" + filename;
+    }
+
+    private String normalizeImportedKmzFilename(String originalFilename, String fallbackId) {
+        String fallback = StringUtils.hasText(fallbackId) ? fallbackId : "imported-wayline";
+        String filename = StringUtils.hasText(originalFilename) ? originalFilename.trim() : fallback + ".kmz";
+        if (!filename.toLowerCase(java.util.Locale.ROOT).endsWith(".kmz")) {
+            filename = filename + ".kmz";
+        }
+        String basename = filename.substring(0, filename.length() - 4);
+        return sanitizeDjiWaylineName(basename, fallback) + ".kmz";
     }
 
     private String sanitizeDjiWaylineName(String name, String fallback) {

@@ -42,4 +42,6 @@ public class DualStreamLiveGroupDTO {
     private Boolean visibleSupported;
 
     private Boolean thermalSupported;
+
+    private Double thermalCenterTemperatureC;
 }

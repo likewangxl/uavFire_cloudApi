@@ -32,20 +32,20 @@ Cloud SDK livestream service code is kept as a manual fallback in phase 1. The l
 The current working tree is configured around the Mac LAN IP:
 
 ```text
-192.168.2.34
+192.168.0.30
 ```
 
 Key paths using this baseline:
 
-- Backend API: `http://192.168.2.34:6789`
-- Frontend dev server: `http://192.168.2.34:8080`
-- ZLMediaKit HTTP/WebRTC API: `http://192.168.2.34:58925`
-- ZLMediaKit RTMP: `rtmp://192.168.2.34:1935/live/<stream>`
-- Agent backend URL: `http://192.168.2.34:6789/`
-- Agent media host: `192.168.2.34`
-- Agent MQTT broker: `tcp://192.168.2.34:1883`
+- Backend API: `http://192.168.0.30:6789`
+- Frontend dev server: `http://192.168.0.30:8080`
+- ZLMediaKit HTTP/WebRTC API: `http://192.168.0.30:58925`
+- ZLMediaKit RTMP: `rtmp://192.168.0.30:1935/live/<stream>`
+- Agent backend URL: `http://192.168.0.30:6789/`
+- Agent media host: `192.168.0.30`
+- Agent MQTT broker: `tcp://192.168.0.30:1883`
 
-Older documents mention `192.168.50.254` or `172.20.10.7`; treat those as historical unless the local network has intentionally been switched again.
+Older documents may mention previous LAN IPs; treat those as historical unless the local network has intentionally been switched again.
 
 ## Subsystem Status
 

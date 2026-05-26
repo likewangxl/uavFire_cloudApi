@@ -7,6 +7,11 @@ interface StreamProvider {
 
     suspend fun focusThermal(droneSn: String): StreamStartResult
 
+    suspend fun focusThermal(
+        droneSn: String,
+        thermalMeasureRegion: ThermalMeasureRegion?,
+    ): StreamStartResult = focusThermal(droneSn)
+
     suspend fun stop()
 }
 
@@ -15,6 +20,8 @@ data class StreamStartResult(
     val thermalState: BoundStreamState,
     val thermalFailureMessage: String? = null,
     val playbackStatus: String? = null,
+    val thermalCenterTemperatureC: Double? = null,
+    val thermalMeasureRegion: ThermalMeasureRegion? = null,
 ) {
     val isApplied: Boolean
         get() = visibleState == BoundStreamState.BOUND

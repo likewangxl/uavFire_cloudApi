@@ -205,8 +205,8 @@ class DjiFlightControlActionClient : FlightControlActionClient {
             throw IllegalArgumentException("unsupported-virtual-stick-key:$key")
         }
         return VirtualStickFlightControlParam(
-            pitchVelocity,
             rollVelocity,
+            pitchVelocity,
             0.0,
             verticalVelocity,
             VerticalControlMode.VELOCITY,
@@ -219,7 +219,7 @@ class DjiFlightControlActionClient : FlightControlActionClient {
     companion object {
         private const val MSDK_ACTION_TIMEOUT_MS: Long = 8_000
         private const val MIN_VIRTUAL_STICK_DURATION_MS: Long = 100
-        private const val MAX_VIRTUAL_STICK_DURATION_MS: Long = 5_000
+        private const val MAX_VIRTUAL_STICK_DURATION_MS: Long = 160_000
         private const val VIRTUAL_STICK_SEND_INTERVAL_MS: Long = 100
         private const val MIN_FLY_TO_SPEED_MPS: Double = 1.0
         private const val MAX_FLY_TO_SPEED_MPS: Double = 15.0

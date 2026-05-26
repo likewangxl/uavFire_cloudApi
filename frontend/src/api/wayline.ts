@@ -181,6 +181,16 @@ export const deletePlannedWayline = async function (workspaceId: string, planned
   return result.data
 }
 
+export const importPlannedWaylineKmzFile = async function (workspaceId: string, file: FormData): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+  const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/import-kmz`
+  const result = await request.post(url, file, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    }
+  })
+  return normalizePlannedWaylineResult(result.data)
+}
+
 export const publishPlannedWayline = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PublishPlannedWaylineResult>> {
   const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/publish`
   const result = await request.post(url)

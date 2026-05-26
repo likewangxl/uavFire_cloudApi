@@ -32,4 +32,6 @@ public class DualStreamAgentStatusDTO {
     private String visiblePlayUrl;
 
     private String thermalPlayUrl;
+
+    private Double thermalCenterTemperatureC;
 }

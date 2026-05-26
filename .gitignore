@@ -11,6 +11,7 @@ yarn-error.log*
 target/
 logs/
 *.class
+backend/uavfire/src/main/resources/application-fc100-local.yml
 
 # Android / Kotlin agent
 .gradle/
@@ -25,6 +26,20 @@ local.properties
 Thumbs.db
 
 # Runtime output
+models/
+data/
+screenshots/
+backups/
+exported-kmz/
+kmz/
+msdk_assets_pack/
+**/__pycache__/
+*.py[cod]
+*.pid
+*.rdb
+.env
+ai-service/data/
+ai-service/.env
 sample-run*.out.log
 sample-run*.err.log
 vite-*.out.log
@@ -32,6 +47,13 @@ vite-*.out.log
 
 # OMC tool state (local only)
 .omc/
+.omx/
+.claude/
+.superpowers/
+
+# Local scratch files
+/1.txt
+/package-lock.json
 
 # Vendored DJI MSDK V5 sample (cloned for local exploration, not part of uavfire)
 Mobile-SDK-Android-V5/

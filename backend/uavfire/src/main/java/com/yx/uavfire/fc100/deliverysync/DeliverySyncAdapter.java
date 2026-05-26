@@ -2,9 +2,13 @@ package com.yx.uavfire.fc100.deliverysync;
 
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceProperties;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskRef;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
 
 import java.util.List;
 
@@ -14,7 +18,10 @@ import java.util.List;
 public interface DeliverySyncAdapter {
     List<DeliveryDeviceDTO> listDevices(String workspaceId);
     DeliveryDeviceProperties getDeviceProperties(String deviceSn);
+    void importWayline(WaylineImportRequest req);
     DeliveryTaskRef createTask(CreateTaskRequest req);
     void startTask(String taskId);
     DeliveryTaskStatus queryTaskStatus(String taskId);
+    DeliveryCommandRef sendDeviceCommand(DeviceCommandRequest req);
+    DeliveryCommandStatus queryDeviceCommandStatus(String deviceSn);
 }

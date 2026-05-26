@@ -29,6 +29,7 @@ export const normalizeDualStreamGroup = (group) => {
     lastCommandAction: pick(group, 'lastCommandAction', 'last_command_action'),
     lastCommandStatus: pick(group, 'lastCommandStatus', 'last_command_status'),
     visibleSupported: pick(group, 'visibleSupported', 'visible_supported'),
-    thermalSupported: pick(group, 'thermalSupported', 'thermal_supported')
+    thermalSupported: pick(group, 'thermalSupported', 'thermal_supported'),
+    thermalCenterTemperatureC: pick(group, 'thermalCenterTemperatureC', 'thermal_center_temperature_c')
   }
 }

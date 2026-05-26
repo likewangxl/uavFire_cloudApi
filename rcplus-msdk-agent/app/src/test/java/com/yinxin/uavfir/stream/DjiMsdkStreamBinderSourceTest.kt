@@ -26,6 +26,25 @@ class DjiMsdkStreamBinderSourceTest {
     }
 
     @Test
+    fun preferredVisibleSource_prioritizesZoomBeforeWideVisibleSources() {
+        val source = String(Files.readAllBytes(
+            Paths.get("src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt"),
+        ))
+        val preferredVisibleSourceBody = source.substringAfter("private fun preferredVisibleSource")
+            .substringBefore("private fun loadAvailableSources")
+
+        assertTrue(
+            "visible fire detection should default to zoom camera before wide/default visible sources",
+            preferredVisibleSourceBody.contains("CameraVideoStreamSourceType.ZOOM_CAMERA"),
+        )
+        assertTrue(
+            "zoom source should be checked before falling back to the first non-infrared source",
+            preferredVisibleSourceBody.indexOf("CameraVideoStreamSourceType.ZOOM_CAMERA") <
+                preferredVisibleSourceBody.indexOf("CameraVideoStreamSourceType.INFRARED_CAMERA"),
+        )
+    }
+
+    @Test
     fun focusThermal_usesThermalOnlyInsteadOfSideBySidePip() {
         val source = String(Files.readAllBytes(
             Paths.get("src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt"),

@@ -6,6 +6,7 @@ import com.yinxin.uavfir.sdk.DjiDeviceState
 import com.yinxin.uavfir.stream.BoundStreamState
 import com.yinxin.uavfir.stream.StreamProvider
 import com.yinxin.uavfir.stream.StreamStartResult
+import com.yinxin.uavfir.stream.ThermalMeasureRegion
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +20,8 @@ class DualStreamSessionManager(
         val visibleState: BoundStreamState? = null,
         val thermalState: BoundStreamState? = null,
         val playbackStatus: String? = null,
+        val thermalCenterTemperatureC: Double? = null,
+        val thermalMeasureRegion: ThermalMeasureRegion? = null,
     )
 
     private val _state = MutableStateFlow(DualStreamSessionState.INIT)
@@ -28,17 +31,20 @@ class DualStreamSessionManager(
     private var lastFailureMessage: String? = null
     private var lastStartResult: StreamStartResult? = null
     private var lastPlaybackStatus: String? = null
+    private var lastThermalCenterTemperatureC: Double? = null
 
     suspend fun start(droneSn: String) {
         _state.value = DualStreamSessionState.STARTING
         lastFailureMessage = null
         lastStartResult = null
         lastPlaybackStatus = null
+        lastThermalCenterTemperatureC = null
         runCatching {
             streamProvider.start(droneSn)
         }.onSuccess { result ->
             lastStartResult = result
             lastPlaybackStatus = result.playbackStatus
+            lastThermalCenterTemperatureC = result.thermalCenterTemperatureC
             if (result.isApplied) {
                 _state.value = DualStreamSessionState.RUNNING
                 lastFailureMessage = result.thermalFailureMessage
@@ -60,6 +66,7 @@ class DualStreamSessionManager(
         }.onSuccess {
             _state.value = DualStreamSessionState.STOPPED
             lastPlaybackStatus = "awaiting-media-url"
+            lastThermalCenterTemperatureC = null
         }.onFailure {
             _state.value = DualStreamSessionState.FAILED
             lastFailureMessage = it.message ?: it::class.simpleName ?: "unknown-stop-failure"
@@ -83,11 +90,18 @@ class DualStreamSessionManager(
         thermalState = lastStartResult?.thermalState,
         failureReason = lastFailureMessage,
         playbackStatus = lastPlaybackStatus,
+        thermalCenterTemperatureC = lastThermalCenterTemperatureC,
     )
 
     override suspend fun executeCommand(
         droneSn: String,
         action: String,
+    ): CommandExecutionResult = executeCommand(droneSn, action, null)
+
+    override suspend fun executeCommand(
+        droneSn: String,
+        action: String,
+        thermalMeasureRegion: ThermalMeasureRegion?,
     ): CommandExecutionResult = when (action.lowercase()) {
         "start" -> {
             start(droneSn)
@@ -129,6 +143,7 @@ class DualStreamSessionManager(
                 lastStartResult = result
                 lastPlaybackStatus = result.playbackStatus
                 lastFailureMessage = null
+                lastThermalCenterTemperatureC = null
                 CommandExecutionResult(
                     status = "applied",
                     visibleState = result.visibleState,
@@ -149,18 +164,51 @@ class DualStreamSessionManager(
         )
 
         "focus-thermal" -> runCatching {
-            streamProvider.focusThermal(droneSn)
+            streamProvider.focusThermal(droneSn, null)
         }.fold(
             onSuccess = { result ->
                 lastStartResult = result
                 lastPlaybackStatus = result.playbackStatus
                 lastFailureMessage = result.thermalFailureMessage
+                lastThermalCenterTemperatureC = result.thermalCenterTemperatureC
                 CommandExecutionResult(
                     status = "applied",
                     message = result.thermalFailureMessage,
                     visibleState = result.visibleState,
                     thermalState = result.thermalState,
                     playbackStatus = result.playbackStatus,
+                    thermalCenterTemperatureC = result.thermalCenterTemperatureC,
+                    thermalMeasureRegion = result.thermalMeasureRegion,
+                )
+            },
+            onFailure = {
+                lastFailureMessage = it.message ?: "focus-thermal-failed"
+                CommandExecutionResult(
+                    status = "failed",
+                    message = lastFailureMessage,
+                    visibleState = lastStartResult?.visibleState,
+                    thermalState = lastStartResult?.thermalState,
+                    playbackStatus = lastPlaybackStatus,
+                )
+            },
+        )
+
+        "measure-thermal-region" -> runCatching {
+            streamProvider.focusThermal(droneSn, thermalMeasureRegion)
+        }.fold(
+            onSuccess = { result ->
+                lastStartResult = result
+                lastPlaybackStatus = result.playbackStatus
+                lastFailureMessage = result.thermalFailureMessage
+                lastThermalCenterTemperatureC = result.thermalCenterTemperatureC
+                CommandExecutionResult(
+                    status = "applied",
+                    message = result.thermalFailureMessage,
+                    visibleState = result.visibleState,
+                    thermalState = result.thermalState,
+                    playbackStatus = result.playbackStatus,
+                    thermalCenterTemperatureC = result.thermalCenterTemperatureC,
+                    thermalMeasureRegion = result.thermalMeasureRegion,
                 )
             },
             onFailure = {
@@ -189,6 +237,7 @@ interface DualStreamCommandExecutor {
         val thermalState: BoundStreamState? = null,
         val failureReason: String? = null,
         val playbackStatus: String? = null,
+        val thermalCenterTemperatureC: Double? = null,
     )
 
     val sessionState: DualStreamSessionState
@@ -199,4 +248,10 @@ interface DualStreamCommandExecutor {
         droneSn: String,
         action: String,
     ): DualStreamSessionManager.CommandExecutionResult
+
+    suspend fun executeCommand(
+        droneSn: String,
+        action: String,
+        thermalMeasureRegion: ThermalMeasureRegion?,
+    ): DualStreamSessionManager.CommandExecutionResult = executeCommand(droneSn, action)
 }

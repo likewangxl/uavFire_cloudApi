@@ -1,5 +1,7 @@
 package com.yinxin.uavfir.stream
 
+import kotlinx.coroutines.delay
+
 class RealMsdkStreamProvider(
     private val binder: MsdkStreamBinder = defaultStreamBinder(),
     private val liveStreamController: LiveStreamController = defaultLiveStreamController(),
@@ -50,16 +52,56 @@ class RealMsdkStreamProvider(
     }
 
     override suspend fun focusThermal(droneSn: String): StreamStartResult {
+        return focusThermal(droneSn, null)
+    }
+
+    override suspend fun focusThermal(
+        droneSn: String,
+        thermalMeasureRegion: ThermalMeasureRegion?,
+    ): StreamStartResult {
         binder.focusThermal(droneSn)
         restartLiveStream(droneSn)
+        val thermalMeasurement = runCatching {
+            if (thermalMeasureRegion == null) {
+                binder.measureThermalCenterTemperatureC()?.let {
+                    ThermalMeasurementResult(
+                        temperatureC = it,
+                        region = ThermalMeasureRegion.CENTER,
+                    )
+                }
+            } else {
+                binder.locateAndMeasureThermalHotspotC(thermalMeasureRegion)
+            }
+        }.getOrNull()
         visibleState = BoundStreamState.BOUND
         thermalState = BoundStreamState.BOUND
         playbackStatus = "shared-side-by-side-preview"
+        val restoreVisibleFailure = if (thermalMeasureRegion != null) {
+            runCatching {
+                binder.focusVisible(droneSn)
+                restartLiveStream(droneSn)
+                visibleState = BoundStreamState.BOUND
+                thermalState = BoundStreamState.IDLE
+                playbackStatus = "visible-live-ready"
+            }.exceptionOrNull()
+        } else {
+            null
+        }
+        val message = when {
+            restoreVisibleFailure != null ->
+                restoreVisibleFailure.message
+                    ?: restoreVisibleFailure::class.simpleName
+                    ?: "thermal-measured-visible-restore-failed"
+            thermalMeasureRegion != null -> "thermal-measured-visible-restored"
+            else -> "single-liveview-source-shared-side-by-side-preview"
+        }
         return StreamStartResult(
             visibleState = visibleState,
             thermalState = thermalState,
-            thermalFailureMessage = "single-liveview-source-shared-side-by-side-preview",
+            thermalFailureMessage = message,
             playbackStatus = playbackStatus,
+            thermalCenterTemperatureC = thermalMeasurement?.temperatureC,
+            thermalMeasureRegion = thermalMeasurement?.region,
         )
     }
 
@@ -73,7 +115,12 @@ class RealMsdkStreamProvider(
 
     private suspend fun restartLiveStream(droneSn: String) {
         liveStreamController.stop()
+        delay(MSDK_LIVE_RESTART_DRAIN_MS)
         liveStreamController.start(droneSn)
+    }
+
+    private companion object {
+        const val MSDK_LIVE_RESTART_DRAIN_MS: Long = 800L
     }
 }
 
@@ -85,6 +132,10 @@ private class StubMsdkStreamBinder : MsdkStreamBinder {
     override suspend fun focusVisible(droneSn: String) = Unit
 
     override suspend fun focusThermal(droneSn: String) = Unit
+
+    override suspend fun measureThermalCenterTemperatureC(): Double? = null
+
+    override suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double? = null
 
     override suspend fun unbindAll() = Unit
 }
