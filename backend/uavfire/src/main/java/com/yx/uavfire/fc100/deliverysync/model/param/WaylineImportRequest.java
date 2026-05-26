@@ -8,5 +8,7 @@ import lombok.Data;
 public class WaylineImportRequest {
     private String missionNo;
     private String waylineId;
-    private String kml;
+    private byte[] fileBytes;
+    private String filename;
+    private String contentType;
 }

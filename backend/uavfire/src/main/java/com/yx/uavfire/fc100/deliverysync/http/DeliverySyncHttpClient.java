@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.FormBody;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
+import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -33,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 public class DeliverySyncHttpClient {
 
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+    private static final MediaType OCTET_STREAM = MediaType.get("application/octet-stream");
 
     private final DeliverySyncProperties props;
     private final ObjectMapper objectMapper;
@@ -54,7 +56,7 @@ public class DeliverySyncHttpClient {
     /**
      * POST request with JSON body.
      *
-     * @param path      relative path, e.g. "/v1/tasks"
+     * @param path      relative path, e.g. "/task/sdk/v1/groups/{group_id}/tasks"
      * @param body      request body object (serialized to JSON)
      * @param respType  response deserialization type
      * @param idemKey   X-Idempotency-Key header value; null to omit
@@ -84,10 +86,34 @@ public class DeliverySyncHttpClient {
         return executeWithRetry("POST", path, null, requestBody, builder.build(), respType, idemKey, missionNo);
     }
 
+    public <T> T postMultipartFile(String path, String fileFieldName, String filename, byte[] fileBytes,
+                                   String contentType, Map<String, String> fields, Class<T> respType,
+                                   String idemKey, String missionNo) throws IOException, DeliverySyncException {
+        if (fileBytes == null || fileBytes.length == 0) {
+            throw new IllegalArgumentException("fileBytes is required");
+        }
+        String safeFilename = filename == null || filename.isBlank() ? "wayline.kml" : filename;
+        MediaType mediaType = contentType == null || contentType.isBlank() ? OCTET_STREAM : MediaType.get(contentType);
+        MultipartBody.Builder builder = new MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart(fileFieldName, safeFilename, RequestBody.create(fileBytes, mediaType));
+        if (fields != null) {
+            fields.forEach((key, value) -> {
+                if (value != null) {
+                    builder.addFormDataPart(key, value);
+                }
+            });
+        }
+        String requestBody = "multipart(" + fileFieldName + "=" + safeFilename
+            + ", size=" + fileBytes.length
+            + (fields == null || fields.isEmpty() ? "" : ", fields=" + fields)
+            + ")";
+        return executeWithRetry("POST", path, null, requestBody, builder.build(), respType, idemKey, missionNo);
+    }
+
     /**
      * GET request with optional query parameters.
      *
-     * @param path      relative path, e.g. "/v1/devices"
+     * @param path      relative path, e.g. "/manage/sdk/v1/groups/{group_id}/devices"
      * @param query     query params; null or empty for none
      * @param respType  response deserialization type
      * @param idemKey   X-Idempotency-Key header value; null to omit

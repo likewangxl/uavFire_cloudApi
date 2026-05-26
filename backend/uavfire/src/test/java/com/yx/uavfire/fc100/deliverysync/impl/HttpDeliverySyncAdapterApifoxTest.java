@@ -4,7 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncProperties;
 import com.yx.uavfire.fc100.deliverysync.http.DeliverySyncHttpClient;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskOperationResult;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskRef;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineDTO;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineImportResult;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
@@ -12,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,25 +32,72 @@ class HttpDeliverySyncAdapterApifoxTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void importsWaylineThroughApifoxFormEndpoint() throws Exception {
+    void importsWaylineThroughApifoxBinaryFileEndpoint() throws Exception {
         DeliverySyncHttpClient client = mock(DeliverySyncHttpClient.class);
         HttpDeliverySyncAdapter adapter = adapter(client);
-        when(client.postForm(eq("/map/sdk/v1/groups/group-1/waylines/kml/import"),
-                any(), eq(HttpDeliverySyncAdapter.DjiStandardResponse.class), anyString(), eq("M-001")))
-            .thenReturn(new HttpDeliverySyncAdapter.DjiStandardResponse());
+        HttpDeliverySyncAdapter.DjiImportWaylineResponse response =
+            new HttpDeliverySyncAdapter.DjiImportWaylineResponse();
+        HttpDeliverySyncAdapter.DjiImportWaylineResponse.DjiImportWaylineData data =
+            new HttpDeliverySyncAdapter.DjiImportWaylineResponse.DjiImportWaylineData();
+        data.setUuid("IMPORTED-WAYLINE-UUID");
+        data.setName("template");
+        data.setKey("object-key");
+        response.setData(data);
+        when(client.postMultipartFile(eq("/map/sdk/v1/groups/group-1/waylines/kml/import"),
+                eq("file"), eq("template.kml"), any(), eq("application/vnd.google-earth.kml+xml"),
+                any(), eq(HttpDeliverySyncAdapter.DjiImportWaylineResponse.class), anyString(), eq("M-001")))
+            .thenReturn(response);
 
-        adapter.importWayline(WaylineImportRequest.builder()
+        byte[] kml = "<?xml version=\"1.0\"?><kml/>".getBytes();
+        DeliveryWaylineImportResult result = adapter.importWayline(WaylineImportRequest.builder()
             .missionNo("M-001")
             .waylineId("M-001")
-            .kml("<?xml version=\"1.0\"?><kml/>")
+            .filename("template.kml")
+            .contentType("application/vnd.google-earth.kml+xml")
+            .fileBytes(kml)
             .build());
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> form = ArgumentCaptor.forClass(Map.class);
-        verify(client).postForm(eq("/map/sdk/v1/groups/group-1/waylines/kml/import"),
-            form.capture(), eq(HttpDeliverySyncAdapter.DjiStandardResponse.class), anyString(), eq("M-001"));
+        verify(client).postMultipartFile(eq("/map/sdk/v1/groups/group-1/waylines/kml/import"),
+            eq("file"), eq("template.kml"), eq(kml), eq("application/vnd.google-earth.kml+xml"),
+            form.capture(), eq(HttpDeliverySyncAdapter.DjiImportWaylineResponse.class), anyString(), eq("M-001"));
         assertEquals("M-001", form.getValue().get("wayline_id"));
-        assertTrue(form.getValue().get("file").contains("<kml/>"));
+        assertEquals("IMPORTED-WAYLINE-UUID", result.getWaylineId());
+        assertEquals("template", result.getName());
+        assertEquals("object-key", result.getKey());
+    }
+
+    @Test
+    void importsNewWaylineWithoutEditWaylineIdWhenNotProvided() throws Exception {
+        DeliverySyncHttpClient client = mock(DeliverySyncHttpClient.class);
+        HttpDeliverySyncAdapter adapter = adapter(client);
+        HttpDeliverySyncAdapter.DjiImportWaylineResponse response =
+            new HttpDeliverySyncAdapter.DjiImportWaylineResponse();
+        HttpDeliverySyncAdapter.DjiImportWaylineResponse.DjiImportWaylineData data =
+            new HttpDeliverySyncAdapter.DjiImportWaylineResponse.DjiImportWaylineData();
+        data.setUuid("IMPORTED-WAYLINE-UUID");
+        response.setData(data);
+        when(client.postMultipartFile(eq("/map/sdk/v1/groups/group-1/waylines/kml/import"),
+                eq("file"), eq("template.kml"), any(), eq("application/vnd.google-earth.kml+xml"),
+                any(), eq(HttpDeliverySyncAdapter.DjiImportWaylineResponse.class), anyString(), eq("M-001")))
+            .thenReturn(response);
+
+        byte[] kml = "<?xml version=\"1.0\"?><kml/>".getBytes();
+        DeliveryWaylineImportResult result = adapter.importWayline(WaylineImportRequest.builder()
+            .missionNo("M-001")
+            .filename("template.kml")
+            .contentType("application/vnd.google-earth.kml+xml")
+            .fileBytes(kml)
+            .build());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> form = ArgumentCaptor.forClass(Map.class);
+        verify(client).postMultipartFile(eq("/map/sdk/v1/groups/group-1/waylines/kml/import"),
+            eq("file"), eq("template.kml"), eq(kml), eq("application/vnd.google-earth.kml+xml"),
+            form.capture(), eq(HttpDeliverySyncAdapter.DjiImportWaylineResponse.class), anyString(), eq("M-001"));
+        assertEquals(false, form.getValue().containsKey("wayline_id"));
+        assertEquals("IMPORTED-WAYLINE-UUID", result.getWaylineId());
     }
 
     @Test
@@ -84,17 +136,108 @@ class HttpDeliverySyncAdapterApifoxTest {
     void startsTaskWithApifoxStartEndpointAndRadarQuery() throws Exception {
         DeliverySyncHttpClient client = mock(DeliverySyncHttpClient.class);
         HttpDeliverySyncAdapter adapter = adapter(client);
+        HttpDeliverySyncAdapter.DjiStandardResponse response = new HttpDeliverySyncAdapter.DjiStandardResponse();
+        response.setCode(0);
+        response.setMessage("OK");
         when(client.post(eq("/task/sdk/v1/groups/group-1/tasks/TASK-001/start"),
                 any(), any(), eq(HttpDeliverySyncAdapter.DjiStandardResponse.class), eq(null), eq(null)))
-            .thenReturn(new HttpDeliverySyncAdapter.DjiStandardResponse());
+            .thenReturn(response);
 
-        adapter.startTask("TASK-001");
+        DeliveryTaskOperationResult result = adapter.startTask("TASK-001");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> query = ArgumentCaptor.forClass(Map.class);
         verify(client).post(eq("/task/sdk/v1/groups/group-1/tasks/TASK-001/start"),
             query.capture(), eq(null), eq(HttpDeliverySyncAdapter.DjiStandardResponse.class), eq(null), eq(null));
         assertEquals("false", query.getValue().get("ignore_radar_detection"));
+        assertEquals(true, result.getAccepted());
+        assertEquals("OK", result.getApiMessage());
+        assertTrue(result.getDisplayMessage().contains("TASK-001"));
+    }
+
+    @Test
+    void startTaskReturnsFc100BusinessMessageWhenNetworkCheckFails() throws Exception {
+        DeliverySyncHttpClient client = mock(DeliverySyncHttpClient.class);
+        HttpDeliverySyncAdapter adapter = adapter(client);
+        HttpDeliverySyncAdapter.DjiStandardResponse response = new HttpDeliverySyncAdapter.DjiStandardResponse();
+        response.setCode(204027);
+        response.setMessage("设备网络检查失败");
+        when(client.post(eq("/task/sdk/v1/groups/group-1/tasks/TASK-001/start"),
+                any(), any(), eq(HttpDeliverySyncAdapter.DjiStandardResponse.class), eq(null), eq(null)))
+            .thenReturn(response);
+
+        DeliveryTaskOperationResult result = adapter.startTask("TASK-001");
+
+        assertEquals(false, result.getAccepted());
+        assertEquals(204027, result.getApiCode());
+        assertEquals("设备网络检查失败", result.getApiMessage());
+        assertEquals("设备网络检查失败", result.getDisplayMessage());
+    }
+
+    @Test
+    void taskStatusDisplaysAbnormalEndedTaskCode() throws Exception {
+        DeliverySyncHttpClient client = mock(DeliverySyncHttpClient.class);
+        HttpDeliverySyncAdapter adapter = adapter(client);
+        HttpDeliverySyncAdapter.DjiTaskListResponse response = new HttpDeliverySyncAdapter.DjiTaskListResponse();
+        response.setCode(0);
+        response.setMessage("OK");
+        HttpDeliverySyncAdapter.DjiTaskListResponse.DjiTaskListData data =
+            new HttpDeliverySyncAdapter.DjiTaskListResponse.DjiTaskListData();
+        HttpDeliverySyncAdapter.DjiTaskListResponse.DjiTaskItem item =
+            new HttpDeliverySyncAdapter.DjiTaskListResponse.DjiTaskItem();
+        item.setId("TASK-001");
+        item.setStatus(6);
+        item.setCode(620179);
+        item.setReason("");
+        item.setStartTime(1779810928747L);
+        item.setEndTime(1779811040304L);
+        data.setList(new HttpDeliverySyncAdapter.DjiTaskListResponse.DjiTaskItem[] { item });
+        response.setData(data);
+        when(client.get(eq("/task/sdk/v1/groups/group-1/tasks"), any(),
+                eq(HttpDeliverySyncAdapter.DjiTaskListResponse.class), eq(null), eq(null)))
+            .thenReturn(response);
+
+        DeliveryTaskStatus status = adapter.queryTaskStatus("TASK-001");
+
+        assertEquals("abnormal", status.getPhase());
+        assertEquals(620179, status.getTaskCode());
+        assertTrue(status.getDisplayMessage().contains("异常结束"));
+        assertTrue(status.getDisplayMessage().contains("620179"));
+        assertTrue(status.getDisplayMessage().contains("右前机臂没有在位"));
+    }
+
+    @Test
+    void listsWaylinesThroughApifoxWaylineEndpoint() throws Exception {
+        DeliverySyncHttpClient client = mock(DeliverySyncHttpClient.class);
+        HttpDeliverySyncAdapter adapter = adapter(client);
+        HttpDeliverySyncAdapter.DjiWaylineListResponse response = new HttpDeliverySyncAdapter.DjiWaylineListResponse();
+        HttpDeliverySyncAdapter.DjiWaylineListResponse.DjiWaylineListData data =
+            new HttpDeliverySyncAdapter.DjiWaylineListResponse.DjiWaylineListData();
+        HttpDeliverySyncAdapter.DjiWaylineListResponse.DjiWaylineItem item =
+            new HttpDeliverySyncAdapter.DjiWaylineListResponse.DjiWaylineItem();
+        item.setWaylineId("5d0bbfcb-6043-45c4-9b29-80f1e59aa4e3");
+        item.setName("2026-05-26 17:49");
+        item.setWaylineType("waypoint");
+        item.setDistance(141.55);
+        item.setDuration(14);
+        item.setFinishAction("goHome");
+        data.setList(new HttpDeliverySyncAdapter.DjiWaylineListResponse.DjiWaylineItem[] { item });
+        response.setData(data);
+        when(client.get(eq("/map/sdk/v1/groups/group-1/waylines"), any(),
+                eq(HttpDeliverySyncAdapter.DjiWaylineListResponse.class), eq(null), eq(null)))
+            .thenReturn(response);
+
+        List<DeliveryWaylineDTO> waylines = adapter.listWaylines(1, 10, null);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> query = ArgumentCaptor.forClass(Map.class);
+        verify(client).get(eq("/map/sdk/v1/groups/group-1/waylines"),
+            query.capture(), eq(HttpDeliverySyncAdapter.DjiWaylineListResponse.class), eq(null), eq(null));
+        assertEquals("1", query.getValue().get("page"));
+        assertEquals("10", query.getValue().get("page_size"));
+        assertEquals("5d0bbfcb-6043-45c4-9b29-80f1e59aa4e3", waylines.get(0).getWaylineId());
+        assertEquals("waypoint", waylines.get(0).getWaylineType());
+        assertEquals(141.55, waylines.get(0).getDistance());
     }
 
     @Test

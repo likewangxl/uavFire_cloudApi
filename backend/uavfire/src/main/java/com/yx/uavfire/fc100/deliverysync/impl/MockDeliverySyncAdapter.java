@@ -6,7 +6,10 @@ import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceProperties;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskRef;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskOperationResult;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineDTO;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineImportResult;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
@@ -51,11 +54,18 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
         long t0 = System.currentTimeMillis();
         var p = new DeliveryDeviceProperties();
         p.setDeviceSn(deviceSn);
+        p.setOnlineStatus(true);
         p.setBatteryPercent(85);
         p.setRtkStatus("FIX");
         p.setLatitude(31.0);
         p.setLongitude(121.0);
         p.setAltitude(50.0);
+        p.setAircraftMode(3);
+        p.setFlying(false);
+        p.setHorizontalSpeed(0.0);
+        p.setVerticalSpeed(0.0);
+        p.setHomeDistance(10.0);
+        p.setWindSpeed(0.0);
         p.setOsdTimestamp(System.currentTimeMillis());
         logService.recordSuccess("getDeviceProperties", null, "GET",
             "/devices/" + deviceSn + "/properties", "", 200,
@@ -64,13 +74,35 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
     }
 
     @Override
-    public void importWayline(WaylineImportRequest req) {
+    public List<DeliveryWaylineDTO> listWaylines(int page, int pageSize, String key) {
         long t0 = System.currentTimeMillis();
-        log.info("MOCK Delivery importWayline: mission={} waylineId={} size={}",
-            req.getMissionNo(), req.getWaylineId(), req.getKml() == null ? 0 : req.getKml().length());
+        var waylines = List.of(DeliveryWaylineDTO.builder()
+            .waylineId("MOCK-WAYLINE-001")
+            .name("Mock FC100 航线")
+            .waylineType("waypoint")
+            .distance(120.0)
+            .duration(12)
+            .finishAction("goHome")
+            .build());
+        logService.recordSuccess("listWaylines", null, "GET",
+            "/waylines?page=" + page + "&page_size=" + pageSize, "", 200,
+            waylines.toString(), null, (int) (System.currentTimeMillis() - t0));
+        return waylines;
+    }
+
+    @Override
+    public DeliveryWaylineImportResult importWayline(WaylineImportRequest req) {
+        long t0 = System.currentTimeMillis();
+        log.info("MOCK Delivery importWayline: mission={} waylineId={} filename={} size={}",
+            req.getMissionNo(), req.getWaylineId(), req.getFilename(),
+            req.getFileBytes() == null ? 0 : req.getFileBytes().length);
         logService.recordSuccess("importWayline", null, "POST", "/waylines/kml/import",
             "wayline_id=" + req.getWaylineId(), 200, "ok", null,
             (int) (System.currentTimeMillis() - t0));
+        return DeliveryWaylineImportResult.builder()
+            .waylineId(req.getWaylineId() != null ? req.getWaylineId() : req.getMissionNo())
+            .name(req.getFilename())
+            .build();
     }
 
     @Override
@@ -88,11 +120,19 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
             taskId, req.getMissionNo(), req.getDeviceSn());
         logService.recordSuccess("createTask", null, "POST", "/tasks",
             req.toString(), 200, taskId, null, (int) (System.currentTimeMillis() - t0));
-        return new DeliveryTaskRef(taskId, "CREATED");
+        DeliveryTaskRef ref = new DeliveryTaskRef(taskId, "CREATED");
+        ref.setAccepted(true);
+        ref.setApiCode(0);
+        ref.setApiMessage("OK");
+        ref.setDisplayMessage("MOCK 任务已创建：" + taskId);
+        ref.setDeviceSn(req.getDeviceSn());
+        ref.setMissionId(req.getMissionId());
+        ref.setTaskName(req.getTaskName());
+        return ref;
     }
 
     @Override
-    public void startTask(String taskId) {
+    public DeliveryTaskOperationResult startTask(String taskId) {
         long t0 = System.currentTimeMillis();
         var s = tasks.get(taskId);
         if (s != null) {
@@ -103,6 +143,14 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
         logService.recordSuccess("startTask", null, "POST",
             "/tasks/" + taskId + "/start", "", 200, "ok",
             null, (int) (System.currentTimeMillis() - t0));
+        return DeliveryTaskOperationResult.builder()
+            .operation("startTask")
+            .taskId(taskId)
+            .accepted(true)
+            .apiCode(0)
+            .apiMessage("OK")
+            .displayMessage("MOCK 开始执行航线：" + taskId)
+            .build();
     }
 
     @Override
