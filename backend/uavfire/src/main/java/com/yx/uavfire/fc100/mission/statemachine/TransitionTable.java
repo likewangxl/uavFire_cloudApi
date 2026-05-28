@@ -54,6 +54,7 @@ public final class TransitionTable {
         put(ROUTE_EXPORTED, FORCE_FAIL, FAILED);
 
         put(SENT_TO_DELIVERY, CANCEL, CANCELLED);
+        put(SENT_TO_DELIVERY, CREATE_DELIVERY_TASK, SENT_TO_DELIVERY); // 司运侧任务失效时允许重新推送
         put(SENT_TO_DELIVERY, START_DELIVERY, IN_PROGRESS);
         put(SENT_TO_DELIVERY, FORCE_FAIL, FAILED);
 
@@ -61,6 +62,7 @@ public final class TransitionTable {
         put(ACCEPTED_BY_PILOT, FORCE_FAIL, FAILED);
 
         put(IN_PROGRESS, MARK_RELEASE_PENDING, PAYLOAD_RELEASE_PENDING);
+        put(IN_PROGRESS, CREATE_DELIVERY_TASK, SENT_TO_DELIVERY); // 司运侧任务异常结束且飞机已停飞时允许重新推送
         put(IN_PROGRESS, TAKEOVER, MANUAL_TAKEOVER);
         put(IN_PROGRESS, FORCE_FAIL, FAILED);
 
@@ -70,6 +72,7 @@ public final class TransitionTable {
         put(PAYLOAD_RELEASE_PENDING, FORCE_FAIL, FAILED);
 
         put(PAYLOAD_RELEASED, MARK_RETURNING, RETURNING);
+        put(PAYLOAD_RELEASED, CREATE_DELIVERY_TASK, SENT_TO_DELIVERY); // 已投放后允许重新创建任务，支持再次执行
         put(PAYLOAD_RELEASED, TAKEOVER, MANUAL_TAKEOVER);
         put(PAYLOAD_RELEASED, FORCE_FAIL, FAILED);
 

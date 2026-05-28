@@ -51,11 +51,11 @@ adb shell am start -n com.yinxin.uavfir/.MainActivity
 关键配置在 `gradle.properties`：
 
 ```text
-agentBackendBaseUrl=http://192.168.0.30:6789/
-agentMediaHost=192.168.0.30
+agentBackendBaseUrl=http://172.20.10.7:6789/
+agentMediaHost=172.20.10.7
 agentMediaRtmpPort=1935
 agentMediaStreamApp=live
-agentMqttBrokerUrl=tcp://192.168.0.30:1883
+agentMqttBrokerUrl=tcp://172.20.10.7:1883
 agentAircraftSn=1581F7K3D249E00AM3Q3
 agentGatewaySn=9N9CMA500100B8
 ```

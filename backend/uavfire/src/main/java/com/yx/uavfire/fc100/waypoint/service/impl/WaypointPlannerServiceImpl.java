@@ -58,6 +58,18 @@ public class WaypointPlannerServiceImpl implements WaypointPlannerService {
                     + (int) props.getMaxDistanceFromTakeoffM());
         }
 
+        if (straight <= props.getShortRouteMaxDistanceM()) {
+            var dropPoint = GeoUtils.offset(param.getFireLat(), param.getFireLng(), offset, theta);
+            List<MissionWaypointDTO> shortest = new ArrayList<>(2);
+            shortest.add(wp(0, WaypointType.TAKEOFF,
+                param.getTakeoffLat(), param.getTakeoffLng(),
+                param.getTakeoffAlt(), speed, "takeoff"));
+            shortest.add(wp(1, WaypointType.DROP,
+                dropPoint.lat(), dropPoint.lng(),
+                param.getFireAlt() + dropAltAgl, speed, "drop-ready"));
+            return shortest;
+        }
+
         List<MissionWaypointDTO> wps = new ArrayList<>(7);
 
         wps.add(wp(0, WaypointType.TAKEOFF,

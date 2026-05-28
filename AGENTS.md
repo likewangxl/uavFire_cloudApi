@@ -1,67 +1,65 @@
 <claude-mem-context>
 # Memory Context
 
-# [uavfire] recent context, 2026-05-25 5:12pm GMT+8
+# [uavfire] recent context, 2026-05-29 2:42am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (20,947t read) | 2,096,266t work | 99% savings
+Stats: 50 obs (17,383t read) | 494,374t work | 96% savings
 
-### Apr 30, 2026
-847 11:38a 🔴 ControlServiceImpl.java 实现固件版本不兼容检查，填补飞行前安全守卫缺口
-848 " ✅ no-agora-browser-sdk.test.mjs 全部转绿：6/6 pass，Agora 下线回归验收通过
-849 " ✅ 所有技术债清理完成：两组测试全绿，全域扫描零残留
-850 11:39a ✅ 全量回归验收通过：前端 10 项测试 + 后端 Maven 构建编译和测试均绿
-### May 20, 2026
-1966 11:50p 🔵 uavfire Project Architecture Overview
-1967 " 🔵 M4T Dual-Stream Runtime Architecture and Verification Status
-1968 " 🔵 DJI MSDK v5 Real-Device Thermal Stream Limitation Confirmed
-1969 " 🔵 RC Plus Agent Backend Auth Bypass and Runtime Loop Real-Device Validation
-1970 " 🔵 DRC Takeoff Implementation and Official takeoff_to_point API Constraints
-1972 11:53p 🔵 Backend StreamSplitterService: FFmpeg-Based Composite Stream Splitting
-1973 " 🔵 DjiMsdkStreamBinder: bindThermal Always Throws, focusThermal Uses THERMAL_ONLY Mode
-1974 " 🔵 AgentRuntimeLoop: 5-Second Heartbeat/Status/Capability/Command Poll Cycle
-1975 " 🔵 AI Service: Three-Tier Detection Stack with Optional YOLO and Continuous Runner
-1976 " 🔵 Leadership Cockpit Frontend: ZLMRTCClient WebRTC Player with Focus-Switch Commands
-1977 " ⚖️ Pilot2 Composite Stream PoC: Design Approved to Validate PIP RTMP Feasibility
-1978 " 🔵 takeoff_to_point Error Code Progression and Coordinate Offset Fix
-1979 " 🔵 Three Android Agent Bugs Found and Fixed During 2026-04-24 Real-Device Integration
-1980 " 🔵 Uncommitted Modifications in Working Tree
-### May 21, 2026
-2120 4:58p 🔵 UAVFire Project Structure Overview
-2121 " 🔵 Uncommitted Changes Span Livestream and Wayline Features
-2122 4:59p 🔵 Pilot 2 Composite Stream PoC (Plan B) Declared Dead
-2123 " 🔵 Dual Stream Current Blockers: visiblePlayUrl Missing and Thermal Second Channel Unimplemented
-2124 " 🔵 MSDK v5 Thermal Stream Hard Limitation Confirmed on Real Device
-2125 " 🟣 RC Plus Agent Runtime Loop and Backend Integration Complete
-2126 " 🟣 Agora Dynamic Token Generation and Frontend Chinese Localization
-2127 5:02p ⚖️ MSDK Migration Plan Phase 1: Full Dataplane Shift from Cloud SDK to Agent
-2128 " 🟣 OsdReporter and HmsReporter Added: Agent Impersonates Pilot 2 on MQTT
-2129 " 🟣 AI Service Full Pipeline: ContinuousTaskRunner with YOLO, Fusion, Snapshot, and FireEvent Reporting
-2130 " 🔵 Backend DualStreamServiceImpl: Auto URL Generation and Single-Stream Review Logic
-2131 " 🟣 Leadership Cockpit: Full Dual-Stream WebRTC Player with AI Risk Panel and Fire Notification
-2132 " 🔵 Current IP Baseline Changed: All Services Now on 192.168.0.30
-2133 " 🟣 Wayline Agent Contract and KMZ Format Verified Against Real M4T Hardware
-2134 " 🔵 Cockpit Dual Livestream Strategy: Cloud API Plan C' as Primary Override for Agent Stream
-2135 " 🔵 Project CLAUDE.md Coding Standards and Backend Start Command
-2136 " ⚖️ Dual-Stream Strategy Matrix: Plans A/B/C/D Evaluated, B Dead, C' Discovered
-2137 5:17p ⚖️ TDD-First Migration Plan for UAV Fire Project Cockpit/Backend Changes
-2138 5:18p 🔵 UAV Fire Project 3-Tier Test Architecture Map
-2139 " 🔵 Leadership Cockpit Livestream Behavioral Contracts (Frontend Tests)
-2140 " 🔵 DJI MSDK Stream Binder Thermal Focus Behavioral Contracts
-2141 " 🔵 RealMsdkStreamProvider Stream Start/Focus/Stop Contracts
-2142 5:19p 🔵 DJI KMZ/WPML Generation Compliance Contracts for M30T and M4T
-2143 " 🔵 Android Agent Build Config: Runtime Parameters via Gradle Properties
-2144 " 🟣 RED Tests Added: Cockpit Fallback Removal, AI Stream URL, MQTT Payload, M4T Thermal Error Rename
-2145 " 🔴 apply_patch Fails on PlannedWaylineServiceTest.java Due to readZipEntry Signature Mismatch
-2146 5:20p 🟣 All RED Tests Written and Confirmed Failing — TDD RED Phase Complete
-2147 5:21p 🔵 AI Detection RTSP URL Format Uses Extended Video ID — Test Expected Wrong Format
-2148 " 🔵 OsdReporter.kt Fails to Compile — DJI MSDK Attitude Class Unresolved
-2149 5:22p 🔵 OsdReporter.kt Uses Wrong Package for Attitude Class — Fix is Import Change Only
-2150 " 🔵 WaylineMqttPublisher Does Not Have Static buildCloudOsdEnvelope/buildCloudEventEnvelope Methods
-2151 " 🔵 Cockpit Pilot Livestream Fallback — Full Scope of Code to Remove Identified
+### May 29, 2026
+2548 1:19a 🔵 ZLM日志揭示外网HTTP失败根因：vicp.fun仅转发TCP连接不转发HTTP数据，导致"end of file"立即关闭
+2549 1:26a 🔵 Port Mapping 3-Rule Limit Constrains Dual-Mapping for Port 10000
+2550 " ✅ ZLMediaKit RTC preferred_tcp=1 Set on Remote Deploy Server
+2551 1:27a ✅ ZLMediaKit preferred_tcp=1 Deployed and Container Restarted via SSH
+2552 " 🔵 SSH Session 48198 Hung Awaiting Remote Command Completion
+2553 1:28a 🔵 write_stdin Fails When exec_command Not Run with tty=true
+2554 " 🔴 Stalled SSH/expect Processes Killed and Retried with Heredoc expect Syntax
+2555 " 🔴 ZLMediaKit preferred_tcp Patch Failed Due to PermissionError on Backup File
+2556 1:29a 🔴 ZLMediaKit preferred_tcp=1 Successfully Applied via sudo sed
+2557 1:38a ✅ ZLMediaKit RTC Port Changed from 10000 to 19586, Container Recreated with New Port Mappings
+2558 " ✅ ZLMediaKit Successfully Redeployed on Port 19586 TCP-Only, Port 10000 Eliminated
+2559 " 🔵 ZLMediaKit Started Successfully but HTTP Probe Returns 502 Bad Gateway via Reverse Proxy
+2560 1:39a ✅ ZLMediaKit HTTP Confirmed Healthy — Full Redeployment on Port 19586 Complete
+2561 1:44a 🔵 Remote Service Status Check on uavfire Production Server
+2562 " 🔵 uavfire Production Server Service Status: Backend and Frontend NOT Running
+2563 1:52a 🔵 Local Dev Environment: Backend Running on 6789, Frontend Running on 8081 (Not 5173)
+2564 1:53a ✅ Media Server Endpoints Migrated from LAN IP (192.168.0.30) to Public frp Tunnel (1916dn17xs12.vicp.fun)
+2565 " 🔵 ZLMediaKit Port 55932 Returns 花生壳 frp Portal Page, Not ZLMediaKit API
+2566 " ✅ Backend and Frontend Successfully Restarted with New Config via tmux Sessions
+2567 " 🔵 Remote Server AI Service Runs Python 3.10.12 Without torch/ultralytics Explicitly Confirmed
+2568 1:54a ✅ Remote Server AI Service ML Dependencies Installing: torch 2.2.2, ultralytics 8.4.56, numpy 1.26.4
+2569 1:56a 🔵 Local YOLOv6 Fire Detection Model Present in uavfire Project
+2570 " 🔵 Remote Server Actively Installing PyTorch and Ultralytics via pip
+2571 " ✅ Remote pip install Process Killed on Ubuntu Server
+2572 " ✅ Local Trained Model Being SCP'd to Remote Server
+2573 " 🔵 SCP Transfer of Model File Stalling at 1% Completion
+2574 1:57a ✅ Model File SCP Transfer Completed Successfully Despite Initial Stall
+2575 1:58a ✅ Remote uavfire-deploy Environment: Model Placed and CPU-Only PyTorch Installing
+2576 " 🟣 Remote uavfire-deploy ML Stack Fully Installed and YOLO Model Load Verified
+2577 2:00a 🔵 uavfire Local Service Architecture: Three Components Running on Mac
+2578 2:05a 🔵 Remote AI Service Running But YOLO Model Path Env Var Is Empty
+2579 2:06a 🔵 AI Service Detector Mode Controlled by YOLO Model Path Env Var
+2580 " 🔴 Remote .env Updated with YOLO Model Path But Service Restart Failed (sudo requires terminal)
+2581 " 🔴 Remote uavfire-ai.service Restarted with YOLO Model Path Config Active
+2582 " 🔵 AI Service Visible Detector Selection Logic in task_registry.py
+2583 2:07a 🔵 YoloVisibleDetector Uses imgsz=1920 and Lazy Model Loading
+2584 " ✅ Local uavfire-ai-service tmux Session Killed on Mac
+2585 " 🟣 Bidirectional SSH Tunnel Established Between Mac and Remote AI Server
+2586 " 🔵 SSH Tunnel Expect Script Failing to Auto-Submit Password
+2587 2:08a 🔴 SSH Tunnel Fixed by Writing Expect Script to File Instead of Inline
+2588 " 🟣 End-to-End Verification: YOLO Model Loads Correctly and Reverse Tunnel Reaches Java Backend
+2589 2:09a 🔵 Full Stack Health Confirmed from Mac: AI Tunnel and Java Backend Both Responding
+2590 2:12a 🔵 Remote Server GPU Check Timed Out — nvidia-smi Command Hung
+2591 2:22a 🔵 YOLOv6 Fire Detection Model Present Locally in uavfire Project
+2592 2:27a 🔵 uavfire Project Has Extensive Uncommitted Changes Including New FC100 Bypass Stream DTOs and Cockpit Plans
+2593 " 🔵 uavfire True Hardware E2E Validated: M4T RTMP Stream Live, AI Detection Running at LOW Risk
+2594 " ✅ MSDK Agent Data Plane Consolidation Round 1: Four Code Fixes and Tests All Passing
+2595 2:28a ✅ RUNBOOK.md Updated: ai-service Now Runs on Public VM with SSH Tunnel, Not Locally
+2596 " ✅ FC100 Public VM Deployment Fully Documented: ZLM on VM, SSH Tunnel for ai-service, Config Switched to Public Endpoints
+2597 " ✅ Network Baseline IP Migrated from 192.168.0.30 to 172.20.10.7 Across All Project Docs
 
-Access 2096k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 494k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

@@ -57,6 +57,20 @@ class WaylineEventForwarder(
         }
     }
 
+    override fun onStartAccepted(missionId: String?) {
+        Log.i(TAG, "start accepted mission=$missionId")
+        scope.launch(dispatcher) {
+            publisher.publishEvent(
+                method = "wayline_state_change",
+                payload = mapOf(
+                    "mission_id" to missionId,
+                    "msdk_state" to "START_ACCEPTED",
+                    "business_state" to "executing",
+                ),
+            )
+        }
+    }
+
     override fun onError(missionId: String?, stage: String, error: IDJIError) {
         Log.w(TAG, "stage=$stage err=${error.errorCode()} desc=${error.description()}")
         scope.launch(dispatcher) {

@@ -1,6 +1,7 @@
 package com.yx.uavfire.fc100.deliverysync.impl;
 
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryBypassStreamDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceDTO;
@@ -11,6 +12,7 @@ import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineImportResult;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.DeliveryBypassStreamRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
 import com.yx.uavfire.fc100.deliverysync.service.DeliverySyncLogService;
@@ -71,6 +73,24 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
             "/devices/" + deviceSn + "/properties", "", 200,
             p.toString(), null, (int) (System.currentTimeMillis() - t0));
         return p;
+    }
+
+    @Override
+    public DeliveryBypassStreamDTO startBypassStream(DeliveryBypassStreamRequest req) {
+        long t0 = System.currentTimeMillis();
+        String baseRtmpUrl = req.getRtmpUrl() == null ? "rtmp://127.0.0.1:1935/live" : req.getRtmpUrl();
+        String streamId = req.getDeviceSn() + "_" + req.getCamera();
+        DeliveryBypassStreamDTO result = DeliveryBypassStreamDTO.builder()
+            .converterId("MOCK-BYPASS-" + UUID.randomUUID())
+            .playRtmpUrl(baseRtmpUrl.replaceAll("/+$", "") + "/" + streamId)
+            .converterState("running")
+            .createTs(System.currentTimeMillis() / 1000)
+            .updateTs(System.currentTimeMillis() / 1000)
+            .build();
+        logService.recordSuccess("startBypassStream", null, "POST",
+            "/bypass/streams/start", String.valueOf(req), 200, result.toString(),
+            null, (int) (System.currentTimeMillis() - t0));
+        return result;
     }
 
     @Override

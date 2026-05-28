@@ -26,6 +26,8 @@ export interface FireEventDTO {
   lastSourceEventId: string | null;
   notificationVersion: number | null;
   status: FireEventStatus;
+  missionNo: string | null;
+  missionStatus: string | null;
   createTime: number;
 }
 

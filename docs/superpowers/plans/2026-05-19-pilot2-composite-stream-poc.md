@@ -12,7 +12,7 @@
 
 **ZLM config (verified Task 1+2):** HTTP API at port `58925`, secret `psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy` (from `deployment/zlmediakit/config/config.ini`). RTMP push to port `1935` does NOT require secret (smoke test passed without).
 
-**Mac LAN IP (verified Task 1):** `192.168.0.30`.
+**Mac LAN IP (verified Task 1):** `172.20.10.7`.
 
 ---
 
@@ -117,12 +117,12 @@ URL format: `rtmp://<MAC_IP>:1935/live/pilot2-composite`
 
 Concrete example (replace with your `<MAC_IP>` from Task 1):
 ```
-rtmp://192.168.0.30:1935/live/pilot2-composite
+rtmp://172.20.10.7:1935/live/pilot2-composite
 ```
 
 ZLM by default does **not** require secret on push (`hook.on_publish` is what gates that, currently unset). Try without secret first. If Pilot2 reports auth failure, append `?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy`:
 ```
-rtmp://192.168.0.30:1935/live/pilot2-composite?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy
+rtmp://172.20.10.7:1935/live/pilot2-composite?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy
 ```
 
 - [ ] **Step 4: Save settings, do NOT start streaming yet**

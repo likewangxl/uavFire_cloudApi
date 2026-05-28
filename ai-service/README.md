@@ -152,7 +152,7 @@ curl http://localhost:9000/api/v1/dual-stream/tasks/zlm-demo/events
 - 如果要监测 agent 推到 ZLM 的单路可见光，visible URL 应为：
 
 ```text
-rtsp://192.168.0.30:8554/live/{streamId}
+rtsp://172.20.10.7:8554/live/{streamId}
 ```
 
 其中 `streamId` 当前通常是 `{aircraftSn}-0` 或 `RC_PLUS_LOCAL-0`，取决于 agent build config。

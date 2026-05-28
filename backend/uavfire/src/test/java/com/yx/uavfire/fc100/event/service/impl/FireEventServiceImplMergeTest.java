@@ -6,6 +6,7 @@ import com.yx.uavfire.fc100.common.MissionNoGenerator;
 import com.yx.uavfire.fc100.event.dao.FireEventMapper;
 import com.yx.uavfire.fc100.event.dao.FireEventHistoryMapper;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
+import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
 import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
 import com.yx.uavfire.fc100.event.model.entity.FireEventHistoryEntity;
 import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
@@ -167,6 +168,35 @@ class FireEventServiceImplMergeTest {
         assertEquals("HIGH", updated.getFireLevel());
         assertEquals(new BigDecimal("0.91"), updated.getConfidence());
         assertEquals(3, updated.getNotificationVersion());
+    }
+
+    @Test
+    void listIncludesActiveMissionNoAndStatusForFireEventActions() {
+        FireEventEntity event = existingEvent(7L, 34.658600, 109.340600, "HIGH", "0.95", 1779163200000L);
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setMissionNo("MISSION-001");
+        mission.setStatus("WAITING_REVIEW");
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(event));
+        when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of(mission));
+
+        List<FireEventDTO> list = build().list("DEFAULT", null, 50);
+
+        assertEquals("MISSION-001", list.get(0).getMissionNo());
+        assertEquals("WAITING_REVIEW", list.get(0).getMissionStatus());
+    }
+
+    @Test
+    void getSupportsNumericFireEventIdFromMissionDetailPage() {
+        FireEventEntity event = existingEvent(555L, 34.658600, 109.340600, "HIGH", "0.95", 1779163200000L);
+        event.setEventId("fire-event-555");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(event);
+        when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+
+        FireEventDTO dto = build().get("555");
+
+        assertEquals("fire-event-555", dto.getEventId());
+        assertEquals(34.658600, dto.getLat());
+        assertEquals(109.340600, dto.getLng());
     }
 
     private FireEventCreateParam param(String eventId, double lat, double lng, String level, String confidence, long ts) {

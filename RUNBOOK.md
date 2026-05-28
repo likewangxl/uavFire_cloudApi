@@ -7,7 +7,7 @@
 当前工作区的局域网基准 IP 是：
 
 ```text
-192.168.0.30
+172.20.10.7
 ```
 
 切换网络后需要同步更新：
@@ -90,24 +90,24 @@ spring:
 
 mqtt:
   BASIC:
-    host: 192.168.0.30
+    host: 172.20.10.7
     port: 1883
   DRC:
     protocol: WS
-    host: 192.168.0.30
+    host: 172.20.10.7
     port: 8083
 
 pilot2:
-  web-entry: http://192.168.0.30:8080/pilot-login
+  web-entry: http://172.20.10.7:8080/pilot-login
 
 livestream:
   playback:
-    webrtc-host: 192.168.0.30
+    webrtc-host: 172.20.10.7
     webrtc-port: 58925
 
 ai-service:
   base-url: http://127.0.0.1:9000
-  zlm-rtsp-host: 192.168.0.30
+  zlm-rtsp-host: 172.20.10.7
   zlm-rtsp-port: 8554
 ```
 
@@ -137,16 +137,16 @@ mvn -pl uavfire spring-boot:run
 
 ```bash
 mvn -pl uavfire spring-boot:run \
-  --mqtt.BASIC.host=192.168.0.30 \
+  --mqtt.BASIC.host=172.20.10.7 \
   --mqtt.BASIC.port=1883 \
-  --mqtt.DRC.host=192.168.0.30 \
+  --mqtt.DRC.host=172.20.10.7 \
   --mqtt.DRC.port=8083
 ```
 
 Windows PowerShell 中可以写成一行：
 
 ```powershell
-mvn -pl uavfire spring-boot:run --mqtt.BASIC.host=192.168.0.30 --mqtt.BASIC.port=1883 --mqtt.DRC.host=192.168.0.30 --mqtt.DRC.port=8083
+mvn -pl uavfire spring-boot:run --mqtt.BASIC.host=172.20.10.7 --mqtt.BASIC.port=1883 --mqtt.DRC.host=172.20.10.7 --mqtt.DRC.port=8083
 ```
 
 启动成功后，后端监听：
@@ -219,29 +219,96 @@ curl -s "http://localhost:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC
 当前 agent 推流命名为：
 
 ```text
-rtmp://192.168.0.30:1935/live/{droneSn}-0
+rtmp://172.20.10.7:1935/live/{droneSn}-0
 ```
 
 对应 cockpit WebRTC 播放地址由 backend 拼成：
 
 ```text
-webrtc://192.168.0.30:58925/live/{droneSn}-0
+webrtc://172.20.10.7:58925/live/{droneSn}-0
 ```
 
-## 7. 启动 ai-service
+## 7. ai-service 当前使用公网 VM，不在本机启动
+
+当前 FC100 公网直播与火情识别链路中，`ai-service` 跑在公网 VM 上，本机不要再启动 `ai-service/scripts/run-dev.sh`，否则会占用 `9000` 端口并绕过 VM 上的 YOLO 环境。
+
+VM 访问方式：
 
 ```bash
-cd ai-service
-./scripts/run-dev.sh
-curl http://127.0.0.1:9000/healthz
+ssh -p 46691 djdev@1916dn17xs12.vicp.fun
 ```
 
-推荐 `.env`：
+VM ai-service 配置文件：
+
+```text
+/home/djdev/uavfire-deploy/ai-service/.env
+```
+
+关键配置：
 
 ```dotenv
 AI_SERVICE_USE_CONTINUOUS_RUNNER=true
 AI_SERVICE_BACKEND_BASE_URL=http://127.0.0.1:6789
-OPENCV_FFMPEG_CAPTURE_OPTIONS="rtsp_transport;tcp"
+AI_SERVICE_BACKEND_USERNAME=adminPC
+AI_SERVICE_BACKEND_PASSWORD=adminPC
+AI_SERVICE_BACKEND_LOGIN_FLAG=1
+AI_SERVICE_VISIBLE_YOLO_MODEL_PATH=/home/djdev/uavfire-deploy/ai-service/models/yolov26-fire-detection-best.pt
+AI_SERVICE_VISIBLE_FIRE_SATURATION_RATIO=0.05
+AI_SERVICE_VISIBLE_CONFIDENCE_FLOOR=0.05
+AI_SERVICE_SNAPSHOT_DIR=/home/djdev/uavfire-deploy/ai-service/data/fire-snapshots
+AI_SERVICE_SNAPSHOT_PUBLIC_BASE_URL=http://127.0.0.1:9000/api/v1/snapshots
+OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp
+```
+
+VM 上使用的模型来自本项目本地训练权重：
+
+```text
+本地: models/yolov26-fire-detection-best.pt
+VM: /home/djdev/uavfire-deploy/ai-service/models/yolov26-fire-detection-best.pt
+```
+
+VM 服务管理：
+
+```bash
+sudo systemctl restart uavfire-ai.service
+systemctl status uavfire-ai.service
+curl http://127.0.0.1:9000/healthz
+```
+
+本机后端仍配置为访问 `http://127.0.0.1:9000`，但该端口由 SSH 隧道转发到 VM ai-service。启动本地前后端后，启动隧道：
+
+```bash
+tmux kill-session -t uavfire-ai-service 2>/dev/null || true
+tmux new-session -d -s uavfire-ai-tunnel 'expect /tmp/uavfire-ai-tunnel.expect'
+curl http://127.0.0.1:9000/healthz
+```
+
+隧道语义：
+
+```text
+本机 127.0.0.1:9000 -> VM 127.0.0.1:9000
+VM 127.0.0.1:6789 -> 本机 127.0.0.1:6789
+```
+
+如果 `/tmp/uavfire-ai-tunnel.expect` 不存在，可用下面内容重建：
+
+```tcl
+set timeout -1
+spawn ssh -N \
+  -o StrictHostKeyChecking=no \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -L 9000:127.0.0.1:9000 \
+  -R 6789:127.0.0.1:6789 \
+  -p 46691 djdev@1916dn17xs12.vicp.fun
+expect {
+  "*assword:*" {
+    send "djdev\r"
+    exp_continue
+  }
+  eof
+}
 ```
 
 ## 8. 构建 / 安装 RC Plus Agent
@@ -318,7 +385,7 @@ adb shell am start -n com.yinxin.uavfir/.MainActivity
 驾驶舱直播无画面：
 
 - 先查 ZLM 是否有 `live/{droneSn}-0`：
-  `curl -s "http://192.168.0.30:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy"`
+  `curl -s "http://172.20.10.7:58925/index/api/getMediaList?secret=psvKeKowZ3tp0Z43oC9O4gWHKFYZAkMy"`
 - 再查 backend dual-stream group 是否有 `visiblePlayUrl`。
 - 浏览器 Network 看 `/index/api/webrtc?app=live&stream=...&type=play` 是否成功。
 - 不要再用 `jswebrtc.Player` 排查；当前 cockpit 使用 `ZLMRTCClient.Endpoint`。

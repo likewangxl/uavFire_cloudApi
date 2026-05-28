@@ -29,8 +29,8 @@ test('leadership cockpit keeps separate map and livestream panel state', () => {
   assert.match(cockpitSource, /liveHudItems/)
 })
 
-test('leadership cockpit switches map panel layout for livestream mode', () => {
-  assert.match(cockpitSource, /'live-mode': activeVisualTab === 'live'/)
+test('leadership cockpit switches map panel layout for livestream tabs', () => {
+  assert.match(cockpitSource, /'live-mode': activeVisualTab !== 'map'/)
   assert.match(cockpitSource, /\.map-panel\.live-mode/)
   assert.match(cockpitSource, /\.livestream-stage\s*\{[\s\S]*overflow:\s*visible/)
 })

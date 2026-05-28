@@ -53,6 +53,18 @@ export interface PlannedWaypoint {
   actions?: WaypointAction[]
 }
 
+export interface FlightPosition {
+  aircraftSn: string
+  gcjLng: number
+  gcjLat: number
+  wgsLng?: number
+  wgsLat?: number
+  height?: number
+  updatedAt?: number
+  currentWaypointIndex?: number
+  totalWaypoints?: number
+}
+
 export enum PlanningExecState {
   IDLE = 'idle',
   DISPATCHING = 'dispatching',
@@ -94,6 +106,7 @@ const state = reactive({
   rthAltitude: undefined as number | undefined,
   statusText: '',
   lastError: '',
+  flightPosition: null as FlightPosition | null,
 })
 
 let wsSubscribed = false
@@ -158,23 +171,6 @@ function restoreDraft () {
     const parsed = JSON.parse(raw) as Partial<PersistedPlanningDraft>
     if (parsed.version !== PLANNING_DRAFT_VERSION) return
 
-    const draftWaypoints = Array.isArray(parsed.waypoints) ? parsed.waypoints : []
-    const restoredWaypoints = draftWaypoints.filter((wp): wp is PlannedWaypoint => {
-      return typeof wp?.id === 'string' &&
-        Number.isFinite(Number(wp.gcjLng)) &&
-        Number.isFinite(Number(wp.gcjLat)) &&
-        Number.isFinite(Number(wp.wgsLng)) &&
-        Number.isFinite(Number(wp.wgsLat)) &&
-        Number.isFinite(Number(wp.height))
-    }).map(wp => ({
-      id: wp.id,
-      gcjLng: Number(wp.gcjLng),
-      gcjLat: Number(wp.gcjLat),
-      wgsLng: Number(wp.wgsLng),
-      wgsLat: Number(wp.wgsLat),
-      height: Number(wp.height),
-    }))
-
     state.gatewaySn = typeof parsed.gatewaySn === 'string' ? parsed.gatewaySn : ''
     state.aircraftSn = typeof parsed.aircraftSn === 'string' ? parsed.aircraftSn : ''
     state.aircraftModelKey = typeof parsed.aircraftModelKey === 'string' ? parsed.aircraftModelKey : ''
@@ -187,6 +183,8 @@ function restoreDraft () {
     state.takeoffSecurityHeight = Number.isFinite(Number(parsed.takeoffSecurityHeight)) ? Number(parsed.takeoffSecurityHeight) : undefined
     state.globalTransitionalSpeed = Number.isFinite(Number(parsed.globalTransitionalSpeed)) ? Number(parsed.globalTransitionalSpeed) : undefined
     state.rthAltitude = Number.isFinite(Number(parsed.rthAltitude)) ? Number(parsed.rthAltitude) : undefined
+    const draftWaypoints = Array.isArray(parsed.waypoints) ? parsed.waypoints : []
+    const restoredWaypoints = draftWaypoints.map(wp => normalizePlannedWaypoint(wp as PlannedWaypoint))
     state.waypoints = restoredWaypoints
     state.active = false
     state.executing = false
@@ -292,6 +290,74 @@ function normalizePlannedWaypoint (wp: PlannedWaypoint): PlannedWaypoint {
       }))
       : undefined,
   }
+}
+
+export function updateAircraftFlightPosition (position: FlightPosition | null) {
+  state.flightPosition = position
+}
+
+export function setFlightPositionFromWgs (
+  aircraftSn: string,
+  wgsLng: unknown,
+  wgsLat: unknown,
+  options: {
+    height?: unknown
+    updatedAt?: unknown
+    currentWaypointIndex?: number
+    totalWaypoints?: number
+  } = {},
+) {
+  const lng = finiteNumber(wgsLng)
+  const lat = finiteNumber(wgsLat)
+  if (!aircraftSn || lng === null || lat === null || lng === 0 || lat === 0) return
+  const [gcjLngRaw, gcjLatRaw] = wgs84togcj02(lng, lat) as [number, number]
+  const gcjLng = finiteNumber(gcjLngRaw)
+  const gcjLat = finiteNumber(gcjLatRaw)
+  if (gcjLng === null || gcjLat === null) return
+  updateAircraftFlightPosition({
+    aircraftSn,
+    gcjLng,
+    gcjLat,
+    wgsLng: lng,
+    wgsLat: lat,
+    height: finiteNumber(options.height) ?? undefined,
+    updatedAt: finiteNumber(options.updatedAt) ?? Date.now(),
+    currentWaypointIndex: options.currentWaypointIndex,
+    totalWaypoints: options.totalWaypoints,
+  })
+}
+
+export function setFlightPositionFromRecord (record: PlannedWaylineRecord | null | undefined) {
+  if (!record) return
+  const aircraftSn = record.droneSn || record.aircraftSn || ''
+  if (!aircraftSn) return
+
+  const gcjLng = finiteNumber(record.aircraftGcjLng)
+  const gcjLat = finiteNumber(record.aircraftGcjLat)
+  const wgsLng = finiteNumber(record.aircraftLng)
+  const wgsLat = finiteNumber(record.aircraftLat)
+  if ((gcjLng === null || gcjLat === null) && wgsLng !== null && wgsLat !== null) {
+    setFlightPositionFromWgs(aircraftSn, wgsLng, wgsLat, {
+      height: record.aircraftHeight,
+      updatedAt: finiteNumber(record.aircraftUpdatedAt) ?? record.lastProgressTime,
+      currentWaypointIndex: record.currentWaypointIndex,
+      totalWaypoints: record.totalWaypoints,
+    })
+    return
+  }
+  if (gcjLng === null || gcjLat === null) return
+
+  updateAircraftFlightPosition({
+    aircraftSn,
+    gcjLng,
+    gcjLat,
+    wgsLng: wgsLng ?? undefined,
+    wgsLat: wgsLat ?? undefined,
+    height: finiteNumber(record.aircraftHeight) ?? undefined,
+    updatedAt: finiteNumber(record.aircraftUpdatedAt) ?? record.lastProgressTime,
+    currentWaypointIndex: record.currentWaypointIndex,
+    totalWaypoints: record.totalWaypoints,
+  })
 }
 
 function currentAircraftOsd () {
@@ -549,6 +615,7 @@ export function resetPlanningDraft () {
   state.rthAltitude = undefined
   state.statusText = ''
   state.lastError = ''
+  state.flightPosition = null
   persistDraft()
 }
 

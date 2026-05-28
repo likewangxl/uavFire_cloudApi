@@ -239,8 +239,8 @@ cd rcplus-msdk-agent && export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openj
 
 根因定位：
 
-- RC Plus 可访问本机 backend 所在网段地址 `192.168.0.30:6789`
-- Android 端 `AGENT_BACKEND_BASE_URL` 已改为 `http://192.168.0.30:6789/`
+- RC Plus 可访问本机 backend 所在网段地址 `172.20.10.7:6789`
+- Android 端 `AGENT_BACKEND_BASE_URL` 已改为 `http://172.20.10.7:6789/`
 - 但 backend 之前对 `/manage/api/v1/dual-stream/agents/**` 也套用了统一 `AuthInterceptor`
 - `rcplus-msdk-agent` 当前没有登录态，也不会附带 `x-auth-token`
 - 所以之前的真机 loop 实际被 backend `401` 拦截，不是设备网络不通
@@ -253,7 +253,7 @@ cd rcplus-msdk-agent && export JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openj
 - `GlobalMVCConfigurer` 已新增：
   - `/" + managePrefix + manageVersion + "/dual-stream/agents/**"`
 - `rcplus-msdk-agent/gradle.properties` 已新增：
-  - `agentBackendBaseUrl=http://192.168.0.30:6789/`
+  - `agentBackendBaseUrl=http://172.20.10.7:6789/`
 - backend 已重启到最新代码
 - RC Plus 上已重新拉起 `com.yinxin.uavfir`
 
@@ -273,7 +273,7 @@ adb logcat -d | rg "ValidationConsole"
 - backend tests: `BUILD SUCCESS`
 - 本机直接访问 agent poll 接口已从 `401` 变为 `200`
 - `6789` 上可观察到活动连接：
-  - `192.168.0.30:6789 -> 192.168.0.30:57938 (ESTABLISHED)`
+  - `172.20.10.7:6789 -> 172.20.10.7:57938 (ESTABLISHED)`
 - RC Plus 侧回归日志显示：
   - `refresh-device-status => 连接状态: CAPABILITY_READY`
   - `可见光: true`
@@ -1367,10 +1367,10 @@ npm.cmd run build
 
 | 服务 | 地址 / 端口 | 状态 |
 | --- | --- | --- |
-| 前端 Vite | `http://192.168.0.30:8080/` | 正常 |
-| 后端 sample | `http://192.168.0.30:6789/` | 正常 |
-| BASIC MQTT | `192.168.0.30:1883` | 正常 |
-| DRC MQTT WS | `ws://192.168.0.30:8083/mqtt` | 正常 |
+| 前端 Vite | `http://172.20.10.7:8080/` | 正常 |
+| 后端 sample | `http://172.20.10.7:6789/` | 正常 |
+| BASIC MQTT | `172.20.10.7:1883` | 正常 |
+| DRC MQTT WS | `ws://172.20.10.7:8083/mqtt` | 正常 |
 | Redis | `6379` | 已恢复 |
 | MySQL | `3306` | 正常 |
 
@@ -1601,10 +1601,10 @@ flyToPoint precheck failed. reason=The current state of the drone does not suppo
 | JDK 11 版本 | OpenJDK 11.0.30 (Homebrew) |
 | Maven | `/usr/local/bin/mvn`（版本 3.9.13，默认绑的是 JDK 8，必须手动覆盖 `JAVA_HOME`） |
 | 后端端口 | 6789 |
-| MQTT 默认地址 | `application.yml` 里的 `192.168.0.30`（Mac 本机使用，无需额外参数） |
+| MQTT 默认地址 | `application.yml` 里的 `172.20.10.7`（Mac 本机使用，无需额外参数） |
 | 后端日志 | `backend/uavfire/logs/cloud-api-sample.log` |
 
-Windows 上的 `run_sample.ps1` 使用 `AI/.jdk17` 并传 `--mqtt.BASIC.host=192.168.0.30`，Mac 上**不要照搬**，MQTT 地址不同。
+Windows 上的 `run_sample.ps1` 使用 `AI/.jdk17` 并传 `--mqtt.BASIC.host=172.20.10.7`，Mac 上**不要照搬**，MQTT 地址不同。
 
 ### 11.2 一次性检查命令（如果必须确认环境）
 
@@ -1648,7 +1648,7 @@ mvn -pl uavfire spring-boot:run
 
 - ❌ 用 `/usr/libexec/java_home -V` 判断有没有 JDK 11 —— 它看不到 Homebrew 的 `openjdk@11`。
 - ❌ 直接 `java -jar uavfire/target/sample-1.10.0.jar` —— sample 的 pom 没有配 `spring-boot-maven-plugin` 的 `repackage`，打出来的 jar 不是可执行 jar，会报 "中没有主清单属性"。必须用 `spring-boot:run`。
-- ❌ 把 Windows `run_sample.ps1` 里的 `--mqtt.BASIC.host=192.168.0.30` 搬到 Mac 上 —— Mac 网络里那个 IP 不通，用 `application.yml` 的默认即可。
+- ❌ 把 Windows `run_sample.ps1` 里的 `--mqtt.BASIC.host=172.20.10.7` 搬到 Mac 上 —— Mac 网络里那个 IP 不通，用 `application.yml` 的默认即可。
 - ❌ 只跑 `mvn -pl uavfire clean package` 不跑 `cloud-sdk install` —— 如果同时改了 cloud-sdk，sample 会继续依赖本地 `~/.m2/` 里的旧 jar，改动看不到。
 
 ### 11.6 停止服务
@@ -1753,21 +1753,21 @@ npm run serve -- --host 0.0.0.0 --port 8080
 
 - 终端打印 `vite dev server running at:`
 - 本机可访问 `http://localhost:8080/`
-- 局域网可访问 `http://192.168.0.30:8080/`
+- 局域网可访问 `http://172.20.10.7:8080/`
 
 本机本次启动成功信息：
 
 | 项 | 值 |
 | --- | --- |
 | 本机地址 | `http://localhost:8080/` |
-| 局域网地址 | `http://192.168.0.30:8080/` |
+| 局域网地址 | `http://172.20.10.7:8080/` |
 
 ### 12.4 本次可复用的结论
 
 - 不能只看代码改完或测试通过，就默认“可以开始飞行测试”。
 - 必须先确认前端和后端都已启动并且端口可访问。
 - 后端启动前必须显式切换到 Java 11。
-- 前端 `.env` 当前后端地址为 `VITE_APP_APIGATEWAY_BACKEND_HOST='http://192.168.0.30:6789'`，与本机当前启动地址一致。
+- 前端 `.env` 当前后端地址为 `VITE_APP_APIGATEWAY_BACKEND_HOST='http://172.20.10.7:6789'`，与本机当前启动地址一致。
 
 ### 12.5 以后回答前的最低要求
 
@@ -2053,9 +2053,9 @@ npm run build
 
 ### 16.2 本轮修正的测试问题
 
-- `frontend/scripts/pilot-liveshare-config.test.mjs` 仍断言旧地址 `192.168.0.30` 和旧变量名 `config.rtmpURL`
+- `frontend/scripts/pilot-liveshare-config.test.mjs` 仍断言旧地址 `172.20.10.7` 和旧变量名 `config.rtmpURL`
 - 当前源码实际契约已经是：
-  - `CURRENT_CONFIG.rtmpURL = rtmp://192.168.0.30:1935/live/`
+  - `CURRENT_CONFIG.rtmpURL = rtmp://172.20.10.7:1935/live/`
   - `pilot-liveshare.vue` 使用 `CURRENT_CONFIG.rtmpURL + 'RC_PLUS_LOCAL-0'`
 - 已将测试脚本更新到当前契约，避免把正确源码误判为失败
 
@@ -2099,7 +2099,7 @@ cd frontend && npm run build
 - Cloud SDK livestream 在 RC Plus + Pilot 2 + 手飞模式下单路可见光可用，但双流仍未确认。
 - M4T + MSDK v5 当前测试组合不暴露 visible + thermal 两路独立 raw stream；同一个 `ComponentIndexType.LEFT_OR_MAIN` 下通过 `CameraVideoStreamSourceType` 切换镜头。
 - 第一阶段方向是 MSDK Agent 数据面迁移，范围限定在直播、航线和 OSD/HMS；飞控迁移延后。
-- 当前工作区配置基准已是 `192.168.0.30`，旧文档中的其他局域网地址不再作为当前运行基准。
+- 当前工作区配置基准已是 `172.20.10.7`，旧文档中的其他局域网地址不再作为当前运行基准。
 
 本轮文档更新：
 
@@ -2109,7 +2109,7 @@ cd frontend && npm run build
 - 更新 `rcplus-msdk-agent/README.md`，移除“只有骨架 / Java 17 阻塞”旧描述。
 - 更新 `ai-service/README.md`，修正为“真实视频输入 + 启发式/YOLO PoC”，并记录 MSDK 迁移注意事项。
 - 更新 `deployment/zlmediakit/README.md`，把旧 `{droneSn}_visible` / `{droneSn}_thermal` 命名改为当前 `{effectiveSn}-0`。
-- 更新 `docs/COCKPIT_VISIBLE_LIVESTREAM_E2E_CHECKLIST.md`，把 E2E 清单同步到 `192.168.0.30` 和当前 stream id 语义。
+- 更新 `docs/COCKPIT_VISIBLE_LIVESTREAM_E2E_CHECKLIST.md`，把 E2E 清单同步到 `172.20.10.7` 和当前 stream id 语义。
 - 更新 `docs/MSDK_MIGRATION_PLAN.md`，补充“已落地 / 未落地”状态边界。
 
 代码评审中发现的当前重点调整项：
@@ -2152,11 +2152,11 @@ JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ANDROID_HO
 
 下一步真机 E2E 顺序：
 
-1. 启动基础服务：MySQL / Redis / ZLM / backend / frontend / ai-service，确认全部使用 `192.168.0.30`。
-2. 安装并启动 RC Plus agent，确认 `AGENT_AIRCRAFT_SN`、`AGENT_MEDIA_HOST=192.168.0.30`、MQTT broker 均正确。
+1. 启动基础服务：MySQL / Redis / ZLM / backend / frontend / ai-service，确认全部使用 `172.20.10.7`。
+2. 安装并启动 RC Plus agent，确认 `AGENT_AIRCRAFT_SN`、`AGENT_MEDIA_HOST=172.20.10.7`、MQTT broker 均正确。
 3. 在 agent UI 启动双流，确认 ZLM 出现 `live/{effectiveSn}-0`，backend DualStream group 的 `visiblePlayUrl` 指向同一 stream。
 4. 打开 cockpit 直播 tab，确认 WebRTC 出画且没有 Cloud SDK 自动开播请求。
-5. 执行一条 agent wayline，确认 backend 触发 ai-service 的 RTSP URL 为 `rtsp://192.168.0.30:8554/live/{droneSn}-0`。
+5. 执行一条 agent wayline，确认 backend 触发 ai-service 的 RTSP URL 为 `rtsp://172.20.10.7:8554/live/{droneSn}-0`。
 6. 对准火焰/测试视频源完成 ai-service event 回传，确认 backend `/fire-events` 和 cockpit 风险事件面板出现记录。
 
 ## 19. 2026-05-21 真机 ADB 联调进展
@@ -2170,8 +2170,8 @@ RC Plus 2 已通过 ADB 识别：
 现场网络发现：
 
 - RC Plus Wi-Fi 地址是 `192.168.0.20/24`
-- Mac 当前基准地址是 `192.168.0.30/24`
-- RC Plus 无到 `192.168.0.30` 的路由，`ping 192.168.0.30` 100% 丢包
+- Mac 当前基准地址是 `172.20.10.7/24`
+- RC Plus 无到 `172.20.10.7` 的路由，`ping 172.20.10.7` 100% 丢包
 
 本轮采用 USB ADB reverse 联调：
 
@@ -2202,7 +2202,7 @@ agent 以如下运行参数安装：
   - `visible_state=running`
   - `thermal_state=degraded`
   - `status_reason=m4t-single-gimbal-only-exposes-single-component-index`
-  - `visible_play_url=webrtc://192.168.0.30:58925/live/1581F7K3D249E00AM3Q3-0`
+  - `visible_play_url=webrtc://172.20.10.7:58925/live/1581F7K3D249E00AM3Q3-0`
 - ai-service 已直接拉取真实 ZLM RTSP：
   - `rtsp://127.0.0.1:8554/live/1581F7K3D249E00AM3Q3-0`
   - task `fire-1581F7K3D249E00AM3Q3` 状态为 `running`
@@ -2219,3 +2219,104 @@ agent 以如下运行参数安装：
 1. cockpit 需要浏览器实测 WebRTC 画面；当前命令行已确认 frontend 200、ZLM source 存在、backend URL 正确。
 2. 当前真实画面没有触发火情，ai-service 只产生 LOW 事件；需要对准火源/测试火焰图，或注入高风险样本，才能验证 `/api/fire/events` 和 cockpit 风险面板。
 3. 若后续不用 USB reverse，应把 RC Plus 和 Mac 放回同一网段，或更新所有 IP 配置。
+
+## 20. 2026-05-29 FC100 公网直播与 VM ai-service 部署记录
+
+本轮将 FC100 公网直播和火情识别链路切到公网 VM，后续启动服务时不要再启动本地 `ai-service/scripts/run-dev.sh`。本机只运行前端、后端和 SSH 隧道，`127.0.0.1:9000` 由隧道转发到 VM 上的 ai-service。
+
+VM 访问：
+
+```bash
+ssh -p 46691 djdev@1916dn17xs12.vicp.fun
+```
+
+花生壳当前映射：
+
+```text
+RTMP 推流: 1916dn17xs12.vicp.fun:56920 -> 192.168.50.200:8089
+WebRTC 信令: 1916dn17xs12.vicp.fun:55932 -> 192.168.50.200:8099
+WebRTC 媒体: 1916dn17xs12.vicp.fun:19586 -> 192.168.50.200:19586
+SSH-200: 1916dn17xs12.vicp.fun:46691 -> 192.168.50.200:22
+```
+
+VM ZLMediaKit 运行在 Docker 容器 `uavfire-zlmediakit`，RTC 已改为 TCP 优先，媒体端口为 `19586`：
+
+```text
+[rtc]
+port=19586
+tcpPort=19586
+preferred_tcp=1
+externIP=1916dn17xs12.vicp.fun
+```
+
+本地配置已经指向公网媒体服务：
+
+```text
+backend/uavfire/src/main/resources/application.yml
+  livestream.playback.webrtc-host=1916dn17xs12.vicp.fun
+  livestream.playback.webrtc-port=55932
+  livestream.url.rtmp.url=rtmp://1916dn17xs12.vicp.fun:56920/live/
+
+frontend/src/api/http/config.ts
+  rtmpURL=rtmp://1916dn17xs12.vicp.fun:56920/live/
+
+rcplus-msdk-agent/gradle.properties
+  agentMediaHost=1916dn17xs12.vicp.fun
+  agentMediaRtmpPort=56920
+```
+
+ai-service 当前部署方式：
+
+```text
+VM systemd service: uavfire-ai.service
+VM project dir: /home/djdev/uavfire-deploy/ai-service
+VM model: /home/djdev/uavfire-deploy/ai-service/models/yolov26-fire-detection-best.pt
+local model source: models/yolov26-fire-detection-best.pt
+```
+
+VM `.env` 关键项：
+
+```dotenv
+AI_SERVICE_USE_CONTINUOUS_RUNNER=true
+AI_SERVICE_BACKEND_BASE_URL=http://127.0.0.1:6789
+AI_SERVICE_BACKEND_USERNAME=adminPC
+AI_SERVICE_BACKEND_PASSWORD=adminPC
+AI_SERVICE_BACKEND_LOGIN_FLAG=1
+AI_SERVICE_VISIBLE_YOLO_MODEL_PATH=/home/djdev/uavfire-deploy/ai-service/models/yolov26-fire-detection-best.pt
+AI_SERVICE_VISIBLE_FIRE_SATURATION_RATIO=0.05
+AI_SERVICE_VISIBLE_CONFIDENCE_FLOOR=0.05
+AI_SERVICE_SNAPSHOT_DIR=/home/djdev/uavfire-deploy/ai-service/data/fire-snapshots
+AI_SERVICE_SNAPSHOT_PUBLIC_BASE_URL=http://127.0.0.1:9000/api/v1/snapshots
+OPENCV_FFMPEG_CAPTURE_OPTIONS=rtsp_transport;tcp
+```
+
+本机启动顺序：
+
+```bash
+tmux new-session -d -s uavfire-backend 'cd /Users/likewang/uavfire/backend && mvn -pl uavfire spring-boot:run'
+tmux new-session -d -s uavfire-frontend 'cd /Users/likewang/uavfire/frontend && npm run serve -- --host 0.0.0.0 --port 8081'
+tmux kill-session -t uavfire-ai-service 2>/dev/null || true
+tmux new-session -d -s uavfire-ai-tunnel 'expect /tmp/uavfire-ai-tunnel.expect'
+```
+
+`/tmp/uavfire-ai-tunnel.expect` 隧道语义：
+
+```text
+本机 127.0.0.1:9000 -> VM 127.0.0.1:9000
+VM 127.0.0.1:6789 -> 本机 127.0.0.1:6789
+```
+
+关键验证结果：
+
+```text
+本机 curl http://127.0.0.1:9000/healthz -> {"status":"ok"}
+VM curl http://127.0.0.1:9000/healthz -> {"status":"ok"}
+VM curl http://127.0.0.1:6789/ -> 302，证明反向隧道能访问本机后端
+VM YOLO load -> model_loaded=YOLO，names={0:'fire',1:'other',2:'smoke'}
+```
+
+注意：
+
+- 当前 ai-service 使用 CPU 版 PyTorch，不启用 VMware GPU 直通。
+- 宿主机有 GTX 1660S 不能自动让 VM 使用 CUDA；除非 VM 内 `nvidia-smi` 能看到 NVIDIA 设备，否则仍是 CPU 推理。
+- 花生壳 TCP 映射访问 WebRTC HTTP 信令可能返回“映射不支持网页访问”，如浏览器侧加载 ZLMRTCClient 失败，需要把 WebRTC 信令映射改成花生壳“网站应用类型”。

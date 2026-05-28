@@ -169,6 +169,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalStateException("Failed to get imported KMZ file URL.", e);
         }
 
+        ImportedKmzPlan importedPlan = extractImportedKmzPlan(content);
         long now = System.currentTimeMillis();
         PlannedWaylineEntity entity = PlannedWaylineEntity.builder()
                 .plannedWaylineId(plannedWaylineId)
@@ -179,9 +180,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                         : "M30T")
                 .gatewaySn("")
                 .aircraftSn("")
-                .defaultHeight(30.0)
-                .maxSpeed(5.0)
-                .waypointsJson("[]")
+                .defaultHeight(importedPlan.defaultHeight)
+                .maxSpeed(importedPlan.maxSpeed)
+                .waypointsJson(writeWaypoints(importedPlan.waypoints))
                 .status(STATUS_FILE_GENERATED)
                 .publishedWaylineId(publishedWayline.getWaylineId())
                 .kmzUrl(kmzUrl)
@@ -208,6 +209,160 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalArgumentException("Failed to import KMZ as planned wayline.");
         }
         return entity2Dto(entity);
+    }
+
+    private ImportedKmzPlan extractImportedKmzPlan(byte[] content) {
+        String xml = readKmzXmlEntry(content, "wpmz/waylines.wpml")
+                .or(() -> readKmzXmlEntry(content, "wpmz/template.kml"))
+                .orElse("");
+        double maxSpeed = parsePositiveDouble(tagText(xml, "autoFlightSpeed")).orElse(5.0);
+        List<PlannedWaypointDTO> waypoints = parseImportedKmzWaypoints(xml, 30.0, maxSpeed);
+        double defaultHeight = waypoints.stream()
+                .map(PlannedWaypointDTO::getHeight)
+                .filter(value -> value != null && value > 0)
+                .findFirst()
+                .orElse(30.0);
+        return new ImportedKmzPlan(waypoints, defaultHeight, maxSpeed);
+    }
+
+    private Optional<String> readKmzXmlEntry(byte[] content, String entryName) {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
+            ZipEntry entry = zipInputStream.getNextEntry();
+            while (entry != null) {
+                if (entryName.equals(entry.getName())) {
+                    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                    zipInputStream.transferTo(outputStream);
+                    return Optional.of(outputStream.toString(StandardCharsets.UTF_8));
+                }
+                entry = zipInputStream.getNextEntry();
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to inspect imported KMZ.", e);
+        }
+        return Optional.empty();
+    }
+
+    private List<PlannedWaypointDTO> parseImportedKmzWaypoints(String xml, double fallbackHeight, double fallbackSpeed) {
+        List<PlannedWaypointDTO> waypoints = new ArrayList<>();
+        Matcher matcher = Pattern.compile("(?s)<Placemark\\b[^>]*>(.*?)</Placemark>").matcher(xml);
+        int sequence = 1;
+        while (matcher.find()) {
+            String body = matcher.group(1);
+            Matcher coordinateMatcher = Pattern.compile("(?s)<coordinates>\\s*([-+0-9.Ee]+),([-+0-9.Ee]+)(?:,[^<]*)?\\s*</coordinates>")
+                    .matcher(body);
+            if (!coordinateMatcher.find()) {
+                continue;
+            }
+            try {
+                double wgsLng = Double.parseDouble(coordinateMatcher.group(1));
+                double wgsLat = Double.parseDouble(coordinateMatcher.group(2));
+                double[] gcj = wgs84ToGcj02(wgsLng, wgsLat);
+                double height = parsePositiveDouble(tagText(body, "executeHeight"))
+                        .or(() -> parsePositiveDouble(tagText(body, "height")))
+                        .orElse(fallbackHeight);
+                double speed = parsePositiveDouble(tagText(body, "waypointSpeed")).orElse(fallbackSpeed);
+                int order = parsePositiveInt(tagText(body, "index")).map(index -> index + 1).orElse(sequence);
+                PlannedWaypointDTO waypoint = new PlannedWaypointDTO()
+                        .setOrder(order)
+                        .setWgsLng(wgsLng)
+                        .setWgsLat(wgsLat)
+                        .setGcjLng(gcj[0])
+                        .setGcjLat(gcj[1])
+                        .setHeight(height)
+                        .setSpeed(speed);
+                tagText(body, "waypointHeadingMode").ifPresent(waypoint::setHeadingMode);
+                parseFiniteDouble(tagText(body, "waypointHeadingAngle")).ifPresent(waypoint::setHeadingAngle);
+                tagText(body, "waypointTurnMode").ifPresent(waypoint::setTurnMode);
+                parseFiniteDouble(tagText(body, "waypointTurnDampingDist")).ifPresent(waypoint::setTurnDamping);
+                parseFiniteDouble(tagText(body, "waypointGimbalPitchAngle")).ifPresent(waypoint::setGimbalPitch);
+                parseFiniteDouble(tagText(body, "waypointGimbalYawAngle")).ifPresent(waypoint::setGimbalYaw);
+                waypoints.add(waypoint);
+                sequence++;
+            } catch (NumberFormatException ignored) {
+                // Skip malformed points; the original KMZ remains stored for download.
+            }
+        }
+        return waypoints;
+    }
+
+    private Optional<String> tagText(String xml, String localName) {
+        Matcher matcher = Pattern.compile("(?s)<(?:[A-Za-z0-9_]+:)?" + Pattern.quote(localName)
+                + ">\\s*([^<]+?)\\s*</(?:[A-Za-z0-9_]+:)?" + Pattern.quote(localName) + ">")
+                .matcher(xml);
+        return matcher.find() ? Optional.of(matcher.group(1).trim()) : Optional.empty();
+    }
+
+    private Optional<Integer> parsePositiveInt(Optional<String> value) {
+        return value.flatMap(text -> {
+            try {
+                int parsed = Integer.parseInt(text);
+                return parsed >= 0 ? Optional.of(parsed) : Optional.empty();
+            } catch (NumberFormatException e) {
+                return Optional.empty();
+            }
+        });
+    }
+
+    private Optional<Double> parsePositiveDouble(Optional<String> value) {
+        return parseFiniteDouble(value).filter(parsed -> parsed > 0);
+    }
+
+    private Optional<Double> parseFiniteDouble(Optional<String> value) {
+        return value.flatMap(text -> {
+            try {
+                double parsed = Double.parseDouble(text);
+                return Double.isFinite(parsed) ? Optional.of(parsed) : Optional.empty();
+            } catch (NumberFormatException e) {
+                return Optional.empty();
+            }
+        });
+    }
+
+    private double[] wgs84ToGcj02(double lng, double lat) {
+        if (outOfChina(lng, lat)) {
+            return new double[]{lng, lat};
+        }
+        double dlat = transformLat(lng - 105.0, lat - 35.0);
+        double dlng = transformLng(lng - 105.0, lat - 35.0);
+        double radLat = lat / 180.0 * Math.PI;
+        double magic = Math.sin(radLat);
+        magic = 1 - 0.00669342162296594323 * magic * magic;
+        double sqrtMagic = Math.sqrt(magic);
+        dlat = (dlat * 180.0) / ((6378245.0 * (1 - 0.00669342162296594323)) / (magic * sqrtMagic) * Math.PI);
+        dlng = (dlng * 180.0) / (6378245.0 / sqrtMagic * Math.cos(radLat) * Math.PI);
+        return new double[]{lng + dlng, lat + dlat};
+    }
+
+    private boolean outOfChina(double lng, double lat) {
+        return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271;
+    }
+
+    private double transformLat(double lng, double lat) {
+        double ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + 0.1 * lng * lat + 0.2 * Math.sqrt(Math.abs(lng));
+        ret += (20.0 * Math.sin(6.0 * lng * Math.PI) + 20.0 * Math.sin(2.0 * lng * Math.PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(lat * Math.PI) + 40.0 * Math.sin(lat / 3.0 * Math.PI)) * 2.0 / 3.0;
+        ret += (160.0 * Math.sin(lat / 12.0 * Math.PI) + 320 * Math.sin(lat * Math.PI / 30.0)) * 2.0 / 3.0;
+        return ret;
+    }
+
+    private double transformLng(double lng, double lat) {
+        double ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + 0.1 * lng * lat + 0.1 * Math.sqrt(Math.abs(lng));
+        ret += (20.0 * Math.sin(6.0 * lng * Math.PI) + 20.0 * Math.sin(2.0 * lng * Math.PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(lng * Math.PI) + 40.0 * Math.sin(lng / 3.0 * Math.PI)) * 2.0 / 3.0;
+        ret += (150.0 * Math.sin(lng / 12.0 * Math.PI) + 300.0 * Math.sin(lng / 30.0 * Math.PI)) * 2.0 / 3.0;
+        return ret;
+    }
+
+    private static class ImportedKmzPlan {
+        private final List<PlannedWaypointDTO> waypoints;
+        private final double defaultHeight;
+        private final double maxSpeed;
+
+        private ImportedKmzPlan(List<PlannedWaypointDTO> waypoints, double defaultHeight, double maxSpeed) {
+            this.waypoints = waypoints;
+            this.defaultHeight = defaultHeight;
+            this.maxSpeed = maxSpeed;
+        }
     }
 
     @Override
@@ -381,6 +536,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         long now = System.currentTimeMillis();
         existing.setStatus(STATUS_PUBLISHING);
         existing.setTaskStatus(STATUS_PUBLISHING);
+        existing.setTaskStatusReason(null);
         existing.setFlightId(UUID.randomUUID().toString());
         if (param != null && StringUtils.hasText(param.getDockSn())) {
             existing.setDockSn(param.getDockSn());
@@ -495,6 +651,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
         existing.setStatus(STATUS_CANCELED);
         existing.setTaskStatus(STATUS_CANCELED);
+        existing.setTaskStatusReason(null);
         existing.setUpdateTime(now);
 
         stopFireDetectionForWayline(existing);
@@ -910,6 +1067,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .updateTime(existing.getUpdateTime())
                 .build();
         int updated = mapper.updateById(update);
+        if (existing.getTaskStatusReason() == null) {
+            mapper.update(null, new LambdaUpdateWrapper<PlannedWaylineEntity>()
+                    .eq(PlannedWaylineEntity::getId, existing.getId())
+                    .set(PlannedWaylineEntity::getTaskStatusReason, null));
+        }
         if (updated <= 0) {
             throw new IllegalArgumentException("Planned wayline doesn't exist.");
         }
@@ -1126,7 +1288,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             elem(w, "positioningType", "GPS");
             w.writeEndElement();
 
-            elem(w, "autoFlightSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+            double flightSpeed = generatedFlightSpeed(entity);
+            elem(w, "autoFlightSpeed", formatNumeric(flightSpeed));
             elem(w, "globalHeight", String.valueOf(globalAvgHeight(waypoints)));
             elem(w, "caliFlightEnable", "0");
             elem(w, "gimbalPitchMode", "manual");
@@ -1166,14 +1329,15 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             // probe.waylines.wpml 实际**没有**这个节点；写了反而让 MSDK pushKMZFileToAircraft
             // 报 GENERATE_MISSION_FILE_FAILED。template.kml 仍保留该节点（line 895）。
 
+            double flightSpeed = generatedFlightSpeed(entity);
             double distance = totalDistanceMeters(waypoints);
             elem(w, "distance", String.valueOf(distance));
-            elem(w, "duration", String.valueOf(distance / Math.max(AUTO_FLIGHT_SPEED_MPS, 1)));
-            elem(w, "autoFlightSpeed", String.valueOf(AUTO_FLIGHT_SPEED_MPS));
+            elem(w, "duration", String.valueOf(distance / Math.max(flightSpeed, 1)));
+            elem(w, "autoFlightSpeed", formatNumeric(flightSpeed));
 
             int index = 0;
             for (PlannedWaypointDTO wp : waypoints) {
-                writeWaylinePlacemark(w, wp, index++);
+                writeWaylinePlacemark(w, wp, index++, flightSpeed);
             }
 
             w.writeEndElement(); // /Folder
@@ -1245,7 +1409,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return wp.getHeadingMode() != null || wp.getHeadingAngle() != null || wp.getPoiLng() != null;
     }
 
-    private void writeWaylinePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index) throws XMLStreamException {
+    private void writeWaylinePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index, double defaultSpeed) throws XMLStreamException {
         w.writeStartElement("Placemark");
         w.writeStartElement("Point");
         elem(w, NS_KML, "coordinates", wp.getWgsLng() + "," + wp.getWgsLat());
@@ -1253,7 +1417,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "index", String.valueOf(index));
         elem(w, "executeHeight", String.valueOf(wp.getHeight()));
         elem(w, "waypointSpeed", formatNumeric(
-                wp.getSpeed() != null ? wp.getSpeed() : (double) AUTO_FLIGHT_SPEED_MPS));
+                wp.getSpeed() != null ? wp.getSpeed() : defaultSpeed));
         w.writeStartElement(NS_WPML, "waypointHeadingParam");
         elem(w, "waypointHeadingMode",
                 wp.getHeadingMode() != null ? wp.getHeadingMode() : "followWayline");
@@ -1346,6 +1510,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             if (wp.getHeight() != null) { sum += wp.getHeight(); n++; }
         }
         return n == 0 ? 100 : (int) (sum / n);
+    }
+
+    private static double generatedFlightSpeed(PlannedWaylineEntity entity) {
+        if (entity != null && entity.getMaxSpeed() != null && entity.getMaxSpeed() > 0) {
+            return entity.getMaxSpeed();
+        }
+        return AUTO_FLIGHT_SPEED_MPS;
     }
 
     /** Haversine distance sum in meters between consecutive WGS84 waypoints. */
@@ -1456,9 +1627,18 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!isDjiSafeWaylineName(entity.getName())) {
             return false;
         }
-        return waylineFileService.getWaylineByWaylineId(workspaceId, entity.getPublishedWaylineId())
+        boolean metadataSafe = waylineFileService.getWaylineByWaylineId(workspaceId, entity.getPublishedWaylineId())
                 .map(file -> isDjiSafeWaylineName(file.getName()))
                 .orElse(false);
+        if (!metadataSafe) {
+            return false;
+        }
+        try {
+            byte[] content = waylineFileService.downloadWaylineContent(workspaceId, entity.getPublishedWaylineId());
+            return content != null && content.length > 0;
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     private void rollbackPublishedWayline(String workspaceId, String publishedWaylineId) {
@@ -1576,7 +1756,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (entity == null) {
             return null;
         }
-        return PlannedWaylineDTO.builder()
+        PlannedWaylineDTO dto = PlannedWaylineDTO.builder()
                 .plannedWaylineId(entity.getPlannedWaylineId())
                 .workspaceId(entity.getWorkspaceId())
                 .name(entity.getName())
@@ -1618,6 +1798,32 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .createTime(entity.getCreateTime())
                 .updateTime(entity.getUpdateTime())
                 .build();
+        enrichAircraftPosition(dto);
+        return dto;
+    }
+
+    private void enrichAircraftPosition(PlannedWaylineDTO dto) {
+        if (dto == null || msdkDeviceStateService == null) {
+            return;
+        }
+        String aircraftSn = StringUtils.hasText(dto.getDroneSn()) ? dto.getDroneSn() : dto.getAircraftSn();
+        if (!StringUtils.hasText(aircraftSn)) {
+            return;
+        }
+        msdkDeviceStateService.get(aircraftSn).ifPresent(state -> {
+            Double lat = state.getLatitude();
+            Double lng = state.getLongitude();
+            if (!isFinite(lat) || !isFinite(lng) || (lat == 0.0 && lng == 0.0)) {
+                return;
+            }
+            double[] gcj = wgs84ToGcj02(lng, lat);
+            dto.setAircraftLng(lng)
+                    .setAircraftLat(lat)
+                    .setAircraftGcjLng(gcj[0])
+                    .setAircraftGcjLat(gcj[1])
+                    .setAircraftHeight(state.getHeight())
+                    .setAircraftUpdatedAt(state.getUpdatedAt());
+        });
     }
 
     private String writeWaypoints(List<PlannedWaypointDTO> waypoints) {

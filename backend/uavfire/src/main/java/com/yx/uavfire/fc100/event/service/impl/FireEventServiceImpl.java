@@ -367,22 +367,36 @@ public class FireEventServiceImpl implements FireEventService {
     }
 
     private String findActiveMissionNo(Long fireEventId) {
+        FireMissionEntity mission = findActiveMission(fireEventId);
+        return mission == null ? null : mission.getMissionNo();
+    }
+
+    private FireMissionEntity findActiveMission(Long fireEventId) {
         List<FireMissionEntity> list = missionMapper.selectList(
             new QueryWrapper<FireMissionEntity>()
                 .eq("fire_event_id", fireEventId)
                 .eq("deleted", 0)
                 .in("status", ACTIVE_MISSION_STATUSES)
                 .orderByDesc("create_time"));
-        return list.isEmpty() ? null : list.get(0).getMissionNo();
+        return list.isEmpty() ? null : list.get(0);
     }
 
     @Override
     public FireEventDTO get(String eventId) {
+        QueryWrapper<FireEventEntity> query = new QueryWrapper<FireEventEntity>()
+            .eq("deleted", 0)
+            .and(w -> {
+                w.eq("event_id", eventId);
+                if (eventId != null && eventId.matches("\\d+")) {
+                    w.or().eq("id", Long.parseLong(eventId));
+                }
+            });
         FireEventEntity e = eventMapper.selectOne(
-            new QueryWrapper<FireEventEntity>().eq("event_id", eventId));
+            query);
         if (e == null) return null;
         FireEventDTO d = new FireEventDTO();
         BeanUtils.copyProperties(e, d);
+        fillActiveMission(d, e.getId());
         return d;
     }
 
@@ -403,9 +417,18 @@ public class FireEventServiceImpl implements FireEventService {
             .map(e -> {
                 FireEventDTO d = new FireEventDTO();
                 BeanUtils.copyProperties(e, d);
+                fillActiveMission(d, e.getId());
                 return d;
             })
             .collect(java.util.stream.Collectors.toList());
+    }
+
+    private void fillActiveMission(FireEventDTO dto, Long fireEventId) {
+        FireMissionEntity mission = findActiveMission(fireEventId);
+        if (mission != null) {
+            dto.setMissionNo(mission.getMissionNo());
+            dto.setMissionStatus(mission.getStatus());
+        }
     }
 
     @Override

@@ -129,6 +129,19 @@ public class WaylineFileServiceImpl implements IWaylineFileService {
     }
 
     @Override
+    public byte[] downloadWaylineContent(String workspaceId, String waylineId) throws SQLException {
+        Optional<GetWaylineListResponse> waylineOpt = this.getWaylineByWaylineId(workspaceId, waylineId);
+        if (waylineOpt.isEmpty()) {
+            throw new SQLException(waylineId + " does not exist.");
+        }
+        try (InputStream object = getObject(OssConfiguration.bucket, waylineOpt.get().getObjectKey())) {
+            return object.readAllBytes();
+        } catch (IOException e) {
+            throw new SQLException("Failed to read wayline file content.", e);
+        }
+    }
+
+    @Override
     public PublishedWaylineFileDTO createPublishedWayline(String workspaceId, PublishedWaylineCreateDTO param) {
         if (param == null || param.getContent() == null || param.getContent().length == 0) {
             throw new IllegalArgumentException("Published wayline content is required.");

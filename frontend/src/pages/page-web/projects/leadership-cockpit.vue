@@ -107,11 +107,11 @@
         </article>
       </div>
 
-      <article class="shell-card panel-card map-panel" :class="{ 'live-mode': activeVisualTab === 'live' }">
+      <article class="shell-card panel-card map-panel" :class="{ 'live-mode': activeVisualTab !== 'map' }">
         <header class="panel-header map-header">
           <div>
-            <h3>{{ activeVisualTab === 'map' ? '森林火场综合态势图' : '森林火场直播画面' }}</h3>
-            <p>{{ activeVisualTab === 'map' ? '领导视角聚焦火势范围、保护圈、力量投向、受威胁对象和处置效果。' : '保留当前直播 HUD，并将直播状态、机组、清晰度和飞行模式集中展示在驾驶舱。' }}</p>
+            <h3>{{ visualPanelTitle }}</h3>
+            <p>{{ visualPanelDescription }}</p>
           </div>
           <div class="map-header-actions">
             <div class="visual-tabs">
@@ -126,8 +126,8 @@
                 {{ tab.label }}
               </button>
             </div>
-            <span class="status-pill" :class="activeVisualTab === 'live' ? dualStreamPillClass : 'safe'">
-              {{ activeVisualTab === 'live' ? livestreamStatusPill : '空地协同封控中' }}
+            <span class="status-pill" :class="visualPanelPillClass">
+              {{ visualPanelPillText }}
             </span>
           </div>
         </header>
@@ -155,10 +155,16 @@
           </div>
         </div>
 
-        <div v-else class="livestream-stage dual-stream-stage">
+        <div v-else-if="activeVisualTab === 'fire-monitor'" class="livestream-stage dual-stream-stage">
           <div class="dual-stream-shell">
             <div class="dual-stream-stage-head">
-              <span class="section-meta">RC Plus Dual-Stream Runtime</span>
+              <CockpitAircraftStreamSelector
+                v-model:value="selectedFireMonitorTargetKey"
+                role="fire-monitor"
+                :targets="fireMonitorTargets"
+                :loading="dualStreamState.loading"
+                @change="handleFireMonitorTargetChange"
+              />
               <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
               <button
                 class="fire-detect-btn"
@@ -278,9 +284,29 @@
           </div>
         </div>
 
-        <div v-if="activeVisualTab === 'map'" class="map-kpi-grid">
+        <div v-else class="livestream-stage delivery-stage">
+          <div class="dual-stream-shell">
+            <div class="dual-stream-stage-head">
+              <CockpitAircraftStreamSelector
+                v-model:value="selectedDeliveryTargetKey"
+                role="delivery"
+                :targets="deliveryExecutionTargets"
+                :loading="deliveryTargetsLoading"
+              />
+              <span class="status-pill" :class="deliveryPanelPillClass">{{ deliveryPanelPillText }}</span>
+            </div>
+            <CockpitDeliveryExecutionPanel
+              :target="selectedDeliveryTarget"
+              :delivery-targets="deliveryExecutionTargets"
+              :loading="deliveryTargetsLoading"
+              @refresh-targets="loadDeliveryExecutionTargets"
+            />
+          </div>
+        </div>
+
+        <div class="map-kpi-grid">
           <section
-            v-for="item in mapKpis"
+            v-for="item in visualKpis"
             :key="item.label"
             class="map-kpi"
           >
@@ -445,10 +471,13 @@ import {
   type DualStreamGroup
 } from '/@/api/manage'
 import { eventApi as fireEventApi } from '/@/api/fire/event'
+import { deliveryApi, type DeliveryDeviceDTO } from '/@/api/fire/delivery'
 import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
 import type { FireEventDTO } from '/@/types/fire/event'
 import { useMyStore } from '/@/store'
 import { EModeCode } from '/@/types/device'
+import CockpitAircraftStreamSelector, { type CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
+import CockpitDeliveryExecutionPanel from '/@/components/cockpit/CockpitDeliveryExecutionPanel.vue'
 import {
   buildDualStreamCandidateSns,
   buildLivePaneState,
@@ -498,7 +527,9 @@ function toDeviceOsdFromMsdk (device: MsdkDeviceState) {
 async function refreshMsdkHudDevices () {
   const res = await listMsdkDevices()
   if (res.code !== 0) return
-  for (const device of res.data || []) {
+  const devices = res.data || []
+  msdkDeviceSnapshots.value = devices
+  for (const device of devices) {
     if (!device.aircraftSn) continue
     store.commit('SET_DEVICE_INFO', {
       sn: device.aircraftSn,
@@ -610,10 +641,16 @@ const mapKpis = [
 
 const visualTabs = [
   { key: 'map', label: '态势图' },
-  { key: 'live', label: '直播画面' }
+  { key: 'fire-monitor', label: '火情监测画面' },
+  { key: 'delivery-execution', label: '投放执行画面' }
 ] as const
 
 const activeVisualTab = ref<typeof visualTabs[number]['key']>('map')
+const msdkDeviceSnapshots = ref<MsdkDeviceState[]>([])
+const selectedFireMonitorTargetKey = ref('')
+const deliveryExecutionTargets = ref<CockpitStreamTarget[]>([])
+const selectedDeliveryTargetKey = ref('')
+const deliveryTargetsLoading = ref(false)
 const primaryPlayerShell = ref<HTMLElement | null>(null)
 const previewPlayerShell = ref<HTMLElement | null>(null)
 const primaryPreference = ref<'visible' | 'thermal'>('visible')
@@ -624,6 +661,134 @@ const dualStreamState = reactive({
   loading: false,
   error: '',
   group: null as DualStreamGroup | null
+})
+
+const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
+  const targets = new Map<string, CockpitStreamTarget>()
+  for (const device of msdkDeviceSnapshots.value) {
+    if (!device.aircraftSn) continue
+    const groupForDevice = dualStreamState.group?.droneSn === device.aircraftSn ? dualStreamState.group : null
+    targets.set(device.aircraftSn, {
+      key: `fire-monitor:${device.aircraftSn}`,
+      role: 'fire-monitor',
+      deviceSn: device.aircraftSn,
+      callsign: device.model || `火情监测 ${device.aircraftSn.slice(-4)}`,
+      online: device.online,
+      taskStatus: groupForDevice?.sessionState || device.connectionState || device.mode,
+      primaryPlayUrl: groupForDevice?.visiblePlayUrl || '',
+      thermalPlayUrl: groupForDevice?.thermalPlayUrl || '',
+      streamStatus: device.online
+        ? (groupForDevice?.visiblePlayUrl ? 'running' : 'idle')
+        : 'offline',
+      message: groupForDevice?.statusMessage || groupForDevice?.statusReason || device.mode
+    })
+  }
+
+  const group = dualStreamState.group
+  if (group?.droneSn && !targets.has(group.droneSn)) {
+    targets.set(group.droneSn, {
+      key: `fire-monitor:${group.droneSn}`,
+      role: 'fire-monitor',
+      deviceSn: group.droneSn,
+      callsign: `火情监测 ${group.droneSn.slice(-4)}`,
+      online: group.connectionState !== 'offline',
+      taskStatus: group.sessionState || group.currentMode,
+      primaryPlayUrl: group.visiblePlayUrl || '',
+      thermalPlayUrl: group.thermalPlayUrl || '',
+      streamStatus: group.visiblePlayUrl ? 'running' : 'idle',
+      message: group.statusMessage || group.statusReason
+    })
+  }
+
+  if (!targets.has(FIELD_AGENT_AIRCRAFT_SN)) {
+    targets.set(FIELD_AGENT_AIRCRAFT_SN, {
+      key: `fire-monitor:${FIELD_AGENT_AIRCRAFT_SN}`,
+      role: 'fire-monitor',
+      deviceSn: FIELD_AGENT_AIRCRAFT_SN,
+      callsign: `火情监测 ${FIELD_AGENT_AIRCRAFT_SN.slice(-4)}`,
+      online: true,
+      taskStatus: '默认监测机',
+      streamStatus: 'idle',
+      message: '默认 Agent 飞机'
+    })
+  }
+
+  return Array.from(targets.values())
+})
+
+const selectedFireMonitorTarget = computed(() => {
+  return fireMonitorTargets.value.find(target => target.key === selectedFireMonitorTargetKey.value) ||
+    fireMonitorTargets.value[0] ||
+    null
+})
+
+const selectedDeliveryTarget = computed(() => {
+  return deliveryExecutionTargets.value.find(target => target.key === selectedDeliveryTargetKey.value) ||
+    deliveryExecutionTargets.value[0] ||
+    null
+})
+
+const visualPanelTitle = computed(() => {
+  if (activeVisualTab.value === 'map') return '森林火场综合态势图'
+  if (activeVisualTab.value === 'fire-monitor') return '森林火场火情监测画面'
+  return 'FC100 投放执行画面'
+})
+
+const visualPanelDescription = computed(() => {
+  if (activeVisualTab.value === 'map') {
+    return '领导视角聚焦火势范围、保护圈、力量投向、受威胁对象和处置效果。'
+  }
+  if (activeVisualTab.value === 'fire-monitor') {
+    return '选择火情监测飞行器，查看可见光、红外复核、AI 识别和飞行 HUD。'
+  }
+  return '选择 FC100 投放飞行器，查看投放执行直播、任务阶段、进度和飞行器状态。'
+})
+
+const visualPanelPillText = computed(() => {
+  if (activeVisualTab.value === 'map') return '空地协同封控中'
+  if (activeVisualTab.value === 'fire-monitor') return livestreamStatusPill.value
+  return deliveryPanelPillText.value
+})
+
+const visualPanelPillClass = computed(() => {
+  if (activeVisualTab.value === 'map') return 'safe'
+  if (activeVisualTab.value === 'fire-monitor') return dualStreamPillClass.value
+  return deliveryPanelPillClass.value
+})
+
+const deliveryPanelPillText = computed(() => {
+  if (deliveryTargetsLoading.value) return '投放机同步中'
+  const target = selectedDeliveryTarget.value
+  if (!target) return '等待 FC100 投放机'
+  if (target.streamStatus === 'running') return 'FC100 直播在线'
+  return target.online ? 'FC100 待播放' : 'FC100 离线'
+})
+
+const deliveryPanelPillClass = computed(() => {
+  const target = selectedDeliveryTarget.value
+  if (!target || !target.online || target.streamStatus === 'error') return 'danger'
+  if (target.streamStatus === 'running') return 'safe'
+  return 'default'
+})
+
+const fireMonitorKpis = computed(() => [
+  { label: '播放对象', value: selectedFireMonitorTarget.value?.callsign || '未选择' },
+  { label: '可见光状态', value: dualStreamSummary.value.visible },
+  { label: '红外状态', value: dualStreamSummary.value.thermal },
+  { label: 'AI 识别记录', value: `${recentAiRiskEvents.value.length} 条` }
+])
+
+const deliveryExecutionKpis = computed(() => [
+  { label: '播放对象', value: selectedDeliveryTarget.value?.callsign || '未选择' },
+  { label: 'FC100 在线状态', value: selectedDeliveryTarget.value?.online ? '在线' : '离线' },
+  { label: '任务阶段', value: selectedDeliveryTarget.value?.taskStatus || '待命' },
+  { label: '执行进度', value: selectedDeliveryTarget.value?.progressPercent != null ? `${selectedDeliveryTarget.value.progressPercent}%` : '--' }
+])
+
+const visualKpis = computed(() => {
+  if (activeVisualTab.value === 'map') return mapKpis
+  if (activeVisualTab.value === 'fire-monitor') return fireMonitorKpis.value
+  return deliveryExecutionKpis.value
 })
 
 const aiRiskState = reactive({
@@ -733,7 +898,7 @@ const mountPlayerInstance = async (
   shell: HTMLElement | null,
   state: PlayerRuntimeState
 ) => {
-  if (!url || activeVisualTab.value !== 'live') {
+  if (!url || activeVisualTab.value !== 'fire-monitor') {
     resetPlayerState(state)
     if (shell) {
       shell.innerHTML = ''
@@ -847,7 +1012,7 @@ const syncLivePlayers = async () => {
   primaryPlayer = destroyPlayerInstance(primaryPlayer, primaryPlayerState, primaryPlayerShell.value)
   previewPlayer = destroyPlayerInstance(previewPlayer, previewPlayerState, previewPlayerShell.value)
 
-  if (activeVisualTab.value !== 'live') {
+  if (activeVisualTab.value !== 'fire-monitor') {
     return
   }
 
@@ -876,6 +1041,7 @@ const fireDetectionState = reactive({ running: false, loading: false, droneSn: '
 
 const resolveFireDetectionDroneSn = async () => {
   const candidateSns = [
+    selectedFireMonitorTarget.value?.deviceSn,
     fireDetectionState.droneSn,
     dualStreamState.group?.droneSn,
     FIELD_AGENT_AIRCRAFT_SN,
@@ -934,9 +1100,10 @@ const onToggleFireDetection = async () => {
 const loadDualStreamState = async () => {
   dualStreamState.loading = true
   try {
+    const selectedSn = selectedFireMonitorTarget.value?.deviceSn
     const candidateSns = buildDualStreamCandidateSns({
       flightHudSn: flightHudSn.value,
-      agentAircraftSn: FIELD_AGENT_AIRCRAFT_SN,
+      agentAircraftSn: selectedSn || FIELD_AGENT_AIRCRAFT_SN,
       currentSn: store.state.deviceState.currentSn,
       fireDetectionSn: fireDetectionState.droneSn
     })
@@ -962,6 +1129,65 @@ const loadDualStreamState = async () => {
     dualStreamState.error = error?.message || 'dual-stream-state-unavailable'
   } finally {
     dualStreamState.loading = false
+  }
+}
+
+function handleFireMonitorTargetChange (target: CockpitStreamTarget) {
+  fireDetectionState.droneSn = target.deviceSn
+  primaryPreference.value = 'visible'
+  loadDualStreamState()
+}
+
+function toDeliveryTarget (device: DeliveryDeviceDTO): CockpitStreamTarget {
+  const onlineText = String(device.online || '').toLowerCase()
+  const online = onlineText === 'true' || onlineText === 'online' || onlineText === '1'
+  const suffix = device.deviceSn ? device.deviceSn.slice(-4) : '--'
+  return {
+    key: `delivery:${device.deviceSn}`,
+    role: 'delivery',
+    deviceSn: device.deviceSn,
+    callsign: `FC100 投放 ${suffix}`,
+    online,
+    taskStatus: device.bindStatus || device.deviceType || '待命',
+    streamStatus: online ? 'idle' : 'offline',
+    message: device.deviceType || undefined
+  }
+}
+
+async function loadDeliveryExecutionTargets () {
+  deliveryTargetsLoading.value = true
+  try {
+    const response = await deliveryApi.listDevices()
+    const devices = response.data?.data || []
+    const targets = devices
+      .filter((device) => !!device.deviceSn)
+      .map(toDeliveryTarget)
+
+    const enriched = await Promise.all(targets.map(async (target) => {
+      try {
+        const liveRes = await deliveryApi.deviceLive(target.deviceSn)
+        const live = liveRes.data?.data
+        if (!live) return target
+        const enrichedTarget: CockpitStreamTarget = {
+          ...target,
+          primaryPlayUrl: live.playUrl || '',
+          streamStatus: live.streamStatus === 'running'
+            ? 'running'
+            : (target.online ? 'idle' : 'offline'),
+          message: live.message || target.message
+        }
+        return enrichedTarget
+      } catch {
+        return target
+      }
+    }))
+
+    deliveryExecutionTargets.value = enriched
+    if (!enriched.some(target => target.key === selectedDeliveryTargetKey.value)) {
+      selectedDeliveryTargetKey.value = enriched[0]?.key || ''
+    }
+  } finally {
+    deliveryTargetsLoading.value = false
   }
 }
 
@@ -1183,6 +1409,7 @@ function shouldNotifyFireEvent (evt: FireEventDTO) {
 onMounted(async () => {
   refreshMsdkHudDevices()
   loadDualStreamState()
+  loadDeliveryExecutionTargets()
   loadAiRiskEvents()
   loadNewFireEvents()
   msdkHudTimer = window.setInterval(refreshMsdkHudDevices, 2000)
@@ -1408,6 +1635,34 @@ const handlePreviewSwap = async () => {
     focusSwitchAction.value = null
   }
 }
+
+watch(
+  fireMonitorTargets,
+  (targets) => {
+    if (!targets.some(target => target.key === selectedFireMonitorTargetKey.value)) {
+      selectedFireMonitorTargetKey.value = targets[0]?.key || ''
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  selectedFireMonitorTarget,
+  (target, previous) => {
+    if (!target || target.deviceSn === previous?.deviceSn) return
+    fireDetectionState.droneSn = target.deviceSn
+    loadDualStreamState()
+  }
+)
+
+watch(
+  activeVisualTab,
+  (tab) => {
+    if (tab === 'delivery-execution' && deliveryExecutionTargets.value.length === 0) {
+      loadDeliveryExecutionTargets()
+    }
+  }
+)
 
 watch(
   [

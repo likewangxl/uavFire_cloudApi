@@ -75,6 +75,14 @@ public class PlannedWaylineDTO {
     private String breakPointJson;
     private Long lastProgressTime;
 
+    // Realtime aircraft position for MSDK/agent wayline execution.
+    private Double aircraftLng;
+    private Double aircraftLat;
+    private Double aircraftGcjLng;
+    private Double aircraftGcjLat;
+    private Double aircraftHeight;
+    private Long aircraftUpdatedAt;
+
     private Long preparedTime;
 
     private Long executedTime;

@@ -6,7 +6,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 OLD_IP_PREFIX="192.168.99"
 OLD_IP="${OLD_IP_PREFIX}.99"
-NEW_IP="192.168.0.30"
+NEW_IP="172.20.10.7"
 
 mkdir -p \
   "$TMP_DIR/scripts" \

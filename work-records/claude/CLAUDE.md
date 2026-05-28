@@ -88,10 +88,10 @@ mvn -pl uavfire spring-boot:run
 
 关键依赖：
 
-- MySQL：默认配置为 `192.168.0.30:3306/cloud_sample`
+- MySQL：默认配置为 `172.20.10.7:3306/cloud_sample`
 - Redis：默认配置为 `localhost:6379`
-- BASIC MQTT：默认配置为 `192.168.0.30:1883`
-- DRC MQTT WebSocket：默认配置为 `192.168.0.30:8083`
+- BASIC MQTT：默认配置为 `172.20.10.7:1883`
+- DRC MQTT WebSocket：默认配置为 `172.20.10.7:8083`
 
 ## DJI Cloud API 注意事项
 

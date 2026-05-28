@@ -4,7 +4,7 @@
     <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #4f4f4f; font-weight: 450;">
       <a-row>
         <a-col :span="1"></a-col>
-        <a-col :span="15">{{ isTaskRouteSelector ? '选择KMZ航线文件' : '航线库' }}</a-col>
+        <a-col :span="15">{{ isTaskRouteSelector ? '选择KMZ航线文件' : '航线任务' }}</a-col>
         <a-col :span="8" v-if="importVisible" class="flex-row flex-justify-end flex-align-center">
           <a-upload
             name="file"
@@ -23,10 +23,22 @@
       </a-row>
     </div>
     <div :style="{ height : height + 'px'}" class="scrollbar">
+      <a-collapse
+        v-if="showPlanningTools"
+        class="wayline-mode-collapse"
+        :bordered="false"
+        expandIconPosition="right"
+        accordion
+        style="background: #232323;">
+        <a-collapse-panel key="monitor-wayline" header="监测火情航线" style="border-bottom: 1px solid #4f4f4f;">
       <!-- Planned Wayline (click-to-fly), see WORK_RECORD.md §8 -->
-      <div class="planning-panel" v-if="showPlanningTools">
+      <div class="workflow-section-note">
+        <strong>M4T 监测任务</strong>
+        <span>用于规划、保存和执行火情巡查航线。</span>
+      </div>
+      <div class="planning-panel">
         <div class="planning-panel-title">
-          <span>规划航线（点选飞行）</span>
+          <span>M4T 监测航线规划</span>
           <a-tooltip title="飞行器可选。可先布点并保存规划航线；生成文件不需要设备，下发准备前再选择或绑定目标机场/飞行器。">
             <QuestionCircleOutlined style="margin-left: 6px; color: #8c8c8c;" />
           </a-tooltip>
@@ -54,7 +66,8 @@
               :min="15"
               :step="1"
               :disabled="planningState.executing"
-              v-model:value="planningState.defaultHeight" />
+              :value="planningState.defaultHeight"
+              @change="onPlanningDefaultHeightChange" />
           </div>
           <div>
             <span class="planning-label">最大速度（米/秒）</span>
@@ -65,7 +78,8 @@
               :max="15"
               :step="1"
               :disabled="planningState.executing"
-              v-model:value="planningState.maxSpeed" />
+              :value="planningState.maxSpeed"
+              @change="onPlanningMaxSpeedChange" />
           </div>
         </div>
         <!-- L1: 全局 mission 配置 -->
@@ -378,16 +392,16 @@
           <span>{{ planningState.statusText }}</span>
         </div>
       </div>
-      <div class="planning-section-gap" v-if="showPlanningTools"></div>
-      <div class="planned-wayline-panel" v-if="showPlanningTools">
+      <div class="planning-section-gap"></div>
+      <div class="planned-wayline-panel">
         <div class="planned-wayline-title">
-          <span>已保存规划航线</span>
+          <span>监测航线库</span>
           <a-button size="small" type="link" :loading="plannedWaylinesLoading" @click="refreshPlannedWaylines">
             刷新
           </a-button>
         </div>
         <div class="planning-empty" v-if="!plannedWaylinesLoading && plannedWaylinesData.data.length === 0">
-          暂无已保存规划航线。
+          暂无已保存监测航线。
         </div>
         <div v-else class="planned-wayline-list" @scroll="onPlannedWaylinesScroll">
           <div class="planned-wayline-card" v-for="record in plannedWaylinesData.data" :key="record.plannedWaylineId" @click="onPreviewPlannedWayline(record)">
@@ -404,8 +418,8 @@
               <span>高度 {{ formatNumber(record.defaultHeight) }} m</span>
               <span>速度 {{ formatNumber(record.maxSpeed) }} m/s</span>
             </div>
-            <div class="planned-wayline-reason" v-if="record.taskStatusReason">
-              {{ record.taskStatusReason }}
+            <div class="planned-wayline-reason" v-if="getPlannedWaylineTaskReason(record)">
+              {{ getPlannedWaylineTaskReason(record) }}
             </div>
             <div class="planned-wayline-meta muted">
               <span>机型 {{ record.aircraftModelKey || '-' }}</span>
@@ -427,6 +441,7 @@
                 size="small"
                 :type="action.primary ? 'primary' : 'default'"
                 :danger="action.danger"
+                :class="{ 'wayline-button-wrap': action.wrap }"
                 @click.stop="action.handler(record)">
                 {{ action.label }}
               </a-button>
@@ -437,8 +452,269 @@
           <div class="planned-wayline-list-footer" v-else-if="plannedWaylinesData.data.length > 0 && !plannedWaylinesCanRefresh">已加载全部</div>
         </div>
       </div>
-      <div class="planning-section-gap" v-if="showPlanningTools"></div>
-      <div id="data" class="height-100 uranus-scrollbar" v-if="waylinesData.data.length !== 0" @scroll="onScroll">
+        </a-collapse-panel>
+        <a-collapse-panel key="delivery-wayline" header="投放执行航线" style="border-bottom: 1px solid #4f4f4f;">
+      <div class="fc100-planning-panel">
+        <div class="fc100-planning-title">
+          <span>投放执行面板</span>
+          <a-button size="small" type="link" :loading="fc100PlanningState.loadingAction === 'devices'" @click="handleFc100RefreshDevices">
+            刷新设备
+          </a-button>
+        </div>
+        <div class="planning-row">
+          <span class="planning-label">FC100云端设备</span>
+          <a-select
+            size="small"
+            style="width: 100%;"
+            :value="fc100PlanningState.selectedDeviceSn"
+            placeholder="请选择FC100飞机设备"
+            option-label-prop="label"
+            :loading="fc100PlanningState.loadingAction === 'devices'"
+            @change="handleFc100SelectDevice">
+            <a-select-option
+              v-for="device in fc100AircraftDevices"
+              :key="device.deviceSn"
+              :value="device.deviceSn"
+              :label="formatFc100DeviceSelectLabel(device)">
+              <div class="fc100-device-option">
+                <div class="fc100-device-option-main">
+                  <span class="fc100-device-option-model">{{ formatFc100DeliveryAircraftModel() }}</span>
+                  <span class="fc100-device-option-status" :class="{ online: isFc100DeviceOnline(device) }">
+                    {{ isFc100DeviceOnline(device) ? '在线' : '离线' }}
+                  </span>
+                </div>
+                <div class="fc100-device-option-sn">{{ device.deviceSn }}</div>
+              </div>
+            </a-select-option>
+          </a-select>
+        </div>
+        <div class="fc100-device-props" v-if="fc100PlanningState.selectedDeviceProps">
+          <span>电量 {{ fc100PlanningState.selectedDeviceProps.batteryPercent ?? '-' }}%</span>
+          <span>RTK {{ fc100PlanningState.selectedDeviceProps.rtkStatus || '-' }}</span>
+          <span>{{ fc100PlanningState.selectedDeviceProps.onlineStatus === false ? '离线' : '在线' }}</span>
+        </div>
+        <div class="planning-row">
+          <a-upload
+            class="fc100-direct-wayline-upload"
+            name="file"
+            accept=".kmz,.kml"
+            :multiple="false"
+            :before-upload="beforeFc100WaylineUpload"
+            :show-upload-list="false"
+            :custom-request="uploadFc100WaylineFile"
+          >
+          <a-button
+              class="wayline-button-wrap"
+              size="small"
+              :loading="fc100PlanningState.loadingAction === 'directImport'">
+              <SelectOutlined />
+              导入FC100任务
+            </a-button>
+          </a-upload>
+        </div>
+        <div class="planning-row">
+          <span class="planning-label">当前规划航线</span>
+          <div class="fc100-selected-wayline">
+            {{ fc100SelectedRecordName }}
+          </div>
+        </div>
+        <div class="planning-row planning-actions fc100-task-actions">
+          <a-button
+            class="wayline-button-wrap"
+            size="small"
+            type="primary"
+            :loading="fc100PlanningState.loadingAction === 'import'"
+            :disabled="!fc100PlanningState.selectedRecord || !fc100PlanningState.selectedRecord.kmzUrl"
+            @click="handleFc100ImportGeneratedWaylineTask()">
+            创建FC100任务
+          </a-button>
+          <a-button
+            size="small"
+            :loading="fc100PlanningState.loadingAction === 'start'"
+            :disabled="!fc100PlanningState.taskId"
+            @click="handleFc100StartGeneratedWaylineTask">
+            开始执行
+          </a-button>
+          <a-button
+            size="small"
+            :loading="fc100PlanningState.loadingAction === 'status'"
+            :disabled="!fc100PlanningState.taskId"
+            @click="handleFc100GeneratedWaylineTaskStatus">
+            刷新任务
+          </a-button>
+        </div>
+        <div class="fc100-task-summary" v-if="fc100PlanningState.taskId || fc100PlanningState.taskStatus">
+          <span>FC100任务ID {{ fc100PlanningState.taskId || '-' }}</span>
+          <span>状态 {{ fc100PlanningState.taskStatus?.status || fc100PlanningState.taskStatus?.phase || '-' }}</span>
+          <span v-if="fc100PlanningState.taskStatus?.progressPercent !== null && fc100PlanningState.taskStatus?.progressPercent !== undefined">
+            进度 {{ fc100PlanningState.taskStatus.progressPercent }}%
+          </span>
+        </div>
+        <div class="fc100-terminal-panel" v-if="fc100PlanningState.taskId">
+          <div class="fc100-terminal-head">
+            <span>到点后投放控制</span>
+            <small>{{ fc100TerminalControlHint }}</small>
+          </div>
+          <div class="fc100-terminal-note">
+            确认航线到达终点并悬停后再操作。
+          </div>
+          <div class="fc100-terminal-actions">
+            <a-button
+              size="small"
+              class="fc100-terminal-actions__primary"
+              :loading="fc100PlanningState.loadingAction === 'ropeDown'"
+              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
+              @click="handleFc100RopeDown">
+              放绳
+            </a-button>
+            <a-button
+              size="small"
+              class="fc100-terminal-actions__neutral"
+              :loading="fc100PlanningState.loadingAction === 'ropeStop'"
+              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
+              @click="handleFc100RopeStop">
+              停止
+            </a-button>
+            <a-button
+              size="small"
+              class="fc100-terminal-actions__primary"
+              :loading="fc100PlanningState.loadingAction === 'ropeUp'"
+              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
+              @click="handleFc100RopeUp">
+              收绳
+            </a-button>
+            <a-button
+              size="small"
+              class="fc100-terminal-actions__danger"
+              :loading="fc100PlanningState.loadingAction === 'releaseHook'"
+              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
+              @click="handleFc100ReleaseHook">
+              脱钩
+            </a-button>
+            <a-button
+              size="small"
+              class="fc100-terminal-actions__return"
+              :loading="fc100PlanningState.loadingAction === 'returnHome'"
+              :disabled="!getSelectedFc100DeviceSn() || isFc100TerminalCommandLoading"
+              @click="handleFc100ReturnHome">
+              返航
+            </a-button>
+          </div>
+        </div>
+        <div class="fc100-result" v-if="fc100PlanningState.lastResult">
+          {{ fc100PlanningState.lastResult }}
+        </div>
+      </div>
+      <div class="planning-section-gap"></div>
+      <div class="planned-wayline-panel planned-wayline-panel--delivery">
+        <div class="planned-wayline-title">
+          <span>FC100 投放航线库</span>
+          <a-button size="small" type="link" :loading="plannedWaylinesLoading" @click="refreshPlannedWaylines">
+            刷新
+          </a-button>
+        </div>
+        <div class="planning-empty" v-if="!plannedWaylinesLoading && plannedWaylinesData.data.length === 0">
+          暂无可用于投放的已保存规划航线。
+        </div>
+        <div v-else class="planned-wayline-list" @scroll="onPlannedWaylinesScroll">
+          <div
+            class="planned-wayline-card"
+            :class="{ 'planned-wayline-card--selected': fc100PlanningState.selectedRecord?.plannedWaylineId === record.plannedWaylineId }"
+            v-for="record in plannedWaylinesData.data"
+            :key="`fc100-${record.plannedWaylineId}`"
+            @click="onFc100PreviewGeneratedWayline(record)">
+            <div class="planned-wayline-card-head">
+              <a-tooltip :title="record.name">
+                <span class="planned-wayline-name">{{ record.name }}</span>
+              </a-tooltip>
+              <span class="planned-wayline-status" :class="{ failed: normalizePlannedWaylineStatus(record) === PlannedWaylineStatus.FAILED }">
+                {{ formatPlannedWaylineStatus(record) }}
+              </span>
+            </div>
+            <div class="planned-wayline-meta">
+              <span>航点 {{ record.waypoints?.length || 0 }}</span>
+              <span>高度 {{ formatNumber(record.defaultHeight) }} m</span>
+              <span>速度 {{ formatNumber(record.maxSpeed) }} m/s</span>
+            </div>
+            <div class="planned-wayline-meta muted">
+              <span>机型 {{ formatFc100DeliveryAircraftModel() }}</span>
+              <span>更新于 {{ formatTimestamp(record.updateTime) }}</span>
+            </div>
+            <div class="planned-wayline-actions planned-wayline-actions--minimal">
+              <a-button size="small" @click.stop="showPlannedWaylineDetail(record)">详情</a-button>
+              <a-button
+                size="small"
+                type="primary"
+                :disabled="!record.kmzUrl"
+                @click.stop="selectFc100GeneratedWayline(record)">
+                选择
+              </a-button>
+              <a-button size="small" danger @click.stop="onDeletePlannedWayline(record)">删除</a-button>
+            </div>
+          </div>
+          <div class="planned-wayline-list-footer" v-if="plannedWaylinesLoading">加载中...</div>
+          <div class="planned-wayline-list-footer" v-else-if="plannedWaylinesData.data.length > 0 && !plannedWaylinesCanRefresh">已加载全部</div>
+        </div>
+      </div>
+        </a-collapse-panel>
+      </a-collapse>
+      <a-collapse
+        v-if="showPlanningTools"
+        class="wayline-mode-collapse generated-wayline-collapse"
+        :bordered="false"
+        expandIconPosition="right"
+        accordion
+        style="background: #232323;">
+        <a-collapse-panel key="generated-wayline" header="已生成航线" style="border-bottom: 1px solid #4f4f4f;">
+          <div id="data" class="height-100 uranus-scrollbar" v-if="waylinesData.data.length !== 0" @scroll="onScroll">
+            <div v-for="wayline in waylinesData.data" :key="wayline.id">
+              <div class="wayline-panel" style="padding-top: 5px;" @click="selectRoute(wayline)">
+                <div class="title">
+                  <a-tooltip :title="wayline.name">
+                    <div class="pr10" style="width: 120px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{{ wayline.name }}</div>
+                  </a-tooltip>
+                  <div class="ml10"><UserOutlined /></div>
+                  <a-tooltip :title="wayline.user_name">
+                    <div class="ml5 pr10" style="width: 80px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{{ wayline.user_name }}</div>
+                  </a-tooltip>
+                  <div class="fz20">
+                    <a-dropdown>
+                      <a style="color: white;">
+                        <EllipsisOutlined />
+                      </a>
+                      <template #overlay>
+                        <a-menu theme="dark" class="more" style="background: #3c3c3c;">
+                          <a-menu-item @click="downloadWayline(wayline.id, wayline.name)">
+                            <span>下载</span>
+                          </a-menu-item>
+                          <a-menu-item @click="showWaylineTip(wayline.id)">
+                            <span>删除</span>
+                          </a-menu-item>
+                        </a-menu>
+                      </template>
+                    </a-dropdown>
+                  </div>
+                </div>
+                <div class="ml10 mt5" style="color: hsla(0,0%,100%,0.65);">
+                  <span><RocketOutlined /></span>
+                  <span class="ml5">{{ DEVICE_NAME[wayline.drone_model_key] }}</span>
+                  <span class="ml10"><CameraFilled style="border-top: 1px solid; padding-top: -3px;" /></span>
+                  <span class="ml5" v-for="payload in wayline.payload_model_keys" :key="payload.id">
+                    {{ DEVICE_NAME[payload] }}
+                  </span>
+                </div>
+                <div class="mt5 ml10" style="color: hsla(0,0%,100%,0.35);">
+                  <span class="mr10">更新于 {{ new Date(wayline.update_time).toLocaleString() }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else>
+            <a-empty :image-style="{ height: '60px', marginTop: '60px' }" />
+          </div>
+        </a-collapse-panel>
+      </a-collapse>
+      <div id="data" class="height-100 uranus-scrollbar" v-else-if="waylinesData.data.length !== 0" @scroll="onScroll">
         <div v-for="wayline in waylinesData.data" :key="wayline.id">
           <div class="wayline-panel" style="padding-top: 5px;" @click="selectRoute(wayline)">
             <div class="title">
@@ -555,7 +831,7 @@
             <span>目标机场</span><strong>{{ selectedPlannedWayline.dockSn || '-' }}</strong>
             <span>目标无人机</span><strong>{{ selectedPlannedWayline.droneSn || '-' }}</strong>
             <span>任务进度</span><strong>{{ selectedPlannedWayline.taskProgress ?? '-' }}</strong>
-            <span>失败原因</span><strong>{{ selectedPlannedWayline.taskStatusReason || '-' }}</strong>
+            <span>失败原因</span><strong>{{ getPlannedWaylineTaskReason(selectedPlannedWayline) || '-' }}</strong>
             <span>创建时间</span><strong>{{ formatTimestamp(selectedPlannedWayline.createTime) }}</strong>
             <span>更新时间</span><strong>{{ formatTimestamp(selectedPlannedWayline.updateTime) }}</strong>
           </div>
@@ -568,6 +844,17 @@
               size="small"
               :type="action.primary ? 'primary' : 'default'"
               :danger="action.danger"
+              :class="{ 'wayline-button-wrap': action.wrap }"
+              @click="action.handler(selectedPlannedWayline)">
+              {{ action.label }}
+            </a-button>
+            <a-button
+              v-for="action in getFc100GeneratedWaylineActions(selectedPlannedWayline)"
+              :key="action.key"
+              size="small"
+              :type="action.primary ? 'primary' : 'default'"
+              :class="{ 'wayline-button-wrap': action.wrap }"
+              :disabled="action.disabled"
               @click="action.handler(selectedPlannedWayline)">
               {{ action.label }}
             </a-button>
@@ -594,7 +881,7 @@
 <script lang="ts" setup>
 import { reactive } from '@vue/reactivity'
 import { message, Modal } from 'ant-design-vue'
-import { computed, onMounted, onUnmounted, onUpdated, ref } from 'vue'
+import { computed, onMounted, onUnmounted, onUpdated, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   createPlannedWayline,
@@ -642,9 +929,13 @@ import {
   loadPlannedWayline,
   previewPlannedWayline,
   resetPlanningDraft,
+  setFlightPositionFromRecord,
+  setFlightPositionFromWgs,
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
 import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
+import { deliveryApi } from '/@/api/fire/delivery'
+import type { DeliveryCommandBody, DeliveryCommandRef, DeliveryDeviceDTO, DeliveryDeviceProperties, DeliveryTaskOperationResult, DeliveryTaskStatus } from '/@/api/fire/delivery'
 import WaypointActionEditor from '/@/components/WaypointActionEditor.vue'
 import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 
@@ -666,6 +957,7 @@ const monitorWorkspaceId = computed(() => localStorage.getItem(ELocalStorageKey.
 function onMissionMonitorChange (updated: PlannedWaylineRecord) {
   const idx = plannedWaylinesData.data.findIndex(r => r.plannedWaylineId === updated.plannedWaylineId)
   if (idx >= 0) plannedWaylinesData.data.splice(idx, 1, updated)
+  setFlightPositionFromRecord(updated)
 }
 
 interface AircraftSummary {
@@ -673,6 +965,13 @@ interface AircraftSummary {
   callsign: string
   gatewaySn: string
   aircraftModelKey: string
+}
+
+interface FileItem extends File {
+  uid?: string;
+  status?: string;
+  response?: string;
+  url?: string;
 }
 
 const onlineAircraftMap = reactive({} as Record<string, AircraftSummary>)
@@ -698,8 +997,49 @@ const savePlannedWaylineModal = reactive({
   maxSpeed: 10,
   waypointCount: 0,
 })
+const fc100PlanningState = reactive({
+  devices: [] as DeliveryDeviceDTO[],
+  selectedDeviceSn: '',
+  selectedDeviceProps: null as DeliveryDeviceProperties | null,
+  selectedRecord: null as PlannedWaylineRecord | null,
+  taskId: '',
+  taskStatus: null as DeliveryTaskStatus | null,
+  lastResult: '',
+  loadingAction: '',
+})
+function isFc100AircraftDevice (device: DeliveryDeviceDTO) {
+  const bindStatus = String(device.bindStatus || '').toLowerCase()
+  const deviceType = String(device.deviceType || '').toLowerCase()
+  return bindStatus !== 'rc' && deviceType !== 'rc'
+}
+const fc100AircraftDevices = computed(() => fc100PlanningState.devices.filter(isFc100AircraftDevice))
+const fc100SelectedRecordName = computed(() => {
+  const record = fc100PlanningState.selectedRecord
+  if (!record) return '请在下方已保存规划航线中选择已生成KMZ的记录。'
+  return record.kmzUrl ? record.name : `${record.name}（请先生成航线文件）`
+})
+function formatFc100DeliveryAircraftModel () {
+  return 'DJI FlyCart 100'
+}
+function formatFc100DeviceSelectLabel (device: DeliveryDeviceDTO) {
+  return `${formatFc100DeliveryAircraftModel()} · ${device.deviceSn}`
+}
+function isFc100DeviceOnline (device: DeliveryDeviceDTO) {
+  const online = String(device.online || '').toLowerCase()
+  return online === 'true' || online === 'online' || online === '1'
+}
+const isFc100TerminalCommandLoading = computed(() => [
+  'ropeDown',
+  'ropeStop',
+  'ropeUp',
+  'releaseHook',
+  'returnHome',
+].includes(fc100PlanningState.loadingAction))
+const fc100TerminalControlHint = computed(() => getFc100TerminalControlBlockedReason() || '已满足投放控制条件')
 
 let topoTimer: number | null = null
+let fc100RealtimeTimer: number | null = null
+let fc100RealtimeRefreshing = false
 
 const AIRCRAFT_MODEL_KEY_MAP: Record<string, string> = {
   [DEVICE_MODEL_KEY.M30]: 'M30',
@@ -725,8 +1065,22 @@ const AIRCRAFT_MODEL_KEY_MAP: Record<string, string> = {
 }
 
 const AIRCRAFT_MODEL_NAME_ORDER = ['M3TD', 'M30T', 'M4T', 'M3T', 'M350', 'M300', 'M30', 'M3E', 'M3D', 'M4E']
-const PLANNED_WAYLINE_MODEL_OPTIONS = ['M30T', 'M30', 'M3T', 'M3E', 'M3TD', 'M3D', 'M350', 'M300']
-const DEFAULT_PLANNED_WAYLINE_MODEL = 'M30T'
+const PLANNED_WAYLINE_MODEL_OPTIONS = ['M4T', 'M4E', 'M30T', 'M30', 'M3T', 'M3E', 'M3TD', 'M3D', 'M350', 'M300']
+const DEFAULT_PLANNED_WAYLINE_MODEL = 'M4T'
+
+watch(
+  () => selectedAircraftSn.value,
+  sn => syncSelectedAircraftFlightPosition(sn),
+)
+
+watch(
+  () => {
+    const sn = selectedAircraftSn.value
+    const osd = sn ? store.state.deviceState.deviceInfo[sn] : null
+    return osd ? `${sn}:${(osd as any).longitude}:${(osd as any).latitude}:${(osd as any).height}` : ''
+  },
+  () => syncSelectedAircraftFlightPosition(),
+)
 
 function normalizeAircraftModelKey (raw: any): string {
   if (raw === undefined || raw === null) return ''
@@ -827,6 +1181,26 @@ function syncMsdkOnlineAircrafts (devices: MsdkDeviceState[], seen: Set<string>)
       gatewaySn: device.gatewaySn || device.aircraftSn,
       aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
     })
+  })
+}
+
+function syncSelectedAircraftFlightPosition (sn = selectedAircraftSn.value) {
+  if (!sn) return
+  const osd = store.state.deviceState.deviceInfo[sn]
+  if (!osd) return
+  setFlightPositionFromWgs(sn, (osd as any).longitude, (osd as any).latitude, {
+    height: (osd as any).height,
+    updatedAt: Date.now(),
+  })
+}
+
+function syncFc100DeviceFlightPosition (props: DeliveryDeviceProperties | null) {
+  if (!props) return
+  const deviceSn = props.deviceSn || fc100PlanningState.selectedDeviceSn
+  if (!deviceSn) return
+  setFlightPositionFromWgs(deviceSn, props.longitude, props.latitude, {
+    height: props.altitude,
+    updatedAt: props.osdTimestamp || Date.now(),
   })
 }
 
@@ -961,6 +1335,7 @@ function onSelectAircraft (sn: string) {
   if (summary) {
     planningSetTarget(summary.gatewaySn, summary.sn)
   }
+  syncSelectedAircraftFlightPosition(sn)
 }
 
 function onStartPlacing () {
@@ -991,6 +1366,25 @@ function onMove (id: string, direction: 'up' | 'down') {
 function onUpdateHeight (id: string, value: number | string | null) {
   const n = typeof value === 'number' ? value : Number(value)
   if (Number.isFinite(n)) planningUpdateHeight(id, n)
+}
+
+function onPlanningDefaultHeightChange (value: number | string | null) {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n) || n <= 0) return
+  const previousDefaultHeight = Number(planningState.defaultHeight)
+  planningState.defaultHeight = n
+  planningState.waypoints.forEach(wp => {
+    if (!Number.isFinite(previousDefaultHeight) || Number(wp.height) === previousDefaultHeight) {
+      wp.height = n
+    }
+  })
+}
+
+function onPlanningMaxSpeedChange (value: number | string | null) {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (Number.isFinite(n) && n > 0) {
+    planningState.maxSpeed = n
+  }
 }
 
 async function onStartExecution () {
@@ -1140,6 +1534,12 @@ async function refreshPlannedWaylines (reset = false) {
     if (res.code !== 0) return
     const list = res.data?.list || []
     plannedWaylinesData.data = reset ? list : [...plannedWaylinesData.data, ...list]
+    const activeRecord = plannedWaylinesData.data.find(record => {
+      const status = String(record.taskStatus || record.status || '').toLowerCase()
+      return ['executing', 'paused', 'broken'].includes(status) &&
+        (record.aircraftGcjLng != null || record.aircraftLng != null)
+    })
+    if (activeRecord) setFlightPositionFromRecord(activeRecord)
     plannedWaylinesPagination.total = res.data?.pagination?.total ?? list.length
     plannedWaylinesPagination.page = res.data?.pagination?.page ?? plannedWaylinesPagination.page
     plannedWaylinesCanRefresh.value = Math.ceil(plannedWaylinesPagination.total / plannedWaylinesPagination.page_size) > plannedWaylinesPagination.page
@@ -1227,6 +1627,7 @@ function resolvePrepareTargetDroneSn (record: PlannedWaylineRecord) {
 }
 
 async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
+  clearPlannedWaylineTaskReason(record)
   await refreshOnlineAircrafts()
   const targetDroneSn = resolvePrepareTargetDroneSn(record)
   if (!targetDroneSn) {
@@ -1251,6 +1652,12 @@ async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
 }
 
 async function onExecutePlannedWaylineTask (record: PlannedWaylineRecord) {
+  const targetDroneSn = record.droneSn || record.aircraftSn
+  if (targetDroneSn) {
+    const summary = onlineAircraftMap[targetDroneSn]
+    planningSetTarget(summary?.gatewaySn || record.gatewaySn || record.dockSn || '', targetDroneSn)
+    selectedAircraftSn.value = targetDroneSn
+  }
   await runPlannedWaylineAction(
     record,
     () => executePlannedWaylineTask(workspaceId, record.plannedWaylineId),
@@ -1320,6 +1727,22 @@ function normalizePlannedWaylineStatus (recordOrStatus: PlannedWaylineRecord | s
   return (raw || PlannedWaylineStatus.DRAFT).toLowerCase()
 }
 
+function getPlannedWaylineTaskReason (record: PlannedWaylineRecord | null): string {
+  if (!record) return ''
+  return normalizePlannedWaylineStatus(record) === PlannedWaylineStatus.FAILED
+    ? (record.taskStatusReason || '')
+    : ''
+}
+
+function clearPlannedWaylineTaskReason (record: PlannedWaylineRecord) {
+  record.taskStatusReason = ''
+  const cached = plannedWaylinesData.data.find(item => item.plannedWaylineId === record.plannedWaylineId)
+  if (cached) cached.taskStatusReason = ''
+  if (selectedPlannedWayline.value?.plannedWaylineId === record.plannedWaylineId) {
+    selectedPlannedWayline.value.taskStatusReason = ''
+  }
+}
+
 function formatPlannedWaylineStatus (status: string): string {
   const labels: Record<string, string> = {
     [PlannedWaylineStatus.DRAFT]: '草稿',
@@ -1342,10 +1765,10 @@ function canOverwritePlannedWayline (record: PlannedWaylineRecord): boolean {
 function getPlannedWaylineActions (record: PlannedWaylineRecord) {
   const status = normalizePlannedWaylineStatus(record)
   if (status === PlannedWaylineStatus.DRAFT) {
-    return [{ key: 'generate', label: '生成航线文件', primary: true, danger: false, handler: onGeneratePlannedWaylineFile }]
+    return [{ key: 'generate', label: '生成航线文件', primary: true, danger: false, wrap: true, handler: onGeneratePlannedWaylineFile }]
   }
   if (status === PlannedWaylineStatus.FILE_GENERATED) {
-    return [{ key: 'prepare', label: '下发准备', primary: true, danger: false, handler: onPreparePlannedWaylineTask }]
+    return [{ key: 'prepare', label: '下发准备', primary: true, danger: false, wrap: true, handler: onPreparePlannedWaylineTask }]
   }
   if (status === PlannedWaylineStatus.PREPARED) {
     return [
@@ -1362,10 +1785,466 @@ function getPlannedWaylineActions (record: PlannedWaylineRecord) {
       label: record.publishedWaylineId ? '下发准备' : '生成航线文件',
       primary: true,
       danger: false,
+      wrap: true,
       handler: record.publishedWaylineId ? onPreparePlannedWaylineTask : onGeneratePlannedWaylineFile,
     }]
   }
   return []
+}
+
+function getFc100GeneratedWaylineActions (record: PlannedWaylineRecord) {
+  return [{
+    key: 'fc100-import-generated',
+    label: '导入生成KMZ并创建任务',
+    primary: false,
+    wrap: true,
+    disabled: !record.kmzUrl,
+    handler: (record: PlannedWaylineRecord) => onFc100UseGeneratedWayline(record),
+  }]
+}
+
+function getFc100ApiBody (res: any) {
+  return res?.data ?? res
+}
+
+function formatFc100OperationResult (result: DeliveryTaskOperationResult | null | undefined, fallback: string): string {
+  if (!result) return fallback
+  return result.displayMessage || result.apiMessage || result.reason || fallback
+}
+
+function formatFc100TaskStatus (status: DeliveryTaskStatus | null | undefined): string {
+  if (!status) return '未返回任务状态'
+  const parts = [
+    status.displayMessage || status.message || status.reason || '',
+    status.status ? `状态 ${status.status}` : '',
+    status.phase ? `阶段 ${status.phase}` : '',
+    status.progressPercent !== null && status.progressPercent !== undefined ? `进度 ${status.progressPercent}%` : '',
+    status.taskCode !== null && status.taskCode !== undefined ? `任务码 ${status.taskCode}` : '',
+  ].filter(Boolean)
+  return parts.join('；') || '任务状态已刷新'
+}
+
+function getFc100ErrorText (error: any, fallback: string): string {
+  return error?.response?.data?.message || error?.message || fallback
+}
+
+function getSelectedFc100DeviceSn (): string {
+  const selected = fc100AircraftDevices.value.find(device => device.deviceSn === fc100PlanningState.selectedDeviceSn)
+  const firstDrone = fc100AircraftDevices.value.find(device => device.bindStatus === 'drone')
+  const firstAircraft = fc100AircraftDevices.value[0]
+  return selected?.deviceSn || firstDrone?.deviceSn || firstAircraft?.deviceSn || ''
+}
+
+function getFc100OperatorId (): string {
+  return localStorage.getItem(ELocalStorageKey.Username) || 'web'
+}
+
+function getFc100WaylineFileTaskName (filename: string): string {
+  const baseName = String(filename || '')
+    .replace(/\.(kmz|kml)$/i, '')
+    .trim()
+  return sanitizeDjiWaylineName(baseName || 'FC100航线', 'FC100航线')
+}
+
+function beforeFc100WaylineUpload (file: FileItem) {
+  if (!file.name || !/\.(kmz|kml)$/i.test(file.name)) {
+    message.error('文件格式错误，请选择 FC100 KMZ/KML 航线文件。')
+    return false
+  }
+  return true
+}
+
+const uploadFc100WaylineFile = async (options?: { file?: FileItem; onSuccess?: (res: any) => void; onError?: (err: any) => void }) => {
+  const file = options?.file
+  if (!file) {
+    message.error('请选择 FC100 KMZ/KML 航线文件。')
+    return
+  }
+  const deviceSn = getSelectedFc100DeviceSn()
+  if (!deviceSn) {
+    message.warning('请先选择FC100飞机设备。')
+    options?.onError?.(new Error('FC100 device is required'))
+    return
+  }
+  fc100PlanningState.selectedDeviceSn = deviceSn
+  fc100PlanningState.loadingAction = 'directImport'
+  const fileData = new FormData()
+  fileData.append('file', file, file.name)
+  fileData.append('deviceSn', deviceSn)
+  fileData.append('taskName', sanitizeDjiWaylineName(getFc100WaylineFileTaskName(file.name), 'FC100航线'))
+  fileData.append('operatorId', getFc100OperatorId())
+  fileData.append('remark', `created from uploaded fc100 wayline ${file.name}`)
+  try {
+    const res = await deliveryApi.importCreateWaylineTask(fileData)
+    const body = getFc100ApiBody(res)
+    if (body.code !== 0) {
+      fc100PlanningState.lastResult = `FC100导入航线文件并创建任务失败：${body.message || '接口返回异常'}`
+      options?.onError?.(new Error(body.message || 'FC100 direct wayline import failed'))
+      return
+    }
+    fc100PlanningState.taskId = body.data?.taskId || ''
+    fc100PlanningState.taskStatus = null
+    fc100PlanningState.selectedRecord = null
+    fc100PlanningState.lastResult = `FC100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
+    message.success('FC100航线文件已导入并创建任务')
+    options?.onSuccess?.(res)
+  } catch (error) {
+    fc100PlanningState.lastResult = `FC100导入航线文件并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
+    options?.onError?.(error)
+  } finally {
+    fc100PlanningState.loadingAction = ''
+  }
+}
+
+function buildFc100CommandBody (data?: Record<string, unknown>): DeliveryCommandBody {
+  return {
+    operatorId: getFc100OperatorId(),
+    data,
+  }
+}
+
+function isFc100TaskTerminal (status: DeliveryTaskStatus | null): boolean {
+  if (!status) return false
+  const text = `${status.status || ''} ${status.phase || ''}`.toLowerCase()
+  return status.progressPercent === 100 ||
+    ['completed', 'complete', 'finished', 'finish', 'success', 'succeeded', 'done'].some(key => text.includes(key))
+}
+
+function isFc100HoveringEnough (props: DeliveryDeviceProperties | null): boolean {
+  if (!props) return false
+  if (props.onlineStatus === false) return false
+  const horizontalSpeed = Number(props.horizontalSpeed ?? 0)
+  const verticalSpeed = Number(props.verticalSpeed ?? 0)
+  return Math.abs(horizontalSpeed) <= 0.5 && Math.abs(verticalSpeed) <= 0.3
+}
+
+function getFc100TerminalControlBlockedReason (): string {
+  if (!fc100PlanningState.taskId) return '请先创建FC100航线任务'
+  if (!isFc100TaskTerminal(fc100PlanningState.taskStatus)) return '等待航线完成'
+  if (!fc100PlanningState.selectedDeviceProps) return '请先刷新FC100状态'
+  if (fc100PlanningState.selectedDeviceProps.onlineStatus === false) return 'FC100设备离线'
+  if (!isFc100HoveringEnough(fc100PlanningState.selectedDeviceProps)) return '等待飞机悬停稳定'
+  return ''
+}
+
+function canUseFc100TerminalControls (): boolean {
+  return !getFc100TerminalControlBlockedReason()
+}
+
+function confirmFc100TerminalAction (title: string, actionText: string, danger = false): Promise<boolean> {
+  const deviceSn = getSelectedFc100DeviceSn() || '-'
+  const status = fc100PlanningState.taskStatus?.status || fc100PlanningState.taskStatus?.phase || '-'
+  return new Promise(resolve => {
+    Modal.confirm({
+      title,
+      content: `设备 ${deviceSn}，当前任务状态 ${status}。请确认飞机已到达终点并处于安全悬停状态后执行${actionText}。`,
+      okText: `确认${actionText}`,
+      cancelText: '取消',
+      okButtonProps: danger ? { danger: true } : undefined,
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    })
+  })
+}
+
+function formatFc100CommandResult (result: DeliveryCommandRef | null | undefined, fallback: string): string {
+  if (!result) return fallback
+  const parts = [
+    result.deviceCmdMethod ? `方法 ${result.deviceCmdMethod}` : '',
+    result.status ? `状态 ${result.status}` : '',
+    result.bid ? `指令 ${result.bid}` : '',
+  ].filter(Boolean)
+  return parts.length ? `${fallback}：${parts.join('；')}` : fallback
+}
+
+async function sendFc100TerminalCommand (
+  loadingAction: string,
+  actionText: string,
+  danger: boolean,
+  request: (deviceSn: string, body: DeliveryCommandBody) => Promise<any>,
+) {
+  const deviceSn = getSelectedFc100DeviceSn()
+  if (!deviceSn) {
+    message.warning('请先选择FC100飞机设备。')
+    return
+  }
+  if (loadingAction !== 'returnHome' && !canUseFc100TerminalControls()) {
+    const reason = getFc100TerminalControlBlockedReason()
+    message.warning(reason || '当前状态不允许投放控制。')
+    return
+  }
+  const confirmed = await confirmFc100TerminalAction(`确认执行${actionText}吗？`, actionText, danger)
+  if (!confirmed) return
+  fc100PlanningState.loadingAction = loadingAction
+  try {
+    const res = await request(deviceSn, buildFc100CommandBody())
+    const body = getFc100ApiBody(res)
+    if (body.code !== 0) {
+      fc100PlanningState.lastResult = `${actionText}失败：${body.message || '接口返回异常'}`
+      return
+    }
+    fc100PlanningState.lastResult = formatFc100CommandResult(body.data, `${actionText}指令已发送`)
+    message.success(`${actionText}指令已发送`)
+    await refreshFc100SelectedDeviceProps(deviceSn)
+  } catch (error) {
+    fc100PlanningState.lastResult = `${actionText}失败：${getFc100ErrorText(error, '接口调用失败')}`
+  } finally {
+    fc100PlanningState.loadingAction = ''
+  }
+}
+
+function handleFc100RopeDown () {
+  return sendFc100TerminalCommand('ropeDown', '放绳', false, deliveryApi.sendFc100RopeDownCommand)
+}
+
+function handleFc100RopeStop () {
+  return sendFc100TerminalCommand('ropeStop', '停止放收绳', false, deliveryApi.sendFc100RopeStopCommand)
+}
+
+function handleFc100RopeUp () {
+  return sendFc100TerminalCommand('ropeUp', '收绳', false, deliveryApi.sendFc100RopeUpCommand)
+}
+
+function handleFc100ReleaseHook () {
+  return sendFc100TerminalCommand('releaseHook', '脱钩', true, deliveryApi.sendFc100ReleaseHookCommand)
+}
+
+function handleFc100ReturnHome () {
+  return sendFc100TerminalCommand('returnHome', '返航', true, (deviceSn, body) =>
+    deliveryApi.sendDeviceCommand(deviceSn, 'return_home', body))
+}
+
+async function handleFc100RefreshDevices () {
+  fc100PlanningState.loadingAction = 'devices'
+  try {
+    const res = await deliveryApi.listDevices(workspaceId)
+    const body = getFc100ApiBody(res)
+    if (body.code !== 0) {
+      fc100PlanningState.lastResult = `FC100设备列表获取失败：${body.message || '接口返回异常'}`
+      return
+    }
+    fc100PlanningState.devices = body.data || []
+    if (!fc100AircraftDevices.value.some(device => device.deviceSn === fc100PlanningState.selectedDeviceSn)) {
+      fc100PlanningState.selectedDeviceSn = fc100AircraftDevices.value.find(device => device.bindStatus === 'drone')?.deviceSn ||
+        fc100AircraftDevices.value[0]?.deviceSn ||
+        ''
+    }
+    if (fc100PlanningState.selectedDeviceSn) {
+      await handleFc100SelectDevice(fc100PlanningState.selectedDeviceSn)
+    } else {
+      fc100PlanningState.selectedDeviceProps = null
+      fc100PlanningState.lastResult = 'FC100设备列表为空，请确认飞机已绑定到当前FC100 workspace/group。'
+    }
+  } catch (error) {
+    fc100PlanningState.lastResult = `FC100设备列表获取失败：${getFc100ErrorText(error, '接口调用失败')}`
+  } finally {
+    fc100PlanningState.loadingAction = ''
+  }
+}
+
+async function handleFc100SelectDevice (deviceSn: string) {
+  fc100PlanningState.selectedDeviceSn = deviceSn
+  if (!deviceSn) {
+    fc100PlanningState.selectedDeviceProps = null
+    return
+  }
+  await refreshFc100SelectedDeviceProps(deviceSn)
+}
+
+async function refreshFc100SelectedDeviceProps (deviceSn = fc100PlanningState.selectedDeviceSn) {
+  if (!deviceSn) return null
+  const res = await deliveryApi.deviceProps(deviceSn)
+  const body = getFc100ApiBody(res)
+  if (body.code !== 0) {
+    fc100PlanningState.lastResult = `FC100设备物模型获取失败：${body.message || '接口返回异常'}`
+    return null
+  }
+  fc100PlanningState.selectedDeviceProps = body.data || null
+  syncFc100DeviceFlightPosition(fc100PlanningState.selectedDeviceProps)
+  return fc100PlanningState.selectedDeviceProps
+}
+
+async function refreshFc100TaskStatus (showLoading = true) {
+  const taskId = fc100PlanningState.taskId
+  if (!taskId) return null
+  if (showLoading) {
+    fc100PlanningState.loadingAction = 'status'
+  }
+  try {
+    const res = await deliveryApi.waylineTaskStatus(taskId)
+    const body = getFc100ApiBody(res)
+    if (body.code !== 0) {
+      fc100PlanningState.lastResult = `FC100任务状态获取失败：${body.message || '接口返回异常'}`
+      return null
+    }
+    fc100PlanningState.taskStatus = body.data || null
+    fc100PlanningState.lastResult = formatFc100TaskStatus(fc100PlanningState.taskStatus)
+    return fc100PlanningState.taskStatus
+  } catch (error) {
+    fc100PlanningState.lastResult = `FC100任务状态获取失败：${getFc100ErrorText(error, '接口调用失败')}`
+    return null
+  } finally {
+    if (showLoading) {
+      fc100PlanningState.loadingAction = ''
+    }
+  }
+}
+
+async function refreshFc100RealtimeState () {
+  if (fc100RealtimeRefreshing) return
+  if (!showPlanningTools.value) return
+  fc100RealtimeRefreshing = true
+  try {
+    if (fc100PlanningState.selectedDeviceSn) {
+      await refreshFc100SelectedDeviceProps()
+    }
+    if (fc100PlanningState.taskId) {
+      await refreshFc100TaskStatus(false)
+    }
+  } catch (error) {
+    // Realtime refresh stays quiet; explicit refresh/actions still show errors.
+  } finally {
+    fc100RealtimeRefreshing = false
+  }
+}
+
+function startFc100RealtimeRefresh () {
+  if (fc100RealtimeTimer !== null) return
+  fc100RealtimeTimer = window.setInterval(refreshFc100RealtimeState, 3000)
+}
+
+function stopFc100RealtimeRefresh () {
+  if (fc100RealtimeTimer === null) return
+  window.clearInterval(fc100RealtimeTimer)
+  fc100RealtimeTimer = null
+  fc100RealtimeRefreshing = false
+}
+
+function buildFc100StartPreflightWarnings (props: DeliveryDeviceProperties | null) {
+  const warnings: string[] = []
+  if (!props) {
+    warnings.push('未获取到飞行器状态')
+    return warnings
+  }
+  if (props.onlineStatus === false) warnings.push('飞行器离线')
+  if (props.batteryPercent !== null && props.batteryPercent !== undefined && props.batteryPercent < 30) warnings.push('电量低于30%')
+  if (!props.rtkStatus) warnings.push('RTK/GPS状态未知')
+  if (props.latitude === null || props.latitude === undefined || props.longitude === null || props.longitude === undefined) warnings.push('未获取到经纬度')
+  return warnings
+}
+
+async function onFc100UseGeneratedWayline (record: PlannedWaylineRecord) {
+  fc100PlanningState.selectedRecord = record
+  previewPlannedWayline(record)
+  if (!fc100PlanningState.devices.length) {
+    await handleFc100RefreshDevices()
+  }
+  await handleFc100ImportGeneratedWaylineTask(record)
+}
+
+function onFc100PreviewGeneratedWayline (record: PlannedWaylineRecord) {
+  fc100PlanningState.selectedRecord = record
+  previewPlannedWayline(record)
+}
+
+function selectFc100GeneratedWayline (record: PlannedWaylineRecord) {
+  fc100PlanningState.selectedRecord = record
+  previewPlannedWayline(record)
+  if (!record.kmzUrl) {
+    message.warning('请先生成航线文件后再创建FC100任务。')
+  }
+}
+
+async function handleFc100ImportGeneratedWaylineTask (record = fc100PlanningState.selectedRecord) {
+  if (!record) {
+    message.warning('请先选择已保存规划航线。')
+    return
+  }
+  if (!record.kmzUrl) {
+    message.warning('请先生成航线文件后再导入FC100。')
+    return
+  }
+  const deviceSn = getSelectedFc100DeviceSn()
+  if (!deviceSn) {
+    message.warning('请先选择FC100飞机设备。')
+    return
+  }
+  fc100PlanningState.selectedRecord = record
+  fc100PlanningState.selectedDeviceSn = deviceSn
+  fc100PlanningState.loadingAction = 'import'
+  try {
+    const res = await deliveryApi.importGeneratedPlannedWaylineTask({
+      workspaceId,
+      plannedWaylineId: record.plannedWaylineId,
+      deviceSn,
+      taskName: sanitizeDjiWaylineName(record.name || 'FC100规划航线'),
+      operatorId: localStorage.getItem(ELocalStorageKey.Username) || 'web',
+      remark: `created from planned wayline ${record.plannedWaylineId}`,
+    })
+    const body = getFc100ApiBody(res)
+    if (body.code !== 0) {
+      fc100PlanningState.lastResult = `FC100导入生成KMZ并创建任务失败：${body.message || '接口返回异常'}`
+      return
+    }
+    fc100PlanningState.taskId = body.data?.taskId || ''
+    fc100PlanningState.taskStatus = null
+    fc100PlanningState.lastResult = `FC100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
+    message.success('FC100航线任务已创建')
+  } catch (error) {
+    fc100PlanningState.lastResult = `FC100导入生成KMZ并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
+  } finally {
+    fc100PlanningState.loadingAction = ''
+  }
+}
+
+async function handleFc100StartGeneratedWaylineTask () {
+  const taskId = fc100PlanningState.taskId
+  if (!taskId) {
+    message.warning('请先创建FC100任务。')
+    return
+  }
+  const deviceSn = getSelectedFc100DeviceSn()
+  if (!deviceSn) {
+    message.warning('请先选择FC100飞机设备。')
+    return
+  }
+  fc100PlanningState.loadingAction = 'start'
+  try {
+    const props = await refreshFc100SelectedDeviceProps(deviceSn)
+    const warnings = buildFc100StartPreflightWarnings(props)
+    if (warnings.length) {
+      const text = `FC100 开始执行航线前检查未通过：${warnings.join('；')}`
+      fc100PlanningState.lastResult = text
+      message.warning(text)
+      return
+    }
+    const res = await deliveryApi.startWaylineTask(taskId, deviceSn)
+    const body = getFc100ApiBody(res)
+    if (body.code !== 0) {
+      fc100PlanningState.lastResult = `FC100开始执行失败：${body.message || '接口返回异常'}`
+      return
+    }
+    const operation = body.data as DeliveryTaskOperationResult | null
+    fc100PlanningState.lastResult = formatFc100OperationResult(operation, 'FC100开始执行航线指令已发送。')
+    if (operation?.accepted === false) {
+      message.warning(fc100PlanningState.lastResult)
+    } else {
+      message.success('FC100开始执行航线指令已发送')
+    }
+    await handleFc100GeneratedWaylineTaskStatus()
+  } catch (error) {
+    fc100PlanningState.lastResult = `FC100开始执行失败：${getFc100ErrorText(error, '接口调用失败')}`
+  } finally {
+    fc100PlanningState.loadingAction = ''
+  }
+}
+
+async function handleFc100GeneratedWaylineTaskStatus () {
+  if (!fc100PlanningState.taskId) {
+    message.warning('请先创建FC100任务。')
+    return
+  }
+  await refreshFc100TaskStatus(true)
 }
 const pagination :IPage = {
   page: 1,
@@ -1407,11 +2286,14 @@ onMounted(() => {
     // Populate online aircraft list for planning target selection.
     selectedAircraftSn.value = planningState.aircraftSn || ''
     refreshOnlineAircrafts()
+    handleFc100RefreshDevices().catch(() => {})
+    startFc100RealtimeRefresh()
     topoTimer = window.setInterval(refreshOnlineAircrafts, 5000)
   }
 })
 
 onUnmounted(() => {
+  stopFc100RealtimeRefresh()
   if (topoTimer !== null) {
     window.clearInterval(topoTimer)
     topoTimer = null
@@ -1497,13 +2379,6 @@ function onScroll (e: any) {
   }
 }
 
-interface FileItem extends File {
-  uid?: string;
-  status?: string;
-  response?: string;
-  url?: string;
-}
-
 function beforeUpload (file: FileItem) {
   if (!file.name || !file.name.toLowerCase().endsWith('.kmz')) {
     message.error('文件格式错误，请选择 KMZ 文件。')
@@ -1566,6 +2441,21 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   scrollbar-width: thin;
   scrollbar-color: #c5c8cc transparent;
 }
+:deep(.wayline-mode-collapse.ant-collapse > .ant-collapse-item > .ant-collapse-header) {
+  color: #fff !important;
+}
+:deep(.wayline-mode-collapse.ant-collapse > .ant-collapse-item > .ant-collapse-header .ant-collapse-arrow) {
+  color: #fff !important;
+}
+.project-wayline-wrapper :deep(.ant-btn) {
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 400;
+  line-height: 1.5715;
+}
+.project-wayline-wrapper :deep(.ant-btn-sm) {
+  font-size: 14px;
+}
 
 .planning-panel {
   margin: 10px auto 0;
@@ -1575,6 +2465,30 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   border-radius: 4px;
   color: #d9d9d9;
   font-size: 12px;
+}
+.workflow-section-note {
+  width: 95%;
+  margin: 10px auto 0;
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-left: 3px solid #1677ff;
+  background: #262c33;
+  color: #d9d9d9;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.workflow-section-note strong {
+  color: #fff;
+  font-size: 13px;
+}
+.workflow-section-note span {
+  color: hsla(0, 0%, 100%, 0.62);
+}
+.workflow-section-note--delivery {
+  border-left-color: #19be6b;
+  background: #22302b;
 }
 .planning-panel-title {
   font-size: 13px;
@@ -1603,11 +2517,21 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   margin-bottom: 4px;
 }
 .planning-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
+.fc100-task-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.fc100-task-actions .ant-btn:not(.wayline-button-wrap) {
+  padding-left: 8px;
+  padding-right: 8px;
+}
 .planning-actions .ant-btn {
-  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
 }
 .planning-empty {
   padding: 8px;
@@ -1651,7 +2575,16 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
 .planning-wp-tail {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
+}
+.planning-wp-tail .ant-btn {
+  flex: 0 1 auto;
+  min-width: 28px;
+  height: auto;
+  min-height: 24px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .planning-wp-unit {
   color: #8c8c8c;
@@ -1717,6 +2650,106 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   color: #d9d9d9;
   font-size: 12px;
 }
+.fc100-planning-panel {
+  margin: 10px auto 0;
+  width: 95%;
+  padding: 10px;
+  background: #242f2c;
+  border: 1px solid rgba(25, 190, 107, 0.28);
+  border-radius: 4px;
+  color: #d9d9d9;
+  font-size: 12px;
+}
+.fc100-planning-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f5f5f5;
+  margin-bottom: 8px;
+}
+.fc100-planning-title > span {
+  min-width: 0;
+}
+.fc100-planning-title .ant-btn {
+  flex: 0 0 auto;
+}
+.fc100-direct-wayline-upload {
+  display: block;
+}
+.fc100-direct-wayline-upload .ant-btn {
+  width: 100%;
+  justify-content: center;
+}
+.fc100-device-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 2px 0;
+}
+.fc100-device-option-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.fc100-device-option-model {
+  min-width: 0;
+  color: #262626;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fc100-device-option-sn {
+  color: #8c8c8c;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fc100-device-option-status {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: #f0f0f0;
+  color: #8c8c8c;
+  font-size: 12px;
+}
+.fc100-device-option-status.online {
+  background: rgba(25, 190, 107, 0.14);
+  color: #19be6b;
+}
+.fc100-device-props,
+.fc100-task-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+  color: hsla(0, 0%, 100%, 0.65);
+}
+.fc100-selected-wayline {
+  min-height: 30px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: #1f1f1f;
+  color: #bfbfbf;
+  word-break: break-word;
+}
+.fc100-result {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-left: 2px solid #19be6b;
+  border-radius: 3px;
+  background: rgba(25, 190, 107, 0.12);
+  color: #d9f7be;
+  line-height: 1.4;
+  word-break: break-word;
+}
 .planned-wayline-title {
   display: flex;
   align-items: center;
@@ -1731,6 +2764,11 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   margin-bottom: 8px;
   background: #353535;
   border-radius: 3px;
+  border: 1px solid transparent;
+}
+.planned-wayline-card--selected {
+  border-color: #19be6b;
+  background: #26382f;
 }
 .planned-wayline-list {
   max-height: 360px;
@@ -1793,12 +2831,107 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   color: hsla(0, 0%, 100%, 0.35);
 }
 .planned-wayline-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: row dense;
   gap: 6px;
   margin-top: 6px;
 }
 .planned-wayline-actions .ant-btn {
-  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.planned-wayline-actions--minimal {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.planned-wayline-detail-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-flow: row dense;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.planned-wayline-detail-actions .ant-btn {
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.fc100-terminal-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(82, 196, 26, 0.42);
+  border-radius: 4px;
+  background: rgba(82, 196, 26, 0.08);
+}
+.fc100-terminal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #f5f5f5;
+  font-weight: 700;
+}
+.fc100-terminal-head small {
+  min-width: 0;
+  color: #8c8c8c;
+  font-weight: 400;
+  text-align: right;
+}
+.fc100-terminal-note {
+  margin-top: 5px;
+  color: #bfbfbf;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.fc100-terminal-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.fc100-terminal-actions .ant-btn {
+  min-width: 0;
+  max-width: 100%;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.fc100-terminal-actions__primary {
+  border-color: #1677ff;
+  background: #1677ff;
+  color: #fff;
+}
+.fc100-terminal-actions__neutral {
+  border-color: #d9d9d9;
+  background: #f5f5f5;
+  color: #262626;
+}
+.fc100-terminal-actions__danger {
+  border-color: #ff4d4f;
+  background: #ff4d4f;
+  color: #fff;
+}
+.fc100-terminal-actions__return {
+  border-color: #faad14;
+  background: #faad14;
+  color: #1f1f1f;
+}
+.fc100-terminal-actions__primary[disabled],
+.fc100-terminal-actions__neutral[disabled],
+.fc100-terminal-actions__danger[disabled],
+.fc100-terminal-actions__return[disabled] {
+  border-color: #595959;
+  background: #f5f5f5;
+  color: #bfbfbf;
+}
+.wayline-button-wrap {
+  grid-column: 1 / -1;
+  min-width: 0 !important;
+  max-width: 100%;
+  height: auto;
+  min-height: 24px;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
 }
 .planned-wayline-form {
   color: #262626;

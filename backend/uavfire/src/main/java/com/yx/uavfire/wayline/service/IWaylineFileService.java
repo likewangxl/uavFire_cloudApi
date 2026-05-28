@@ -44,6 +44,8 @@ public interface IWaylineFileService {
      */
     URL getObjectUrl(String workspaceId, String waylineId) throws SQLException;
 
+    byte[] downloadWaylineContent(String workspaceId, String waylineId) throws SQLException;
+
     PublishedWaylineFileDTO createPublishedWayline(String workspaceId, PublishedWaylineCreateDTO param);
 
     /**

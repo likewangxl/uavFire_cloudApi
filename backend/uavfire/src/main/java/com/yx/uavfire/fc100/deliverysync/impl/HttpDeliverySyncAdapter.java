@@ -8,6 +8,7 @@ import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncException;
 import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncProperties;
 import com.yx.uavfire.fc100.deliverysync.http.DeliverySyncHttpClient;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryBypassStreamDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceDTO;
@@ -18,6 +19,7 @@ import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineImportResult;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.DeliveryBypassStreamRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
 import lombok.Data;
@@ -67,6 +69,28 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
             return ResponseMapper.toDeviceProperties(deviceSn, resp);
         } catch (DeliverySyncException e) {
             throw toBusinessException(e, "getDeviceProperties");
+        } catch (IOException e) {
+            throw new Fc100BusinessException(Fc100ErrorCode.DELIVERY_SYNC_NETWORK, e.getMessage());
+        }
+    }
+
+    @Override
+    public DeliveryBypassStreamDTO startBypassStream(DeliveryBypassStreamRequest req) {
+        String idemKey = UUID.randomUUID().toString();
+        DjiCreatePassStreamRequest body = new DjiCreatePassStreamRequest();
+        body.setRegion(req.getRegion());
+        body.setRtmpUrl(req.getRtmpUrl());
+        body.setSn(req.getDeviceSn());
+        body.setCamera(req.getCamera());
+        body.setVideo(req.getVideo());
+        body.setExpireTs(req.getExpireTs());
+        body.setVideoQuality(req.getVideoQuality());
+        try {
+            DjiPassStreamResponse resp = httpClient.post(groupPath("/manage/sdk/v1/groups/%s/bypass/streams/start"),
+                body, DjiPassStreamResponse.class, idemKey, req.getDeviceSn());
+            return ResponseMapper.toBypassStream(resp);
+        } catch (DeliverySyncException e) {
+            throw toBusinessException(e, "startBypassStream");
         } catch (IOException e) {
             throw new Fc100BusinessException(Fc100ErrorCode.DELIVERY_SYNC_NETWORK, e.getMessage());
         }
@@ -232,6 +256,24 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
         private String deviceCmdMethod;
         @JsonProperty("device_cmd_data")
         private Map<String, Object> deviceCmdData;
+    }
+
+    @Data
+    static class DjiCreatePassStreamRequest {
+        @JsonProperty("region")
+        private String region;
+        @JsonProperty("rtmp_url")
+        private String rtmpUrl;
+        @JsonProperty("sn")
+        private String sn;
+        @JsonProperty("camera")
+        private String camera;
+        @JsonProperty("video")
+        private String video;
+        @JsonProperty("expire_ts")
+        private Long expireTs;
+        @JsonProperty("video_quality")
+        private Integer videoQuality;
     }
 
     @Data
@@ -481,6 +523,32 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
         }
     }
 
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class DjiPassStreamResponse {
+        @JsonProperty("code")
+        private Integer code;
+        @JsonProperty("message")
+        private String message;
+        @JsonProperty("data")
+        private DjiPassStreamData data;
+
+        @Data
+        @JsonIgnoreProperties(ignoreUnknown = true)
+        static class DjiPassStreamData {
+            @JsonProperty("converter_id")
+            private String converterId;
+            @JsonProperty("play_rtmp_url")
+            private String playRtmpUrl;
+            @JsonProperty("create_ts")
+            private Long createTs;
+            @JsonProperty("update_ts")
+            private Long updateTs;
+            @JsonProperty("converter_state")
+            private String converterState;
+        }
+    }
+
     static final class ResponseMapper {
 
         private ResponseMapper() {}
@@ -524,6 +592,20 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
                     p.setWindSpeed(asDouble(propertyValue(first(properties, "wind_speed"))));
                 });
             return p;
+        }
+
+        static DeliveryBypassStreamDTO toBypassStream(DjiPassStreamResponse resp) {
+            if (resp == null || resp.getData() == null) {
+                return DeliveryBypassStreamDTO.builder().build();
+            }
+            DjiPassStreamResponse.DjiPassStreamData data = resp.getData();
+            return DeliveryBypassStreamDTO.builder()
+                .converterId(data.getConverterId())
+                .playRtmpUrl(data.getPlayRtmpUrl())
+                .converterState(data.getConverterState())
+                .createTs(data.getCreateTs())
+                .updateTs(data.getUpdateTs())
+                .build();
         }
 
         static List<DeliveryWaylineDTO> toWaylineList(DjiWaylineListResponse resp) {

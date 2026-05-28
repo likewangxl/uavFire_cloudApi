@@ -21,6 +21,8 @@ public class Fc100RouteProperties {
     private int takeOffSecurityHeight = 20;
     /** 全局过渡速度 m/s */
     private int globalTransitionalSpeed = 15;
+    /** 航线结束动作。FC100 投放流程默认停在终点，投放后由业务发送 return_home。 */
+    private String finishAction = "noAction";
     /**
      * EGM96 height ≈ ellipsoidHeight + offset。
      * Round 1 验证发现符号错：参考样例 ellipsoid 1052 → height 1089，差 **+36 不是 -36**。

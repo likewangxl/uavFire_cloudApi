@@ -8,7 +8,7 @@
 这一轮没有再改官方起飞主链路，主要做了三件事：
 
 1. 补 DRC 退出来源埋点，便于下次现场复测直接定位“是谁触发了退出遥控”
-2. 把本机运行环境重新收敛到 Java 11 + `192.168.0.30`
+2. 把本机运行环境重新收敛到 Java 11 + `172.20.10.7`
 3. 重做 `tsa.vue` 左侧飞行控制区的布局和交互，重点是位移控制弹窗、按钮分区、危险动作层级和文案统一
 
 ### 0.0.1 本轮与下次现场测试直接相关的结论
@@ -37,15 +37,15 @@
     - `~/.zshrc`
     - `~/.bash_profile`
   - 新开 shell 默认应是 Java 11，不应再回到 JDK 8
-- 当前仓库运行地址已改回 **`192.168.0.30`**
+- 当前仓库运行地址已改回 **`172.20.10.7`**
   - 前端：
     - `frontend/src/api/http/config.ts`
   - 后端：
     - `backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java`
     - `backend/uavfire/src/main/resources/application.yml`
 - 这意味着当前应按下面这组地址理解本机环境：
-  - 前端：`http://192.168.0.30:8080`
-  - 后端：`http://192.168.0.30:6789`
+  - 前端：`http://172.20.10.7:8080`
+  - 后端：`http://172.20.10.7:6789`
 
 ### 0.0.3 TSA 页面本轮已完成的交互改动
 
@@ -108,7 +108,7 @@ npm --prefix frontend run build
      - `drc_mode_exit`
      - `cloud_control_release`
      - `cloud_control_auth_update`
-3. 交接时不要沿用文档里的旧 IP 运行结论；当前代码和本机测试已经统一到 `192.168.0.30`
+3. 交接时不要沿用文档里的旧 IP 运行结论；当前代码和本机测试已经统一到 `172.20.10.7`
 
 ## 0.1 2026-04-20 最新交接摘要
 
@@ -125,15 +125,15 @@ npm --prefix frontend run build
 
 本轮还完成了一项环境变更：
 
-- 代码里的默认本机地址已从 `192.168.0.30` 统一改为 `192.168.0.30`
+- 代码里的默认本机地址已从 `172.20.10.7` 统一改为 `172.20.10.7`
 - 涉及后端 MQTT / Pilot 登录入口 / livestream 配置 / 前端 API 与 WebSocket 地址
 
 当前有效服务地址应按以下值理解：
 
-- 前端：`http://192.168.0.30:8080`
-- 后端：`http://192.168.0.30:6789`
-- BASIC MQTT：`192.168.0.30:1883`
-- DRC MQTT WS：`ws://192.168.0.30:8083/mqtt`
+- 前端：`http://172.20.10.7:8080`
+- 后端：`http://172.20.10.7:6789`
+- BASIC MQTT：`172.20.10.7:1883`
+- DRC MQTT WS：`ws://172.20.10.7:8083/mqtt`
 
 ## 0.1.1 这一轮已经实际做过的工作
 
@@ -158,7 +158,7 @@ npm --prefix frontend run build
    - 第二阶段 `fly_to_point.points[].height`
 6. 已补前端测试与后端单测，并分别编译通过
 7. 已重新编译并重启前后端，确保当前运行实例和源码对齐
-8. 已把仓库中代码里的默认 IP 从 `192.168.0.30` 改成 `192.168.0.30`
+8. 已把仓库中代码里的默认 IP 从 `172.20.10.7` 改成 `172.20.10.7`
 
 ## 0.1.2 这轮日志里最关键的新结论
 
@@ -1065,7 +1065,7 @@ mvn -pl uavfire -Dtest=CloudControlAuthStateResolverTest test
 
 ### 14.6 网络配置现状
 
-本轮已把代码默认 IP 改为 `192.168.0.30`，后续若本机网络再次变化，需要同时检查：
+本轮已把代码默认 IP 改为 `172.20.10.7`，后续若本机网络再次变化，需要同时检查：
 
 - [backend/uavfire/src/main/resources/application.yml](/Users/likewang/uavfire/backend/uavfire/src/main/resources/application.yml:57)
 - [backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java:13)

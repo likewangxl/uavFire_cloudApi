@@ -59,7 +59,7 @@ async function doSubmit () {
       checklistTimestamps: { ...timestamps },
     })
     message.success('投放指令已提交')
-    router.push(`/missions/${props.no}`)
+    router.push(`/fire-mission-detail/${props.no}`)
   } catch (e: unknown) {
     const err = e as { response?: { data?: { message?: string } } }
     Modal.error({

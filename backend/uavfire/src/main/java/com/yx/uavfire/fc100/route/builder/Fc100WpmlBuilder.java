@@ -34,6 +34,12 @@ public class Fc100WpmlBuilder {
         return "http://www.dji.com/wpmz/" + props.getWpmlVersion();
     }
 
+    private String finishAction() {
+        return props.getFinishAction() == null || props.getFinishAction().isBlank()
+            ? "noAction"
+            : props.getFinishAction().trim();
+    }
+
     /** template.kml — 设计模板 */
     public byte[] buildTemplateKml(WpmlBuildContext ctx) {
         return writeXml(w -> {
@@ -50,7 +56,7 @@ public class Fc100WpmlBuilder {
             // missionConfig
             w.writeStartElement(wpmlNs(), "missionConfig");
             elem(w, wpmlNs(), "flyToWaylineMode", "safely");
-            elem(w, wpmlNs(), "finishAction", "goHome");
+            elem(w, wpmlNs(), "finishAction", finishAction());
             elem(w, wpmlNs(), "exitOnRCLost", "executeLostAction");
             elem(w, wpmlNs(), "executeRCLostAction", "goBack");
             int safetyH = orDefault(ctx.getTakeOffSecurityHeight(), props.getTakeOffSecurityHeight());
@@ -135,7 +141,7 @@ public class Fc100WpmlBuilder {
             // missionConfig（同 template）
             w.writeStartElement(wpmlNs(), "missionConfig");
             elem(w, wpmlNs(), "flyToWaylineMode", "safely");
-            elem(w, wpmlNs(), "finishAction", "goHome");
+            elem(w, wpmlNs(), "finishAction", finishAction());
             elem(w, wpmlNs(), "exitOnRCLost", "executeLostAction");
             elem(w, wpmlNs(), "executeRCLostAction", "goBack");
             int safetyH = orDefault(ctx.getTakeOffSecurityHeight(), props.getTakeOffSecurityHeight());

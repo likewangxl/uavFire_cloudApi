@@ -7,41 +7,492 @@ import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
 import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncProperties;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryBypassStreamDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceProperties;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryDeviceLiveDTO;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineImportResult;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskRef;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskOperationResult;
+import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryTaskStatus;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryWaylineDTO;
 import com.yx.uavfire.fc100.deliverysync.model.param.CreateTaskRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.DeliveryBypassStreamRequest;
+import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
+import com.yx.uavfire.fc100.event.dao.FireEventMapper;
+import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
+import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
+import com.yx.uavfire.fc100.mission.service.TransitCommand;
 import com.yx.uavfire.fc100.mission.service.MissionStateMachine;
 import com.yx.uavfire.fc100.route.model.dto.RouteFileDTO;
 import com.yx.uavfire.fc100.route.service.RouteExportService;
+import com.yx.uavfire.fc100.safety.model.dto.SafetyCheckResult;
+import com.yx.uavfire.fc100.safety.service.SafetyCheckService;
+import com.yx.uavfire.fc100.waypoint.model.dto.MissionWaypointDTO;
+import com.yx.uavfire.fc100.waypoint.model.param.WaypointGenerateParam;
+import com.yx.uavfire.fc100.waypoint.service.WaypointPlannerService;
+import com.yx.uavfire.wayline.model.dto.PlannedWaylineDTO;
+import com.yx.uavfire.wayline.service.IPlannedWaylineService;
+import com.yx.uavfire.wayline.service.IWaylineFileService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import javax.servlet.http.HttpServletRequest;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.sql.SQLException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.List;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DeliveryControllerApifoxWorkflowTest {
+
+    @Test
+    void prepareFireMissionDeliveryTaskGeneratesRouteAndCreatesTaskWithoutStartingIt() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireEventMapper eventMapper = mock(FireEventMapper.class);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        SafetyCheckService safety = mock(SafetyCheckService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, eventMapper, planner, safety);
+
+        FireMissionEntity approved = fireMission("M-AUTO-001", "APPROVED");
+        FireMissionEntity routeGenerated = fireMission("M-AUTO-001", "ROUTE_GENERATED");
+        FireMissionEntity routeExported = fireMission("M-AUTO-001", "ROUTE_EXPORTED");
+        FireEventEntity event = new FireEventEntity();
+        event.setId(99L);
+        event.setLat(22.123456);
+        event.setLng(113.654321);
+        event.setAlt(12.0);
+        event.setConfidence(new BigDecimal("0.96"));
+
+        SafetyCheckResult safe = new SafetyCheckResult();
+        safe.setPassed(true);
+        RouteFileDTO route = new RouteFileDTO();
+        route.setId(22L);
+        route.setObjectKey("/tmp/M-AUTO-001.kmz");
+        route.setSign("sha256");
+        MissionWaypointDTO wp = new MissionWaypointDTO();
+        wp.setWaypointIndex(0);
+
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(approved, routeGenerated, routeExported);
+        when(eventMapper.selectById(99L)).thenReturn(event);
+        when(safety.check(any(), any())).thenReturn(safe);
+        when(planner.plan(any(WaypointGenerateParam.class))).thenReturn(List.of(wp));
+        when(routeService.exportKmz("M-AUTO-001", "operator-1", "127.0.0.1", "REQ-001")).thenReturn(route);
+        when(routeService.getLatest("M-AUTO-001")).thenReturn(route);
+        when(routeService.downloadById(22L)).thenReturn(kmzWithTemplate("<kml><Document><name>M-AUTO-001</name></Document></kml>"));
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("WAYLINE-AUTO-001")
+            .name("M-AUTO-001")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-AUTO-001", "2"));
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeader("X-Request-Id")).thenReturn("REQ-001");
+
+        DeliveryController.PrepareFireMissionDeliveryTaskParam param =
+            new DeliveryController.PrepareFireMissionDeliveryTaskParam();
+        param.setOperatorId("operator-1");
+        ApiResult<DeliveryTaskRef> result = controller.prepareFireMissionDeliveryTask("M-AUTO-001", param, request);
+
+        assertEquals("TASK-AUTO-001", result.getData().getTaskId());
+        ArgumentCaptor<WaypointGenerateParam> waypointParam = ArgumentCaptor.forClass(WaypointGenerateParam.class);
+        verify(planner).plan(waypointParam.capture());
+        assertEquals(22.123456, waypointParam.getValue().getFireLat());
+        assertEquals(113.654321, waypointParam.getValue().getFireLng());
+        assertEquals(30.01, waypointParam.getValue().getTakeoffLat());
+        assertEquals(120.01, waypointParam.getValue().getTakeoffLng());
+        verify(planner).persistForMission(11L, List.of(wp));
+        verify(routeService).exportKmz("M-AUTO-001", "operator-1", "127.0.0.1", "REQ-001");
+        verify(adapter).createTask(any(CreateTaskRequest.class));
+        verify(adapter, never()).startTask(any());
+        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine, times(2)).transit(transit.capture());
+        assertEquals(FireMissionEvent.GEN_WP, transit.getAllValues().get(0).getEvent());
+        assertEquals(FireMissionEvent.CREATE_DELIVERY_TASK, transit.getAllValues().get(1).getEvent());
+    }
+
+    @Test
+    void prepareFireMissionDeliveryTaskRecreatesDeliveryTaskWhenSentTaskIsStale() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireEventMapper eventMapper = mock(FireEventMapper.class);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        SafetyCheckService safety = mock(SafetyCheckService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, eventMapper, planner, safety);
+
+        FireMissionEntity sent = fireMission("M-STALE-001", "SENT_TO_DELIVERY");
+        sent.setDjiTaskId("OLD-TASK-001");
+        RouteFileDTO route = new RouteFileDTO();
+        route.setId(22L);
+        route.setObjectKey("/tmp/M-STALE-001.kmz");
+        route.setSign("sha256");
+
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(sent, sent);
+        when(routeService.getLatest("M-STALE-001")).thenReturn(route);
+        when(routeService.downloadById(22L)).thenReturn(kmzWithTemplate("<kml><Document><name>M-STALE-001</name></Document></kml>"));
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("WAYLINE-STALE-001")
+            .name("M-STALE-001")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("NEW-TASK-001", "2"));
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeader("X-Request-Id")).thenReturn("REQ-STALE");
+
+        DeliveryController.PrepareFireMissionDeliveryTaskParam param =
+            new DeliveryController.PrepareFireMissionDeliveryTaskParam();
+        param.setOperatorId("operator-1");
+        ApiResult<DeliveryTaskRef> result = controller.prepareFireMissionDeliveryTask("M-STALE-001", param, request);
+
+        assertEquals("NEW-TASK-001", result.getData().getTaskId());
+        verify(adapter).importWayline(any(WaylineImportRequest.class));
+        verify(adapter).createTask(any(CreateTaskRequest.class));
+        verify(missionMapper).update(any(), any(UpdateWrapper.class));
+        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine).transit(transit.capture());
+        assertEquals(FireMissionEvent.CREATE_DELIVERY_TASK, transit.getValue().getEvent());
+    }
+
+    @Test
+    void prepareFireMissionDeliveryTaskRecoversInProgressMissionWhenDeliveryTaskEndedAbnormallyAndAircraftStopped() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireEventMapper eventMapper = mock(FireEventMapper.class);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        SafetyCheckService safety = mock(SafetyCheckService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, eventMapper, planner, safety);
+
+        FireMissionEntity inProgress = fireMission("M-RECOVER-001", "IN_PROGRESS");
+        inProgress.setDjiTaskId("FAILED-TASK-001");
+        RouteFileDTO route = new RouteFileDTO();
+        route.setId(22L);
+        route.setObjectKey("/tmp/M-RECOVER-001.kmz");
+        route.setSign("sha256");
+
+        DeliveryTaskStatus abnormal = new DeliveryTaskStatus();
+        abnormal.setTaskId("FAILED-TASK-001");
+        abnormal.setPhase("abnormal");
+        abnormal.setTaskCode(620179);
+        abnormal.setEndTime(1779978628898L);
+        DeliveryDeviceProperties stopped = new DeliveryDeviceProperties();
+        stopped.setDeviceSn("FC100-SN-001");
+        stopped.setFlying(false);
+
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(inProgress, inProgress);
+        when(adapter.queryTaskStatus("FAILED-TASK-001")).thenReturn(abnormal);
+        when(adapter.getDeviceProperties("FC100-SN-001")).thenReturn(stopped);
+        when(routeService.getLatest("M-RECOVER-001")).thenReturn(route);
+        when(routeService.downloadById(22L)).thenReturn(kmzWithTemplate("<kml><Document><name>M-RECOVER-001</name></Document></kml>"));
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("WAYLINE-RECOVER-001")
+            .name("M-RECOVER-001")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("NEW-TASK-001", "2"));
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeader("X-Request-Id")).thenReturn("REQ-RECOVER");
+
+        DeliveryController.PrepareFireMissionDeliveryTaskParam param =
+            new DeliveryController.PrepareFireMissionDeliveryTaskParam();
+        param.setOperatorId("operator-1");
+        ApiResult<DeliveryTaskRef> result = controller.prepareFireMissionDeliveryTask("M-RECOVER-001", param, request);
+
+        assertEquals("NEW-TASK-001", result.getData().getTaskId());
+        verify(adapter).queryTaskStatus("FAILED-TASK-001");
+        verify(adapter).getDeviceProperties("FC100-SN-001");
+        verify(adapter).createTask(any(CreateTaskRequest.class));
+        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine).transit(transit.capture());
+        assertEquals(FireMissionEvent.CREATE_DELIVERY_TASK, transit.getValue().getEvent());
+    }
+
+    @Test
+    void prepareFireMissionDeliveryTaskAllowsReleasedMissionToCreateAnotherTask() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireEventMapper eventMapper = mock(FireEventMapper.class);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        SafetyCheckService safety = mock(SafetyCheckService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, eventMapper, planner, safety);
+
+        FireMissionEntity released = fireMission("M-SECOND-DROP-001", "PAYLOAD_RELEASED");
+        released.setDjiTaskId("DONE-TASK-001");
+        RouteFileDTO route = new RouteFileDTO();
+        route.setId(22L);
+        route.setObjectKey("/tmp/M-SECOND-DROP-001.kmz");
+        route.setSign("sha256");
+
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(released, released);
+        when(routeService.getLatest("M-SECOND-DROP-001")).thenReturn(route);
+        when(routeService.downloadById(22L)).thenReturn(kmzWithTemplate("<kml><Document><name>M-SECOND-DROP-001</name></Document></kml>"));
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("WAYLINE-SECOND-DROP-001")
+            .name("M-SECOND-DROP-001")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("NEXT-TASK-001", "2"));
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeader("X-Request-Id")).thenReturn("REQ-SECOND-DROP");
+
+        DeliveryController.PrepareFireMissionDeliveryTaskParam param =
+            new DeliveryController.PrepareFireMissionDeliveryTaskParam();
+        param.setOperatorId("operator-1");
+        ApiResult<DeliveryTaskRef> result = controller.prepareFireMissionDeliveryTask("M-SECOND-DROP-001", param, request);
+
+        assertEquals("NEXT-TASK-001", result.getData().getTaskId());
+        verify(adapter).createTask(any(CreateTaskRequest.class));
+        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine).transit(transit.capture());
+        assertEquals(FireMissionEvent.CREATE_DELIVERY_TASK, transit.getValue().getEvent());
+    }
+
+    @Test
+    void deviceLiveStartsDeliveryBypassStreamAndReturnsZlmPlaybackUrl() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+        ReflectionTestUtils.setField(controller, "deliveryBypassRtmpUrl", "rtmp://192.168.0.30:1935/live/");
+        ReflectionTestUtils.setField(controller, "webrtcPlaybackHost", "192.168.0.30");
+        ReflectionTestUtils.setField(controller, "webrtcPlaybackPort", 58925);
+
+        DeliveryDeviceProperties properties = new DeliveryDeviceProperties();
+        properties.setDeviceSn("FC100-SN-001");
+        properties.setOnlineStatus(true);
+        when(adapter.getDeviceProperties("FC100-SN-001")).thenReturn(properties);
+        when(adapter.startBypassStream(any(DeliveryBypassStreamRequest.class))).thenReturn(DeliveryBypassStreamDTO.builder()
+            .converterId("CONVERTER-001")
+            .playRtmpUrl("rtmp://192.168.0.30:1935/live/FC100-SN-001_39-0-7")
+            .converterState("running")
+            .build());
+
+        ApiResult<DeliveryDeviceLiveDTO> result = controller.deviceLive("FC100-SN-001");
+        ApiResult<DeliveryDeviceLiveDTO> cachedResult = controller.deviceLive("FC100-SN-001");
+
+        assertEquals("FC100-SN-001", result.getData().getDeviceSn());
+        assertEquals("running", result.getData().getStreamStatus());
+        assertEquals("webrtc://192.168.0.30:58925/live/FC100-SN-001_39-0-7", result.getData().getPlayUrl());
+        assertEquals(result.getData().getPlayUrl(), cachedResult.getData().getPlayUrl());
+        assertEquals("delivery-platform", result.getData().getSource());
+        assertTrue(result.getData().getMessage().contains("CONVERTER-001"));
+
+        ArgumentCaptor<DeliveryBypassStreamRequest> bypassReq = ArgumentCaptor.forClass(DeliveryBypassStreamRequest.class);
+        verify(adapter, times(1)).startBypassStream(bypassReq.capture());
+        assertEquals("FC100-SN-001", bypassReq.getValue().getDeviceSn());
+        assertEquals("rtmp://192.168.0.30:1935/live", bypassReq.getValue().getRtmpUrl());
+        assertEquals("39-0-7", bypassReq.getValue().getCamera());
+        assertEquals("normal-0", bypassReq.getValue().getVideo());
+        assertEquals(7200L, bypassReq.getValue().getExpireTs());
+        assertEquals(0, bypassReq.getValue().getVideoQuality());
+    }
+
+    @Test
+    void statusAutoReleasesHookOnceWhenDeliveryTaskCompletedAndHovering() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setMissionNo("M-AUTO-RELEASE-001");
+        mission.setStatus("IN_PROGRESS");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setDjiTaskId("TASK-AUTO-RELEASE-001");
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+
+        DeliveryTaskStatus completed = new DeliveryTaskStatus();
+        completed.setTaskId("TASK-AUTO-RELEASE-001");
+        completed.setPhase("completed");
+        completed.setAccepted(true);
+        when(adapter.queryTaskStatus("TASK-AUTO-RELEASE-001")).thenReturn(completed);
+
+        DeliveryCommandRef releaseRef = new DeliveryCommandRef();
+        releaseRef.setBid("BID-AUTO-HOOK");
+        when(adapter.sendDeviceCommand(any(DeviceCommandRequest.class))).thenReturn(releaseRef);
+
+        ApiResult<DeliveryTaskStatus> result = controller.status("M-AUTO-RELEASE-001");
+
+        assertEquals("completed", result.getData().getPhase());
+        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
+        verify(adapter).sendDeviceCommand(commandReq.capture());
+        assertEquals("FC100-SN-001", commandReq.getValue().getDeviceSn());
+        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
+        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
+
+        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine, times(2)).transit(transit.capture());
+        assertEquals(FireMissionEvent.MARK_RELEASE_PENDING, transit.getAllValues().get(0).getEvent());
+        assertEquals(FireMissionEvent.CONFIRM_RELEASE, transit.getAllValues().get(1).getEvent());
+    }
+
+    @Test
+    void scheduledPollingAutoReleasesCompletedInProgressMissionWithoutPageStatusPoll() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setMissionNo("M-SCHEDULED-RELEASE-001");
+        mission.setStatus("IN_PROGRESS");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setDjiTaskId("TASK-SCHEDULED-RELEASE-001");
+        when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+
+        DeliveryTaskStatus completed = new DeliveryTaskStatus();
+        completed.setTaskId("TASK-SCHEDULED-RELEASE-001");
+        completed.setPhase("completed");
+        completed.setAccepted(true);
+        when(adapter.queryTaskStatus("TASK-SCHEDULED-RELEASE-001")).thenReturn(completed);
+
+        DeliveryCommandRef releaseRef = new DeliveryCommandRef();
+        releaseRef.setBid("BID-SCHEDULED-HOOK");
+        when(adapter.sendDeviceCommand(any(DeviceCommandRequest.class))).thenReturn(releaseRef);
+
+        controller.pollInProgressMissionsForAutoRelease();
+
+        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
+        verify(adapter).sendDeviceCommand(commandReq.capture());
+        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
+        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
+
+        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine, times(2)).transit(transit.capture());
+        assertEquals(FireMissionEvent.MARK_RELEASE_PENDING, transit.getAllValues().get(0).getEvent());
+        assertEquals(FireMissionEvent.CONFIRM_RELEASE, transit.getAllValues().get(1).getEvent());
+    }
+
+    @Test
+    void scheduledPollingAutoReleasesWhenAircraftIsHoveringAtDropWaypointBeforeTaskCompleted() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, planner, null);
+
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(11L);
+        mission.setMissionNo("M-DROP-HOVER-001");
+        mission.setStatus("IN_PROGRESS");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setDjiTaskId("TASK-DROP-HOVER-001");
+        when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+
+        DeliveryTaskStatus running = new DeliveryTaskStatus();
+        running.setTaskId("TASK-DROP-HOVER-001");
+        running.setPhase("normal");
+        running.setAccepted(true);
+        when(adapter.queryTaskStatus("TASK-DROP-HOVER-001")).thenReturn(running);
+
+        MissionWaypointDTO drop = new MissionWaypointDTO();
+        drop.setWaypointIndex(1);
+        drop.setWaypointType("DROP");
+        drop.setLat(34.667795);
+        drop.setLng(109.326400);
+        when(planner.listLatest(11L)).thenReturn(List.of(drop));
+
+        DeliveryDeviceProperties properties = new DeliveryDeviceProperties();
+        properties.setDeviceSn("FC100-SN-001");
+        properties.setLatitude(34.667795);
+        properties.setLongitude(109.326400);
+        properties.setHorizontalSpeed(0.0);
+        properties.setVerticalSpeed(0.0);
+        when(adapter.getDeviceProperties("FC100-SN-001")).thenReturn(properties);
+
+        DeliveryCommandRef releaseRef = new DeliveryCommandRef();
+        releaseRef.setBid("BID-DROP-HOVER-HOOK");
+        when(adapter.sendDeviceCommand(any(DeviceCommandRequest.class))).thenReturn(releaseRef);
+
+        controller.pollInProgressMissionsForAutoRelease();
+
+        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
+        verify(adapter).sendDeviceCommand(commandReq.capture());
+        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
+        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
+
+        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine, times(2)).transit(transit.capture());
+        assertEquals(FireMissionEvent.MARK_RELEASE_PENDING, transit.getAllValues().get(0).getEvent());
+        assertEquals(FireMissionEvent.CONFIRM_RELEASE, transit.getAllValues().get(1).getEvent());
+    }
+
+    @Test
+    void statusDoesNotAutoReleaseHookAgainAfterMissionLeftInProgress() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setMissionNo("M-AUTO-RELEASE-001");
+        mission.setStatus("PAYLOAD_RELEASED");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setDjiTaskId("TASK-AUTO-RELEASE-001");
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+
+        DeliveryTaskStatus completed = new DeliveryTaskStatus();
+        completed.setTaskId("TASK-AUTO-RELEASE-001");
+        completed.setPhase("completed");
+        completed.setAccepted(true);
+        when(adapter.queryTaskStatus("TASK-AUTO-RELEASE-001")).thenReturn(completed);
+
+        controller.status("M-AUTO-RELEASE-001");
+
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        verify(stateMachine, never()).transit(any(TransitCommand.class));
+    }
 
     @Test
     void createTaskImportsLatestRouteKmlBeforeCreatingApifoxTask() throws Exception {
@@ -79,14 +530,15 @@ class DeliveryControllerApifoxWorkflowTest {
 
         ArgumentCaptor<WaylineImportRequest> importReq = ArgumentCaptor.forClass(WaylineImportRequest.class);
         verify(adapter).importWayline(importReq.capture());
-        assertEquals("M-001", importReq.getValue().getWaylineId());
-        assertEquals("template.kml", importReq.getValue().getFilename());
-        assertEquals("application/vnd.google-earth.kml+xml", importReq.getValue().getContentType());
-        assertTrue(new String(importReq.getValue().getFileBytes(), StandardCharsets.UTF_8).contains("<name>M-001</name>"));
+        UUID.fromString(importReq.getValue().getMissionNo());
+        assertEquals(null, importReq.getValue().getWaylineId());
+        assertTrue(importReq.getValue().getFilename().endsWith(".kmz"));
+        assertEquals("application/vnd.google-earth.kmz", importReq.getValue().getContentType());
+        assertTrue(zipEntry(importReq.getValue().getFileBytes(), "wpmz/template.kml").contains("<name>火情任务-M-001-"));
 
         ArgumentCaptor<CreateTaskRequest> taskReq = ArgumentCaptor.forClass(CreateTaskRequest.class);
         verify(adapter).createTask(taskReq.capture());
-        assertEquals("M-001", taskReq.getValue().getMissionId());
+        assertEquals(importReq.getValue().getMissionNo(), taskReq.getValue().getMissionId());
         assertEquals("SN-001", taskReq.getValue().getDeviceSn());
     }
 
@@ -129,9 +581,10 @@ class DeliveryControllerApifoxWorkflowTest {
         ArgumentCaptor<WaylineImportRequest> importReq = ArgumentCaptor.forClass(WaylineImportRequest.class);
         verify(adapter).importWayline(importReq.capture());
         assertEquals("WAYLINE-001", importReq.getValue().getWaylineId());
-        assertEquals("route.kmz", importReq.getValue().getFilename());
+        assertEquals("route-WAYLINE-001.kmz", importReq.getValue().getFilename());
         assertEquals("application/vnd.google-earth.kmz", importReq.getValue().getContentType());
-        assertEquals(originalKmz.length, importReq.getValue().getFileBytes().length);
+        assertTrue(zipEntry(importReq.getValue().getFileBytes(), "wpmz/template.kml")
+            .contains("<name>route-WAYLINE-001</name>"));
 
         ArgumentCaptor<CreateTaskRequest> taskReq = ArgumentCaptor.forClass(CreateTaskRequest.class);
         verify(adapter).createTask(taskReq.capture());
@@ -140,6 +593,46 @@ class DeliveryControllerApifoxWorkflowTest {
         assertEquals("IMPORTED-WAYLINE-UUID", taskReq.getValue().getMissionNo());
         assertEquals("IMPORTED-WAYLINE-UUID", taskReq.getValue().getMissionId());
         assertEquals("现场导入航线", taskReq.getValue().getTaskName());
+    }
+
+    @Test
+    void importCreateDirectWaylineTaskNormalizesFc100FinishActionToNoAction() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        props.setWorkspaceId("WS-001");
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("IMPORTED-WAYLINE-UUID")
+            .name("route")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-DIRECT-001", "2"));
+
+        byte[] kmzBytes = kmzWithTemplateAndWaylines(
+            "<kml><Document><wpml:finishAction>goHome</wpml:finishAction></Document></kml>",
+            "<kml><Document><wpml:finishAction>autoLand</wpml:finishAction></Document></kml>");
+        MockMultipartFile kmz = new MockMultipartFile("file", "route.kmz", "application/vnd.google-earth.kmz",
+            kmzBytes);
+
+        controller.importCreateDirectWaylineTask(
+            kmz,
+            "1581FAN4C257L0010RBE",
+            "现场导入航线",
+            "operator-1",
+            "direct verify",
+            "WAYLINE-001");
+
+        ArgumentCaptor<WaylineImportRequest> importReq = ArgumentCaptor.forClass(WaylineImportRequest.class);
+        verify(adapter).importWayline(importReq.capture());
+        String template = zipEntry(importReq.getValue().getFileBytes(), "wpmz/template.kml");
+        String waylines = zipEntry(importReq.getValue().getFileBytes(), "wpmz/waylines.wpml");
+        assertTrue(template.contains("<wpml:finishAction>noAction</wpml:finishAction>"));
+        assertTrue(waylines.contains("<wpml:finishAction>noAction</wpml:finishAction>"));
+        assertFalse(template.contains("<wpml:finishAction>goHome</wpml:finishAction>"));
+        assertFalse(waylines.contains("<wpml:finishAction>autoLand</wpml:finishAction>"));
     }
 
     @Test
@@ -192,9 +685,9 @@ class DeliveryControllerApifoxWorkflowTest {
         when(adapter.importWayline(any(WaylineImportRequest.class))).thenThrow(new Fc100BusinessException(
             Fc100ErrorCode.DELIVERY_SYNC_BUSINESS,
             "importWayline failed HTTP 400: {\"code\":203541,\"message\":\"航线名称重复\",\"data\":null}"));
-        when(adapter.listWaylines(1, 100, "route")).thenReturn(List.of(DeliveryWaylineDTO.builder()
+        when(adapter.listWaylines(1, 100, "route-ROUTE-001")).thenReturn(List.of(DeliveryWaylineDTO.builder()
             .waylineId("EXISTING-WAYLINE-UUID")
-            .name("route")
+            .name("route-ROUTE-001")
             .build()));
         when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-DIRECT-001", "2"));
 
@@ -207,14 +700,276 @@ class DeliveryControllerApifoxWorkflowTest {
             null,
             "operator-1",
             "direct verify",
-            null);
+            "ROUTE-001");
 
         assertEquals("TASK-DIRECT-001", result.getData().getTaskId());
         ArgumentCaptor<CreateTaskRequest> taskReq = ArgumentCaptor.forClass(CreateTaskRequest.class);
         verify(adapter).createTask(taskReq.capture());
         assertEquals("EXISTING-WAYLINE-UUID", taskReq.getValue().getMissionNo());
         assertEquals("EXISTING-WAYLINE-UUID", taskReq.getValue().getMissionId());
-        assertEquals("FC100航线-route", taskReq.getValue().getTaskName());
+        assertEquals("FC100航线-route-ROUTE-001", taskReq.getValue().getTaskName());
+    }
+
+    @Test
+    void importCreateGeneratedPlannedWaylineTaskReadsPublishedKmzOnServerSide() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        props.setWorkspaceId("WS-FC100");
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        IPlannedWaylineService plannedWaylineService = mock(IPlannedWaylineService.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            plannedWaylineService, waylineFileService);
+
+        PlannedWaylineDTO planned = PlannedWaylineDTO.builder()
+            .plannedWaylineId("PW-001")
+            .workspaceId("WS-FC100")
+            .name("FC100 planned route")
+            .publishedWaylineId("WAYLINE-FILE-001")
+            .kmzUrl("http://minio-internal/wayline.kmz")
+            .build();
+        byte[] kmzBytes = kmzWithTemplate("<kml><Document><name>planned</name></Document></kml>");
+        when(plannedWaylineService.getOne("WS-FC100", "PW-001")).thenReturn(java.util.Optional.of(planned));
+        when(waylineFileService.downloadWaylineContent("WS-FC100", "WAYLINE-FILE-001")).thenReturn(kmzBytes);
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("IMPORTED-PW-001")
+            .name("FC100 planned route")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-PW-001", "2"));
+
+        DeliveryController.ImportGeneratedPlannedWaylineTaskParam param =
+            new DeliveryController.ImportGeneratedPlannedWaylineTaskParam();
+        param.setWorkspaceId("WS-FC100");
+        param.setPlannedWaylineId("PW-001");
+        param.setDeviceSn("FC100-DRONE-001");
+        param.setTaskName("FC100 planned route");
+        param.setOperatorId("operator-1");
+
+        ApiResult<DeliveryTaskRef> result = controller.importCreateGeneratedPlannedWaylineTask(param);
+
+        assertEquals("TASK-PW-001", result.getData().getTaskId());
+        ArgumentCaptor<WaylineImportRequest> importReq = ArgumentCaptor.forClass(WaylineImportRequest.class);
+        verify(adapter).importWayline(importReq.capture());
+        assertEquals("PW-001", importReq.getValue().getMissionNo());
+        assertEquals(null, importReq.getValue().getWaylineId());
+        assertEquals("FC100 planned route-PW-001.kmz", importReq.getValue().getFilename());
+        assertEquals("application/vnd.google-earth.kmz", importReq.getValue().getContentType());
+        assertTrue(zipEntry(importReq.getValue().getFileBytes(), "wpmz/template.kml")
+            .contains("<name>FC100 planned route-PW-001</name>"));
+
+        ArgumentCaptor<CreateTaskRequest> taskReq = ArgumentCaptor.forClass(CreateTaskRequest.class);
+        verify(adapter).createTask(taskReq.capture());
+        assertEquals("WS-FC100", taskReq.getValue().getWorkspaceId());
+        assertEquals("FC100-DRONE-001", taskReq.getValue().getDeviceSn());
+        assertEquals("IMPORTED-PW-001", taskReq.getValue().getMissionId());
+        assertEquals("FC100 planned route", taskReq.getValue().getTaskName());
+    }
+
+    @Test
+    void importCreateGeneratedPlannedWaylineTaskNormalizesM30tKmzToFc100M4tBeforeImport() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        props.setWorkspaceId("WS-FC100");
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        IPlannedWaylineService plannedWaylineService = mock(IPlannedWaylineService.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            plannedWaylineService, waylineFileService);
+
+        PlannedWaylineDTO planned = PlannedWaylineDTO.builder()
+            .plannedWaylineId("PW-M30T")
+            .workspaceId("WS-FC100")
+            .name("M30T planned route")
+            .aircraftModelKey("M30T")
+            .publishedWaylineId("WAYLINE-FILE-M30T")
+            .build();
+        byte[] m30tKmz = kmzWithTemplateAndWaylines(
+            "<kml><Document><wpml:droneEnumValue>67</wpml:droneEnumValue><wpml:payloadEnumValue>53</wpml:payloadEnumValue></Document></kml>",
+            "<kml><Document><wpml:droneEnumValue>67</wpml:droneEnumValue><wpml:payloadEnumValue>53</wpml:payloadEnumValue></Document></kml>");
+        when(plannedWaylineService.getOne("WS-FC100", "PW-M30T")).thenReturn(java.util.Optional.of(planned));
+        when(waylineFileService.downloadWaylineContent("WS-FC100", "WAYLINE-FILE-M30T")).thenReturn(m30tKmz);
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("IMPORTED-M4T")
+            .name("M30T planned route")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-M4T", "2"));
+
+        DeliveryController.ImportGeneratedPlannedWaylineTaskParam param =
+            new DeliveryController.ImportGeneratedPlannedWaylineTaskParam();
+        param.setWorkspaceId("WS-FC100");
+        param.setPlannedWaylineId("PW-M30T");
+        param.setDeviceSn("FC100-DRONE-001");
+
+        controller.importCreateGeneratedPlannedWaylineTask(param);
+
+        ArgumentCaptor<WaylineImportRequest> importReq = ArgumentCaptor.forClass(WaylineImportRequest.class);
+        verify(adapter).importWayline(importReq.capture());
+        assertEquals(null, importReq.getValue().getWaylineId());
+        String template = zipEntry(importReq.getValue().getFileBytes(), "wpmz/template.kml");
+        String waylines = zipEntry(importReq.getValue().getFileBytes(), "wpmz/waylines.wpml");
+        assertTrue(template.contains("<wpml:droneEnumValue>100</wpml:droneEnumValue>"));
+        assertTrue(template.contains("<wpml:payloadEnumValue>99</wpml:payloadEnumValue>"));
+        assertTrue(waylines.contains("<wpml:droneEnumValue>100</wpml:droneEnumValue>"));
+        assertTrue(waylines.contains("<wpml:payloadEnumValue>99</wpml:payloadEnumValue>"));
+        assertFalse(template.contains("<wpml:droneEnumValue>67</wpml:droneEnumValue>"));
+        assertFalse(template.contains("<wpml:payloadEnumValue>53</wpml:payloadEnumValue>"));
+    }
+
+    @Test
+    void importCreateGeneratedPlannedWaylineTaskNormalizesFinishActionToNoActionBeforeImport() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        props.setWorkspaceId("WS-FC100");
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        IPlannedWaylineService plannedWaylineService = mock(IPlannedWaylineService.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            plannedWaylineService, waylineFileService);
+
+        PlannedWaylineDTO planned = PlannedWaylineDTO.builder()
+            .plannedWaylineId("PW-FINISH")
+            .workspaceId("WS-FC100")
+            .name("planned finish route")
+            .aircraftModelKey("FC100")
+            .publishedWaylineId("WAYLINE-FILE-FINISH")
+            .build();
+        byte[] kmzBytes = kmzWithTemplateAndWaylines(
+            "<kml><Document><wpml:finishAction>goHome</wpml:finishAction></Document></kml>",
+            "<kml><Document><wpml:finishAction>gotoFirstWaypoint</wpml:finishAction></Document></kml>");
+        when(plannedWaylineService.getOne("WS-FC100", "PW-FINISH")).thenReturn(java.util.Optional.of(planned));
+        when(waylineFileService.downloadWaylineContent("WS-FC100", "WAYLINE-FILE-FINISH")).thenReturn(kmzBytes);
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("IMPORTED-FINISH")
+            .name("planned finish route")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-FINISH", "2"));
+
+        DeliveryController.ImportGeneratedPlannedWaylineTaskParam param =
+            new DeliveryController.ImportGeneratedPlannedWaylineTaskParam();
+        param.setWorkspaceId("WS-FC100");
+        param.setPlannedWaylineId("PW-FINISH");
+        param.setDeviceSn("FC100-DRONE-001");
+
+        controller.importCreateGeneratedPlannedWaylineTask(param);
+
+        ArgumentCaptor<WaylineImportRequest> importReq = ArgumentCaptor.forClass(WaylineImportRequest.class);
+        verify(adapter).importWayline(importReq.capture());
+        String template = zipEntry(importReq.getValue().getFileBytes(), "wpmz/template.kml");
+        String waylines = zipEntry(importReq.getValue().getFileBytes(), "wpmz/waylines.wpml");
+        assertTrue(template.contains("<wpml:finishAction>noAction</wpml:finishAction>"));
+        assertTrue(waylines.contains("<wpml:finishAction>noAction</wpml:finishAction>"));
+        assertFalse(template.contains("<wpml:finishAction>goHome</wpml:finishAction>"));
+        assertFalse(waylines.contains("<wpml:finishAction>gotoFirstWaypoint</wpml:finishAction>"));
+    }
+
+    @Test
+    void importCreateGeneratedPlannedWaylineTaskReusesExistingFc100WaylineWhenGeneratedKmzMissing() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        props.setWorkspaceId("WS-FC100");
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        IPlannedWaylineService plannedWaylineService = mock(IPlannedWaylineService.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            plannedWaylineService, waylineFileService);
+
+        PlannedWaylineDTO planned = PlannedWaylineDTO.builder()
+            .plannedWaylineId("PW-001")
+            .workspaceId("WS-FC100")
+            .name("2026-05-26 17_49")
+            .publishedWaylineId("MISSING-WAYLINE-FILE")
+            .build();
+        when(plannedWaylineService.getOne("WS-FC100", "PW-001")).thenReturn(java.util.Optional.of(planned));
+        when(waylineFileService.downloadWaylineContent("WS-FC100", "MISSING-WAYLINE-FILE"))
+            .thenThrow(new SQLException("Failed to read wayline file content."));
+        when(adapter.listWaylines(1, 100, "2026-05-26 17_49")).thenReturn(List.of(DeliveryWaylineDTO.builder()
+            .waylineId("f7151cbd-5016-415f-8fde-6a19c2395987")
+            .name("2026-05-26 17_49")
+            .build()));
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-PW-EXISTING", "2"));
+
+        DeliveryController.ImportGeneratedPlannedWaylineTaskParam param =
+            new DeliveryController.ImportGeneratedPlannedWaylineTaskParam();
+        param.setWorkspaceId("WS-FC100");
+        param.setPlannedWaylineId("PW-001");
+        param.setDeviceSn("FC100-DRONE-001");
+        param.setTaskName("2026-05-26 17_49");
+
+        ApiResult<DeliveryTaskRef> result = controller.importCreateGeneratedPlannedWaylineTask(param);
+
+        assertEquals("TASK-PW-EXISTING", result.getData().getTaskId());
+        verify(adapter, never()).importWayline(any(WaylineImportRequest.class));
+        verify(plannedWaylineService, never()).generateFile(any(), any(), any());
+        ArgumentCaptor<CreateTaskRequest> taskReq = ArgumentCaptor.forClass(CreateTaskRequest.class);
+        verify(adapter).createTask(taskReq.capture());
+        assertEquals("f7151cbd-5016-415f-8fde-6a19c2395987", taskReq.getValue().getMissionNo());
+        assertEquals("f7151cbd-5016-415f-8fde-6a19c2395987", taskReq.getValue().getMissionId());
+    }
+
+    @Test
+    void importCreateGeneratedPlannedWaylineTaskRegeneratesKmzWhenStoredContentIsMissingAndNoFc100WaylineExists() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        props.setWorkspaceId("WS-FC100");
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        IPlannedWaylineService plannedWaylineService = mock(IPlannedWaylineService.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            plannedWaylineService, waylineFileService);
+
+        PlannedWaylineDTO planned = PlannedWaylineDTO.builder()
+            .plannedWaylineId("PW-002")
+            .workspaceId("WS-FC100")
+            .name("missing local file route")
+            .publishedWaylineId("OLD-WAYLINE-FILE")
+            .build();
+        PlannedWaylineDTO regenerated = PlannedWaylineDTO.builder()
+            .plannedWaylineId("PW-002")
+            .workspaceId("WS-FC100")
+            .name("missing local file route")
+            .publishedWaylineId("NEW-WAYLINE-FILE")
+            .build();
+        byte[] regeneratedKmz = kmzWithTemplate("<kml><Document><name>missing local file route</name></Document></kml>");
+
+        when(plannedWaylineService.getOne("WS-FC100", "PW-002")).thenReturn(java.util.Optional.of(planned));
+        when(waylineFileService.downloadWaylineContent("WS-FC100", "OLD-WAYLINE-FILE"))
+            .thenThrow(new SQLException("Failed to read wayline file content."));
+        when(adapter.listWaylines(1, 100, "missing local file route")).thenReturn(List.of());
+        when(plannedWaylineService.generateFile("WS-FC100", "PW-002", "operator-1")).thenReturn(regenerated);
+        when(waylineFileService.downloadWaylineContent("WS-FC100", "NEW-WAYLINE-FILE")).thenReturn(regeneratedKmz);
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("IMPORTED-REGENERATED")
+            .name("missing local file route")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-PW-REGENERATED", "2"));
+
+        DeliveryController.ImportGeneratedPlannedWaylineTaskParam param =
+            new DeliveryController.ImportGeneratedPlannedWaylineTaskParam();
+        param.setWorkspaceId("WS-FC100");
+        param.setPlannedWaylineId("PW-002");
+        param.setDeviceSn("FC100-DRONE-001");
+        param.setOperatorId("operator-1");
+
+        ApiResult<DeliveryTaskRef> result = controller.importCreateGeneratedPlannedWaylineTask(param);
+
+        assertEquals("TASK-PW-REGENERATED", result.getData().getTaskId());
+        verify(plannedWaylineService).generateFile("WS-FC100", "PW-002", "operator-1");
+        ArgumentCaptor<WaylineImportRequest> importReq = ArgumentCaptor.forClass(WaylineImportRequest.class);
+        verify(adapter).importWayline(importReq.capture());
+        assertEquals(null, importReq.getValue().getWaylineId());
+        assertEquals("missing local file route-PW-002.kmz", importReq.getValue().getFilename());
+        assertTrue(zipEntry(importReq.getValue().getFileBytes(), "wpmz/template.kml")
+            .contains("<name>missing local file route-PW-002</name>"));
     }
 
     @Test
@@ -318,13 +1073,81 @@ class DeliveryControllerApifoxWorkflowTest {
         verify(adapter, never()).startTask("TASK-001");
     }
 
+    @Test
+    void releaseHookSendsFc100HoistHookOpenCommandForMissionDevice() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setMissionNo("M-FC100-001");
+        mission.setAircraftSn("FC100-SN-001");
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+        DeliveryCommandRef commandRef = new DeliveryCommandRef();
+        commandRef.setBid("BID-HOOK-001");
+        commandRef.setDeviceCmdMethod("hoist_hook_control");
+        when(adapter.sendDeviceCommand(any(DeviceCommandRequest.class))).thenReturn(commandRef);
+
+        DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
+        param.setOperatorId("operator-1");
+        ApiResult<DeliveryCommandRef> result = controller.releaseHook("M-FC100-001", param);
+
+        assertEquals("BID-HOOK-001", result.getData().getBid());
+        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
+        verify(adapter).sendDeviceCommand(commandReq.capture());
+        assertEquals("M-FC100-001", commandReq.getValue().getMissionNo());
+        assertEquals("FC100-SN-001", commandReq.getValue().getDeviceSn());
+        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
+        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
+    }
+
     private byte[] kmzWithTemplate(String templateKml) throws Exception {
+        return kmzWithTemplateAndWaylines(templateKml, null);
+    }
+
+    private FireMissionEntity fireMission(String missionNo, String status) {
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(11L);
+        mission.setMissionNo(missionNo);
+        mission.setWorkspaceId("WS-001");
+        mission.setFireEventId(99L);
+        mission.setStatus(status);
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setTakeoffLat(30.01);
+        mission.setTakeoffLng(120.01);
+        mission.setTakeoffAlt(20.0);
+        mission.setWindSpeedAtApproval(3.0);
+        mission.setWindDirectionDeg(45.0);
+        return mission;
+    }
+
+    private byte[] kmzWithTemplateAndWaylines(String templateKml, String waylinesWpml) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(out)) {
             zip.putNextEntry(new ZipEntry("wpmz/template.kml"));
             zip.write(templateKml.getBytes(StandardCharsets.UTF_8));
             zip.closeEntry();
+            if (waylinesWpml != null) {
+                zip.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
+                zip.write(waylinesWpml.getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
         }
         return out.toByteArray();
+    }
+
+    private String zipEntry(byte[] zipBytes, String entryName) throws Exception {
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+            ZipEntry entry = zip.getNextEntry();
+            while (entry != null) {
+                if (entryName.equals(entry.getName())) {
+                    return new String(zip.readAllBytes(), StandardCharsets.UTF_8);
+                }
+                entry = zip.getNextEntry();
+            }
+        }
+        return "";
     }
 }

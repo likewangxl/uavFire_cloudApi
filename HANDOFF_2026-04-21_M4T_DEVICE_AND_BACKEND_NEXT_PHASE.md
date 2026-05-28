@@ -99,7 +99,7 @@
 - 现已完成最小修复：
   - backend `GlobalMVCConfigurer` 只放行 `/manage/api/v1/dual-stream/agents/**`
   - 不放行整个 `/manage/api/v1/dual-stream/**`
-  - Android `agentBackendBaseUrl` 已改为 `http://192.168.0.30:6789/`
+  - Android `agentBackendBaseUrl` 已改为 `http://172.20.10.7:6789/`
 - backend 本机探测结果：
   - `curl /manage/api/v1/dual-stream/agents/RC_PLUS_LOCAL/command` 已返回 `200`
 - 真机侧回归结果：
@@ -108,7 +108,7 @@
   - `红外: true`
   - 设备 logcat 未再出现 `401` / `ConnectException` / `UnknownHostException`
   - 本机 `lsof -nP -iTCP:6789` 可见活动连接：
-    - `192.168.0.30:6789 -> 192.168.0.30:57938 (ESTABLISHED)`
+    - `172.20.10.7:6789 -> 172.20.10.7:57938 (ESTABLISHED)`
 
 这意味着：
 

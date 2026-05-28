@@ -12,7 +12,7 @@ import type {
 } from '/@/types/wayline'
 
 const HTTP_PREFIX = '/wayline/api/v1'
-const DEFAULT_PLANNED_WAYLINE_MODEL = 'M30T'
+const DEFAULT_PLANNED_WAYLINE_MODEL = 'M4T'
 const DEFAULT_PLANNED_WAYLINE_HEIGHT = 30
 const DEFAULT_PLANNED_WAYLINE_SPEED = 5
 
@@ -94,6 +94,18 @@ function normalizePlannedWaylineResponse (record: any): PlannedWaylineRecord {
     taskStatus: record?.taskStatus ?? record?.task_status,
     taskStatusReason: record?.taskStatusReason ?? record?.task_status_reason,
     taskProgress: record?.taskProgress ?? record?.task_progress,
+    waylineMissionState: record?.waylineMissionState ?? record?.wayline_mission_state,
+    currentWaypointIndex: record?.currentWaypointIndex ?? record?.current_waypoint_index,
+    totalWaypoints: record?.totalWaypoints ?? record?.total_waypoints,
+    mediaCount: record?.mediaCount ?? record?.media_count,
+    breakPointJson: record?.breakPointJson ?? record?.break_point_json,
+    lastProgressTime: record?.lastProgressTime ?? record?.last_progress_time,
+    aircraftLng: record?.aircraftLng ?? record?.aircraft_lng,
+    aircraftLat: record?.aircraftLat ?? record?.aircraft_lat,
+    aircraftGcjLng: record?.aircraftGcjLng ?? record?.aircraft_gcj_lng,
+    aircraftGcjLat: record?.aircraftGcjLat ?? record?.aircraft_gcj_lat,
+    aircraftHeight: record?.aircraftHeight ?? record?.aircraft_height,
+    aircraftUpdatedAt: record?.aircraftUpdatedAt ?? record?.aircraft_updated_at,
     preparedTime: record?.preparedTime ?? record?.prepared_time,
     executedTime: record?.executedTime ?? record?.executed_time,
     creator: record?.creator,

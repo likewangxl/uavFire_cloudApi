@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { missionApi, type MissionApproveBody } from '/@/api/fire/mission'
@@ -15,6 +15,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ refresh: [] }>()
 const router = useRouter()
+const routePreparationActions = new Set(['GEN_WP', 'EXP_KMZ', 'CREATE_DELIVERY_TASK'])
 
 // ---- Approve modal state ----
 const approveVisible = ref(false)
@@ -52,6 +53,7 @@ const labelMap: Record<string, { label: string; danger?: boolean; secondary?: bo
   APPROVE: { label: '审批' },
   REJECT: { label: '驳回', danger: true },
   CANCEL: { label: '取消', danger: true },
+  PREPARE_FC100_DELIVERY: { label: '生成航线并推送FC100' },
   GEN_WP: { label: '生成航点' },
   EXP_KMZ: { label: '导出 KMZ' },
   CREATE_DELIVERY_TASK: { label: '推送 Delivery' },
@@ -70,6 +72,21 @@ const labelMap: Record<string, { label: string; danger?: boolean; secondary?: bo
   ARCHIVE: { label: '归档' },
   FORCE_FAIL: { label: '管理员中止', danger: true, secondary: true },
 }
+
+const visibleActions = computed(() => {
+  const actions = props.actions.filter(a => !routePreparationActions.has(a))
+  if (props.actions.some(a => routePreparationActions.has(a)) || props.actions.includes('APPROVE')) {
+    actions.unshift('PREPARE_FC100_DELIVERY')
+  }
+  return actions
+})
+
+const canPrepareFc100Delivery = computed(() => props.actions.some(a => routePreparationActions.has(a)))
+const prepareFc100DeliveryTitle = computed(() =>
+  canPrepareFc100Delivery.value
+    ? '生成航线并推送FC100，推送后仍需人工启动任务'
+    : '先审批任务，填写FC100、起飞点和风场参数',
+)
 
 async function doSimple (call: () => Promise<unknown>, actionLabel: string) {
   try {
@@ -102,7 +119,7 @@ async function handle (action: string) {
       break
 
     case 'CONFIRM_RELEASE':
-      router.push(`/missions/${no}/release`)
+      router.push(`/fire-payload-release/${no}`)
       break
 
     case 'TAKEOVER':
@@ -126,6 +143,10 @@ async function handle (action: string) {
 
     case 'GEN_WP':
       await doSimple(() => waypointApi.generate(no, op), '生成航点')
+      break
+
+    case 'PREPARE_FC100_DELIVERY':
+      await doSimple(() => deliveryApi.prepareFireMissionDeliveryTask(no, op), '生成航线并推送FC100')
       break
 
     case 'EXP_KMZ':
@@ -229,10 +250,12 @@ async function submitResolve () {
 <template>
   <a-space wrap>
     <a-button
-      v-for="a in actions"
+      v-for="a in visibleActions"
       :key="a"
       :danger="labelMap[a]?.danger"
       :type="labelMap[a]?.secondary ? 'dashed' : 'primary'"
+      :disabled="a === 'PREPARE_FC100_DELIVERY' && !canPrepareFc100Delivery"
+      :title="a === 'PREPARE_FC100_DELIVERY' ? prepareFc100DeliveryTitle : undefined"
       @click="handle(a)"
     >
       {{ labelMap[a]?.label ?? a }}

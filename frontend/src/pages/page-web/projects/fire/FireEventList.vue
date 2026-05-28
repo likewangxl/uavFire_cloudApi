@@ -67,9 +67,11 @@
         <span v-else>-</span>
       </template>
       <template #actionCell="{ record }">
-        <a-button type="primary" size="small" @click="openHistory(record)">
-          查看历史
-        </a-button>
+        <a-space direction="vertical" size="small">
+          <a-button type="primary" size="small" @click="openHistory(record)">
+            查看历史
+          </a-button>
+        </a-space>
       </template>
     </a-table>
 
@@ -155,13 +157,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
-import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { eventApi } from '/@/api/fire/event'
 import type { FireEventDTO, FireEventHistoryDTO } from '/@/types/fire/event'
 import type { FireEventCreateRequest } from '/@/api/fire/event'
-
-const router = useRouter()
 
 const events = ref<FireEventDTO[]>([])
 const loading = ref(false)
@@ -291,11 +290,10 @@ async function handleCreate () {
   try {
     const res = await eventApi.createMock(form.value)
     if (res.data.code === 0 && res.data.data?.missionNo) {
-      message.success('火情创建成功，跳转任务详情')
+      message.success('火情创建成功，可在灭火任务列表查看对应任务')
       showCreateModal.value = false
       resetForm()
       await loadEvents()
-      router.push(`/missions/${res.data.data.missionNo}`)
     } else if (res.data.code === 0 && res.data.data?.merged) {
       message.success('同坐标火情已合并到已有事件')
       showCreateModal.value = false
@@ -311,8 +309,8 @@ async function handleCreate () {
   }
 }
 
-const ACTION_COLUMN_WIDTH = 120
-const tableScrollX = 1870
+const ACTION_COLUMN_WIDTH = 110
+const tableScrollX = 1920
 
 const columns = [
   { title: '事件编号', key: 'eventId', width: 230, slots: { customRender: 'eventIdCell' } },

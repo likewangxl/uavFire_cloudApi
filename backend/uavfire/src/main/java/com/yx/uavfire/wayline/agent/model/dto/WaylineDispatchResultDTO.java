@@ -19,5 +19,7 @@ public class WaylineDispatchResultDTO {
 
     private String msdkErrorMsg;
 
+    private String reason;
+
     private String msdkMissionFileName;
 }

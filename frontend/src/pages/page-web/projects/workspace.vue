@@ -164,8 +164,10 @@ useConnectWebSocket(messageHandler)
       .main-content {
         flex: 1;
         min-width: 0;
+        min-height: 0;
         width: auto;
-        overflow: hidden;
+        overflow-y: auto;
+        overflow-x: hidden;
         background-color: #f6f8fa;
         color: #222;
       }

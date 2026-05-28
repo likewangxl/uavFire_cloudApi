@@ -1,7 +1,10 @@
 package com.yx.uavfire.wayline;
 
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.yx.uavfire.wayline.dao.IPlannedWaylineMapper;
 import com.yx.uavfire.component.oss.model.OssConfiguration;
+import com.yx.uavfire.msdk.model.MsdkDeviceStateDTO;
+import com.yx.uavfire.msdk.service.MsdkDeviceStateService;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineFileDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaylineDTO;
@@ -15,6 +18,9 @@ import com.yx.uavfire.wayline.service.IWaylineFileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dji.sdk.cloudapi.device.DeviceEnum;
 import com.dji.sdk.cloudapi.wayline.GetWaylineListResponse;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
@@ -52,6 +58,11 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 class PlannedWaylineServiceTest {
+
+    @BeforeAll
+    static void initMybatisPlusTableInfo() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+    }
 
     @Test
     void createShouldDefaultStatusToDraft() {
@@ -143,7 +154,12 @@ class PlannedWaylineServiceTest {
                 () -> assertEquals("http://localhost:6789/kmz/imported.kmz", dto.getKmzUrl()),
                 () -> assertEquals("0123456789abcdef0123456789abcdef", dto.getKmzMd5()),
                 () -> assertEquals("planned-imports/imported.kmz", dto.getKmzObjectKey()),
-                () -> assertTrue(dto.getWaypoints().isEmpty()),
+                () -> assertEquals(2, dto.getWaypoints().size()),
+                () -> assertEquals(113.0, dto.getWaypoints().get(0).getWgsLng()),
+                () -> assertEquals(22.0, dto.getWaypoints().get(0).getWgsLat()),
+                () -> assertEquals(30.0, dto.getWaypoints().get(0).getHeight()),
+                () -> assertEquals(5.0, dto.getWaypoints().get(0).getSpeed()),
+                () -> assertEquals(2, objectMapper.readTree(inserted.get().getWaypointsJson()).size()),
                 () -> assertNotNull(dto.getFileGeneratedTime()),
                 () -> assertNotNull(dto.getPlannedWaylineId()),
                 () -> assertEquals("M4T Official.kmz", publishedCaptor.getValue().getFilename()),
@@ -208,6 +224,46 @@ class PlannedWaylineServiceTest {
                         .setWgsLat(30.1)
                         .setHeight(80.0)))
                 .build()));
+    }
+
+    @Test
+    void getOneShouldIncludeMsdkAircraftPositionForAgentWayline() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        PlannedWaylineEntity entity = PlannedWaylineEntity.builder()
+                .id(1)
+                .plannedWaylineId("planned-001")
+                .workspaceId("workspace-001")
+                .name("M4T Route")
+                .aircraftModelKey("M4T")
+                .droneSn("M4T-SN-001")
+                .waypointsJson("[]")
+                .status("executing")
+                .taskStatus("executing")
+                .build();
+        when(mapper.selectOne(any())).thenReturn(entity);
+        MsdkDeviceStateService msdkDeviceStateService = new MsdkDeviceStateService();
+        msdkDeviceStateService.upsert(new MsdkDeviceStateDTO()
+                .setAircraftSn("M4T-SN-001")
+                .setOnline(true)
+                .setConnectionState("CONNECTED")
+                .setLatitude(34.123456)
+                .setLongitude(108.654321)
+                .setHeight(42.0)
+                .setUpdatedAt(123456789L));
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, objectMapper, mock(IWaylineFileService.class));
+        setField(service, "msdkDeviceStateService", msdkDeviceStateService);
+
+        PlannedWaylineDTO dto = service.getOne("workspace-001", "planned-001").orElseThrow();
+
+        assertAll(
+                () -> assertEquals(108.654321, dto.getAircraftLng()),
+                () -> assertEquals(34.123456, dto.getAircraftLat()),
+                () -> assertNotNull(dto.getAircraftGcjLng()),
+                () -> assertNotNull(dto.getAircraftGcjLat()),
+                () -> assertEquals(42.0, dto.getAircraftHeight()),
+                () -> assertEquals(123456789L, dto.getAircraftUpdatedAt()));
     }
 
     @Test
@@ -1472,6 +1528,51 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void generatedKmzUsesPlannedMaxSpeedForAutoFlightAndDefaultWaypointSpeed() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2010)
+                .plannedWaylineId("pw-speed")
+                .workspaceId("workspace-001")
+                .name("Speed Test")
+                .aircraftModelKey("M4T")
+                .defaultHeight(60.0)
+                .maxSpeed(9.0)
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":60.0}," +
+                        "{\"order\":2,\"gcjLng\":113.002,\"gcjLat\":22.002,\"wgsLng\":113.001,\"wgsLat\":22.001,\"height\":60.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-speed")
+                        .name("Speed Test")
+                        .objectKey("custom-prefix/pw-speed.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-speed", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String template = readZipEntry(createCaptor.getValue().getContent(), "wpmz/template.kml");
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+
+        assertAll("planned maxSpeed is the generated default flight speed",
+                () -> assertTrue(template.contains("<wpml:autoFlightSpeed>9</wpml:autoFlightSpeed>"), "template autoFlightSpeed"),
+                () -> assertTrue(waylines.contains("<wpml:autoFlightSpeed>9</wpml:autoFlightSpeed>"), "waylines autoFlightSpeed"),
+                () -> assertEquals(2, waylines.split("<wpml:waypointSpeed>9</wpml:waypointSpeed>", -1).length - 1, "default waypointSpeed"),
+                () -> assertFalse(waylines.contains("<wpml:waypointSpeed>5</wpml:waypointSpeed>"), "no hardcoded waypointSpeed=5"));
+    }
+
+    @Test
     void actionGroupsEmittedPerWaypointInBothKmzFiles() throws Exception {
         // P1.b: wp[0] takePhoto, wp[1] gimbalRotate, wp[2] hover。每个航点一个 actionGroup,
         // 出现在 template.kml 和 waylines.wpml 中,结构对齐 Pilot 2 真机导出 (kmz/麟游官坪.kmz)。
@@ -1656,7 +1757,7 @@ class PlannedWaylineServiceTest {
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
         setField(service, "aiServiceClient", aiServiceClient);
-        setField(service, "aiZlmRtspHost", "192.168.0.30");
+        setField(service, "aiZlmRtspHost", "172.20.10.7");
         setField(service, "aiZlmRtspPort", 8554);
         setField(service, "aiAutoTriggerOnWayline", true);
 
@@ -1665,7 +1766,7 @@ class PlannedWaylineServiceTest {
         verify(aiServiceClient).startDetection(
                 eq("fire-M4T-SN-001"),
                 eq("M4T-SN-001"),
-                eq("rtsp://192.168.0.30:8554/live/M4T-SN-001-0"),
+                eq("rtsp://172.20.10.7:8554/live/M4T-SN-001-0"),
                 eq(""));
     }
 

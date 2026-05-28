@@ -11,16 +11,16 @@ class LiveStreamServiceImplPlaybackUrlTest {
     @Test
     void buildRtmpPlaybackUrl_usesConfiguredHostAndPort() {
         LiveStreamServiceImpl service = new LiveStreamServiceImpl();
-        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "192.168.0.30");
+        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "172.20.10.7");
         ReflectionTestUtils.setField(service, "webrtcPlaybackPort", 58925);
 
         String playbackUrl = (String) ReflectionTestUtils.invokeMethod(
                 service,
                 "buildRtmpPlaybackUrl",
-                new LivestreamRtmpUrl().setUrl("rtmp://192.168.0.30/live/RC_PLUS_LOCAL-0"));
+                new LivestreamRtmpUrl().setUrl("rtmp://172.20.10.7/live/RC_PLUS_LOCAL-0"));
 
         assertEquals(
-                "webrtc://192.168.0.30:58925/live/RC_PLUS_LOCAL-0",
+                "webrtc://172.20.10.7:58925/live/RC_PLUS_LOCAL-0",
                 playbackUrl);
     }
 }

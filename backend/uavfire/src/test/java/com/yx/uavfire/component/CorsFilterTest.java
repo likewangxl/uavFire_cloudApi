@@ -6,6 +6,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class CorsFilterTest {
@@ -34,5 +35,15 @@ class CorsFilterTest {
         assertNull(response.getHeader("Cache-Control"));
         assertNull(response.getHeader("Pragma"));
         assertNull(response.getHeader("Expires"));
+    }
+
+    @Test
+    void corsAllowsFc100IdempotencyHeader() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS", "/api/fire/delivery/wayline-tasks/import-create");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, new MockFilterChain());
+
+        assertTrue(response.getHeader("Access-Control-Allow-Headers").contains("X-Idempotency-Key"));
     }
 }

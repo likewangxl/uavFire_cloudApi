@@ -111,13 +111,51 @@ class WaylineAgentEventListenerTest {
     @Test
     void onEvent_decodesDispatchResult() {
         String payload = "{\"method\":\"wayline_dispatch_result\","
-                + "\"data\":{\"mission_id\":\"m-1\",\"result\":0,\"msdk_mission_file_name\":\"f.kmz\"}}";
+                + "\"data\":{\"mission_id\":\"m-1\",\"result\":0,\"reason\":\"kmz-md5:abc\","
+                + "\"msdk_mission_file_name\":\"f.kmz\"}}";
 
         listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_dispatch_result", payload));
 
         WaylineDispatchResultDTO dr = assertInstanceOf(WaylineDispatchResultDTO.class, store.getByMission("m-1").get(0).getData());
         assertEquals(Integer.valueOf(0), dr.getResult());
+        assertEquals("kmz-md5:abc", dr.getReason());
         assertEquals("f.kmz", dr.getMsdkMissionFileName());
+    }
+
+    @Test
+    void onEvent_persistsSuccessfulDispatchResultAsExecutingTaskStatus() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        String payload = "{\"method\":\"wayline_dispatch_result\","
+                + "\"data\":{\"mission_id\":\"m-dispatch\",\"result\":0,\"reason\":\"kmz-md5:abc\","
+                + "\"msdk_mission_file_name\":\"m-dispatch.kmz\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_dispatch_result", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue("executing"));
+        assertTrue(params.containsValue(0));
+    }
+
+    @Test
+    void onEvent_persistsFailedDispatchResultAsFailedTaskStatus() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        String payload = "{\"method\":\"wayline_dispatch_result\","
+                + "\"data\":{\"mission_id\":\"m-dispatch-failed\",\"result\":2004,"
+                + "\"msdk_error_msg\":\"pushKmz:GPS_INVALID:GPS信号弱\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_dispatch_result", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue("failed"));
+        assertTrue(params.containsValue("pushKmz:GPS_INVALID:GPS信号弱"));
     }
 
     @Test

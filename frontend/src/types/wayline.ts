@@ -123,6 +123,12 @@ export interface PlannedWaylineRecord {
   mediaCount?: number
   breakPointJson?: string
   lastProgressTime?: number
+  aircraftLng?: number
+  aircraftLat?: number
+  aircraftGcjLng?: number
+  aircraftGcjLat?: number
+  aircraftHeight?: number
+  aircraftUpdatedAt?: number
   preparedTime?: number
   executedTime?: number
   creator: string

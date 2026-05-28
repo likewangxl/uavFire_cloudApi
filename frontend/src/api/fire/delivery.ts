@@ -25,6 +25,14 @@ export interface DeliveryDeviceProperties {
   osdTimestamp: number | null;
 }
 
+export interface DeliveryDeviceLiveDTO {
+  deviceSn: string;
+  streamStatus: 'running' | 'idle' | 'offline' | 'error' | string;
+  playUrl: string | null;
+  source: string | null;
+  message: string | null;
+}
+
 export interface DeliveryTaskRef {
   taskId: string;
   status: string;
@@ -114,6 +122,14 @@ export interface DeliveryCreateTaskBody {
   notifies?: string[];
 }
 
+export interface DeliveryPrepareFireMissionTaskBody extends DeliveryCreateTaskBody {
+  cruiseAlt?: number;
+  dropAltAgl?: number;
+  approachDistance?: number;
+  exitDistance?: number;
+  speed?: number;
+}
+
 export interface DeliveryCommandBody {
   operatorId: string;
   data?: Record<string, unknown>;
@@ -127,6 +143,32 @@ export interface DeliveryCreateWaylineTaskBody {
   remark?: string;
 }
 
+export interface DeliveryImportGeneratedPlannedWaylineTaskBody {
+  workspaceId: string;
+  plannedWaylineId: string;
+  deviceSn: string;
+  taskName?: string;
+  operatorId?: string;
+  remark?: string;
+}
+
+export const FC100_DELIVERY_DEVICE_COMMANDS = {
+  ropeDown: 'hoist_control',
+  ropeUp: 'hoist_control',
+  ropeStop: 'hoist_control',
+  releaseHook: 'hoist_hook_control',
+} as const
+
+function withFc100CommandData (body: DeliveryCommandBody, data: Record<string, unknown>): DeliveryCommandBody {
+  return {
+    ...body,
+    data: {
+      ...(body.data || {}),
+      ...data,
+    },
+  }
+}
+
 export const deliveryApi = {
   listDevices: (workspaceId?: string) =>
     client.get<ApiResult<DeliveryDeviceDTO[]>>('/api/fire/delivery/devices', {
@@ -136,8 +178,14 @@ export const deliveryApi = {
   deviceProps: (sn: string) =>
     client.get<ApiResult<DeliveryDeviceProperties>>(`/api/fire/delivery/devices/${sn}/properties`),
 
+  deviceLive: (deviceSn: string) =>
+    client.get<ApiResult<DeliveryDeviceLiveDTO>>(`/api/fire/delivery/devices/${deviceSn}/live`),
+
   createTask: (no: string, body: DeliveryCreateTaskBody) =>
     client.post<ApiResult<DeliveryTaskRef>>(`/api/fire/missions/${no}/delivery/create-task`, body),
+
+  prepareFireMissionDeliveryTask: (no: string, body: DeliveryPrepareFireMissionTaskBody) =>
+    client.post<ApiResult<DeliveryTaskRef>>(`/api/fire/missions/${no}/delivery/prepare-task`, body),
 
   startTask: (no: string, body: { operatorId: string }) =>
     client.post<ApiResult<DeliveryTaskOperationResult>>(`/api/fire/missions/${no}/delivery/start-task`, body),
@@ -151,6 +199,9 @@ export const deliveryApi = {
   returnHome: (no: string, body: DeliveryCommandBody) =>
     client.post<ApiResult<DeliveryCommandRef>>(`/api/fire/missions/${no}/delivery/return-home`, body),
 
+  releaseHook: (no: string, body: DeliveryCommandBody) =>
+    client.post<ApiResult<DeliveryCommandRef>>(`/api/fire/missions/${no}/delivery/release-hook`, body),
+
   land: (no: string, body: DeliveryCommandBody) =>
     client.post<ApiResult<DeliveryCommandRef>>(`/api/fire/missions/${no}/delivery/land`, body),
 
@@ -159,6 +210,9 @@ export const deliveryApi = {
 
   importCreateWaylineTask: (body: FormData) =>
     client.post<ApiResult<DeliveryTaskRef>>('/api/fire/delivery/wayline-tasks/import-create', body),
+
+  importGeneratedPlannedWaylineTask: (body: DeliveryImportGeneratedPlannedWaylineTaskBody) =>
+    client.post<ApiResult<DeliveryTaskRef>>('/api/fire/delivery/wayline-tasks/import-planned-create', body),
 
   listWaylines: (page?: number, pageSize?: number, key?: string) =>
     client.get<ApiResult<DeliveryWaylineDTO[]>>('/api/fire/delivery/waylines', {
@@ -178,6 +232,18 @@ export const deliveryApi = {
 
   sendDeviceCommand: (deviceSn: string, method: string, body: DeliveryCommandBody) =>
     client.post<ApiResult<DeliveryCommandRef>>(`/api/fire/delivery/devices/${deviceSn}/commands/${method}`, body),
+
+  sendFc100RopeDownCommand: (deviceSn: string, body: DeliveryCommandBody) =>
+    deliveryApi.sendDeviceCommand(deviceSn, FC100_DELIVERY_DEVICE_COMMANDS.ropeDown, withFc100CommandData(body, { mode: 0 })),
+
+  sendFc100RopeUpCommand: (deviceSn: string, body: DeliveryCommandBody) =>
+    deliveryApi.sendDeviceCommand(deviceSn, FC100_DELIVERY_DEVICE_COMMANDS.ropeUp, withFc100CommandData(body, { mode: 2 })),
+
+  sendFc100RopeStopCommand: (deviceSn: string, body: DeliveryCommandBody) =>
+    deliveryApi.sendDeviceCommand(deviceSn, FC100_DELIVERY_DEVICE_COMMANDS.ropeStop, withFc100CommandData(body, { mode: 1 })),
+
+  sendFc100ReleaseHookCommand: (deviceSn: string, body: DeliveryCommandBody) =>
+    deliveryApi.sendDeviceCommand(deviceSn, FC100_DELIVERY_DEVICE_COMMANDS.releaseHook, withFc100CommandData(body, { mode: 1 })),
 
   deviceCommandStatus: (deviceSn: string) =>
     client.get<ApiResult<DeliveryCommandStatus>>(`/api/fire/delivery/devices/${deviceSn}/commands/status`),

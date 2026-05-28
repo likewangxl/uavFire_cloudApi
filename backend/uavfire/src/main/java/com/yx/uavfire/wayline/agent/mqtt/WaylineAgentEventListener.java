@@ -17,6 +17,7 @@ import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.integration.mqtt.support.MqttHeaders;
 import org.springframework.messaging.Message;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
@@ -122,6 +123,8 @@ public class WaylineAgentEventListener {
                     persistProgress(missionId, (WaylineProgressDTO) decoded);
                 } else if (decoded instanceof WaylineStateChangeDTO) {
                     persistStateChange(missionId, (WaylineStateChangeDTO) decoded);
+                } else if (decoded instanceof WaylineDispatchResultDTO) {
+                    persistDispatchResult(missionId, (WaylineDispatchResultDTO) decoded);
                 }
             } catch (RuntimeException persistErr) {
                 log.warn("wayline-agent persist to planned_wayline failed mission={}: {}", missionId, persistErr.getMessage());
@@ -141,6 +144,27 @@ public class WaylineAgentEventListener {
         }
         if (pr.getTotalWaypoints() != null) {
             update.set(PlannedWaylineEntity::getTotalWaypoints, pr.getTotalWaypoints());
+        }
+        plannedWaylineMapper.update(null, update);
+    }
+
+    private void persistDispatchResult(String missionId, WaylineDispatchResultDTO dr) {
+        long now = System.currentTimeMillis();
+        Integer result = dr.getResult();
+        boolean ok = result != null && result == 0;
+        LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
+                .eq(PlannedWaylineEntity::getFlightId, missionId)
+                .set(PlannedWaylineEntity::getLastProgressTime, now)
+                .set(PlannedWaylineEntity::getUpdateTime, now);
+        if (ok) {
+            update.set(PlannedWaylineEntity::getStatus, "executing");
+            update.set(PlannedWaylineEntity::getTaskStatus, "executing");
+            update.set(PlannedWaylineEntity::getTaskProgress, 0);
+            update.set(PlannedWaylineEntity::getTaskStatusReason, null);
+        } else {
+            update.set(PlannedWaylineEntity::getStatus, "failed");
+            update.set(PlannedWaylineEntity::getTaskStatus, "failed");
+            update.set(PlannedWaylineEntity::getTaskStatusReason, dispatchFailureReason(dr));
         }
         plannedWaylineMapper.update(null, update);
     }
@@ -200,5 +224,18 @@ public class WaylineAgentEventListener {
             default:
                 return null;
         }
+    }
+
+    private static String dispatchFailureReason(WaylineDispatchResultDTO dr) {
+        if (StringUtils.hasText(dr.getMsdkErrorMsg())) {
+            return dr.getMsdkErrorMsg();
+        }
+        if (StringUtils.hasText(dr.getReason())) {
+            return dr.getReason();
+        }
+        if (dr.getMsdkErrorCode() != null) {
+            return "MSDK error " + dr.getMsdkErrorCode();
+        }
+        return "dispatch result " + dr.getResult();
     }
 }

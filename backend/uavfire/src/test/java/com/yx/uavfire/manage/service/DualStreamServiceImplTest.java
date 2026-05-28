@@ -81,7 +81,7 @@ class DualStreamServiceImplTest {
     @Test
     void mergeAgentState_buildsLiveGroupSnapshot() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
-        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "192.168.0.30");
+        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "172.20.10.7");
         ReflectionTestUtils.setField(service, "webrtcPlaybackPort", 58925);
 
         service.acceptHeartbeat("DRONE-001", new DualStreamAgentHeartbeatDTO()
@@ -116,7 +116,7 @@ class DualStreamServiceImplTest {
         assertEquals("thermal-stream-source-unavailable", group.getStatusReason());
         assertEquals("visible-playback-ready", group.getPlaybackStatus());
         assertEquals("no-web-playback-url-yet", group.getStatusMessage());
-        assertEquals("webrtc://192.168.0.30:58925/live/DRONE-001-0", group.getVisiblePlayUrl());
+        assertEquals("webrtc://172.20.10.7:58925/live/DRONE-001-0", group.getVisiblePlayUrl());
         assertNull(group.getThermalPlayUrl());
         assertTrue(group.getVisibleSupported());
         assertTrue(group.getThermalSupported());
@@ -125,7 +125,7 @@ class DualStreamServiceImplTest {
     @Test
     void getGroup_derivesVisiblePlaybackUrlFromLegacySnapshotWithoutMutatingThermalChannel() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
-        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "192.168.0.30");
+        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "172.20.10.7");
         ReflectionTestUtils.setField(service, "webrtcPlaybackPort", 58925);
 
         service.acceptStatus("RC_PLUS_LOCAL", new DualStreamAgentStatusDTO()
@@ -137,7 +137,7 @@ class DualStreamServiceImplTest {
         DualStreamLiveGroupDTO group = service.getGroup("RC_PLUS_LOCAL");
 
         assertNotNull(group);
-        assertEquals("webrtc://192.168.0.30:58925/live/RC_PLUS_LOCAL-0", group.getVisiblePlayUrl());
+        assertEquals("webrtc://172.20.10.7:58925/live/RC_PLUS_LOCAL-0", group.getVisiblePlayUrl());
         assertNull(group.getThermalPlayUrl());
         assertEquals("visible-playback-ready", group.getPlaybackStatus());
     }
@@ -145,7 +145,7 @@ class DualStreamServiceImplTest {
     @Test
     void getGroup_reusesVisiblePlaybackUrlForThermalWhenAgentReportsSharedPreview() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
-        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "192.168.0.30");
+        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "172.20.10.7");
         ReflectionTestUtils.setField(service, "webrtcPlaybackPort", 58925);
 
         service.acceptStatus("RC_PLUS_LOCAL", new DualStreamAgentStatusDTO()
@@ -158,7 +158,7 @@ class DualStreamServiceImplTest {
         DualStreamLiveGroupDTO group = service.getGroup("RC_PLUS_LOCAL");
 
         assertNotNull(group);
-        assertEquals("webrtc://192.168.0.30:58925/live/RC_PLUS_LOCAL-0", group.getVisiblePlayUrl());
+        assertEquals("webrtc://172.20.10.7:58925/live/RC_PLUS_LOCAL-0", group.getVisiblePlayUrl());
         assertEquals(group.getVisiblePlayUrl(), group.getThermalPlayUrl());
         assertEquals("shared-side-by-side-preview", group.getPlaybackStatus());
     }
@@ -734,7 +734,7 @@ class DualStreamServiceImplTest {
     @Test
     void acceptStatus_resetsStaleSplitPlaybackUrlsWhenAgentReturnsToVisibleLiveReady() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
-        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "192.168.0.30");
+        ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "172.20.10.7");
         ReflectionTestUtils.setField(service, "webrtcPlaybackPort", 58925);
 
         service.acceptStatus("RC_PLUS_LOCAL", new DualStreamAgentStatusDTO()
@@ -742,8 +742,8 @@ class DualStreamServiceImplTest {
                 .setVisibleState("running")
                 .setThermalState("running")
                 .setPlaybackStatus("shared-side-by-side-preview")
-                .setVisiblePlayUrl("webrtc://192.168.0.30:58925/live/RC_PLUS_LOCAL-0-visible")
-                .setThermalPlayUrl("webrtc://192.168.0.30:58925/live/RC_PLUS_LOCAL-0-thermal"));
+                .setVisiblePlayUrl("webrtc://172.20.10.7:58925/live/RC_PLUS_LOCAL-0-visible")
+                .setThermalPlayUrl("webrtc://172.20.10.7:58925/live/RC_PLUS_LOCAL-0-thermal"));
 
         service.acceptStatus("RC_PLUS_LOCAL", new DualStreamAgentStatusDTO()
                 .setDroneSn("RC_PLUS_LOCAL")
@@ -755,7 +755,7 @@ class DualStreamServiceImplTest {
 
         assertNotNull(group);
         assertEquals("visible-live-ready", group.getPlaybackStatus());
-        assertEquals("webrtc://192.168.0.30:58925/live/RC_PLUS_LOCAL-0", group.getVisiblePlayUrl());
+        assertEquals("webrtc://172.20.10.7:58925/live/RC_PLUS_LOCAL-0", group.getVisiblePlayUrl());
         assertNull(group.getThermalPlayUrl());
     }
 

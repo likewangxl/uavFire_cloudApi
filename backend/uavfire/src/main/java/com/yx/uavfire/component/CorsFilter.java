@@ -27,7 +27,8 @@ public class CorsFilter implements Filter {
         res.addHeader("Access-Control-Allow-Headers", "Access-Control-Allow-Headers," +
                 "Authorization, Content-Length, X-CSRF-Token, Token,session,X_Requested_With,Accept, "+
                         "Origin, Host, Connection, Accept-Encoding, Accept-Language,DNT, X-CustomHeader, Keep-Alive," +
-                        " User-Agent, X-Requested-With, If-Modified-Since, Cache-Control, Content-Type, Pragma," + PARAM_TOKEN);
+                        " User-Agent, X-Requested-With, If-Modified-Since, Cache-Control, Content-Type, Pragma," +
+                        "X-Request-Id, X-Idempotency-Key," + PARAM_TOKEN);
         if (isApiRequest(req.getRequestURI())) {
             res.setHeader("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
             res.setHeader("Pragma", "no-cache");

@@ -2,7 +2,7 @@
   <div class="wayline-mission-monitor">
     <div class="mm-row mm-status-row">
       <span class="mm-status-badge" :class="statusClass">{{ statusLabel }}</span>
-      <span class="mm-status-reason" v-if="record.taskStatusReason">{{ record.taskStatusReason }}</span>
+      <span class="mm-status-reason" v-if="taskStatusReason">{{ taskStatusReason }}</span>
     </div>
     <a-progress
       :percent="progressPercent"
@@ -127,6 +127,7 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
 }
 const statusLabel = computed(() => STATUS_LABEL[taskStatus.value]?.label || taskStatus.value || '未知')
 const statusClass = computed(() => STATUS_LABEL[taskStatus.value]?.cls || 'mm-status-draft')
+const taskStatusReason = computed(() => taskStatus.value === 'failed' ? (props.record.taskStatusReason || '') : '')
 
 const lastUpdateText = computed(() => {
   const t = props.record.lastProgressTime

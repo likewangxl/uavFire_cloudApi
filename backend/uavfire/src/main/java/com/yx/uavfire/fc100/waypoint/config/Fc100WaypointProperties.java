@@ -12,6 +12,7 @@ public class Fc100WaypointProperties {
     private double defaultCruiseSpeed = 5.0;
     private double maxRouteLengthM = 8000.0;
     private double maxDistanceFromTakeoffM = 5000.0;
+    private double shortRouteMaxDistanceM = 300.0;
     private double dropAltitudeAglM = 30.0;
     /** spec §5.1 — 水柱漂移系数；MVP 默认 0.4，二期实机调优 */
     private double driftCoefficient = 0.4;

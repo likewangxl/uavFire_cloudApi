@@ -419,6 +419,15 @@
       <a style="position: absolute; right: 10px; top: 10px; font-size: 16px; color: white;" @click="closeLivestreamOthers"><CloseOutlined /></a>
       <LivestreamOthers />
     </div>
+    <a-tooltip title="切换到飞机位置">
+      <button
+        class="aircraft-follow-control"
+        :class="{ active: aircraftFollowEnabled }"
+        :disabled="!hasFlightPosition"
+        @click="toggleAircraftFollow">
+        <AimOutlined />
+      </button>
+    </a-tooltip>
   </div>
 </template>
 
@@ -451,7 +460,8 @@ import M30 from '/@/assets/icons/m30.png'
 import {
   BorderOutlined, LineOutlined, CloseOutlined, ControlOutlined, TrademarkOutlined, ArrowDownOutlined,
   ThunderboltOutlined, SignalFilled, GlobalOutlined, HistoryOutlined, CloudUploadOutlined, RocketOutlined,
-  FieldTimeOutlined, CloudOutlined, CloudFilled, FolderOpenOutlined, RobotFilled, ArrowUpOutlined, CarryOutOutlined
+  FieldTimeOutlined, CloudOutlined, CloudFilled, FolderOpenOutlined, RobotFilled, ArrowUpOutlined, CarryOutOutlined,
+  AimOutlined
 } from '@ant-design/icons-vue'
 import { EDeviceTypeName } from '../types'
 import DockControlPanel from './g-map/DockControlPanel.vue'
@@ -463,7 +473,7 @@ import FlightAreaActionIcon from './flight-area/FlightAreaActionIcon.vue'
 import { EFlightAreaType } from '../types/flight-area'
 import { useFlightArea } from './flight-area/use-flight-area'
 import { useFlightAreaDroneLocationEvent } from './flight-area/use-flight-area-drone-location-event'
-import { addWaypointGcj, getPlanningStateRaw } from '/@/hooks/use-wayline-planning'
+import { addWaypointGcj, getPlanningStateRaw, setFlightPositionFromWgs } from '/@/hooks/use-wayline-planning'
 
 export default defineComponent({
   components: {
@@ -488,6 +498,7 @@ export default defineComponent({
     DroneControlPanel,
     CarryOutOutlined,
     RocketOutlined,
+    AimOutlined,
     LivestreamOthers,
     FlightAreaActionIcon,
   },
@@ -498,8 +509,11 @@ export default defineComponent({
     const useGMapManageHook = useGMapManage()
     const deviceTsaUpdateHook = deviceTsaUpdate()
     const root = getRoot()
+    const planningState = getPlanningStateRaw()
 
     const mouseMode = ref(false)
+    const aircraftFollowEnabled = ref(false)
+    const hasFlightPosition = computed(() => !!planningState.flightPosition)
     const store = useMyStore()
     const state = reactive({
       currentType: '',
@@ -596,6 +610,7 @@ export default defineComponent({
       if (data.currentType === EDeviceTypeName.Aircraft && data.deviceInfo[data.currentSn]) {
         const coordinate = wgs84togcj02(data.deviceInfo[data.currentSn].longitude, data.deviceInfo[data.currentSn].latitude)
         deviceTsaUpdateHook.moveTo(data.currentSn, coordinate[0], coordinate[1])
+        updateFlightPositionFromOsd(data.currentSn, data.deviceInfo[data.currentSn], coordinate[0], coordinate[1])
         if (osdVisible.value.visible && osdVisible.value.sn !== '') {
           deviceInfo.device = data.deviceInfo[osdVisible.value.sn]
         }
@@ -707,6 +722,7 @@ export default defineComponent({
     onUnmounted(() => {
       unbindPlanningClick()
       clearPlanningOverlays()
+      clearFlightPositionOverlay()
     })
 
     const { getDrawFlightAreaCallback, onFlightAreaDroneLocationWs } = useFlightArea()
@@ -720,12 +736,14 @@ export default defineComponent({
     // When planning mode is active we register a map click handler that records
     // the clicked point as a waypoint; we also maintain AMap markers + a
     // polyline visualising the current waypoint list.
-    const planningState = getPlanningStateRaw()
     const renderPlanningWaypoints = computed(() => {
-      return planningState.waypoints.length > 0 ? planningState.waypoints : planningState.previewWaypoints
+      return planningState.previewWaypoints.length > 0 ? planningState.previewWaypoints : planningState.waypoints
     })
     const planningMarkers: any[] = []
     let planningPolyline: any = null
+    let flightPositionMarker: any = null
+    let flightTrackPolyline: any = null
+    const flightTrackPath: any[] = []
     let planningClickBound = false
 
     function onPlanningMapClick (e: any) {
@@ -744,6 +762,19 @@ export default defineComponent({
         map?.remove(planningPolyline)
         planningPolyline = null
       }
+    }
+
+    function clearFlightPositionOverlay () {
+      const map = root?.$map
+      if (flightPositionMarker) {
+        map?.remove(flightPositionMarker)
+        flightPositionMarker = null
+      }
+      if (flightTrackPolyline) {
+        map?.remove(flightTrackPolyline)
+        flightTrackPolyline = null
+      }
+      flightTrackPath.length = 0
     }
 
     function rebuildPlanningOverlays () {
@@ -774,6 +805,91 @@ export default defineComponent({
         })
         map.add(planningPolyline)
       }
+      fitPlanningPreviewToMap()
+      updateFlightPositionOverlay()
+    }
+
+    function flightPositionContent (label: string) {
+      const progress = label ? `<em>${label}</em>` : ''
+      return `<div class="flight-position-marker"><span>✈️</span>${progress}</div>`
+    }
+
+    function setAircraftView (position = planningState.flightPosition) {
+      const map = root?.$map
+      if (!map || !position) return
+      const currentZoom = typeof map.getZoom === 'function' ? Number(map.getZoom()) : 17
+      const zoom = Number.isFinite(currentZoom) ? Math.max(currentZoom, 17) : 17
+      map.setZoomAndCenter(zoom, [position.gcjLng, position.gcjLat])
+    }
+
+    function toggleAircraftFollow () {
+      aircraftFollowEnabled.value = !aircraftFollowEnabled.value
+      if (aircraftFollowEnabled.value) {
+        setAircraftView()
+      }
+    }
+
+    function updateFlightPositionFromOsd (sn: string, osd: any, gcjLng: number, gcjLat: number) {
+      const trackingSn = planningState.flightPosition?.aircraftSn || planningState.aircraftSn
+      if (trackingSn && sn !== trackingSn) return
+      if (!Number.isFinite(gcjLng) || !Number.isFinite(gcjLat) || gcjLng === 0 || gcjLat === 0) return
+      setFlightPositionFromWgs(sn, osd?.longitude, osd?.latitude, {
+        height: Number(osd?.height),
+        updatedAt: Date.now(),
+        currentWaypointIndex: planningState.flightPosition?.currentWaypointIndex,
+        totalWaypoints: planningState.flightPosition?.totalWaypoints,
+      })
+    }
+
+    function updateFlightPositionOverlay () {
+      const AMap = root?.$aMap
+      const map = root?.$map
+      const position = planningState.flightPosition
+      if (!position) {
+        clearFlightPositionOverlay()
+        return
+      }
+      if (!AMap || !map) return
+      const lngLat = [position.gcjLng, position.gcjLat]
+      const label = position.currentWaypointIndex != null && position.totalWaypoints != null
+        ? `${position.currentWaypointIndex + 1}/${position.totalWaypoints}`
+        : ''
+      if (!flightPositionMarker) {
+        flightPositionMarker = new AMap.Marker({
+          position: lngLat,
+          content: flightPositionContent(label),
+          anchor: 'center',
+          zIndex: 120,
+        })
+        map.add(flightPositionMarker)
+      } else {
+        flightPositionMarker.setPosition(lngLat)
+        flightPositionMarker.setContent(flightPositionContent(label))
+      }
+      flightTrackPath.push(lngLat)
+      if (flightTrackPath.length > 600) flightTrackPath.shift()
+      if (!flightTrackPolyline) {
+        flightTrackPolyline = new AMap.Polyline({
+          path: flightTrackPath,
+          strokeColor: '#13c2c2',
+          strokeWeight: 4,
+          strokeOpacity: 0.85,
+        })
+        map.add(flightTrackPolyline)
+      } else {
+        flightTrackPolyline.setPath(flightTrackPath)
+      }
+      if (aircraftFollowEnabled.value) {
+        setAircraftView(position)
+      }
+    }
+
+    function fitPlanningPreviewToMap () {
+      const map = root?.$map
+      if (!map || planningState.waypoints.length > 0 || planningState.previewWaypoints.length === 0) return
+      const overlays = planningPolyline ? [...planningMarkers, planningPolyline] : [...planningMarkers]
+      if (overlays.length === 0 || typeof map.setFitView !== 'function') return
+      map.setFitView(overlays, false, [80, 80, 80, 80], 17)
     }
 
     function bindPlanningClick () {
@@ -804,6 +920,13 @@ export default defineComponent({
     watch(
       () => renderPlanningWaypoints.value.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|'),
       () => rebuildPlanningOverlays()
+    )
+
+    watch(
+      () => planningState.flightPosition
+        ? `${planningState.flightPosition.aircraftSn}:${planningState.flightPosition.gcjLng}:${planningState.flightPosition.gcjLat}:${planningState.flightPosition.currentWaypointIndex}:${planningState.flightPosition.updatedAt}`
+        : '',
+      () => updateFlightPositionOverlay()
     )
 
     function getDrawCallback ({ obj }: { obj : any }) {
@@ -987,6 +1110,9 @@ export default defineComponent({
       closeLivestreamOthers,
       qualityStyle,
       selectFlightAreaAction,
+      aircraftFollowEnabled,
+      hasFlightPosition,
+      toggleAircraftFollow,
     }
   }
 })
@@ -1095,5 +1221,61 @@ export default defineComponent({
   width: 800px;
   height: 720px;
   background: #232323;
+}
+.aircraft-follow-control {
+  position: absolute;
+  right: 18px;
+  bottom: 82px;
+  z-index: 2;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fff;
+  color: #1f1f1f;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+.aircraft-follow-control.active {
+  color: #fff;
+  background: #1677ff;
+  border-color: #1677ff;
+}
+.aircraft-follow-control:disabled {
+  color: #bfbfbf;
+  cursor: not-allowed;
+  background: #f5f5f5;
+}
+:deep(.flight-position-marker) {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #13c2c2;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 3px rgba(19, 194, 194, 0.28), 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 18px;
+  line-height: 28px;
+  text-align: center;
+}
+:deep(.flight-position-marker em) {
+  position: absolute;
+  right: -12px;
+  bottom: -7px;
+  min-width: 22px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #1f1f1f;
+  color: #fff;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
 }
 </style>

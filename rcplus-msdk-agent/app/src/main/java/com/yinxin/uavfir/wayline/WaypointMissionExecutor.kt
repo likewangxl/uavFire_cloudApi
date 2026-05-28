@@ -27,6 +27,7 @@ class WaypointMissionExecutor(
     interface Listener {
         fun onState(missionId: String?, msdk: WaypointMissionExecuteState, previous: WaypointMissionExecuteState?)
         fun onProgress(missionId: String?, info: WaylineExecutingInfo)
+        fun onStartAccepted(missionId: String?)
         fun onError(missionId: String?, stage: String, error: IDJIError)
     }
 
@@ -150,6 +151,9 @@ class WaypointMissionExecutor(
     private fun simpleCallback(missionId: String?, stage: String) = object : CommonCallbacks.CompletionCallback {
         override fun onSuccess() {
             Log.d(TAG, "$stage success missionId=$missionId")
+            if (stage == "startMission") {
+                listener.onStartAccepted(missionId)
+            }
         }
 
         override fun onFailure(error: IDJIError) {

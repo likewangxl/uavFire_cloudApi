@@ -91,6 +91,11 @@ function fmt (ts: number | null | undefined): string {
   return new Date(ts).toLocaleString('zh-CN')
 }
 
+function fmtTemperature (temperature: number | null | undefined, unit: string | null | undefined): string {
+  if (temperature == null || Number.isNaN(temperature)) return '-'
+  return `${temperature.toFixed(2)} ${unit ?? 'C'}`
+}
+
 onMounted(refresh)
 </script>
 
@@ -104,6 +109,17 @@ onMounted(refresh)
 
     <a-spin :spinning="loading">
       <a-row :gutter="[16, 16]">
+        <a-col :span="24">
+          <a-card title="可用操作" size="small" class="mission-detail-actions-card">
+            <ActionButtons
+              v-if="dto"
+              :mission-no="dto.missionNo"
+              :actions="dto.availableActions"
+              @refresh="refresh"
+            />
+            <span v-else style="color: #aaa">-</span>
+          </a-card>
+        </a-col>
 
         <!-- 区 1: 基本信息 -->
         <a-col :span="24">
@@ -132,7 +148,7 @@ onMounted(refresh)
               <a-descriptions-item label="置信度">{{ fireEvent?.confidence ?? '-' }}</a-descriptions-item>
               <a-descriptions-item label="火情等级">{{ fireEvent?.fireLevel ?? '-' }}</a-descriptions-item>
               <a-descriptions-item label="热成像温度">
-                {{ fireEvent?.thermalTemperature != null ? `${fireEvent.thermalTemperature} ${fireEvent.temperatureUnit ?? 'K'}` : '-' }}
+                {{ fmtTemperature(fireEvent?.thermalTemperature, fireEvent?.temperatureUnit) }}
               </a-descriptions-item>
             </a-descriptions>
             <div v-if="fireEvent?.thermalImageUrl || fireEvent?.visibleImageUrl" style="margin-top: 8px; display: flex; gap: 8px">
@@ -144,7 +160,7 @@ onMounted(refresh)
 
         <!-- 区 3: Mini 地图 -->
         <a-col :span="12">
-          <a-card title="位置地图" size="small" style="cursor: pointer" @click="router.push(`/missions/${props.no}/route`)">
+          <a-card title="位置地图" size="small" style="cursor: pointer" @click="router.push(`/fire-route-preview/${props.no}`)">
             <AmapMissionMap
               v-if="fireEvent"
               :fire-lat="fireEvent.lat"
@@ -239,20 +255,15 @@ onMounted(refresh)
           </a-card>
         </a-col>
 
-        <!-- 区 10: 操作按钮 -->
-        <a-col :span="24">
-          <a-card title="可用操作" size="small">
-            <ActionButtons
-              v-if="dto"
-              :mission-no="dto.missionNo"
-              :actions="dto.availableActions"
-              @refresh="refresh"
-            />
-            <span v-else style="color: #aaa">-</span>
-          </a-card>
-        </a-col>
-
       </a-row>
     </a-spin>
   </div>
 </template>
+
+<style lang="scss" scoped>
+.mission-detail-actions-card {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+</style>
