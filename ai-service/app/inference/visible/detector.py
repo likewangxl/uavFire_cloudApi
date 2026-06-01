@@ -1,3 +1,4 @@
+from threading import Lock
 from typing import Any, Callable, Iterable, Optional, Protocol, Set
 
 from app.models.frame import FramePacket
@@ -75,13 +76,16 @@ class YoloVisibleDetector:
         model_path: str,
         target_class_names: Iterable[str] = ("fire", "smoke"),
         confidence_floor: float = 0.25,
+        imgsz: int = 1280,
         model_factory: Optional[Callable[[str], Any]] = None,
     ) -> None:
         self._model_path = model_path
         self._target_class_names: Set[str] = {name.lower() for name in target_class_names}
         self._confidence_floor = float(confidence_floor)
+        self._imgsz = int(imgsz)
         self._model_factory = model_factory
         self._model: Optional[Any] = None
+        self._model_lock = Lock()
         # 暴露最近一次 detect() 的检测框，供 snapshot_writer 在升级触发时画框。
         self.last_boxes: list[dict] = []
 
@@ -90,7 +94,7 @@ class YoloVisibleDetector:
             self.last_boxes = []
             return 0.0
         model = self._ensure_model()
-        results = model.predict(frame.frame, verbose=False, conf=self._confidence_floor, imgsz=1920)
+        results = model.predict(frame.frame, verbose=False, conf=self._confidence_floor, imgsz=self._imgsz)
         from app.services.snapshot_writer import boxes_from_yolo_results
 
         self.last_boxes = boxes_from_yolo_results(
@@ -106,8 +110,10 @@ class YoloVisibleDetector:
 
     def _ensure_model(self) -> Any:
         if self._model is None:
-            factory = self._model_factory or _default_model_factory()
-            self._model = factory(self._model_path)
+            with self._model_lock:
+                if self._model is None:
+                    factory = self._model_factory or _default_model_factory()
+                    self._model = factory(self._model_path)
         return self._model
 
 

@@ -35,6 +35,12 @@ interface DualStreamApi {
         @Body body: AgentCommandAckRequest,
     )
 
+    @POST("/manage/api/v1/dual-stream/tasks/{taskId}/events")
+    suspend fun recordTaskEvent(
+        @Path("taskId") taskId: String,
+        @Body body: DualStreamEventRequest,
+    )
+
     @POST("/manage/api/v1/msdk/devices/state")
     suspend fun reportMsdkDeviceState(
         @Body body: MsdkDeviceStateRequest,

@@ -96,6 +96,11 @@ class AgentReporterTest {
             body: AgentCommandAckRequest,
         ) = Unit
 
+        override suspend fun recordTaskEvent(
+            taskId: String,
+            body: DualStreamEventRequest,
+        ) = Unit
+
         override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) = Unit
 
         override suspend fun pollMsdkCommand(aircraftSn: String): AgentApiEnvelope<MsdkCommandResponse>? = null

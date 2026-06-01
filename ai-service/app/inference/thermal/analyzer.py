@@ -152,22 +152,64 @@ def _select_measurement_component(active: Any, mask: Any) -> Any:
     center_x = width / 2
     center_y = height / 2
     best_label: Optional[int] = None
-    best_score: Optional[Tuple[float, float, int]] = None
+    best_score: Optional[Tuple[float, float, float, float, int]] = None
     for label in range(1, labels_count):
         area = int(stats[label, cv2.CC_STAT_AREA])
         if area < MIN_CORE_COMPONENT_AREA:
             continue
+        left = int(stats[label, cv2.CC_STAT_LEFT])
+        top = int(stats[label, cv2.CC_STAT_TOP])
+        component_width = max(int(stats[label, cv2.CC_STAT_WIDTH]), 1)
+        component_height = max(int(stats[label, cv2.CC_STAT_HEIGHT]), 1)
+        fill_ratio = area / float(component_width * component_height)
+        if fill_ratio < MIN_COMPONENT_FILL_RATIO:
+            continue
         component_mask = labels == label
         peak = float(active[component_mask].max())
         cx, cy = centroids[label]
+        if _is_top_overlay_component(
+            left=left,
+            top=top,
+            centroid_y=float(cy),
+            component_height=component_height,
+            frame_width=width,
+            frame_height=height,
+        ):
+            continue
         distance = ((float(cx) - center_x) / max(width, 1)) ** 2 + ((float(cy) - center_y) / max(height, 1)) ** 2
-        score = (peak, -distance, area)
+        lower_bias = float(cy) / max(height, 1)
+        edge_penalty = _edge_penalty(
+            left=left,
+            top=top,
+            component_width=component_width,
+            component_height=component_height,
+            frame_width=width,
+            frame_height=height,
+        )
+        peak_band = int(peak // HOT_COMPONENT_PEAK_BAND)
+        capped_area = min(area * fill_ratio, MAX_COMPONENT_AREA_SCORE) * _edge_area_multiplier(edge_penalty)
+        score = (peak_band, lower_bias, fill_ratio, capped_area, -distance - edge_penalty)
         if best_score is None or score > best_score:
             best_label = label
             best_score = score
     if best_label is None:
         return mask
     return labels == best_label
+
+
+def _is_top_overlay_component(
+    *,
+    left: int,
+    top: int,
+    centroid_y: float,
+    component_height: int,
+    frame_width: int,
+    frame_height: int,
+) -> bool:
+    del left, frame_width
+    top_band = frame_height * TOP_OVERLAY_IGNORE_RATIO
+    compact_height = max(frame_height * TOP_OVERLAY_MAX_HEIGHT_RATIO, 1.0)
+    return top <= 1 and centroid_y <= top_band and component_height <= compact_height
 
 
 def _active_content_bounds(intensity: Any) -> Tuple[int, int, int, int]:
@@ -194,8 +236,38 @@ def _active_content_bounds(intensity: Any) -> Tuple[int, int, int, int]:
     return x0, y0, x1, y1
 
 
+def _edge_penalty(
+    *,
+    left: int,
+    top: int,
+    component_width: int,
+    component_height: int,
+    frame_width: int,
+    frame_height: int,
+) -> float:
+    right = left + component_width
+    bottom = top + component_height
+    touches_edge = (
+        left <= EDGE_COMPONENT_MARGIN_PX
+        or top <= EDGE_COMPONENT_MARGIN_PX
+        or right >= frame_width - EDGE_COMPONENT_MARGIN_PX
+        or bottom >= frame_height - EDGE_COMPONENT_MARGIN_PX
+    )
+    return 0.2 if touches_edge else 0.0
+
+
+def _edge_area_multiplier(edge_penalty: float) -> float:
+    return 0.02 if edge_penalty > 0 else 1.0
+
+
 BLACK_BAR_INTENSITY_FLOOR = 8
 MIN_ACTIVE_AXIS_RATIO = 0.45
 MIN_MEASURE_ROI_SIZE = 0.08
 HOT_CORE_INTENSITY_DELTA = 20
 MIN_CORE_COMPONENT_AREA = 12
+MIN_COMPONENT_FILL_RATIO = 0.18
+TOP_OVERLAY_IGNORE_RATIO = 0.12
+TOP_OVERLAY_MAX_HEIGHT_RATIO = 0.10
+EDGE_COMPONENT_MARGIN_PX = 3
+HOT_COMPONENT_PEAK_BAND = 32.0
+MAX_COMPONENT_AREA_SCORE = 256.0

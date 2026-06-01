@@ -12,6 +12,8 @@ import { deliveryApi } from '/@/api/fire/delivery'
 const props = defineProps<{
   missionNo: string;
   actions: string[];
+  onlyActions?: string[];
+  excludeActions?: string[];
 }>()
 const emit = defineEmits<{ refresh: [] }>()
 const router = useRouter()
@@ -74,11 +76,18 @@ const labelMap: Record<string, { label: string; danger?: boolean; secondary?: bo
 }
 
 const visibleActions = computed(() => {
-  const actions = props.actions.filter(a => !routePreparationActions.has(a))
+  const only = new Set(props.onlyActions ?? [])
+  const exclude = new Set(props.excludeActions ?? [])
+  const actions = props.actions.filter(a =>
+    !routePreparationActions.has(a) &&
+    (!only.size || only.has(a)) &&
+    !exclude.has(a))
   if (props.actions.some(a => routePreparationActions.has(a)) || props.actions.includes('APPROVE')) {
-    actions.unshift('PREPARE_FC100_DELIVERY')
+    if ((!only.size || only.has('PREPARE_FC100_DELIVERY')) && !exclude.has('PREPARE_FC100_DELIVERY')) {
+      actions.unshift('PREPARE_FC100_DELIVERY')
+    }
   }
-  return actions
+  return actions.sort((a, b) => actionSortOrder(a) - actionSortOrder(b))
 })
 
 const canPrepareFc100Delivery = computed(() => props.actions.some(a => routePreparationActions.has(a)))
@@ -87,6 +96,21 @@ const prepareFc100DeliveryTitle = computed(() =>
     ? '生成航线并推送FC100，推送后仍需人工启动任务'
     : '先审批任务，填写FC100、起飞点和风场参数',
 )
+
+function actionClassName (action: string) {
+  return action.toLowerCase().replace(/_/g, '-')
+}
+
+function actionSortOrder (action: string) {
+  const order: Record<string, number> = {
+    PREPARE_FC100_DELIVERY: 0,
+    START_DELIVERY: 10,
+    TAKEOVER: 20,
+    FORCE_FAIL: 30,
+    CANCEL: 40,
+  }
+  return order[action] ?? 25
+}
 
 async function doSimple (call: () => Promise<unknown>, actionLabel: string) {
   try {
@@ -252,6 +276,7 @@ async function submitResolve () {
     <a-button
       v-for="a in visibleActions"
       :key="a"
+      :class="['fire-action-button', `fire-action-button--${actionClassName(a)}`]"
       :danger="labelMap[a]?.danger"
       :type="labelMap[a]?.secondary ? 'dashed' : 'primary'"
       :disabled="a === 'PREPARE_FC100_DELIVERY' && !canPrepareFc100Delivery"

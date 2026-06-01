@@ -26,6 +26,7 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
     private val keyManager: KeyManager
         get() = KeyManager.getInstance()
     private var visibleListener: ICameraStreamManager.ReceiveStreamListener? = null
+    private val thermalFrameProbe = ThermalFrameProbe()
 
     override suspend fun bindVisible(droneSn: String) {
         focusVisible(droneSn)
@@ -34,6 +35,7 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
             .cameraStreamManager
             .addReceiveStreamListener(ComponentIndexType.LEFT_OR_MAIN, listener)
         visibleListener = listener
+        thermalFrameProbe.start()
     }
 
     override suspend fun bindThermal(droneSn: String) {
@@ -65,34 +67,7 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
             ),
             preferredVisibleSource(),
         )
-        resetThermalDisplayModeToVisualOnly()
         logCurrentStreamSelection("focusVisible")
-    }
-
-    private suspend fun resetThermalDisplayModeToVisualOnly() {
-        runCatching {
-            setValue(
-                KeyTools.createCameraKey(
-                    DJICameraKey.KeyThermalDisplayMode,
-                    ComponentIndexType.LEFT_OR_MAIN,
-                    CameraLensType.CAMERA_LENS_THERMAL,
-                ),
-                ThermalDisplayMode.VISUAL_ONLY,
-            )
-        }.onFailure {
-            Log.w(tag, "focusVisible failed to reset lens thermal display mode: ${it.message}", it)
-            runCatching {
-                setValue(
-                    KeyTools.createKey(
-                        DJICameraKey.KeyThermalDisplayMode,
-                        ComponentIndexType.LEFT_OR_MAIN,
-                    ),
-                    ThermalDisplayMode.VISUAL_ONLY,
-                )
-            }.onFailure { fallbackError ->
-                Log.w(tag, "focusVisible failed to reset camera thermal display mode: ${fallbackError.message}", fallbackError)
-            }
-        }
     }
 
     override suspend fun focusThermal(droneSn: String) {
@@ -116,6 +91,23 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
             Log.w(tag, "focusThermal failed to set thermal-only display mode: ${it.message}", it)
         }
         logCurrentStreamSelection("focusThermal")
+    }
+
+    override suspend fun captureVisibleSnapshot(droneSn: String): String? {
+        focusVisible(droneSn)
+        val requestedAtMs = thermalFrameProbe.requestImmediateVisibleSnapshot()
+        repeat(VISIBLE_SNAPSHOT_WAIT_ATTEMPTS) {
+            delay(VISIBLE_SNAPSHOT_POLL_MS)
+            thermalFrameProbe.latestVisibleSnapshotPath(
+                minTimestampMs = requestedAtMs,
+                maxAgeMs = VISIBLE_SNAPSHOT_MAX_AGE_MS,
+            )?.let { path ->
+                Log.i(tag, "visible snapshot captured path=$path")
+                return path
+            }
+        }
+        Log.w(tag, "visible snapshot unavailable after focus visible")
+        return thermalFrameProbe.latestVisibleSnapshotPath(maxAgeMs = VISIBLE_SNAPSHOT_MAX_AGE_MS)
     }
 
     override suspend fun measureThermalCenterTemperatureC(): Double? {
@@ -143,22 +135,72 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
     override suspend fun locateAndMeasureThermalHotspotC(
         seedRegion: ThermalMeasureRegion?,
     ): ThermalMeasurementResult? {
+        val requestedAtMs = System.currentTimeMillis()
+        val frameHotspotRegions = selectThermalHotspotRegions(
+            latestFrameHotspotRegions = thermalFrameProbe.latestHotspotRegions(),
+            seedRegion = seedRegion,
+        )
+        if (frameHotspotRegions.isNotEmpty()) {
+            val measured = mutableListOf<ThermalMeasuredPoint>()
+            for (region in frameHotspotRegions.distinctThermalRegions()) {
+                val temperature = measureThermalRegionTemperatureC(region) ?: continue
+                val point = ThermalMeasuredPoint(temperature, region)
+                measured += point
+                if (shouldFastConfirmThermalHotspot(temperature)) {
+                    val result = ThermalMeasurementResult(
+                        temperatureC = point.temperatureC,
+                        region = point.region,
+                        thermalSnapshotPath = thermalFrameProbe.latestSnapshotPath(
+                            minTimestampMs = requestedAtMs - THERMAL_SNAPSHOT_CLOCK_SKEW_MS,
+                        ),
+                        measurements = measured.sortedByDescending { it.temperatureC },
+                    )
+                    Log.i(
+                        tag,
+                        "thermal frame hotspot fast-confirmed best=${result.temperatureC}C region=${result.region} " +
+                            "measurements=${result.measurements}",
+                    )
+                    return result
+                }
+            }
+            val best = measured.maxByOrNull { it.temperatureC }
+            if (best != null) {
+                val result = ThermalMeasurementResult(
+                    temperatureC = best.temperatureC,
+                    region = best.region,
+                    thermalSnapshotPath = thermalFrameProbe.latestSnapshotPath(
+                        minTimestampMs = requestedAtMs - THERMAL_SNAPSHOT_CLOCK_SKEW_MS,
+                    ),
+                    measurements = measured.sortedByDescending { it.temperatureC },
+                )
+                Log.i(
+                    tag,
+                    "thermal frame hotspots measured best=${result.temperatureC}C region=${result.region} " +
+                        "measurements=${result.measurements}",
+                )
+                return result
+            }
+        }
+
         val measured = mutableListOf<ThermalMeasurementResult>()
-        val initialCandidates = buildList {
-            addAll(coarseThermalScanRegions())
-            seedRegion?.let { addAll(localThermalScanRegions(it.centerX(), it.centerY())) }
-        }.distinctThermalRegions()
+        val primaryFrameHotspotRegion = frameHotspotRegions.firstOrNull()
+        val initialCandidates = if (primaryFrameHotspotRegion != null) {
+            localThermalScanRegions(primaryFrameHotspotRegion.centerX(), primaryFrameHotspotRegion.centerY()).distinctThermalRegions()
+        } else {
+            coarseThermalScanRegions().distinctThermalRegions()
+        }
 
         for (candidate in initialCandidates) {
             val temperature = measureThermalRegionTemperatureC(candidate) ?: continue
             measured += ThermalMeasurementResult(
                 temperatureC = temperature,
                 region = candidate,
+                measurements = listOf(ThermalMeasuredPoint(temperature, candidate)),
             )
         }
 
         val coarseBest = measured.maxByOrNull { it.temperatureC }
-        if (coarseBest != null) {
+        if (coarseBest != null && primaryFrameHotspotRegion == null) {
             val refinedCandidates = localThermalScanRegions(
                 coarseBest.region.centerX(),
                 coarseBest.region.centerY(),
@@ -171,6 +213,7 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
                 measured += ThermalMeasurementResult(
                     temperatureC = temperature,
                     region = candidate,
+                    measurements = listOf(ThermalMeasuredPoint(temperature, candidate)),
                 )
             }
         }
@@ -178,19 +221,25 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
         val best = measured.maxByOrNull { it.temperatureC }
         if (best != null) {
             Log.i(tag, "thermal hotspot temperature measured: ${best.temperatureC}C region=${best.region}")
-            return best
+            return best.copy(
+                measurements = measured
+                    .map { ThermalMeasuredPoint(it.temperatureC, it.region) }
+                    .sortedByDescending { it.temperatureC },
+            )
         }
         return seedRegion?.let { region ->
             measureThermalRegionTemperatureC(region)?.let { temperature ->
                 ThermalMeasurementResult(
                     temperatureC = temperature,
                     region = region,
+                    measurements = listOf(ThermalMeasuredPoint(temperature, region)),
                 )
             }
         } ?: measureThermalCenterTemperatureC()?.let { temperature ->
             ThermalMeasurementResult(
                 temperatureC = temperature,
                 region = ThermalMeasureRegion.CENTER,
+                measurements = listOf(ThermalMeasuredPoint(temperature, ThermalMeasureRegion.CENTER)),
             )
         }
     }
@@ -253,6 +302,7 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
                 .removeReceiveStreamListener(it)
         }
         visibleListener = null
+        thermalFrameProbe.stop()
     }
 
     private fun preferredVisibleSource(): CameraVideoStreamSourceType {
@@ -326,7 +376,11 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
 
     companion object {
         private const val MSDK_CALLBACK_TIMEOUT_MS: Long = 8_000
-        private const val THERMAL_MEASURE_SETTLE_MS: Long = 600
+        private const val THERMAL_MEASURE_SETTLE_MS: Long = 400
+        private const val VISIBLE_SNAPSHOT_POLL_MS: Long = 100
+        private const val VISIBLE_SNAPSHOT_WAIT_ATTEMPTS: Int = 12
+        private const val VISIBLE_SNAPSHOT_MAX_AGE_MS: Long = 3_000
+        private const val THERMAL_SNAPSHOT_CLOCK_SKEW_MS: Long = 1_000
         const val COARSE_SCAN_COLUMNS = 5
         const val COARSE_SCAN_ROWS = 4
         const val COARSE_SCAN_REGION_SIZE = 0.18
@@ -372,6 +426,34 @@ private fun axisCenter(index: Int, count: Int): Double {
     return (index + 0.5) / count
 }
 
+internal fun selectThermalHotspotRegion(
+    latestFrameHotspotRegion: ThermalMeasureRegion?,
+    seedRegion: ThermalMeasureRegion?,
+): ThermalMeasureRegion? = latestFrameHotspotRegion ?: seedRegion
+
+internal fun selectThermalHotspotRegions(
+    latestFrameHotspotRegions: List<ThermalMeasureRegion>,
+    seedRegion: ThermalMeasureRegion?,
+): List<ThermalMeasureRegion> =
+    if (latestFrameHotspotRegions.isNotEmpty()) {
+        latestFrameHotspotRegions.clusterNearbyThermalRegions()
+    } else {
+        seedRegion?.let { listOf(it) }.orEmpty()
+    }
+
+internal fun shouldFastConfirmThermalHotspot(temperatureC: Double): Boolean =
+    temperatureC >= FAST_CONFIRM_TEMPERATURE_C
+
+private fun List<ThermalMeasureRegion>.clusterNearbyThermalRegions(): List<ThermalMeasureRegion> {
+    val selected = mutableListOf<ThermalMeasureRegion>()
+    for (region in this) {
+        if (selected.none { it.centerDistanceTo(region) <= HOTSPOT_CLUSTER_DISTANCE }) {
+            selected += region
+        }
+    }
+    return selected
+}
+
 private fun regionAround(centerX: Double, centerY: Double, size: Double): ThermalMeasureRegion {
     val width = size.coerceIn(0.01, 1.0)
     val height = size.coerceIn(0.01, 1.0)
@@ -389,6 +471,12 @@ private fun ThermalMeasureRegion.centerX(): Double = x + width / 2
 
 private fun ThermalMeasureRegion.centerY(): Double = y + height / 2
 
+private fun ThermalMeasureRegion.centerDistanceTo(other: ThermalMeasureRegion): Double {
+    val dx = centerX() - other.centerX()
+    val dy = centerY() - other.centerY()
+    return kotlin.math.sqrt(dx * dx + dy * dy)
+}
+
 private fun List<ThermalMeasureRegion>.distinctThermalRegions(): List<ThermalMeasureRegion> {
     val seen = mutableSetOf<String>()
     return filter { seen.add(it.cellKey()) }
@@ -401,6 +489,9 @@ private fun ThermalMeasureRegion.cellKey(): String =
 
 private fun roundMeasureCoordinate(value: Double): Double =
     kotlin.math.round(value * 10_000.0) / 10_000.0
+
+private const val HOTSPOT_CLUSTER_DISTANCE = 0.075
+private const val FAST_CONFIRM_TEMPERATURE_C = 120.0
 
 private fun ThermalMeasureRegion.toDoubleRect(): DoubleRect {
     val normalizedX = x.coerceIn(0.0, 0.99)

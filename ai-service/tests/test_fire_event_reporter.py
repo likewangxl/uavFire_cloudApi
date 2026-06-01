@@ -287,6 +287,21 @@ def test_confidence_uses_thermal_when_higher():
     assert payload["confidence"] == 0.62
 
 
+def test_build_fire_event_payload_includes_geo_snapshot():
+    task = _task()
+    geo_snapshot = {
+        "aircraftPosition": {"lat": 34.0, "lng": 109.0, "alt": 200.0},
+        "gimbalAttitude": {"pitch": -90.0, "yaw": 0.0, "roll": 0.0},
+        "rtkStatus": "FIXED",
+    }
+    event = _event(risk="HIGH", thermal=0.75, channel="thermal", geo_snapshot=geo_snapshot)
+
+    payload = build_fire_event_payload(task, event)
+
+    assert payload["geo_snapshot"] == geo_snapshot
+    assert payload["geoSnapshot"] == geo_snapshot
+
+
 def _task(task_id: str = "zlm-demo", drone_sn: str = "DRONE-1") -> TaskRecord:
     return TaskRecord(
         task_id=task_id,
@@ -304,6 +319,7 @@ def _event(
     channel: str | None = None,
     thermal_temperature: float | None = None,
     thermal_measure_roi: dict | None = None,
+    geo_snapshot: dict | None = None,
 ) -> DualStreamEvent:
     fusion = round(visible * 0.6 + thermal * 0.4, 3)
     return DualStreamEvent(
@@ -315,6 +331,7 @@ def _event(
         analysis_channel=channel or ("visible" if thermal == 0 else "dual"),
         thermal_temperature=thermal_temperature,
         thermal_measure_roi=thermal_measure_roi,
+        geo_snapshot=geo_snapshot,
     )
 
 

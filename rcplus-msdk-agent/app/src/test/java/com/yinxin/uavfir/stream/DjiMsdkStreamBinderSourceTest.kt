@@ -7,7 +7,7 @@ import java.nio.file.Paths
 
 class DjiMsdkStreamBinderSourceTest {
     @Test
-    fun focusVisible_resetsThermalDisplayModeToVisualOnly() {
+    fun focusVisible_switchesVisibleSourceWithoutWritingThermalDisplayMode() {
         val source = String(Files.readAllBytes(
             Paths.get("src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt"),
         ))
@@ -15,13 +15,13 @@ class DjiMsdkStreamBinderSourceTest {
             .substringBefore("override suspend fun focusThermal")
 
         assertTrue(
-            "focusVisible must reset Pilot2 side-by-side thermal PIP back to visual-only mode",
-            focusVisibleBody.contains("ThermalDisplayMode.VISUAL_ONLY"),
+            "focusVisible must switch to a visible stream source",
+            focusVisibleBody.contains("preferredVisibleSource()"),
         )
         assertTrue(
-            "focusVisible must switch to a visible stream source before disabling thermal PIP",
-            focusVisibleBody.indexOf("preferredVisibleSource()") <
-                focusVisibleBody.indexOf("resetThermalDisplayModeToVisualOnly()"),
+            "focusVisible should not write ThermalDisplayMode after switching away from infrared; MSDK rejects that key on the visible stream source",
+            !focusVisibleBody.contains("resetThermalDisplayModeToVisualOnly()") &&
+                !focusVisibleBody.contains("ThermalDisplayMode.VISUAL_ONLY"),
         )
     }
 

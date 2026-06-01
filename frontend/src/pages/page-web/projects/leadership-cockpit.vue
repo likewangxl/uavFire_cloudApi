@@ -1,68 +1,78 @@
 <template>
   <div class="leadership-cockpit">
-    <section class="hero-grid">
-      <article class="shell-card hero-title">
-        <p class="eyebrow">Emergency Leadership Cockpit</p>
-        <h1>智能集群大载重无人机灭火系统</h1>
-        <p class="hero-subtitle">陕西省森林消防应急指挥中心驾驶舱</p>
-      </article>
+    <section class="cockpit-shell">
+      <header class="cockpit-topbar">
+        <div class="cockpit-title">
+          <h1>森林灭火综合驾驶舱</h1>
+          <p>火情识别 / 双光复核 / FC100 投放 / 飞机状态</p>
+        </div>
+        <div class="cockpit-actions">
+          <span class="status-pill default" :title="cockpitLastRefreshText">{{ cockpitRefreshLabel }}</span>
+          <span class="status-pill" :class="cockpitDataStatusClass">{{ cockpitDataStatusText }}</span>
+        </div>
+      </header>
 
-      <article class="shell-card hero-brief">
-        <div class="section-meta">处置简报</div>
-        <h2>秦岭北坡 2 号山火处于可控压制阶段</h2>
-        <p>
-          当前主火点 1 处、次生火点 2 处，火线向东南缓慢扩展，已形成空地协同封控圈。
-          现场无人机集群、补给、通信和道路管制均保持稳定。
-        </p>
-        <span class="status-pill danger">一级关注事件</span>
-      </article>
+      <section class="summary-grid">
+        <article
+          v-for="item in cockpitSummary.metrics"
+          :key="item.key"
+          class="shell-card summary-card"
+          :class="item.tone"
+          :title="item.source"
+        >
+          <div class="section-meta">{{ item.label }}</div>
+          <div class="summary-value">{{ item.value }}</div>
+          <p>{{ item.note }}</p>
+        </article>
+      </section>
 
-      <article class="shell-card hero-clock">
-        <div class="section-meta">当前时间</div>
-        <div class="clock-value">14:26</div>
-        <p>2026-03-30 周一</p>
-        <p>指挥值守正常</p>
-      </article>
-    </section>
-
-    <section class="summary-grid">
-      <article
-        v-for="item in summaryCards"
-        :key="item.label"
-        class="shell-card summary-card"
-      >
-        <div class="section-meta">{{ item.label }}</div>
-        <div class="summary-value">{{ item.value }}</div>
-        <p>{{ item.note }}</p>
-      </article>
-    </section>
-
-    <section class="content-grid">
+      <section class="content-grid">
       <div class="column">
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>领导决策摘要</h3>
-              <p>面向值班领导的核心结论，不展示飞控级操作细节。</p>
+              <h3>AI 识别记录</h3>
+              <p>来自 dual-stream task events，展示最近识别和复核状态。</p>
             </div>
           </header>
 
-          <div class="decision-list">
+          <div class="ai-risk-alert-header">
+            <div>
+              <span class="section-meta">AI Fire Recognition</span>
+              <h4>AI 风险识别记录</h4>
+            </div>
+            <span class="status-pill" :class="aiRiskPillClass">{{ aiRiskPillText }}</span>
+          </div>
+
+          <div v-if="aiRiskState.error" class="ai-risk-empty error">
+            {{ aiRiskState.error }}
+          </div>
+          <div v-else-if="recentAiRiskEvents.length === 0" class="ai-risk-empty">
+            暂无 AI 识别记录
+          </div>
+          <div v-else class="info-list ai-risk-alert-list">
             <section
-              v-for="item in decisions"
-              :key="item.title"
-              class="decision-card"
+              v-for="event in recentAiRiskEvents"
+              :key="`${event.sourceTs || 'no-ts'}-${event.analysisChannel || 'unknown'}-${event.fusionScore || 0}`"
+              class="info-card ai-risk-card"
+              :class="aiRiskCardClass(event)"
             >
-              <div class="decision-top">
-                <h4>{{ item.title }}</h4>
-                <span
-                  class="status-pill"
-                  :class="item.type"
-                >
-                  {{ item.tag }}
+              <div class="ai-risk-card-top">
+                <div>
+                  <strong>{{ formatAiEventTime(event.sourceTs) }}</strong>
+                  <span>{{ formatAiChannel(event.analysisChannel) }}</span>
+                </div>
+                <span class="status-pill" :class="aiRiskLevelClass(event.riskLevel)">
+                  {{ event.riskLevel || 'UNKNOWN' }}
                 </span>
               </div>
-              <p>{{ item.content }}</p>
+              <div class="ai-risk-scores">
+                <span>可见光分数 {{ formatAiScore(event.visibleScore) }}</span>
+                <span>融合分数 {{ formatAiScore(event.fusionScore) }}</span>
+              </div>
+              <div class="ai-risk-review" :class="aiReviewStatusClass(event.reviewStatus)">
+                {{ formatAiReviewStatus(event.reviewStatus) }}
+              </div>
             </section>
           </div>
         </article>
@@ -70,38 +80,41 @@
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>现场风险与民生影响</h3>
-              <p>突出群众、道路、设施、重点坡向等消防领导最关心的要点。</p>
+              <h3>火情事件队列</h3>
+              <p>来自 /api/fire/events，按风险等级和最近更新时间排序。</p>
             </div>
           </header>
 
-          <div class="small-metric-grid">
-            <section
-              v-for="item in impactMetrics"
-              :key="item.label"
-              class="small-metric-card"
-            >
-              <div class="section-meta">{{ item.label }}</div>
-              <div class="small-metric-value">{{ item.value }}</div>
-            </section>
+          <div v-if="fireEventState.error" class="ai-risk-empty error">
+            {{ fireEventState.error }}
           </div>
-
-          <div class="info-list">
+          <div v-else-if="cockpitSummary.recentFireEvents.length === 0" class="ai-risk-empty">
+            暂无火情事件
+          </div>
+          <div v-else class="info-list">
             <section
-              v-for="item in riskItems"
-              :key="item.title"
+              v-for="event in cockpitSummary.recentFireEvents"
+              :key="event.eventId"
               class="info-card"
             >
               <div class="info-top">
-                <h4>{{ item.title }}</h4>
+                <h4>{{ event.fireLevel || 'UNKNOWN' }} · {{ event.eventId }}</h4>
                 <span
                   class="status-pill"
-                  :class="item.type"
+                  :class="fireEventLevelClass(event.fireLevel)"
                 >
-                  {{ item.level }}
+                  {{ event.status }}
                 </span>
               </div>
-              <p>{{ item.content }}</p>
+              <p>
+                置信度 {{ formatFireConfidence(event.confidence) }} ·
+                定位 {{ event.geoQuality || '未知' }} ·
+                任务 {{ event.missionNo || '未关联' }}
+              </p>
+              <p>
+                {{ formatFireEventLocation(event) }} ·
+                通知版本 {{ event.notificationVersion ?? 1 }}
+              </p>
             </section>
           </div>
         </article>
@@ -304,7 +317,7 @@
           </div>
         </div>
 
-        <div class="map-kpi-grid">
+        <div v-if="activeVisualTab !== 'delivery-execution'" class="map-kpi-grid">
           <section
             v-for="item in visualKpis"
             :key="item.label"
@@ -320,69 +333,28 @@
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>重点告警与处置状态</h3>
-              <p>只保留对决策有价值的高等级告警和处置结果。</p>
+              <h3>飞机与直播状态</h3>
+              <p>聚合 MSDK Agent、双光直播和 FC100 投放设备状态。</p>
             </div>
           </header>
 
-          <div class="ai-risk-alert-header">
-            <div>
-              <span class="section-meta">AI Fire Recognition</span>
-              <h4>AI 风险识别记录</h4>
-            </div>
-            <span class="status-pill" :class="aiRiskPillClass">{{ aiRiskPillText }}</span>
+          <div v-if="cockpitSummary.aircraftRows.length === 0" class="ai-risk-empty">
+            暂无飞机状态，请确认 MSDK Agent 或 FC100 投放平台已接入。
           </div>
-
-          <div v-if="aiRiskState.error" class="ai-risk-empty error">
-            {{ aiRiskState.error }}
-          </div>
-          <div v-else-if="recentAiRiskEvents.length === 0" class="ai-risk-empty">
-            暂无 AI 识别记录
-          </div>
-          <div v-else class="info-list ai-risk-alert-list">
+          <div v-else class="info-list">
             <section
-              v-for="event in recentAiRiskEvents"
-              :key="`${event.sourceTs || 'no-ts'}-${event.analysisChannel || 'unknown'}-${event.fusionScore || 0}`"
-              class="info-card ai-risk-card"
-              :class="aiRiskCardClass(event)"
-            >
-              <div class="ai-risk-card-top">
-                <div>
-                  <strong>{{ formatAiEventTime(event.sourceTs) }}</strong>
-                  <span>{{ formatAiChannel(event.analysisChannel) }}</span>
-                </div>
-                <span class="status-pill" :class="aiRiskLevelClass(event.riskLevel)">
-                  {{ event.riskLevel || 'UNKNOWN' }}
-                </span>
-              </div>
-              <div class="ai-risk-scores">
-                <span>可见光分数 {{ formatAiScore(event.visibleScore) }}</span>
-                <span>融合分数 {{ formatAiScore(event.fusionScore) }}</span>
-              </div>
-              <div class="ai-risk-review" :class="aiReviewStatusClass(event.reviewStatus)">
-                {{ formatAiReviewStatus(event.reviewStatus) }}
-              </div>
-            </section>
-          </div>
-
-          <div class="alert-divider"></div>
-
-          <div class="info-list">
-            <section
-              v-for="item in alertItems"
-              :key="item.title"
+              v-for="aircraft in cockpitSummary.aircraftRows"
+              :key="aircraft.key"
               class="info-card"
             >
               <div class="info-top">
-                <h4>{{ item.title }}</h4>
-                <span
-                  class="status-pill"
-                  :class="item.type"
-                >
-                  {{ item.level }}
+                <h4>{{ aircraft.name }}</h4>
+                <span class="status-pill" :class="aircraft.online ? 'safe' : 'danger'">
+                  {{ aircraft.role }}
                 </span>
               </div>
-              <p>{{ item.content }}</p>
+              <p>{{ aircraft.status }} · 电量 {{ formatAircraftBattery(aircraft.battery) }}</p>
+              <p>{{ aircraft.detail }}</p>
             </section>
           </div>
         </article>
@@ -390,69 +362,39 @@
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>力量与保障资源</h3>
-              <p>面向连续作战场景，突出力量、药剂、电池与补能保障状态。</p>
+              <h3>FC100 投放与链路状态</h3>
+              <p>投放任务来自 delivery 接口；系统链路健康没有统一 health 汇总接口的部分明确标注。</p>
             </div>
           </header>
 
           <div class="info-list">
             <section
-              v-for="item in resourceItems"
-              :key="item.title"
+              v-for="task in cockpitSummary.taskRows"
+              :key="task.taskId || task.missionId || task.deviceSn"
               class="info-card"
             >
               <div class="info-top">
-                <h4>{{ item.title }}</h4>
-                <span
-                  class="status-pill"
-                  :class="item.type"
-                >
-                  {{ item.level }}
-                </span>
+                <h4>{{ task.taskName || task.taskId || '投放任务' }}</h4>
+                <span class="status-pill default">{{ task.status || task.phase || '同步中' }}</span>
               </div>
-              <p>{{ item.content }}</p>
+              <p>阶段 {{ task.phase || '--' }} · 进度 {{ formatTaskProgress(task.progressPercent) }}</p>
+              <p>{{ task.message || task.displayMessage || task.reason || '等待投放平台返回任务消息' }}</p>
+            </section>
+            <section
+              v-for="gap in cockpitSummary.dataGaps"
+              :key="gap.key"
+              class="info-card"
+            >
+              <div class="info-top">
+                <h4>{{ gap.label }}</h4>
+                <span class="status-pill default">{{ gap.value }}</span>
+              </div>
+              <p>{{ gap.note }}</p>
             </section>
           </div>
         </article>
       </div>
-    </section>
-
-    <section class="footer-grid">
-      <article class="shell-card footer-card">
-        <h3>处置成效趋势</h3>
-        <p>火场受控比例持续提升，说明当前策略有效。</p>
-        <div class="trend-bars">
-          <span
-            v-for="(height, index) in trendBars"
-            :key="index"
-            :class="{ active: index >= 3 }"
-            :style="{ height }"
-          ></span>
-        </div>
-      </article>
-
-      <article class="shell-card footer-card">
-        <h3>火势扩展预测</h3>
-        <p>未来 30 分钟整体向东南缓慢扩展，仍处可压制区间。</p>
-        <div class="progress-track">
-          <i class="progress-danger" style="width: 42%;"></i>
-        </div>
-      </article>
-
-      <article class="shell-card footer-card">
-        <h3>无人机轮换健康度</h3>
-        <p>主力机队状态良好，轮换节奏平稳。</p>
-        <div class="progress-track">
-          <i class="progress-safe" style="width: 86%;"></i>
-        </div>
-      </article>
-
-      <article class="shell-card footer-card">
-        <h3>建议领导关注事项</h3>
-        <ul class="focus-list">
-          <li v-for="item in focusItems" :key="item">{{ item }}</li>
-        </ul>
-      </article>
+      </section>
     </section>
   </div>
 </template>
@@ -485,6 +427,7 @@ import {
   resolveAppliedFocusPreference,
   swapPrimaryPreference
 } from './leadership-cockpit-live-layout.mjs'
+import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
 
 const store = useMyStore()
 const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
@@ -578,66 +521,27 @@ const flightHud = computed(() => {
 
 const AI_EVENT_TASK_ID = 'manual-ai-001'
 
-const summaryCards = [
-  { label: '受控火场面积', value: '68%', note: '较 30 分钟前提升 14%' },
-  { label: '受威胁群众点位', value: '2', note: '均已完成提前疏散' },
-  { label: '投入无人机力量', value: '12', note: '侦察 4 / 灭火 6 / 中继 2' },
-  { label: '累计投送灭火弹', value: '29', note: '有效命中率 92%' },
-  { label: '预计扑灭窗口', value: '23', note: '分钟内进入残火清理' },
-  { label: '保障资源到位率', value: '96%', note: '电池、药剂、通信均充足' }
-]
+const fireEventState = reactive({
+  loading: false,
+  error: '',
+  events: [] as FireEventDTO[]
+})
+const deliveryTaskStatuses = ref<any[]>([])
+const cockpitLastRefreshAt = ref(0)
 
-const decisions = [
-  {
-    title: '总体判断',
-    tag: '态势可控',
-    type: 'safe',
-    content: '现阶段火势已被主封控圈限制，未出现跨山脊跃迁，建议维持当前空中压制强度。'
-  },
-  {
-    title: '下一步建议',
-    tag: '建议批示',
-    type: 'default',
-    content: '保持 2 个侦察架次持续巡查东南回燃区，同时提前调度补给组进入待命，不建议新增地面冒进扑救。'
+const mapNodes = computed(() => {
+  const events = cockpitSummary.value.recentFireEvents
+  if (events.length === 0) {
+    return [{ name: '等待火情定位', top: '48%', left: '48%' }]
   }
-]
+  return events.slice(0, 5).map((event, index) => ({
+    name: `${event.fireLevel || 'UNKNOWN'} ${event.eventId}`,
+    top: `${20 + (index % 3) * 22}%`,
+    left: `${24 + (index % 2) * 34}%`
+  }))
+})
 
-const impactMetrics = [
-  { label: '受威胁村组', value: '1' },
-  { label: '重要设施点', value: '3' },
-  { label: '道路管制段', value: '2' },
-  { label: '需重点盯防坡向', value: '东南坡' }
-]
-
-const riskItems = [
-  {
-    title: '东南坡回燃风险',
-    level: '高',
-    type: 'danger',
-    content: '地表温升回弹明显，若风向继续偏东，20 分钟内有局部复燃可能。'
-  },
-  {
-    title: '通信链路冗余',
-    level: '中',
-    type: 'default',
-    content: '中继链路整体稳定，但建议继续保留专网备份，避免山谷遮挡造成盲区。'
-  }
-]
-
-const mapNodes = [
-  { name: '侦察组 A-01', top: '23%', left: '28%' },
-  { name: '投送组 B-02', top: '52%', left: '23%' },
-  { name: '中继组 C-01', top: '38%', left: '61%' },
-  { name: '封控组 D-03', top: '60%', left: '55%' },
-  { name: '补位组 E-02', top: '16%', left: '72%' }
-]
-
-const mapKpis = [
-  { label: '当前主火点', value: '1' },
-  { label: '次生火点', value: '2' },
-  { label: '封控圈完整度', value: '91%' },
-  { label: '预计稳控时间', value: '23 分钟' }
-]
+const mapKpis = computed(() => cockpitSummary.value.metrics.slice(0, 4))
 
 const visualTabs = [
   { key: 'map', label: '态势图' },
@@ -662,6 +566,42 @@ const dualStreamState = reactive({
   error: '',
   group: null as DualStreamGroup | null
 })
+
+const cockpitSummary = computed(() => buildCockpitSummary({
+  fireEvents: fireEventState.events,
+  aiEvents: aiRiskState.events,
+  msdkDevices: msdkDeviceSnapshots.value,
+  deliveryTargets: deliveryExecutionTargets.value,
+  deliveryTaskStatuses: deliveryTaskStatuses.value,
+  dualStreamGroup: dualStreamState.group,
+  deliveryTargetsLoading: deliveryTargetsLoading.value,
+  fireEventsError: fireEventState.error,
+  aiEventsError: aiRiskState.error,
+  dualStreamError: dualStreamState.error
+}))
+
+const cockpitDataStatusText = computed(() => {
+  if (fireEventState.error || aiRiskState.error || dualStreamState.error) return '部分接口异常'
+  if (fireEventState.loading || aiRiskState.loading || dualStreamState.loading || deliveryTargetsLoading.value) return '数据同步中'
+  return '已接入现有接口'
+})
+
+const cockpitDataStatusClass = computed(() => {
+  if (fireEventState.error || aiRiskState.error || dualStreamState.error) return 'danger'
+  return 'safe'
+})
+
+const cockpitRefreshLabel = computed(() => {
+  if (!cockpitLastRefreshAt.value) return '等待'
+  const seconds = Math.max(0, Math.floor((Date.now() - cockpitLastRefreshAt.value) / 1000))
+  return `${seconds}s`
+})
+
+const cockpitLastRefreshText = computed(() => (
+  cockpitLastRefreshAt.value
+    ? `最近火情同步 ${new Date(cockpitLastRefreshAt.value).toLocaleTimeString('zh-CN', { hour12: false })}`
+    : '等待后端返回火情数据'
+))
 
 const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
   const targets = new Map<string, CockpitStreamTarget>()
@@ -778,17 +718,9 @@ const fireMonitorKpis = computed(() => [
   { label: 'AI 识别记录', value: `${recentAiRiskEvents.value.length} 条` }
 ])
 
-const deliveryExecutionKpis = computed(() => [
-  { label: '播放对象', value: selectedDeliveryTarget.value?.callsign || '未选择' },
-  { label: 'FC100 在线状态', value: selectedDeliveryTarget.value?.online ? '在线' : '离线' },
-  { label: '任务阶段', value: selectedDeliveryTarget.value?.taskStatus || '待命' },
-  { label: '执行进度', value: selectedDeliveryTarget.value?.progressPercent != null ? `${selectedDeliveryTarget.value.progressPercent}%` : '--' }
-])
-
 const visualKpis = computed(() => {
-  if (activeVisualTab.value === 'map') return mapKpis
-  if (activeVisualTab.value === 'fire-monitor') return fireMonitorKpis.value
-  return deliveryExecutionKpis.value
+  if (activeVisualTab.value === 'map') return mapKpis.value
+  return fireMonitorKpis.value
 })
 
 const aiRiskState = reactive({
@@ -1165,17 +1097,23 @@ async function loadDeliveryExecutionTargets () {
 
     const enriched = await Promise.all(targets.map(async (target) => {
       try {
-        const liveRes = await deliveryApi.deviceLive(target.deviceSn)
+        const [liveRes, propsRes] = await Promise.all([
+          deliveryApi.deviceLive(target.deviceSn),
+          deliveryApi.deviceProps(target.deviceSn).catch(() => null)
+        ])
         const live = liveRes.data?.data
-        if (!live) return target
+        const props = propsRes?.data?.data
         const enrichedTarget: CockpitStreamTarget = {
           ...target,
-          primaryPlayUrl: live.playUrl || '',
-          streamStatus: live.streamStatus === 'running'
+          online: props?.onlineStatus ?? target.online,
+          primaryPlayUrl: live?.playUrl || '',
+          streamStatus: live?.streamStatus === 'running'
             ? 'running'
             : (target.online ? 'idle' : 'offline'),
-          message: live.message || target.message
-        }
+          message: live?.message || target.message
+        } as CockpitStreamTarget
+        ;(enrichedTarget as any).batteryPercent = props?.batteryPercent
+        ;(enrichedTarget as any).taskStatus = props?.aircraftMode != null ? `模式 ${props.aircraftMode}` : enrichedTarget.taskStatus
         return enrichedTarget
       } catch {
         return target
@@ -1323,16 +1261,39 @@ const lastSeenFireEventId = ref(0)
 const fireEventsBootstrapped = ref(false)
 const lastNotifiedFireEventVersions = new Map<number, number>()
 
-async function loadNewFireEvents (): Promise<void> {
-  let events: FireEventDTO[] = []
+async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
+  fireEventState.loading = true
   try {
     const res = await fireEventApi.list()
-    events = res.data.data ?? []
+    const events = res.data.data ?? []
+    fireEventState.events = events
+    fireEventState.error = ''
+    cockpitLastRefreshAt.value = Date.now()
+    const missionNos = Array.from(new Set(events.map(event => event.missionNo).filter(Boolean))) as string[]
+    const statuses = await Promise.all(missionNos.slice(0, 6).map(async (missionNo) => {
+      try {
+        const statusRes = await deliveryApi.status(missionNo)
+        return statusRes.data?.data || null
+      } catch {
+        return null
+      }
+    }))
+    deliveryTaskStatuses.value = statuses.filter(Boolean)
+    return events
   } catch (e) {
     console.warn('[cockpit] fire event poll failed', e)
+    fireEventState.error = (e as any)?.message || 'fire-events-unavailable'
+    return []
+  } finally {
+    fireEventState.loading = false
+  }
+}
+
+async function loadNewFireEvents (): Promise<void> {
+  const events = await loadCockpitFireEvents()
+  if (events.length === 0) {
     return
   }
-  if (events.length === 0) return
   const maxId = events.reduce((m, e) => (e.id > m ? e.id : m), 0)
   if (!fireEventsBootstrapped.value) {
     lastSeenFireEventId.value = maxId
@@ -1565,6 +1526,37 @@ const formatAiScore = (score?: number) => {
   return score.toFixed(3)
 }
 
+const formatFireConfidence = (confidence: number | string) => {
+  const n = Number(confidence)
+  return Number.isFinite(n) ? n.toFixed(2) : '--'
+}
+
+const formatFireEventLocation = (event: FireEventDTO) => {
+  const lat = Number(event.lat)
+  const lng = Number(event.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '位置未返回'
+  const errorRadius = Number(event.geoErrorRadiusM)
+  const errorText = Number.isFinite(errorRadius) ? ` · 误差 ${errorRadius.toFixed(1)}m` : ''
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}${errorText}`
+}
+
+const fireEventLevelClass = (level?: string | null) => {
+  const normalized = String(level || '').toUpperCase()
+  if (normalized === 'HIGH' || normalized === 'MEDIUM') return 'danger'
+  if (normalized === 'LOW') return 'default'
+  return 'safe'
+}
+
+const formatAircraftBattery = (battery?: number) => {
+  const n = Number(battery)
+  return Number.isFinite(n) ? `${n.toFixed(0)}%` : '--'
+}
+
+const formatTaskProgress = (progress?: number | null) => {
+  const n = Number(progress)
+  return Number.isFinite(n) ? `${n.toFixed(0)}%` : '--'
+}
+
 const formatAiEventTime = (sourceTs?: number) => {
   if (!sourceTs) {
     return '--:--:--'
@@ -1676,66 +1668,13 @@ watch(
   { immediate: true }
 )
 
-const resourceItems = [
-  {
-    title: '空中作战力量',
-    level: '充足',
-    type: 'safe',
-    content: '在线 12 架，可立即补位 2 架，核心灭火力量满足连续两轮压制要求。'
-  },
-  {
-    title: '药剂与投送载荷',
-    level: '充足',
-    type: 'safe',
-    content: '可支持后续 31 次标准投送，满足本次事件全程处置。'
-  },
-  {
-    title: '电池与补能保障',
-    level: '可持续',
-    type: 'default',
-    content: '轮换电池 24 组，现场补能车 1 台，预计可支撑 4 小时连续作战。'
-  }
-]
-
-const alertItems = [
-  {
-    title: '东南坡热成像温升回弹',
-    level: '需持续关注',
-    type: 'danger',
-    content: '已安排 2 架侦察无人机轮巡，暂未触发新的扩大蔓延。'
-  },
-  {
-    title: '山谷链路抖动',
-    level: '已采取备份',
-    type: 'default',
-    content: '专网备链已启用，中继高度已调整，未对当前任务造成实质影响。'
-  },
-  {
-    title: '群众点位风险',
-    level: '已解除',
-    type: 'safe',
-    content: '下风向村组已完成疏散和交通管制，目前无人员被困报告。'
-  }
-]
-
-const trendBars = ['24%', '36%', '48%', '62%', '74%', '86%']
-
-const focusItems = [
-  '东南坡复燃风险',
-  '保持交通管制',
-  '视风向变化决定是否增援'
-]
 </script>
 
 <style lang="scss" scoped>
 .leadership-cockpit {
   min-height: calc(100vh - 60px);
   padding: 16px;
-  background:
-    radial-gradient(circle at 14% 18%, rgba(69, 221, 255, 0.12), transparent 18%),
-    radial-gradient(circle at 88% 12%, rgba(255, 97, 114, 0.12), transparent 16%),
-    radial-gradient(circle at 50% 85%, rgba(103, 184, 255, 0.08), transparent 24%),
-    linear-gradient(180deg, #081424 0%, #07111d 52%, #030912 100%);
+  background: linear-gradient(180deg, #07111d 0%, #030812 100%);
   color: #f0f6ff;
   overflow: auto;
 }
@@ -1746,7 +1685,6 @@ const focusItems = [
   overflow-wrap: anywhere;
 }
 
-.hero-grid,
 .summary-grid,
 .content-grid,
 .footer-grid,
@@ -1756,13 +1694,49 @@ const focusItems = [
   gap: 14px;
 }
 
-.hero-grid {
-  grid-template-columns: 420px minmax(0, 1fr) 260px;
+.cockpit-shell {
+  min-height: calc(100vh - 92px);
+  padding: 18px;
+  border: 1px solid rgba(69, 221, 255, 0.42);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #071321 0%, #050b14 100%);
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(157, 237, 255, 0.08);
+}
+
+.cockpit-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
   margin-bottom: 14px;
 }
 
+.cockpit-title h1 {
+  margin: 0;
+  color: #e9f8ff;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.cockpit-title p {
+  margin: 8px 0 0;
+  color: #7f9eb7;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cockpit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .summary-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   margin-bottom: 14px;
 }
 
@@ -1785,10 +1759,9 @@ const focusItems = [
 .shell-card {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(17, 36, 60, 0.84), rgba(5, 15, 27, 0.9));
-  border: 1px solid rgba(113, 179, 255, 0.2);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(16px);
+  background: #0a2130;
+  border: 1px solid rgba(69, 221, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(168, 239, 255, 0.06);
 }
 
 .shell-card::after {
@@ -1799,18 +1772,13 @@ const focusItems = [
   pointer-events: none;
 }
 
-.hero-title,
-.hero-brief,
-.hero-clock,
 .summary-card,
 .panel-card,
 .footer-card {
-  border-radius: 22px;
-  padding: 18px 20px;
+  border-radius: 8px;
+  padding: 16px;
 }
 
-.hero-title h1,
-.hero-brief h2,
 .panel-header h3,
 .footer-card h3,
 .decision-card h4,
@@ -1827,15 +1795,6 @@ const focusItems = [
   text-transform: uppercase;
 }
 
-.hero-title h1 {
-  margin-top: 8px;
-  font-size: 30px;
-  line-height: 1.15;
-}
-
-.hero-subtitle,
-.hero-brief p,
-.hero-clock p,
 .summary-card p,
 .panel-header p,
 .decision-card p,
@@ -1955,33 +1914,6 @@ const focusItems = [
   background: linear-gradient(90deg, rgba(113, 179, 255, 0.2), transparent);
 }
 
-.hero-brief {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.hero-brief h2 {
-  color: #ffd36b;
-  font-size: 18px;
-  line-height: 1.4;
-}
-
-.hero-clock {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  text-align: right;
-}
-
-.clock-value {
-  font-size: 34px;
-  font-weight: 700;
-  line-height: 1.1;
-  margin: 10px 0 6px;
-}
-
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -2017,13 +1949,27 @@ const focusItems = [
 
 .summary-card {
   min-width: 0;
+  min-height: 108px;
 }
 
 .summary-value {
   margin: 8px 0;
-  font-size: 30px;
+  color: #e9f8ff;
+  font-size: 28px;
   font-weight: 700;
   line-height: 1.1;
+}
+
+.summary-card.danger .summary-value {
+  color: #ff6978;
+}
+
+.summary-card.safe .summary-value {
+  color: #72ff6a;
+}
+
+.summary-card.default .summary-value {
+  color: #ffd866;
 }
 
 .panel-card {
@@ -2032,6 +1978,10 @@ const focusItems = [
 
 .panel-header {
   margin-bottom: 14px;
+}
+
+.panel-header h3 {
+  color: #7ee8ff;
 }
 
 .decision-list,
@@ -2062,6 +2012,7 @@ const focusItems = [
 
 .decision-card h4,
 .info-card h4 {
+  color: #d8f3ff;
   font-size: 15px;
   line-height: 1.4;
 }
@@ -2253,8 +2204,16 @@ const focusItems = [
 }
 
 .dual-stream-overlay.error {
+  inset: auto 24px 24px auto;
+  width: min(420px, calc(100% - 48px));
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 112, 112, 0.28);
+  border-radius: 12px;
   background:
-    linear-gradient(180deg, rgba(47, 10, 17, 0.38) 0%, rgba(25, 8, 11, 0.92) 100%);
+    linear-gradient(180deg, rgba(47, 10, 17, 0.86) 0%, rgba(25, 8, 11, 0.94) 100%);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
 }
 
 .live-badge {
@@ -2715,7 +2674,7 @@ const focusItems = [
 
 @media (max-width: 1680px) {
   .summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .content-grid {
@@ -2728,7 +2687,6 @@ const focusItems = [
 }
 
 @media (max-width: 1280px) {
-  .hero-grid,
   .content-grid,
   .footer-grid {
     grid-template-columns: 1fr;
@@ -2740,9 +2698,8 @@ const focusItems = [
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .hero-clock {
-    align-items: flex-start;
-    text-align: left;
+  .cockpit-topbar {
+    flex-direction: column;
   }
 
   .map-header {

@@ -184,6 +184,91 @@ class AgentBackendClient(
         debug("ack response drone=$droneSn command=$commandId")
     }
 
+    suspend fun recordThermalHotspotEvent(
+        taskId: String,
+        droneSn: String,
+        sourceTs: Long,
+        temperatureC: Double,
+        thermalMeasureRoi: Map<String, Double>,
+        thermalMeasurements: List<ThermalMeasurementPayload> = emptyList(),
+        thermalImageUrl: String? = null,
+        geoSnapshot: GeoSnapshot? = null,
+    ) {
+        debug("thermal hotspot event task=$taskId drone=$droneSn temp=$temperatureC roi=$thermalMeasureRoi")
+        api.recordTaskEvent(
+            taskId = taskId,
+            body = buildThermalHotspotEventRequest(
+                taskId = taskId,
+                droneSn = droneSn,
+                sourceTs = sourceTs,
+                temperatureC = temperatureC,
+                thermalMeasureRoi = thermalMeasureRoi,
+                thermalMeasurements = thermalMeasurements,
+                thermalImageUrl = thermalImageUrl,
+                geoSnapshot = geoSnapshot,
+            ),
+        )
+        debug("thermal hotspot event response task=$taskId drone=$droneSn")
+    }
+
+    fun buildThermalHotspotEventRequest(
+        taskId: String,
+        droneSn: String,
+        sourceTs: Long,
+        temperatureC: Double,
+        thermalMeasureRoi: Map<String, Double>,
+        thermalMeasurements: List<ThermalMeasurementPayload> = emptyList(),
+        thermalImageUrl: String? = null,
+        geoSnapshot: GeoSnapshot? = null,
+    ): DualStreamEventRequest {
+        val score = temperatureToThermalScore(temperatureC)
+        return DualStreamEventRequest(
+            taskId = taskId,
+            droneSn = droneSn,
+            sourceTs = sourceTs,
+            thermalScore = score,
+            fusionScore = score,
+            riskLevel = temperatureToRiskLevel(temperatureC),
+            thermalImageUrl = thermalImageUrl,
+            thermalTemperature = temperatureC,
+            thermalMeasureRoi = thermalMeasureRoi,
+            thermalMeasurements = thermalMeasurements.ifEmpty {
+                listOf(ThermalMeasurementPayload(temperatureC, thermalMeasureRoi))
+            },
+            geoSnapshot = geoSnapshot,
+        )
+    }
+
+    suspend fun recordVisibleConfirmationStatus(
+        taskId: String,
+        droneSn: String,
+        sourceTs: Long,
+        reviewStatus: String,
+        thermalSourceEventId: String,
+        thermalImageUrl: String,
+        visibleImageUrl: String? = null,
+    ) {
+        debug("visible confirmation status task=$taskId drone=$droneSn status=$reviewStatus")
+        api.recordTaskEvent(
+            taskId = taskId,
+            body = DualStreamEventRequest(
+                taskId = taskId,
+                droneSn = droneSn,
+                sourceTs = sourceTs,
+                visibleScore = 0.0,
+                thermalScore = 0.0,
+                fusionScore = 0.0,
+                riskLevel = "LOW",
+                analysisChannel = "visible",
+                reviewStatus = reviewStatus,
+                visibleImageUrl = visibleImageUrl,
+                thermalSourceEventId = thermalSourceEventId,
+                thermalImageUrl = thermalImageUrl,
+            ),
+        )
+        debug("visible confirmation status response task=$taskId drone=$droneSn status=$reviewStatus")
+    }
+
     suspend fun pollMsdkCommand(
         aircraftSn: String,
     ): MsdkCommandResponse? {
@@ -214,6 +299,19 @@ class AgentBackendClient(
 
     private fun debug(message: String) {
         println("AgentBackendClient: $message")
+    }
+
+    private fun temperatureToThermalScore(temperatureC: Double): Double = when {
+        temperatureC >= 80.0 -> 1.0
+        temperatureC >= 60.0 -> 0.72
+        temperatureC >= 45.0 -> 0.48
+        else -> 0.0
+    }
+
+    private fun temperatureToRiskLevel(temperatureC: Double): String = when {
+        temperatureC >= 80.0 -> "HIGH"
+        temperatureC >= 45.0 -> "MEDIUM"
+        else -> "LOW"
     }
 
     private fun com.yinxin.uavfir.stream.BoundStreamState.toApiStreamState(): String = when (this) {

@@ -6,10 +6,10 @@ const configPath = new URL('../src/api/http/config.ts', import.meta.url)
 const configSource = readFileSync(configPath, 'utf8')
 
 test('pilot liveshare RTMP config uses a real endpoint instead of placeholder text', () => {
-  const match = configSource.match(/rtmpURL:\s*'([^']+)'/)
-  assert.ok(match, 'rtmpURL config should exist')
-  assert.doesNotMatch(match[1], /Please enter/i)
-  assert.match(match[1], /^rtmp:\/\/192\.168\.50\.254:1935\/live\/$/)
+  assert.match(configSource, /const rtmpUrl = import\.meta\.env\.VITE_APP_LIVESTREAM_RTMP_URL \|\| 'rtmp:\/\/localhost:1935\/live\/'/)
+  assert.match(configSource, /rtmpURL:\s*rtmpUrl/)
+  assert.doesNotMatch(configSource, /rtmpURL:\s*'rtmp:\/\/(?:10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.)/)
+  assert.doesNotMatch(configSource, /rtmpURL:\s*'Please enter/i)
 })
 
 const liveSharePath = new URL('../src/pages/page-pilot/pilot-liveshare.vue', import.meta.url)

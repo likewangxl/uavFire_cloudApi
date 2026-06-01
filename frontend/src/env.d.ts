@@ -5,5 +5,7 @@ interface ImportMetaEnv {
   VITE_APP_ENVIRONMENT: 'DEV' | 'STAG' | 'UAT' | 'PROD',
   // api gateway
   VITE_APP_APIGATEWAY_BACKEND_HOST: string
+  VITE_APP_APIGATEWAY_WEBSOCKET_HOST: string
+  VITE_APP_LIVESTREAM_RTMP_URL: string
   // More environment variables...
 }

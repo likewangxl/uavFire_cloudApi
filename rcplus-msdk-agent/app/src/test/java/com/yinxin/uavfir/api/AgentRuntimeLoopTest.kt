@@ -181,6 +181,11 @@ class AgentRuntimeLoopTest {
             body: AgentCommandAckRequest,
         ) = Unit
 
+        override suspend fun recordTaskEvent(
+            taskId: String,
+            body: DualStreamEventRequest,
+        ) = Unit
+
         override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) {
             lastMsdkDeviceState = body
         }

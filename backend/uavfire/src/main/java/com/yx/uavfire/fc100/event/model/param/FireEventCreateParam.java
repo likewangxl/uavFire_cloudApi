@@ -1,6 +1,9 @@
 package com.yx.uavfire.fc100.event.model.param;
 
 import lombok.Data;
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.yx.uavfire.fc100.event.model.dto.FireGeoSnapshotDTO;
 
 import javax.validation.constraints.DecimalMax;
 import javax.validation.constraints.DecimalMin;
@@ -43,6 +46,32 @@ public class FireEventCreateParam {
     private Double thermalTemperature;
 
     private Map<String, Double> thermalMeasureRoi;
+
+    @JsonProperty("geo_snapshot")
+    @JsonAlias("geoSnapshot")
+    private FireGeoSnapshotDTO geoSnapshot;
+
+    private String geoMethod;
+
+    private Double geoErrorRadiusM;
+
+    private String geoQuality;
+
+    private Long geoSourceTs;
+
+    private Double aircraftLat;
+
+    private Double aircraftLng;
+
+    private Double aircraftAlt;
+
+    private Double gimbalPitch;
+
+    private Double gimbalYaw;
+
+    private Double gimbalRoll;
+
+    private String thermalRoi;
 
     @Pattern(regexp = "K|C")
     private String temperatureUnit;

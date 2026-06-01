@@ -3,6 +3,7 @@ from app.services.task_registry import (
     _build_backend_client,
     _build_thermal_analyzer,
     _build_visible_detector,
+    _get_cached_visible_detector,
 )
 
 
@@ -38,6 +39,34 @@ def test_build_visible_detector_returns_yolo_when_model_path_set():
     from app.inference.visible.detector import YoloVisibleDetector
 
     assert isinstance(detector, YoloVisibleDetector)
+    assert detector._imgsz == 1280
+
+
+def test_build_visible_detector_passes_configured_yolo_imgsz():
+    settings = Settings(visible_yolo_model_path="best.pt", visible_yolo_imgsz=960)
+    detector = _build_visible_detector(settings)
+
+    assert detector._imgsz == 960
+
+
+def test_cached_visible_detector_reuses_same_instance_for_same_config():
+    settings = Settings(visible_yolo_model_path="best.pt", visible_yolo_imgsz=960)
+
+    detector_a = _get_cached_visible_detector(settings)
+    detector_b = _get_cached_visible_detector(settings)
+
+    assert detector_b is detector_a
+
+
+def test_cached_visible_detector_rebuilds_when_key_config_changes():
+    detector_a = _get_cached_visible_detector(
+        Settings(visible_yolo_model_path="best.pt", visible_yolo_imgsz=960)
+    )
+    detector_b = _get_cached_visible_detector(
+        Settings(visible_yolo_model_path="best.pt", visible_yolo_imgsz=1280)
+    )
+
+    assert detector_b is not detector_a
 
 
 def test_build_thermal_analyzer_returns_hotspot_when_continuous_runner_enabled():

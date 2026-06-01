@@ -49,6 +49,12 @@ test('cockpit live video uses aspect-fit sizing instead of cropping', () => {
   assert.doesNotMatch(cockpitSource, /\.dual-stream-video\s*\{[\s\S]*object-fit:\s*cover/)
 })
 
+test('cockpit keeps playback failure card away from the lower-left flight HUD', () => {
+  assert.match(cockpitSource, /\.flight-hud-overlay\s*\{[\s\S]*left:\s*18px[\s\S]*bottom:\s*18px/)
+  assert.match(cockpitSource, /\.dual-stream-overlay\.error\s*\{[\s\S]*inset:\s*auto 24px 24px auto/)
+  assert.match(cockpitSource, /\.dual-stream-overlay\.error\s*\{[\s\S]*width:\s*min\(420px,\s*calc\(100% - 48px\)\)/)
+})
+
 test('cockpit avoids duplicate playback when visible and thermal share one stream url', () => {
   assert.match(cockpitSource, /allowSharedThermalPreview:\s*true/)
   assert.match(cockpitSource, /livePaneState\.value\.preview\.url/)

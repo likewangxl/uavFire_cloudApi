@@ -11,6 +11,7 @@ import com.yinxin.uavfir.api.CommandPollingCoordinator
 import com.yinxin.uavfir.api.CompositeCommandPoller
 import com.yinxin.uavfir.api.DjiFlightControlActionClient
 import com.yinxin.uavfir.api.DualStreamMsdkCommandExecutor
+import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
 import com.yinxin.uavfir.sdk.HmsReporter
@@ -57,6 +58,11 @@ class AppServices(
         client = backendClient,
         sessionManager = sessionManager,
         commandExecutor = msdkCommandExecutor,
+    )
+    private val thermalHotspotMonitor = ThermalHotspotMonitor(
+        client = backendClient,
+        sessionManager = sessionManager,
+        visibleConfirmationScope = appScope,
     )
 
     // Wayline-agent control plane (HTTP) + event plane (MQTT).
@@ -107,7 +113,7 @@ class AppServices(
         defaultKmzFile = File(localKmzDir, "Kmz2.kmz"),
     )
 
-    private val commandPoller = CompositeCommandPoller(listOf(dualStreamPoller, waylineRouter))
+    private val commandPoller = CompositeCommandPoller(listOf(thermalHotspotMonitor, dualStreamPoller, waylineRouter))
 
     val validationController = ValidationConsoleController(
         deviceSession = deviceSession,

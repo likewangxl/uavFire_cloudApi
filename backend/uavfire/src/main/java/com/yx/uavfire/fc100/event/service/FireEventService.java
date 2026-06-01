@@ -20,6 +20,27 @@ public interface FireEventService {
      */
     FireEventCreateResponse create(FireEventCreateParam param);
 
+    default boolean attachVisibleImage(String eventId, String sourceEventId, String visibleImageUrl, String timestamp) {
+        return attachVisibleImage(eventId, sourceEventId, visibleImageUrl, timestamp, null, null);
+    }
+
+    boolean attachVisibleImage(
+        String eventId,
+        String sourceEventId,
+        String visibleImageUrl,
+        String timestamp,
+        String thermalSourceEventId,
+        String thermalImageUrl);
+
+    boolean recordVisibleConfirmationStatus(
+        String eventId,
+        String sourceEventId,
+        String action,
+        String visibleImageUrl,
+        String timestamp,
+        String thermalSourceEventId,
+        String thermalImageUrl);
+
     FireEventDTO get(String eventId);
 
     /**

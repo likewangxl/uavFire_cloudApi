@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 from typing import Callable, Literal, Optional, Protocol
 
 from app.models.frame import FramePacket
@@ -100,8 +101,10 @@ class OpenCvVideoSource:
             height, width = int(shape[0]), int(shape[1])
         else:
             height, width = 0, 0
+        source_ts = int(self._clock() * 1000)
+        frame = _stamp_capture_time(frame, source_ts)
         return FramePacket(
-            source_ts=int(self._clock() * 1000),
+            source_ts=source_ts,
             channel=self._channel,
             frame=frame,
             width=width,
@@ -119,3 +122,45 @@ def _default_capture_factory() -> CaptureFactory:
     import cv2
 
     return lambda url: cv2.VideoCapture(url)
+
+
+def _stamp_capture_time(frame: object, source_ts: int) -> object:
+    shape = getattr(frame, "shape", None)
+    if shape is None or len(shape) < 2:
+        return frame
+    try:
+        import cv2
+
+        height = int(shape[0])
+        width = int(shape[1])
+        if width <= 0 or height <= 0:
+            return frame
+        caption = datetime.fromtimestamp(source_ts / 1000.0).strftime("%Y-%m-%d %H:%M:%S")
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = max(min(width / 1280.0, 1.2), 0.55)
+        thickness = max(int(round(scale * 2)), 1)
+        margin = max(int(round(width * 0.012)), 10)
+        text_size, baseline = cv2.getTextSize(caption, font, scale, thickness)
+        text_w, text_h = text_size
+        x = margin
+        y = margin + text_h
+        cv2.rectangle(
+            frame,
+            (max(x - 6, 0), max(y - text_h - 6, 0)),
+            (min(x + text_w + 6, width - 1), min(y + baseline + 6, height - 1)),
+            (0, 0, 0),
+            -1,
+        )
+        cv2.putText(
+            frame,
+            caption,
+            (x, y),
+            font,
+            scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
+    except Exception:
+        return frame
+    return frame

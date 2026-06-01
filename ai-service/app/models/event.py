@@ -23,8 +23,10 @@ class EventRecord(BaseModel):
     analysis_channel: Optional[str] = None
     visible_image_url: Optional[str] = None
     thermal_image_url: Optional[str] = None
+    thermal_source_event_id: Optional[str] = None
     thermal_temperature: Optional[float] = None
     thermal_measure_roi: Optional[ThermalMeasureRoi] = None
+    geo_snapshot: Optional[dict] = None
 
 
 class DualStreamEvent(BaseModel):
@@ -36,5 +38,7 @@ class DualStreamEvent(BaseModel):
     analysis_channel: Optional[str] = None
     visible_image_url: Optional[str] = None
     thermal_image_url: Optional[str] = None
+    thermal_source_event_id: Optional[str] = None
     thermal_temperature: Optional[float] = None
     thermal_measure_roi: Optional[ThermalMeasureRoi] = None
+    geo_snapshot: Optional[dict] = None
