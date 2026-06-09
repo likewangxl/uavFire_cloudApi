@@ -28,6 +28,8 @@ public interface IPlannedWaylineService {
 
     PlannedWaylineDTO executeTask(String workspaceId, String id);
 
+    PlannedWaylineDTO executeTask(String workspaceId, String id, PreparePlannedWaylineTaskParam param);
+
     PlannedWaylineDTO cancelTask(String workspaceId, String id);
 
     // P2: 实时控制 (按 entity.dockSn 路由到 dock Cloud SDK 或 agent path)

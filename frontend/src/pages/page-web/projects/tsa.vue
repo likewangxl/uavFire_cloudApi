@@ -13,31 +13,51 @@
         <a-collapse-panel key="fc100-delivery" header="投放设备" style="border-bottom: 1px solid #4f4f4f;">
           <div class="fc100-cloud-panel">
             <div class="fc100-cloud-header">
-          <div class="fc100-cloud-title">FC100 云端设备</div>
-          <a-button
-            size="small"
-            type="primary"
-            :loading="fc100DeliveryFormState.deviceLoading"
-            @click="handleFc100RefreshDevices">
-            刷新设备
-          </a-button>
-        </div>
+              <div class="fc100-cloud-title">FC100 云端设备</div>
+              <a-button
+                size="small"
+                type="primary"
+                :loading="fc100DeliveryFormState.deviceLoading"
+                @click="handleFc100RefreshDevices">
+                刷新设备
+              </a-button>
+            </div>
         <div v-if="fc100DeliveryFormState.devices.length === 0" class="fc100-cloud-empty">
           暂无 FC100 云端设备
         </div>
         <div v-else class="fc100-device-list">
           <div
-            v-for="device in fc100DeliveryFormState.devices"
-            :key="device.deviceSn"
+            v-if="selectedFc100DeliveryDevice"
+            :key="selectedFc100DeliveryDevice.deviceSn"
             class="fc100-device-item"
-            :class="{ 'fc100-device-item--active': fc100DeliveryFormState.selectedDeviceSn === device.deviceSn }"
-            @click="handleFc100SelectDevice(device.deviceSn)">
+            :class="{ 'fc100-device-item--active': true }"
+            @click="handleFc100SelectDevice(selectedFc100DeliveryDevice.deviceSn)">
             <div class="fc100-device-main">
-              <div class="fc100-device-sn">{{ formatFc100DeviceModel(device) }}</div>
+              <div class="fc100-device-sn">{{ formatFc100DeviceModel(selectedFc100DeliveryDevice) }}</div>
               <div class="fc100-device-meta">
-                {{ device.deviceSn }} · {{ device.bindStatus || '--' }}
+                {{ selectedFc100DeliveryDevice.deviceSn }} · {{ selectedFc100DeliveryDevice.bindStatus || '--' }}
               </div>
             </div>
+            <a-dropdown
+              v-if="selectableFc100DeliveryDevices.length > 0"
+              class="fc100-device-card-dropdown delivery-device-card-dropdown"
+              :trigger="['click']">
+              <button class="fc100-device-card-dropdown__trigger" type="button" @click.stop>
+                <DownOutlined />
+              </button>
+              <template #overlay>
+                <a-menu @click="({ key }) => handleFc100SelectDevice(String(key))">
+                  <a-menu-item
+                    v-for="device in selectableFc100DeliveryDevices"
+                    :key="device.deviceSn">
+                    <div class="fc100-device-menu-item">
+                      <span>{{ formatFc100DeviceModel(device) }}</span>
+                      <small>{{ device.deviceSn }} · {{ formatDeviceOnlineLabel(device) }}</small>
+                    </div>
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
           </div>
         </div>
         <div v-if="fc100DeliveryFormState.selectedDeviceProps" class="fc100-device-props">
@@ -234,77 +254,96 @@
             <a-empty :image="noData" :image-style="{ height: '60px' }" />
           </div>
           <div v-else class="fz12" style="color: white;">
-            <div v-for="device in onlineDevices.data" :key="device.sn" class="aircraft-card">
-              <div class="battery-slide" v-if="deviceInfo[device.sn]">
-                <div style="background: #535759; width: 100%;"></div>
-                <div class="capacity-percent" :style="{ width: deviceInfo[device.sn].battery.capacity_percent + '%'}"></div>
-                <div class="return-home" :style="{ width: deviceInfo[device.sn].battery.return_home_power + '%'}"></div>
-                <div class="landing" :style="{ width: deviceInfo[device.sn].battery.landing_power + '%'}"></div>
-                <div class="battery" :style="{ left: deviceInfo[device.sn].battery.capacity_percent + '%' }"></div>
-              </div>
-              <div style="border-bottom: 1px solid #515151; border-radius: 2px; min-height: 50px; width: 100%;" class="flex-row flex-justify-between flex-align-center">
-                <div style="float: left; padding: 5px 5px 8px 8px; width: 88%">
-                  <div style="width: 100%; height: 100%;">
-                    <a-tooltip>
-                      <template #title>{{ device.model ? `${device.model} - ${device.callsign}` : '未识别设备'}}</template>
-                      <span class="text-hidden" style="max-width: 200px; display: block; height: 20px;">{{ device.model ? `${device.model} - ${device.callsign}` : '未识别设备'}}</span>
-                    </a-tooltip>
+            <div v-for="device in selectedMonitoringDevices" :key="device.sn" class="aircraft-card">
+              <div class="fc100-device-list monitoring-device-list">
+                <div
+                  class="fc100-device-item fc100-device-item--active"
+                  @click="handleMonitoringSelectDevice(device.sn)">
+                  <div class="fc100-device-main">
+                    <div class="fc100-device-sn">{{ formatMonitoringDeviceModel(device) }}</div>
+                    <div class="fc100-device-meta">
+                      {{ device.sn }} · {{ formatDeviceOnlineLabel(device) }}
+                    </div>
                   </div>
-                  <div class="mt5" style="background: #595959;">
-                    <span class="ml5 mr5"><RocketOutlined /></span>
-                    <span class="font-bold" :style="deviceInfo[device.sn] && deviceInfo[device.sn].mode_code !== EModeCode.Disconnected ? 'color: #00ee8b' :  'color: red;'">
-                      {{ deviceInfo[device.sn] ? EModeCode[deviceInfo[device.sn].mode_code] : EModeCode[EModeCode.Disconnected] }}
-                    </span>
-                  </div>
-                </div>
-                <div style="float: right; background: #595959; height: 50px; width: 40px;" class="flex-row flex-justify-center flex-align-center">
-                  <div class="fz16" @click="switchVisible($event, device, false, deviceInfo[device.sn] && deviceInfo[device.sn].mode_code !== EModeCode.Disconnected)">
-                    <a v-if="osdVisible.sn === device.sn && osdVisible.visible"><EyeOutlined /></a>
-                    <a v-else><EyeInvisibleOutlined /></a>
-                  </div>
-                </div>
-              </div>
-              <div class="flex-row flex-justify-center flex-align-center" style="height: 40px; margin-bottom: 8px;">
-                <div class="flex-row" style="height: 20px; background: #595959; width: 94%;" >
-                  <span class="mr5"><a-image style="margin-left: 2px; margin-top: -2px; height: 20px; width: 20px;" :src="rc" /></span>
-                  <a-tooltip>
-                    <template #title>{{ device.gateway.model }} - {{ device.gateway.callsign }} </template>
-                    <div class="text-hidden" style="max-width: 200px;">{{ device.gateway.model }} - {{ device.gateway.callsign }}</div>
-                  </a-tooltip>
+                  <a-dropdown
+                    v-if="selectableMonitoringDevices.length > 0"
+                    class="fc100-device-card-dropdown monitoring-device-card-dropdown"
+                    :trigger="['click']">
+                    <button class="fc100-device-card-dropdown__trigger" type="button" @click.stop>
+                      <DownOutlined />
+                    </button>
+                    <template #overlay>
+                      <a-menu @click="({ key }) => handleMonitoringSelectDevice(String(key))">
+                        <a-menu-item
+                          v-for="option in selectableMonitoringDevices"
+                          :key="option.sn">
+                          <div class="fc100-device-menu-item">
+                            <span>{{ formatMonitoringDeviceModel(option) }}</span>
+                            <small>{{ option.sn }} · {{ formatDeviceOnlineLabel(option) }}</small>
+                          </div>
+                        </a-menu-item>
+                      </a-menu>
+                    </template>
+                  </a-dropdown>
                 </div>
               </div>
-              <div class="aircraft-osd-panel" v-if="deviceInfo[device.sn]">
-                <div class="aircraft-osd-title">飞行状态</div>
-                <div class="aircraft-osd-grid">
-                  <div class="aircraft-osd-item">
-                    <span class="label">电量</span>
-                    <span class="value">{{ getBatteryPercent(device.sn) }}</span>
-                  </div>
-                  <div class="aircraft-osd-item">
-                    <span class="label">高度</span>
-                    <span class="value">{{ formatMetric(deviceInfo[device.sn].height, 'm') }}</span>
-                  </div>
-                  <div class="aircraft-osd-item">
-                    <span class="label">返航点</span>
-                    <span class="value">{{ formatMetric(deviceInfo[device.sn].home_distance, 'm') }}</span>
-                  </div>
-                  <div class="aircraft-osd-item">
-                    <span class="label">水平速度</span>
-                    <span class="value">{{ formatMetric(deviceInfo[device.sn].horizontal_speed, 'm/s') }}</span>
-                  </div>
-                  <div class="aircraft-osd-item">
-                    <span class="label">垂直速度</span>
-                    <span class="value">{{ formatMetric(deviceInfo[device.sn].vertical_speed, 'm/s') }}</span>
-                  </div>
-                  <div class="aircraft-osd-item">
-                    <span class="label">风速</span>
-                    <span class="value">{{ formatMetric(deviceInfo[device.sn].wind_speed, 'm/s') }}</span>
-                  </div>
+              <div class="fc100-device-props monitoring-device-props">
+                <div class="fc100-device-prop">
+                  <span>连接状态</span>
+                  <strong
+                    class="fc100-link-status"
+                    :class="getMonitoringConnectionStatusClass(device)">
+                    {{ formatMonitoringConnectionLabel(device) }}
+                  </strong>
                 </div>
-              </div>
-              <div class="aircraft-osd-panel" v-else>
-                <div class="aircraft-osd-title">飞行状态</div>
-                <div class="aircraft-osd-empty">等待飞机 OSD 数据...</div>
+                <div class="fc100-device-prop">
+                  <span>电量</span>
+                  <strong>{{ getBatteryPercent(device.sn) }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>RTK</span>
+                  <strong>{{ formatMonitoringRtkStatus(device.sn) }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>飞行模式</span>
+                  <strong>{{ formatMonitoringFlightMode(device.sn) }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>飞行中</span>
+                  <strong>{{ formatMonitoringFlying(device.sn) }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>经度</span>
+                  <strong>{{ formatMonitoringOsdValue(device.sn, 'longitude') }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>纬度</span>
+                  <strong>{{ formatMonitoringOsdValue(device.sn, 'latitude') }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>高度</span>
+                  <strong>{{ formatMonitoringOsdValue(device.sn, 'height', ' m') }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>水平速度</span>
+                  <strong>{{ formatMonitoringOsdValue(device.sn, 'horizontal_speed', ' m/s') }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>垂直速度</span>
+                  <strong>{{ formatMonitoringOsdValue(device.sn, 'vertical_speed', ' m/s') }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>返航距离</span>
+                  <strong>{{ formatMonitoringOsdValue(device.sn, 'home_distance', ' m') }}</strong>
+                </div>
+                <div class="fc100-device-prop">
+                  <span>风速</span>
+                  <strong>{{ formatMonitoringOsdValue(device.sn, 'wind_speed', ' m/s') }}</strong>
+                </div>
+                <div class="fc100-device-prop fc100-device-prop--wide">
+                  <span>更新时间</span>
+                  <strong>{{ formatMonitoringUpdateTime(device.sn) }}</strong>
+                </div>
               </div>
               <div class="aircraft-action-panel">
                 <div class="aircraft-osd-title">飞行控制</div>
@@ -745,7 +784,6 @@
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { EDeviceTypeName, ELocalStorageKey, EBizCode } from '/@/types'
 import noData from '/@/assets/icons/no-data.png'
-import rc from '/@/assets/icons/rc.png'
 import { OnlineDevice, EModeCode, OSDVisible, EDockModeCode, DeviceOsd, DrcStateEnum } from '/@/types/device'
 import { useMyStore } from '/@/store'
 import { getUnreadDeviceHms, updateDeviceHms } from '/@/api/manage'
@@ -795,6 +833,11 @@ import {
   getVerticalCommandDurationMs
 } from './axis-displacement-policy.mjs'
 import {
+  isDeviceOnline,
+  pickSelectedDeviceSn,
+  sortDevicesOnlineFirst,
+} from './device-selection-policy.mjs'
+import {
   OFFICIAL_TAKEOFF_TARGET_HEIGHT,
   OFFICIAL_TAKEOFF_STAGE2_STABILIZATION_MS,
   buildOfficialTakeoffPlan,
@@ -826,8 +869,24 @@ const onlineDevices = reactive({
 const onlineDocks = reactive({
   data: [] as OnlineDevice[]
 })
+const selectedMonitoringDeviceSn = ref('')
 const msdkOnlineDevices = computed<MsdkDeviceState[]>(() => {
   return Object.values(store.state.msdkDeviceState.devices || {}) as MsdkDeviceState[]
+})
+const sortedMonitoringDevices = computed<OnlineDevice[]>(() => {
+  return sortDevicesOnlineFirst(onlineDevices.data) as OnlineDevice[]
+})
+function isMonitoringAircraftDevice (device: OnlineDevice) {
+  const model = String(device.model || '').toLowerCase()
+  const callsign = String(device.callsign || '').toLowerCase()
+  return !model.includes('rc plus') && !callsign.includes('rc plus')
+}
+const selectableMonitoringDevices = computed<OnlineDevice[]>(() => {
+  return sortDevicesOnlineFirst(sortedMonitoringDevices.value.filter(isMonitoringAircraftDevice)) as OnlineDevice[]
+})
+const selectedMonitoringDevices = computed<OnlineDevice[]>(() => {
+  const selected = selectableMonitoringDevices.value.find(device => device.sn === selectedMonitoringDeviceSn.value)
+  return selected ? [selected] : selectableMonitoringDevices.value.slice(0, 1)
 })
 const tsaMap = deviceTsaUpdate()
 let msdkDeviceTimer: ReturnType<typeof window.setInterval> | undefined
@@ -840,6 +899,21 @@ const fc100DeliveryFormState = reactive({
   selectedDeviceProps: null as DeliveryDeviceProperties | null,
   deviceLoading: false,
   propsLoading: false,
+})
+const sortedFc100DeliveryDevices = computed<DeliveryDeviceDTO[]>(() => {
+  return sortDevicesOnlineFirst(fc100DeliveryFormState.devices) as DeliveryDeviceDTO[]
+})
+function isFc100AircraftDevice (device: DeliveryDeviceDTO) {
+  const bindStatus = String(device.bindStatus || '').toLowerCase()
+  const deviceType = String(device.deviceType || '').toLowerCase()
+  return bindStatus !== 'rc' && deviceType !== 'rc'
+}
+const selectableFc100DeliveryDevices = computed<DeliveryDeviceDTO[]>(() => {
+  return sortDevicesOnlineFirst(fc100DeliveryFormState.devices.filter(isFc100AircraftDevice)) as DeliveryDeviceDTO[]
+})
+const selectedFc100DeliveryDevice = computed<DeliveryDeviceDTO | undefined>(() => {
+  return selectableFc100DeliveryDevices.value.find(device => device.deviceSn === fc100DeliveryFormState.selectedDeviceSn) ||
+    selectableFc100DeliveryDevices.value[0]
 })
 const officialTakeoffFlow = reactive({
   gatewaySn: '',
@@ -1043,10 +1117,10 @@ onMounted(() => {
 })
 
 function toOnlineDeviceFromMsdk (device: MsdkDeviceState): OnlineDevice {
-  const callsign = device.model || device.aircraftSn
+  const model = normalizeMonitoringModelName(device.model)
   return {
-    model: device.model || 'MSDK Aircraft',
-    callsign,
+    model,
+    callsign: model || device.aircraftSn,
     sn: device.aircraftSn,
     mode: device.online ? EModeCode.Manual : EModeCode.Disconnected,
     gateway: {
@@ -1088,7 +1162,8 @@ function toDeviceOsdFromMsdk (device: MsdkDeviceState): DeviceOsd {
 }
 
 function syncMsdkDevicesToPage () {
-  onlineDevices.data = msdkOnlineDevices.value.map(toOnlineDeviceFromMsdk)
+  onlineDevices.data = sortDevicesOnlineFirst(msdkOnlineDevices.value.map(toOnlineDeviceFromMsdk)) as OnlineDevice[]
+  selectedMonitoringDeviceSn.value = pickSelectedDeviceSn(selectableMonitoringDevices.value, selectedMonitoringDeviceSn.value, device => device.sn)
   onlineDocks.data = []
   msdkOnlineDevices.value.forEach(device => {
     if (!device.aircraftSn) return
@@ -1100,6 +1175,10 @@ function syncMsdkDevicesToPage () {
       tsaMap.moveTo(device.aircraftSn, device.longitude, device.latitude, EDeviceTypeName.Aircraft, device.model || device.aircraftSn)
     }
   })
+}
+
+function handleMonitoringSelectDevice (deviceSn: string) {
+  selectedMonitoringDeviceSn.value = deviceSn
 }
 
 async function refreshMsdkDevices () {
@@ -1186,13 +1265,6 @@ function getBatteryPercent (sn: string) {
     return '--'
   }
   return `${osd.battery.capacity_percent}%`
-}
-
-function formatMetric (value: string | number | undefined, unit: string) {
-  if (value === undefined || value === null || value === '') {
-    return '--'
-  }
-  return `${value} ${unit}`
 }
 
 function createSeq () {
@@ -1497,6 +1569,59 @@ function formatFc100DeviceModel (device: DeliveryDeviceDTO) {
   return device.deviceType || '--'
 }
 
+function normalizeMonitoringModelName (model?: string) {
+  const value = String(model || '').trim()
+  if (!value || /^msdk aircraft$/i.test(value)) return ''
+  if (/matrice[_\s-]*4t/i.test(value)) return 'Matrice 4T'
+  if (/m4t/i.test(value)) return 'Matrice 4T'
+  return value
+}
+
+function formatMonitoringDeviceModel (device: OnlineDevice) {
+  return normalizeMonitoringModelName(device.model) || device.callsign || device.sn
+}
+
+function getMonitoringConnectionStatusClass (device: OnlineDevice) {
+  return isDeviceOnline(device) ? 'fc100-link-status--online' : 'fc100-link-status--offline'
+}
+
+function formatMonitoringConnectionLabel (device: OnlineDevice) {
+  return isDeviceOnline(device) ? '已连接' : '离线'
+}
+
+function formatMonitoringRtkStatus (sn: string) {
+  const state = deviceInfo.value[sn]?.position_state
+  if (!state) return '--'
+  return `RTK ${state.rtk_number ?? '--'} / GPS ${state.gps_number ?? '--'}`
+}
+
+function formatMonitoringFlightMode (sn: string) {
+  const modeCode = deviceInfo.value[sn]?.mode_code
+  if (modeCode === undefined || modeCode === null) return EModeCode[EModeCode.Disconnected]
+  return EModeCode[modeCode] || '--'
+}
+
+function formatMonitoringFlying (sn: string) {
+  const modeCode = deviceInfo.value[sn]?.mode_code
+  if (modeCode === undefined || modeCode === null || modeCode === EModeCode.Disconnected) return '否'
+  return modeCode === EModeCode.Manual ? '否' : '是'
+}
+
+type MonitoringOsdNumericKey = 'longitude' | 'latitude' | 'height' | 'horizontal_speed' | 'vertical_speed' | 'home_distance' | 'wind_speed'
+
+function formatMonitoringOsdValue (sn: string, key: MonitoringOsdNumericKey, unit = '') {
+  const value = deviceInfo.value[sn]?.[key]
+  if (value === undefined || value === null || value === '') return '--'
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return '--'
+  return formatFc100Value(numericValue, unit)
+}
+
+function formatMonitoringUpdateTime (sn: string) {
+  const device = msdkOnlineDevices.value.find(item => item.aircraftSn === sn)
+  return formatFc100Time(device?.updatedAt)
+}
+
 function getFc100ConnectionStatusClass (value: boolean | null | undefined) {
   if (value === true) return 'fc100-link-status--online'
   return 'fc100-link-status--offline'
@@ -1505,6 +1630,10 @@ function getFc100ConnectionStatusClass (value: boolean | null | undefined) {
 function formatFc100ConnectionLabel (value: boolean | null | undefined) {
   if (value === true) return '已连接'
   return '离线'
+}
+
+function formatDeviceOnlineLabel (device: any) {
+  return isDeviceOnline(device) ? '在线' : '离线'
 }
 
 function formatFc100Boolean (value: boolean | null | undefined) {
@@ -1571,7 +1700,7 @@ async function handleFc100RefreshDevices () {
       message.warning(failText)
       return
     }
-    fc100DeliveryFormState.devices = body.data || []
+    fc100DeliveryFormState.devices = sortDevicesOnlineFirst(body.data || []) as DeliveryDeviceDTO[]
     if (!fc100DeliveryFormState.devices.length) {
       fc100DeliveryFormState.lastResult = 'FC100 设备列表为空：请确认飞机/遥控器已绑定到当前 FC100 workspace/group。'
     }
@@ -1580,10 +1709,11 @@ async function handleFc100RefreshDevices () {
       fc100DeliveryFormState.selectedDeviceProps = null
       return
     }
-    const selectedStillExists = fc100DeliveryFormState.devices.some(device => device.deviceSn === fc100DeliveryFormState.selectedDeviceSn)
-    const nextSelectedDeviceSn = selectedStillExists
-      ? fc100DeliveryFormState.selectedDeviceSn
-      : fc100DeliveryFormState.devices[0]?.deviceSn
+    const nextSelectedDeviceSn = pickSelectedDeviceSn(
+      selectableFc100DeliveryDevices.value,
+      fc100DeliveryFormState.selectedDeviceSn,
+      device => device.deviceSn
+    )
     if (nextSelectedDeviceSn) {
       await handleFc100SelectDevice(nextSelectedDeviceSn)
     }
@@ -2395,6 +2525,7 @@ onUnmounted(() => {
   gap: 6px;
 }
 .fc100-device-item {
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2411,8 +2542,11 @@ onUnmounted(() => {
 }
 .fc100-device-main {
   min-width: 0;
+  flex: 1;
 }
 .fc100-device-sn {
+  max-width: 100%;
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2427,6 +2561,48 @@ onUnmounted(() => {
   white-space: nowrap;
   color: #a6a6a6;
   font-size: 11px;
+}
+.fc100-device-card-dropdown {
+  flex: 0 0 auto;
+}
+.fc100-device-card-dropdown__trigger {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  color: #f5f5f5;
+  background: transparent;
+  cursor: pointer;
+}
+.fc100-device-card-dropdown__trigger:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.fc100-device-menu-item {
+  width: 220px;
+  max-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fc100-device-menu-item span {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fc100-device-menu-item span {
+  color: #1f1f1f;
+  font-weight: 600;
+}
+.fc100-device-menu-item small {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #8c8c8c;
 }
 .fc100-device-props {
   display: grid;

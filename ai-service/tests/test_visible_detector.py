@@ -4,6 +4,7 @@ from app.inference.visible.detector import (
     YoloVisibleDetector,
 )
 from app.models.frame import FramePacket
+from concurrent.futures import ThreadPoolExecutor
 
 
 def test_stub_returns_configured_score_for_visible_frame_with_data():
@@ -28,23 +29,60 @@ def test_stub_returns_zero_when_frame_data_missing():
 
 
 def test_yolo_detector_returns_top_target_confidence():
+    fake_yolo = _FakeYolo(
+        results=[
+            _FakeResult(
+                names={0: "fire", 1: "smoke", 2: "person"},
+                classes=[0, 1, 2],
+                confidences=[0.55, 0.85, 0.9],
+            )
+        ]
+    )
     detector = YoloVisibleDetector(
         model_path="fake.pt",
         target_class_names=("fire", "smoke"),
         confidence_floor=0.25,
-        model_factory=lambda path: _FakeYolo(
-            results=[
-                _FakeResult(
-                    names={0: "fire", 1: "smoke", 2: "person"},
-                    classes=[0, 1, 2],
-                    confidences=[0.55, 0.85, 0.9],
-                )
-            ]
-        ),
+        model_factory=lambda path: fake_yolo,
     )
     packet = FramePacket(source_ts=1, channel="visible", frame=object())
 
     assert detector.detect(packet) == 0.85
+    assert fake_yolo.predict_kwargs["imgsz"] == 1280
+    assert fake_yolo.predict_kwargs["conf"] == 0.25
+
+
+def test_yolo_detector_passes_configured_imgsz_to_model_predict():
+    fake_yolo = _FakeYolo(results=[])
+    detector = YoloVisibleDetector(
+        model_path="fake.pt",
+        imgsz=960,
+        model_factory=lambda path: fake_yolo,
+    )
+    packet = FramePacket(source_ts=1, channel="visible", frame=object())
+
+    detector.detect(packet)
+
+    assert fake_yolo.predict_kwargs["imgsz"] == 960
+
+
+def test_yolo_detector_loads_model_once_when_detect_is_called_concurrently():
+    factory_calls = []
+    fake_yolo = _FakeYolo(results=[])
+
+    def factory(path):
+        factory_calls.append(path)
+        return fake_yolo
+
+    detector = YoloVisibleDetector(
+        model_path="fake.pt",
+        model_factory=factory,
+    )
+    packet = FramePacket(source_ts=1, channel="visible", frame=object())
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(lambda _: detector.detect(packet), range(8)))
+
+    assert factory_calls == ["fake.pt"]
 
 
 def test_yolo_detector_ignores_non_target_classes():
@@ -175,8 +213,10 @@ def test_color_fire_detector_returns_zero_when_no_fire_colored_pixels():
 class _FakeYolo:
     def __init__(self, results):
         self._results = results
+        self.predict_kwargs = {}
 
-    def predict(self, frame, verbose=False):
+    def predict(self, frame, **kwargs):
+        self.predict_kwargs = kwargs
         return self._results
 
 

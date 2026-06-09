@@ -1,5 +1,6 @@
 const backendHost = (import.meta.env.VITE_APP_APIGATEWAY_BACKEND_HOST || 'http://192.168.0.204:6789').replace(/\/$/, '')
 const websocketHost = import.meta.env.VITE_APP_APIGATEWAY_WEBSOCKET_HOST || backendHost.replace(/^http/, 'ws')
+const rtmpUrl = import.meta.env.VITE_APP_LIVESTREAM_RTMP_URL || 'rtmp://localhost:1935/live/'
 
 export const CURRENT_CONFIG = {
 
@@ -14,7 +15,7 @@ export const CURRENT_CONFIG = {
 
   // livestreaming
   // RTMP  Note: This IP is the address of the streaming server. If you want to see livestream on web page, you need to convert the RTMP stream to WebRTC stream.
-  rtmpURL: 'rtmp://1916dn17xs12.vicp.fun:56920/live/', // Example: 'rtmp://192.168.1.1/live/'
+  rtmpURL: rtmpUrl, // Example: 'rtmp://192.168.1.1/live/'
   // GB28181 Note:If you don't know what these parameters mean, you can go to Pilot2 and select the GB28181 page in the cloud platform. Where the parameters same as these parameters.
   gbServerIp: 'Please enter the server ip.',
   gbServerPort: 'Please enter the server port.',

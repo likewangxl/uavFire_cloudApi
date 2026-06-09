@@ -1,10 +1,13 @@
 <template>
-  <div style="padding: 24px">
-    <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 12px">
-      <h2 style="margin: 0">灭火任务列表</h2>
+  <div class="fire-mission-page">
+    <div class="fire-mission-toolbar">
+      <div>
+        <h2>灭火任务列表</h2>
+        <span>按运行状态追踪 FC100 灭火任务和火情处置进度</span>
+      </div>
       <a-select
         v-model:value="statusFilter"
-        style="width: 180px"
+        class="fire-mission-filter"
         @change="onStatusChange"
         placeholder="筛选状态"
       >
@@ -16,27 +19,31 @@
     </div>
 
     <a-table
+      class="fire-mission-table"
       :columns="columns"
       :data-source="missions"
       :loading="loading"
       :row-key="(r: FireMissionDTO) => r.missionNo"
       :pagination="{ pageSize: 20 }"
-      :scroll="{ x: 1680 }"
+      :scroll="{ x: 1280 }"
     >
+      <template #missionNoCell="{ record }: { record: FireMissionDTO }">
+        <div class="mission-number-cell">
+          <strong>{{ record.missionNo }}</strong>
+        </div>
+      </template>
       <template #fireEventCell="{ record }: { record: FireMissionDTO }">
-        <div class="mission-fire-event">
-          <strong>{{ getMissionFireEvent(record)?.eventId || `事件 ${record.fireEventId}` }}</strong>
-          <span>
-            {{ displayFireLevel(getMissionFireEvent(record)?.fireLevel) }}
-            · 置信度 {{ formatConfidence(getMissionFireEvent(record)?.confidence) }}
-            · 温度 {{ formatTemperature(getMissionFireEvent(record)?.thermalTemperature) }}
-          </span>
-          <span>
-            {{ formatCoordinate(getMissionFireEvent(record)) }}
-          </span>
-          <span>
-            设备 {{ getMissionFireEvent(record)?.deviceSn || '-' }}
-          </span>
+        <div class="mission-fire-summary">
+          <div class="mission-title-line">
+            <span class="fire-level-pill">{{ displayFireLevel(getMissionFireEvent(record)?.fireLevel) }}</span>
+            <strong>{{ getMissionFireEvent(record)?.eventId || `事件 ${record.fireEventId}` }}</strong>
+          </div>
+          <div class="mission-meta-row">
+            <span>置信度 {{ formatConfidence(getMissionFireEvent(record)?.confidence) }}</span>
+            <span>温度 {{ formatTemperature(getMissionFireEvent(record)?.thermalTemperature) }}</span>
+          </div>
+          <div class="mission-muted-line">{{ formatCoordinate(getMissionFireEvent(record)) }}</div>
+          <div class="mission-muted-line">设备 {{ getMissionFireEvent(record)?.deviceSn || '-' }}</div>
         </div>
       </template>
       <template #statusCell="{ record }: { record: FireMissionDTO }">
@@ -52,18 +59,30 @@
         </div>
       </template>
       <template #actionCell="{ record }: { record: FireMissionDTO }">
-        <a-space direction="vertical" size="small" class="mission-action-stack">
-          <a-button size="small" @click="router.push(`/fire-mission-detail/${record.missionNo}`)">
-            详情
-          </a-button>
-          <ActionButtons
-            v-if="record.availableActions?.length"
-            :mission-no="record.missionNo"
-            :actions="record.availableActions"
-            @refresh="loadMissions(statusFilter || undefined)"
-          />
-          <span v-else class="mission-no-actions">暂无可执行操作</span>
-        </a-space>
+        <div class="mission-action-panel">
+          <div class="mission-action-primary">
+            <ActionButtons
+              v-if="record.availableActions?.length"
+              :mission-no="record.missionNo"
+              :actions="record.availableActions"
+              :only-actions="['PREPARE_FC100_DELIVERY']"
+              @refresh="loadMissions(statusFilter || undefined)"
+            />
+            <a-button class="mission-detail-button" size="small" @click="router.push(`/fire-mission-detail/${record.missionNo}`)">
+              详情
+            </a-button>
+          </div>
+          <div class="mission-action-secondary">
+            <ActionButtons
+              v-if="record.availableActions?.length"
+              :mission-no="record.missionNo"
+              :actions="record.availableActions"
+              :exclude-actions="['PREPARE_FC100_DELIVERY']"
+              @refresh="loadMissions(statusFilter || undefined)"
+            />
+            <span v-else class="mission-no-actions">暂无可执行操作</span>
+          </div>
+        </div>
       </template>
       <template #createTimeCell="{ record }: { record: FireMissionDTO }">
         {{ new Date(record.createTime).toLocaleString('zh-CN') }}
@@ -211,13 +230,13 @@ function formatAircraftModel (mission: FireMissionDTO) {
 }
 
 const columns = [
-  { title: '任务编号', dataIndex: 'missionNo', key: 'missionNo', width: 200 },
-  { title: '火情信息', key: 'fireEvent', width: 320, slots: { customRender: 'fireEventCell' } },
-  { title: '无人机信息', key: 'aircraft', width: 180, slots: { customRender: 'aircraftCell' } },
-  { title: '运行状态', key: 'status', width: 190, slots: { customRender: 'statusCell' } },
-  { title: '载水量(L)', dataIndex: 'waterLoadLiters', key: 'waterLoadLiters', width: 100 },
-  { title: '创建时间', key: 'createTime', width: 170, slots: { customRender: 'createTimeCell' } },
-  { title: '操作', key: 'action', width: 360, fixed: 'right', slots: { customRender: 'actionCell' } },
+  { title: '任务编号', key: 'missionNo', width: 240, slots: { customRender: 'missionNoCell' } },
+  { title: '火情信息', key: 'fireEvent', width: 360, slots: { customRender: 'fireEventCell' } },
+  { title: '无人机信息', key: 'aircraft', width: 200, slots: { customRender: 'aircraftCell' } },
+  { title: '运行状态', key: 'status', width: 210, slots: { customRender: 'statusCell' } },
+  { title: '载水量(L)', dataIndex: 'waterLoadLiters', key: 'waterLoadLiters', width: 110 },
+  { title: '创建时间', key: 'createTime', width: 180, slots: { customRender: 'createTimeCell' } },
+  { title: '操作', key: 'action', width: 300, slots: { customRender: 'actionCell' } },
 ]
 
 onMounted(() => {
@@ -226,26 +245,87 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-.mission-action-stack {
-  max-width: 320px;
+.fire-mission-page {
+  padding: 24px;
+  background: #f5f7fa;
+  min-height: 100%;
 }
 
-.mission-fire-event,
+.fire-mission-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+
+  h2 {
+    margin: 0;
+    color: #1f2933;
+    font-size: 22px;
+    font-weight: 650;
+    line-height: 1.3;
+  }
+
+  span {
+    display: block;
+    margin-top: 4px;
+    color: #8c8c8c;
+    font-size: 13px;
+  }
+}
+
+.fire-mission-filter {
+  width: 180px;
+  flex: 0 0 auto;
+}
+
+.fire-mission-table {
+  background: #fff;
+  border: 1px solid #edf0f3;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fire-mission-table :deep(.ant-table) {
+  color: #2f343b;
+}
+
+.fire-mission-table :deep(.ant-table-thead > tr > th) {
+  background: #fbfcfd;
+  border-bottom: 1px solid #edf0f3;
+  color: #4b5563;
+  font-weight: 600;
+  padding: 14px 18px;
+}
+
+.fire-mission-table :deep(.ant-table-tbody > tr > td) {
+  padding: 18px;
+  vertical-align: middle;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.fire-mission-table :deep(.ant-table-tbody > tr:hover > td) {
+  background: #f8fbff;
+}
+
+.mission-number-cell,
 .mission-aircraft,
 .mission-runtime {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
-.mission-fire-event strong,
+.mission-number-cell strong,
 .mission-aircraft strong {
   color: #262626;
   font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
 }
 
-.mission-fire-event span,
+.mission-number-cell span,
 .mission-aircraft span,
 .mission-runtime span {
   color: #8c8c8c;
@@ -253,17 +333,119 @@ onMounted(() => {
   line-height: 1.35;
 }
 
+.mission-fire-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mission-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  strong {
+    display: inline;
+    min-width: 0;
+    color: #262626;
+    font-weight: 600;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+}
+
+.fire-level-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border: 1px solid #ffd6d6;
+  border-radius: 999px;
+  background: #fff7f7;
+  color: #cf3f3f;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.mission-meta-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #5c6670;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.mission-muted-line {
+  color: #9aa3ad;
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.mission-runtime :deep(.ant-tag) {
+  align-self: flex-start;
+  margin-right: 0;
+  min-width: 88px;
+  text-align: center;
+}
+
+.mission-action-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 280px;
+}
+
+.mission-action-primary,
+.mission-action-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.mission-action-secondary :deep(.ant-space) {
+  gap: 8px 8px !important;
+}
+
+.mission-action-primary :deep(.ant-btn) {
+  height: 34px;
+  line-height: 1;
+}
+
+.mission-action-secondary :deep(.fire-action-button--force-fail) {
+  order: 20;
+}
+
+.mission-action-secondary :deep(.fire-action-button--cancel) {
+  order: 30;
+}
+
+.mission-action-secondary :deep(.ant-btn),
+.mission-detail-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.mission-detail-button {
+  color: #2563eb;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
 .mission-no-actions {
   color: #8c8c8c;
   font-size: 12px;
-}
-
-.mission-action-stack :deep(.ant-space) {
-  row-gap: 6px;
-}
-
-.mission-action-stack :deep(.ant-btn) {
-  font-size: 14px;
-  line-height: 1.5715;
 }
 </style>

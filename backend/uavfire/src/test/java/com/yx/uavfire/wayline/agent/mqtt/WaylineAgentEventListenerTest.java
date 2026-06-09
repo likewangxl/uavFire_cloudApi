@@ -29,9 +29,11 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class WaylineAgentEventListenerTest {
 
@@ -106,6 +108,48 @@ class WaylineAgentEventListenerTest {
         assertEquals(Double.valueOf(5.2), p.getAircraft().getSpeed());
         assertEquals(Integer.valueOf(73), p.getBatteryPercent());
         assertEquals("FIX", p.getRtkStatus());
+    }
+
+    @Test
+    void onEvent_persistsProgressPercentFromStoredWaypointCountWhenAgentOmitsPercent() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        when(mapper.selectOne(any())).thenReturn(PlannedWaylineEntity.builder()
+                .flightId("m-progress")
+                .waypointsJson("[{\"order\":1},{\"order\":2},{\"order\":3},{\"order\":4},{\"order\":5}]")
+                .build());
+        String payload = "{\"method\":\"wayline_progress\",\"timestamp\":2000,"
+                + "\"data\":{\"mission_id\":\"m-progress\",\"mission_file_name\":\"f.kmz\",\"wayline_id\":0,"
+                + "\"current_waypoint_index\":2}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue(2));
+        assertTrue(params.containsValue(5));
+        assertTrue(params.containsValue(60));
+        assertTrue(params.containsValue("executing"));
+    }
+
+    @Test
+    void onEvent_persistsReadyAfterExecutingAsFinishedWithFullProgress() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":1000,"
+                + "\"data\":{\"mission_id\":\"m-finished\",\"msdk_state\":\"READY\","
+                + "\"previous_msdk_state\":\"EXECUTING\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue("finished"));
+        assertTrue(params.containsValue(100));
     }
 
     @Test

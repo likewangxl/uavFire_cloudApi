@@ -51,6 +51,21 @@ class RealMsdkStreamProvider(
         )
     }
 
+    override suspend fun captureVisibleSnapshot(droneSn: String): StreamStartResult {
+        binder.focusVisible(droneSn)
+        restartLiveStream(droneSn)
+        val snapshotPath = binder.captureVisibleSnapshot(droneSn)
+        visibleState = BoundStreamState.BOUND
+        thermalState = BoundStreamState.IDLE
+        playbackStatus = "visible-live-ready"
+        return StreamStartResult(
+            visibleState = visibleState,
+            thermalState = thermalState,
+            playbackStatus = playbackStatus,
+            visibleSnapshotPath = snapshotPath,
+        )
+    }
+
     override suspend fun focusThermal(droneSn: String): StreamStartResult {
         return focusThermal(droneSn, null)
     }
@@ -70,7 +85,12 @@ class RealMsdkStreamProvider(
                     )
                 }
             } else {
-                binder.locateAndMeasureThermalHotspotC(thermalMeasureRegion)
+                binder.measureThermalRegionTemperatureC(thermalMeasureRegion)?.let {
+                    ThermalMeasurementResult(
+                        temperatureC = it,
+                        region = thermalMeasureRegion,
+                    )
+                }
             }
         }.getOrNull()
         visibleState = BoundStreamState.BOUND
@@ -102,6 +122,57 @@ class RealMsdkStreamProvider(
             playbackStatus = playbackStatus,
             thermalCenterTemperatureC = thermalMeasurement?.temperatureC,
             thermalMeasureRegion = thermalMeasurement?.region,
+            thermalMeasurements = thermalMeasurement?.measurements.orEmpty(),
+        )
+    }
+
+    override suspend fun measureThermalRegion(
+        droneSn: String,
+        thermalMeasureRegion: ThermalMeasureRegion,
+    ): StreamStartResult {
+        binder.focusThermal(droneSn)
+        val thermalMeasurement = runCatching {
+            binder.measureThermalRegionTemperatureC(thermalMeasureRegion)?.let {
+                ThermalMeasurementResult(
+                    temperatureC = it,
+                    region = thermalMeasureRegion,
+                )
+            }
+        }.getOrNull()
+        visibleState = BoundStreamState.BOUND
+        thermalState = BoundStreamState.BOUND
+        playbackStatus = "shared-side-by-side-preview"
+        return StreamStartResult(
+            visibleState = visibleState,
+            thermalState = thermalState,
+            thermalFailureMessage = "thermal-measured",
+            playbackStatus = playbackStatus,
+            thermalCenterTemperatureC = thermalMeasurement?.temperatureC,
+            thermalMeasureRegion = thermalMeasurement?.region,
+            thermalMeasurements = thermalMeasurement?.measurements.orEmpty(),
+        )
+    }
+
+    override suspend fun measureThermalHotspot(
+        droneSn: String,
+        seedRegion: ThermalMeasureRegion?,
+    ): StreamStartResult {
+        binder.focusThermal(droneSn)
+        val thermalMeasurement = runCatching {
+            binder.locateAndMeasureThermalHotspotC(seedRegion)
+        }.getOrNull()
+        visibleState = BoundStreamState.BOUND
+        thermalState = BoundStreamState.BOUND
+        playbackStatus = "shared-side-by-side-preview"
+        return StreamStartResult(
+            visibleState = visibleState,
+            thermalState = thermalState,
+            thermalFailureMessage = "thermal-hotspot-measured",
+            playbackStatus = playbackStatus,
+            thermalCenterTemperatureC = thermalMeasurement?.temperatureC,
+            thermalMeasureRegion = thermalMeasurement?.region,
+            thermalMeasurements = thermalMeasurement?.measurements.orEmpty(),
+            thermalSnapshotPath = thermalMeasurement?.thermalSnapshotPath,
         )
     }
 
@@ -132,6 +203,8 @@ private class StubMsdkStreamBinder : MsdkStreamBinder {
     override suspend fun focusVisible(droneSn: String) = Unit
 
     override suspend fun focusThermal(droneSn: String) = Unit
+
+    override suspend fun captureVisibleSnapshot(droneSn: String): String? = null
 
     override suspend fun measureThermalCenterTemperatureC(): Double? = null
 

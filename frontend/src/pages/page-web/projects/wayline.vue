@@ -5,20 +5,27 @@
       <a-row>
         <a-col :span="1"></a-col>
         <a-col :span="15">{{ isTaskRouteSelector ? '选择KMZ航线文件' : '航线任务' }}</a-col>
-        <a-col :span="8" v-if="importVisible" class="flex-row flex-justify-end flex-align-center">
-          <a-upload
-            name="file"
-            accept=".kmz"
-            :multiple="false"
-            :before-upload="beforeUpload"
-            :show-upload-list="false"
-            :custom-request="uploadFile"
-          >
-            <a-button type="text" style="color: white;" :loading="loading">
-              <SelectOutlined />
-              KMZ同步
+        <a-col :span="8" v-if="importVisible" class="wayline-header-actions">
+          <a-tooltip title="导入航线">
+            <a-upload
+              name="file"
+              accept=".kmz"
+              :multiple="false"
+              :before-upload="beforeUpload"
+              :show-upload-list="false"
+              :custom-request="uploadFile"
+            >
+              <a-button class="wayline-header-icon-button" type="text" :loading="loading">
+                <ImportOutlined />
+              </a-button>
+            </a-upload>
+          </a-tooltip>
+          <a-tooltip :title="planningOverlayOpen ? '收起航线规划' : '创建新航线'">
+            <a-button class="wayline-header-icon-button" type="text" @click="togglePlanningOverlay">
+              <MinusOutlined v-if="planningOverlayOpen" />
+              <PlusOutlined v-else />
             </a-button>
-          </a-upload>
+          </a-tooltip>
         </a-col>
       </a-row>
     </div>
@@ -29,370 +36,9 @@
         :bordered="false"
         expandIconPosition="right"
         accordion
+        default-active-key="monitor-wayline"
         style="background: #232323;">
         <a-collapse-panel key="monitor-wayline" header="监测火情航线" style="border-bottom: 1px solid #4f4f4f;">
-      <!-- Planned Wayline (click-to-fly), see WORK_RECORD.md §8 -->
-      <div class="workflow-section-note">
-        <strong>M4T 监测任务</strong>
-        <span>用于规划、保存和执行火情巡查航线。</span>
-      </div>
-      <div class="planning-panel">
-        <div class="planning-panel-title">
-          <span>M4T 监测航线规划</span>
-          <a-tooltip title="飞行器可选。可先布点并保存规划航线；生成文件不需要设备，下发准备前再选择或绑定目标机场/飞行器。">
-            <QuestionCircleOutlined style="margin-left: 6px; color: #8c8c8c;" />
-          </a-tooltip>
-        </div>
-        <div class="planning-row">
-          <span class="planning-label">飞行器（可选）</span>
-          <a-select
-            size="small"
-            style="width: 100%;"
-            :value="selectedAircraftSn"
-            :disabled="planningState.executing || planningState.active"
-            placeholder="可不选；下发准备前再选择目标"
-            @change="onSelectAircraft">
-            <a-select-option v-for="d in onlineAircrafts" :key="d.sn" :value="d.sn">
-              {{ d.callsign || d.sn }}<span v-if="d.aircraftModelKey"> · {{ d.aircraftModelKey }}</span>
-            </a-select-option>
-          </a-select>
-        </div>
-        <div class="planning-row planning-two-col">
-          <div>
-            <span class="planning-label">高度（米）</span>
-            <a-input-number
-              size="small"
-              style="width: 100%;"
-              :min="15"
-              :step="1"
-              :disabled="planningState.executing"
-              :value="planningState.defaultHeight"
-              @change="onPlanningDefaultHeightChange" />
-          </div>
-          <div>
-            <span class="planning-label">最大速度（米/秒）</span>
-            <a-input-number
-              size="small"
-              style="width: 100%;"
-              :min="2"
-              :max="15"
-              :step="1"
-              :disabled="planningState.executing"
-              :value="planningState.maxSpeed"
-              @change="onPlanningMaxSpeedChange" />
-          </div>
-        </div>
-        <!-- L1: 全局 mission 配置 -->
-        <div class="planning-row">
-          <a-button
-            size="small"
-            type="link"
-            style="padding: 0;"
-            @click="advancedConfigOpen = !advancedConfigOpen">
-            {{ advancedConfigOpen ? '▼ 高级配置' : '▶ 高级配置' }}
-          </a-button>
-        </div>
-        <div class="planning-advanced" v-if="advancedConfigOpen">
-          <div class="planning-row planning-two-col">
-            <div>
-              <span class="planning-label">完成动作</span>
-              <a-select
-                size="small"
-                style="width: 100%;"
-                :value="planningState.finishAction"
-                placeholder="goHome (默认)"
-                allow-clear
-                :disabled="planningState.executing"
-                @change="(v: any) => planningSetMissionConfig({ finishAction: v })">
-                <a-select-option value="goHome">goHome 返航</a-select-option>
-                <a-select-option value="autoLand">autoLand 原地降落</a-select-option>
-                <a-select-option value="noAction">noAction 不动作</a-select-option>
-                <a-select-option value="gotoFirstWaypoint">回到首点</a-select-option>
-              </a-select>
-            </div>
-            <div>
-              <span class="planning-label">RC 失联</span>
-              <a-select
-                size="small"
-                style="width: 100%;"
-                :value="planningState.exitOnRcLost"
-                placeholder="goContinue (默认)"
-                allow-clear
-                :disabled="planningState.executing"
-                @change="(v: any) => planningSetMissionConfig({ exitOnRcLost: v })">
-                <a-select-option value="goContinue">goContinue 继续飞</a-select-option>
-                <a-select-option value="executeLostAction">executeLostAction 执行失联动作</a-select-option>
-              </a-select>
-            </div>
-          </div>
-          <div class="planning-row planning-two-col">
-            <div>
-              <span class="planning-label">失联动作</span>
-              <a-select
-                size="small"
-                style="width: 100%;"
-                :value="planningState.rcLostAction"
-                placeholder="goBack (默认)"
-                allow-clear
-                :disabled="planningState.executing"
-                @change="(v: any) => planningSetMissionConfig({ rcLostAction: v })">
-                <a-select-option value="hover">hover 悬停</a-select-option>
-                <a-select-option value="goBack">goBack 返航</a-select-option>
-                <a-select-option value="landing">landing 降落</a-select-option>
-              </a-select>
-            </div>
-            <div>
-              <span class="planning-label">起飞安全高度 (m)</span>
-              <a-input-number
-                size="small"
-                style="width: 100%;"
-                :min="2"
-                :max="1500"
-                :step="1"
-                :value="planningState.takeoffSecurityHeight"
-                placeholder="20 (默认)"
-                :disabled="planningState.executing"
-                @change="(v: any) => planningSetMissionConfig({ takeoffSecurityHeight: v })" />
-            </div>
-          </div>
-          <div class="planning-row planning-two-col">
-            <div>
-              <span class="planning-label">转场速度 (m/s)</span>
-              <a-input-number
-                size="small"
-                style="width: 100%;"
-                :min="1"
-                :max="15"
-                :step="1"
-                :value="planningState.globalTransitionalSpeed"
-                placeholder="5 (默认)"
-                :disabled="planningState.executing"
-                @change="(v: any) => planningSetMissionConfig({ globalTransitionalSpeed: v })" />
-            </div>
-            <div>
-              <span class="planning-label">RTH 高度 (m, 仅 dock)</span>
-              <a-input-number
-                size="small"
-                style="width: 100%;"
-                :min="2"
-                :max="1500"
-                :step="1"
-                :value="planningState.rthAltitude"
-                placeholder="飞机默认"
-                :disabled="planningState.executing"
-                @change="(v: any) => planningSetMissionConfig({ rthAltitude: v })" />
-            </div>
-          </div>
-        </div>
-        <div class="planning-row planning-actions">
-          <a-button
-            v-if="!planningState.active"
-            size="small"
-            type="primary"
-            :disabled="planningState.executing"
-            @click="onStartPlacing">
-            开始布点
-          </a-button>
-          <a-button
-            v-else
-            size="small"
-            @click="onStopPlacing">
-            停止布点
-          </a-button>
-          <a-button
-            size="small"
-            :disabled="planningState.executing || planningState.waypoints.length === 0"
-            @click="onClearWaypoints">
-            清空
-          </a-button>
-        </div>
-        <div class="planning-row">
-          <span class="planning-label">航点（{{ planningState.waypoints.length }}）</span>
-          <div class="planning-empty" v-if="planningState.waypoints.length === 0">
-            暂无航点。请开始布点后在地图上点击添加。
-          </div>
-          <div class="planning-waypoints" v-else>
-            <div
-              v-for="(wp, idx) in planningState.waypoints"
-              :key="wp.id"
-              class="planning-wp"
-              :class="{ active: planningState.executing && planningState.currentIndex === idx }">
-              <div class="planning-wp-head">
-                <span class="planning-wp-index">#{{ idx + 1 }}</span>
-                <span class="planning-wp-coord">
-                  {{ wp.wgsLat.toFixed(6) }}, {{ wp.wgsLng.toFixed(6) }}
-                </span>
-              </div>
-              <div class="planning-wp-tail">
-                <a-input-number
-                  size="small"
-                  :min="15"
-                  :step="1"
-                  :disabled="planningState.executing"
-                  :value="wp.height"
-                  @change="(v) => onUpdateHeight(wp.id, v)"
-                  style="width: 70px;" />
-                <span class="planning-wp-unit">m</span>
-                <a-button size="small" :disabled="planningState.executing" @click="toggleWaypointExpand(wp.id)">
-                  {{ expandedWaypointId === wp.id ? '收起' : '高级' }}
-                </a-button>
-                <a-button size="small" :disabled="planningState.executing || idx === 0" @click="onMove(wp.id, 'up')">↑</a-button>
-                <a-button size="small" :disabled="planningState.executing || idx === planningState.waypoints.length - 1" @click="onMove(wp.id, 'down')">↓</a-button>
-                <a-button size="small" danger :disabled="planningState.executing" @click="onRemove(wp.id)">✕</a-button>
-              </div>
-              <!-- L1 per-waypoint 高级编辑 -->
-              <div class="planning-wp-advanced" v-if="expandedWaypointId === wp.id">
-                <div class="planning-wp-row">
-                  <span class="planning-wp-row-label">飞行速度</span>
-                  <a-input-number
-                    size="small"
-                    :min="1"
-                    :max="15"
-                    :step="0.5"
-                    :value="wp.speed"
-                    placeholder="走全局"
-                    :disabled="planningState.executing"
-                    @change="(v: any) => planningUpdateField(wp.id, 'speed', v ?? undefined)"
-                    style="width: 100%;" />
-                </div>
-                <div class="planning-wp-row planning-two-col">
-                  <div>
-                    <span class="planning-wp-row-label">云台俯仰°</span>
-                    <a-input-number
-                      size="small"
-                      :min="-90"
-                      :max="30"
-                      :step="5"
-                      :value="wp.gimbalPitch"
-                      placeholder="0"
-                      :disabled="planningState.executing"
-                      @change="(v: any) => planningUpdateField(wp.id, 'gimbalPitch', v ?? undefined)"
-                      style="width: 100%;" />
-                  </div>
-                  <div>
-                    <span class="planning-wp-row-label">云台偏航°</span>
-                    <a-input-number
-                      size="small"
-                      :min="-180"
-                      :max="180"
-                      :step="5"
-                      :value="wp.gimbalYaw"
-                      placeholder="跟随机头"
-                      :disabled="planningState.executing"
-                      @change="(v: any) => planningUpdateField(wp.id, 'gimbalYaw', v ?? undefined)"
-                      style="width: 100%;" />
-                  </div>
-                </div>
-                <div class="planning-wp-row planning-two-col">
-                  <div>
-                    <span class="planning-wp-row-label">朝向模式</span>
-                    <a-select
-                      size="small"
-                      :value="wp.headingMode"
-                      placeholder="followWayline"
-                      allow-clear
-                      :disabled="planningState.executing"
-                      @change="(v: any) => planningUpdateField(wp.id, 'headingMode', v ?? undefined)"
-                      style="width: 100%;">
-                      <a-select-option value="followWayline">followWayline</a-select-option>
-                      <a-select-option value="smoothTransition">smoothTransition</a-select-option>
-                      <a-select-option value="fixed">fixed</a-select-option>
-                      <a-select-option value="towardPOI">towardPOI</a-select-option>
-                    </a-select>
-                  </div>
-                  <div>
-                    <span class="planning-wp-row-label">朝向角°</span>
-                    <a-input-number
-                      size="small"
-                      :min="-180"
-                      :max="180"
-                      :step="5"
-                      :value="wp.headingAngle"
-                      placeholder="0 (fixed 用)"
-                      :disabled="planningState.executing || wp.headingMode !== 'fixed'"
-                      @change="(v: any) => planningUpdateField(wp.id, 'headingAngle', v ?? undefined)"
-                      style="width: 100%;" />
-                  </div>
-                </div>
-                <div class="planning-wp-row planning-two-col">
-                  <div>
-                    <span class="planning-wp-row-label">转弯模式</span>
-                    <a-select
-                      size="small"
-                      :value="wp.turnMode"
-                      placeholder="默认平滑过弯"
-                      allow-clear
-                      :disabled="planningState.executing"
-                      @change="(v: any) => planningUpdateField(wp.id, 'turnMode', v ?? undefined)"
-                      style="width: 100%;">
-                      <a-select-option value="coordinateTurn">协调转弯</a-select-option>
-                      <a-select-option value="toPointAndStopWithDiscontinuityCurvature">停止转弯</a-select-option>
-                      <a-select-option value="toPointAndStopWithContinuityCurvature">平滑停止</a-select-option>
-                      <a-select-option value="toPointAndPassWithContinuityCurvature">平滑通过</a-select-option>
-                    </a-select>
-                  </div>
-                  <div>
-                    <span class="planning-wp-row-label">转弯阻尼 (m)</span>
-                    <a-input-number
-                      size="small"
-                      :min="0"
-                      :max="500"
-                      :step="1"
-                      :value="wp.turnDamping"
-                      placeholder="10"
-                      :disabled="planningState.executing"
-                      @change="(v: any) => planningUpdateField(wp.id, 'turnDamping', v ?? undefined)"
-                      style="width: 100%;" />
-                  </div>
-                </div>
-                <div class="planning-wp-row">
-                  <span class="planning-wp-row-label">动作 (执行到该航点时)</span>
-                  <WaypointActionEditor
-                    :actions="wp.actions"
-                    @add="(fn: any) => planningAddAction(wp.id, fn)"
-                    @remove="(i: number) => planningRemoveAction(wp.id, i)"
-                    @updateParam="(i: number, k: string, v: any) => planningUpdateActionParam(wp.id, i, k, v)" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="planning-row planning-actions">
-          <a-button
-            v-if="!planningState.executing"
-            size="small"
-            type="primary"
-            :disabled="planningState.waypoints.length === 0 || !selectedAircraftSn"
-            @click="onStartExecution">
-            执行
-          </a-button>
-          <a-button
-            v-else
-            size="small"
-            danger
-            @click="onStopExecution">
-            停止执行
-          </a-button>
-        </div>
-        <div class="planning-row planning-actions">
-          <a-button
-            size="small"
-            :disabled="planningState.executing || planningState.waypoints.length === 0"
-            @click="onSavePlannedWayline(false)">
-            保存
-          </a-button>
-          <a-button
-            size="small"
-            :disabled="planningState.executing || planningState.waypoints.length === 0"
-            @click="onSavePlannedWayline(true)">
-            另存为
-          </a-button>
-        </div>
-        <div class="planning-status" v-if="planningState.statusText">
-          <span>{{ planningState.statusText }}</span>
-        </div>
-      </div>
-      <div class="planning-section-gap"></div>
       <div class="planned-wayline-panel">
         <div class="planned-wayline-title">
           <span>监测航线库</span>
@@ -430,7 +76,8 @@
               <WaylineMissionMonitor
                 :workspace-id="monitorWorkspaceId"
                 :record="record"
-                @change="(updated: any) => onMissionMonitorChange(updated)" />
+                @change="(updated: any) => onMissionMonitorChange(updated)"
+                @execute="openExecuteTargetModal" />
             </div>
             <div class="planned-wayline-actions">
               <a-button size="small" @click.stop="showPlannedWaylineDetail(record)">详情</a-button>
@@ -873,15 +520,437 @@
           </div>
         </div>
       </a-modal>
+      <a-modal
+        v-model:visible="executeTargetModal.visible"
+        width="520px"
+        title="选择执行飞行器"
+        :confirmLoading="executeTargetModal.loading"
+        ok-text="确认执行"
+        cancel-text="取消"
+        @ok="confirmExecuteTarget">
+        <div class="execute-target-modal">
+          <div class="execute-target-summary">
+            <span>航线</span>
+            <strong>{{ executeTargetModal.record?.name || '-' }}</strong>
+          </div>
+          <div class="execute-target-field">
+            <span class="planning-label">在线飞行器</span>
+            <a-select
+              style="width: 100%;"
+              :value="executeTargetModal.targetSn"
+              placeholder="请选择在线飞行器"
+              @change="(sn: string) => executeTargetModal.targetSn = sn">
+              <a-select-option
+                v-for="aircraft in executeTargetOptions"
+                :key="aircraft.sn"
+                :value="aircraft.sn">
+                {{ aircraft.callsign || aircraft.sn }}<span v-if="aircraft.aircraftModelKey"> · {{ aircraft.aircraftModelKey }}</span>
+              </a-select-option>
+            </a-select>
+          </div>
+          <div class="planning-empty" v-if="executeTargetOptions.length === 0">
+            当前没有检测到在线飞行器，请确认 MSDK 程序在线后点击左侧刷新。
+          </div>
+        </div>
+      </a-modal>
     </div>
     </a-spin>
+    <Teleport v-if="showPlanningTools && planningOverlayReady" to="#wayline-planning-overlay-host">
+      <div class="wayline-map-planning-overlay">
+        <div v-if="planningOverlayOpen" class="wayline-map-planning-bar">
+          <div class="wayline-map-planning-title">
+            <span>航线规划</span>
+            <a-tooltip title="飞行器可选。可先布点并保存规划航线；生成文件不需要设备，下发准备前再选择或绑定目标机场/飞行器。">
+              <QuestionCircleOutlined class="wayline-map-planning-help" />
+            </a-tooltip>
+          </div>
+          <div class="wayline-map-planning-chip">
+            <span>高度</span>
+            <strong>{{ planningState.defaultHeight }} m</strong>
+          </div>
+          <div class="wayline-map-planning-chip">
+            <span>速度</span>
+            <strong>{{ planningState.maxSpeed }} m/s</strong>
+          </div>
+          <div class="wayline-map-planning-chip">
+            <span>航点</span>
+            <strong>{{ planningState.waypoints.length }}</strong>
+          </div>
+          <div class="wayline-map-planning-route-summary">
+            <span>航程 {{ formatRouteDistance(planningRouteStats.totalDistanceM) }}</span>
+            <span>预计 {{ formatRouteDuration(planningRouteStats.estimatedSeconds) }}</span>
+          </div>
+          <div class="wayline-map-planning-actions">
+            <div class="wayline-map-planning-action-stack">
+              <a-button
+                v-if="!planningState.active"
+                size="small"
+                type="primary"
+                :disabled="planningState.executing"
+                @click="onStartPlacing">
+                开始布点
+              </a-button>
+              <a-button
+                v-else
+                size="small"
+                @click="onStopPlacing">
+                停止布点
+              </a-button>
+              <a-button
+                size="small"
+                :disabled="planningState.executing || planningState.waypoints.length === 0"
+                @click="onClearWaypoints">
+                清空
+              </a-button>
+            </div>
+            <a-tooltip :title="planningDrawerOpen ? '收起' : '展开'">
+              <a-button class="wayline-map-collapse-button" size="small" @click="planningDrawerOpen = !planningDrawerOpen">
+                <DownOutlined />
+              </a-button>
+            </a-tooltip>
+          </div>
+        </div>
+
+        <div v-if="planningOverlayOpen && planningDrawerOpen" class="wayline-map-planning-drawer">
+          <div class="wayline-map-planning-drawer-head">
+            <div>
+              <span class="planning-drawer-kicker">当前规划</span>
+              <strong>规划参数</strong>
+            </div>
+            <div class="wayline-map-planning-drawer-actions">
+              <a-button size="small" type="link" @click="advancedConfigOpen = !advancedConfigOpen">
+                {{ advancedConfigOpen ? '收起高级配置' : '高级配置' }}
+              </a-button>
+            </div>
+          </div>
+          <div class="wayline-map-planning-drawer-grid">
+            <div class="planning-row planning-field-card">
+              <span class="planning-label">高度（米）</span>
+              <a-input-number
+                size="small"
+                style="width: 100%;"
+                :min="15"
+                :step="1"
+                :disabled="planningState.executing"
+                :value="planningState.defaultHeight"
+                @change="onPlanningDefaultHeightChange" />
+            </div>
+            <div class="planning-row planning-field-card">
+              <span class="planning-label">最大速度（米/秒）</span>
+              <a-input-number
+                size="small"
+                style="width: 100%;"
+                :min="2"
+                :max="15"
+                :step="1"
+                :disabled="planningState.executing"
+                :value="planningState.maxSpeed"
+                @change="onPlanningMaxSpeedChange" />
+            </div>
+          </div>
+
+          <div class="planning-advanced planning-map-advanced" v-if="advancedConfigOpen">
+            <div class="planning-row planning-two-col">
+              <div>
+                <span class="planning-label">完成动作</span>
+                <a-select
+                  size="small"
+                  style="width: 100%;"
+                  :value="planningState.finishAction"
+                  placeholder="goHome (默认)"
+                  allow-clear
+                  :disabled="planningState.executing"
+                  @change="(v: any) => planningSetMissionConfig({ finishAction: v })">
+                  <a-select-option value="goHome">goHome 返航</a-select-option>
+                  <a-select-option value="autoLand">autoLand 原地降落</a-select-option>
+                  <a-select-option value="noAction">noAction 不动作</a-select-option>
+                  <a-select-option value="gotoFirstWaypoint">回到首点</a-select-option>
+                </a-select>
+              </div>
+              <div>
+                <span class="planning-label">RC 失联</span>
+                <a-select
+                  size="small"
+                  style="width: 100%;"
+                  :value="planningState.exitOnRcLost"
+                  placeholder="goContinue (默认)"
+                  allow-clear
+                  :disabled="planningState.executing"
+                  @change="(v: any) => planningSetMissionConfig({ exitOnRcLost: v })">
+                  <a-select-option value="goContinue">goContinue 继续飞</a-select-option>
+                  <a-select-option value="executeLostAction">executeLostAction 执行失联动作</a-select-option>
+                </a-select>
+              </div>
+            </div>
+            <div class="planning-row planning-two-col">
+              <div>
+                <span class="planning-label">失联动作</span>
+                <a-select
+                  size="small"
+                  style="width: 100%;"
+                  :value="planningState.rcLostAction"
+                  placeholder="goBack (默认)"
+                  allow-clear
+                  :disabled="planningState.executing"
+                  @change="(v: any) => planningSetMissionConfig({ rcLostAction: v })">
+                  <a-select-option value="hover">hover 悬停</a-select-option>
+                  <a-select-option value="goBack">goBack 返航</a-select-option>
+                  <a-select-option value="landing">landing 降落</a-select-option>
+                </a-select>
+              </div>
+              <div>
+                <span class="planning-label">起飞安全高度 (m)</span>
+                <a-input-number
+                  size="small"
+                  style="width: 100%;"
+                  :min="2"
+                  :max="1500"
+                  :step="1"
+                  :value="planningState.takeoffSecurityHeight"
+                  placeholder="20 (默认)"
+                  :disabled="planningState.executing"
+                  @change="(v: any) => planningSetMissionConfig({ takeoffSecurityHeight: v })" />
+              </div>
+            </div>
+            <div class="planning-row planning-two-col">
+              <div>
+                <span class="planning-label">转场速度 (m/s)</span>
+                <a-input-number
+                  size="small"
+                  style="width: 100%;"
+                  :min="1"
+                  :max="15"
+                  :step="1"
+                  :value="planningState.globalTransitionalSpeed"
+                  placeholder="5 (默认)"
+                  :disabled="planningState.executing"
+                  @change="(v: any) => planningSetMissionConfig({ globalTransitionalSpeed: v })" />
+              </div>
+              <div>
+                <span class="planning-label">RTH 高度 (m, 仅 dock)</span>
+                <a-input-number
+                  size="small"
+                  style="width: 100%;"
+                  :min="2"
+                  :max="1500"
+                  :step="1"
+                  :value="planningState.rthAltitude"
+                  placeholder="飞机默认"
+                  :disabled="planningState.executing"
+                  @change="(v: any) => planningSetMissionConfig({ rthAltitude: v })" />
+              </div>
+            </div>
+          </div>
+
+          <div class="wayline-map-planning-content">
+            <div class="wayline-map-planning-waypoints">
+              <div class="wayline-map-planning-section-title">
+                <span>航点（{{ planningState.waypoints.length }}）</span>
+                <span v-if="planningState.active">地图点击添加航点中</span>
+              </div>
+              <div class="planning-empty" v-if="planningState.waypoints.length === 0">
+                暂无航点。请开始布点后在地图上点击添加。
+              </div>
+              <div class="planning-waypoints planning-waypoints--map" v-else>
+                <div
+                  v-for="(wp, idx) in planningState.waypoints"
+                  :key="wp.id"
+                  class="planning-wp"
+                  :class="{ active: planningState.executing && planningState.currentIndex === idx, selected: planningState.selectedWaypointId === wp.id }"
+                  @click="selectPlanningWaypoint(wp.id)">
+                  <div class="planning-wp-head">
+                    <span class="planning-wp-index">#{{ idx + 1 }}</span>
+                    <span class="planning-wp-coord">
+                      {{ wp.wgsLat.toFixed(5) }}, {{ wp.wgsLng.toFixed(5) }}
+                    </span>
+                    <span class="planning-wp-summary">高 {{ formatNumber(wp.height) }}m · 速 {{ formatNumber(wp.speed || planningState.maxSpeed) }}m/s</span>
+                  </div>
+                  <div class="planning-wp-tail">
+                    <a-input-number
+                      size="small"
+                      :min="15"
+                      :step="1"
+                      :disabled="planningState.executing"
+                      :value="wp.height"
+                      @change="(v) => onUpdateHeight(wp.id, v)"
+                      style="width: 70px;" />
+                    <span class="planning-wp-unit">m</span>
+                    <a-button size="small" :disabled="planningState.executing" @click="toggleWaypointExpand(wp.id)">
+                      {{ expandedWaypointId === wp.id ? '收起' : '高级' }}
+                    </a-button>
+                    <a-button size="small" :disabled="planningState.executing || idx === 0" @click="onMove(wp.id, 'up')">↑</a-button>
+                    <a-button size="small" :disabled="planningState.executing || idx === planningState.waypoints.length - 1" @click="onMove(wp.id, 'down')">↓</a-button>
+                    <a-button size="small" danger :disabled="planningState.executing" @click="onRemove(wp.id)">✕</a-button>
+                  </div>
+                  <div class="planning-wp-advanced" v-if="expandedWaypointId === wp.id">
+                    <div class="planning-wp-row">
+                      <span class="planning-wp-row-label">飞行速度</span>
+                      <a-input-number
+                        size="small"
+                        :min="1"
+                        :max="15"
+                        :step="0.5"
+                        :value="wp.speed"
+                        placeholder="走全局"
+                        :disabled="planningState.executing"
+                        @change="(v: any) => planningUpdateField(wp.id, 'speed', v ?? undefined)"
+                        style="width: 100%;" />
+                    </div>
+                    <div class="planning-wp-row planning-two-col">
+                      <div>
+                        <span class="planning-wp-row-label">云台俯仰°</span>
+                        <a-input-number
+                          size="small"
+                          :min="-90"
+                          :max="30"
+                          :step="5"
+                          :value="wp.gimbalPitch"
+                          placeholder="0"
+                          :disabled="planningState.executing"
+                          @change="(v: any) => planningUpdateField(wp.id, 'gimbalPitch', v ?? undefined)"
+                          style="width: 100%;" />
+                      </div>
+                      <div>
+                        <span class="planning-wp-row-label">云台偏航°</span>
+                        <a-input-number
+                          size="small"
+                          :min="-180"
+                          :max="180"
+                          :step="5"
+                          :value="wp.gimbalYaw"
+                          placeholder="跟随机头"
+                          :disabled="planningState.executing"
+                          @change="(v: any) => planningUpdateField(wp.id, 'gimbalYaw', v ?? undefined)"
+                          style="width: 100%;" />
+                      </div>
+                    </div>
+                    <div class="planning-wp-row planning-two-col">
+                      <div>
+                        <span class="planning-wp-row-label">朝向模式</span>
+                        <a-select
+                          size="small"
+                          :value="wp.headingMode"
+                          placeholder="followWayline"
+                          allow-clear
+                          :disabled="planningState.executing"
+                          @change="(v: any) => planningUpdateField(wp.id, 'headingMode', v ?? undefined)"
+                          style="width: 100%;">
+                          <a-select-option value="followWayline">followWayline</a-select-option>
+                          <a-select-option value="smoothTransition">smoothTransition</a-select-option>
+                          <a-select-option value="fixed">fixed</a-select-option>
+                          <a-select-option value="towardPOI">towardPOI</a-select-option>
+                        </a-select>
+                      </div>
+                      <div>
+                        <span class="planning-wp-row-label">朝向角°</span>
+                        <a-input-number
+                          size="small"
+                          :min="-180"
+                          :max="180"
+                          :step="5"
+                          :value="wp.headingAngle"
+                          placeholder="0 (fixed 用)"
+                          :disabled="planningState.executing || wp.headingMode !== 'fixed'"
+                          @change="(v: any) => planningUpdateField(wp.id, 'headingAngle', v ?? undefined)"
+                          style="width: 100%;" />
+                      </div>
+                    </div>
+                    <div class="planning-wp-row planning-two-col">
+                      <div>
+                        <span class="planning-wp-row-label">转弯模式</span>
+                        <a-select
+                          size="small"
+                          :value="wp.turnMode"
+                          placeholder="默认平滑过弯"
+                          allow-clear
+                          :disabled="planningState.executing"
+                          @change="(v: any) => planningUpdateField(wp.id, 'turnMode', v ?? undefined)"
+                          style="width: 100%;">
+                          <a-select-option value="coordinateTurn">协调转弯</a-select-option>
+                          <a-select-option value="toPointAndStopWithDiscontinuityCurvature">停止转弯</a-select-option>
+                          <a-select-option value="toPointAndStopWithContinuityCurvature">平滑停止</a-select-option>
+                          <a-select-option value="toPointAndPassWithContinuityCurvature">平滑通过</a-select-option>
+                        </a-select>
+                      </div>
+                      <div>
+                        <span class="planning-wp-row-label">转弯阻尼 (m)</span>
+                        <a-input-number
+                          size="small"
+                          :min="0"
+                          :max="500"
+                          :step="1"
+                          :value="wp.turnDamping"
+                          placeholder="10"
+                          :disabled="planningState.executing"
+                          @change="(v: any) => planningUpdateField(wp.id, 'turnDamping', v ?? undefined)"
+                          style="width: 100%;" />
+                      </div>
+                    </div>
+                    <div class="planning-wp-row">
+                      <span class="planning-wp-row-label">动作 (执行到该航点时)</span>
+                      <WaypointActionEditor
+                        :actions="wp.actions"
+                        @add="(fn: any) => planningAddAction(wp.id, fn)"
+                        @remove="(i: number) => planningRemoveAction(wp.id, i)"
+                        @updateParam="(i: number, k: string, v: any) => planningUpdateActionParam(wp.id, i, k, v)" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="wayline-map-planning-command-panel">
+              <div class="planning-status" v-if="planningState.statusText">
+                <span>{{ planningState.statusText }}</span>
+              </div>
+              <div class="wayline-map-planning-command-grid">
+                <a-button
+                  v-if="!planningState.executing"
+                  size="small"
+                  type="primary"
+                  :disabled="planningState.waypoints.length === 0 || !selectedAircraftSn"
+                  @click="onStartExecution">
+                  执行
+                </a-button>
+                <a-button
+                  v-else
+                  size="small"
+                  danger
+                  @click="onStopExecution">
+                  停止执行
+                </a-button>
+                <a-button
+                  size="small"
+                  :disabled="planningState.executing || planningState.waypoints.length === 0"
+                  @click="onSavePlannedWayline(false)">
+                  保存
+                </a-button>
+                <a-button
+                  size="small"
+                  :disabled="planningState.executing || planningState.waypoints.length === 0"
+                  @click="onSavePlannedWayline(true)">
+                  另存为
+                </a-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="planningOverlayOpen" class="wayline-map-planning-mini">
+          <button class="wayline-map-planning-edge-tab" type="button" @click="planningDrawerOpen = true">
+            <span>规划 {{ planningState.waypoints.length }}点</span>
+            <small>{{ planningState.active ? '布点中' : planningState.executing ? '执行中' : '点击展开' }}</small>
+          </button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script lang="ts" setup>
 import { reactive } from '@vue/reactivity'
 import { message, Modal } from 'ant-design-vue'
-import { computed, onMounted, onUnmounted, onUpdated, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, onUpdated, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   createPlannedWayline,
@@ -899,8 +968,8 @@ import {
   updatePlannedWayline,
 } from '/@/api/wayline'
 import { ELocalStorageKey, ERouterName, EDeviceTypeName } from '/@/types'
-import { EllipsisOutlined, RocketOutlined, CameraFilled, UserOutlined, SelectOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
-import { DEVICE_MODEL_KEY, DEVICE_NAME } from '/@/types/device'
+import { EllipsisOutlined, CameraFilled, UserOutlined, SelectOutlined, QuestionCircleOutlined, ImportOutlined, PlusOutlined, MinusOutlined, DownOutlined } from '@ant-design/icons-vue'
+import { DEVICE_MODEL_KEY, DEVICE_NAME, EModeCode } from '/@/types/device'
 import { useMyStore } from '/@/store'
 import { CreatePlannedWaylineBody, PlannedWaypoint, PlannedWaylineRecord, PlannedWaylineStatus, WaylineFile } from '/@/types/wayline'
 import { downloadFile } from '/@/utils/common'
@@ -925,6 +994,8 @@ import {
   startExecution as planningExecute,
   stopExecution as planningStopExec,
   setTargetAircraft as planningSetTarget,
+  planningRouteStats,
+  selectWaypoint as planningSelectWaypoint,
   buildPlannedWaylineBody,
   loadPlannedWayline,
   previewPlannedWayline,
@@ -949,15 +1020,42 @@ const showPlanningTools = computed(() => !isTaskRouteSelector.value)
 const planningState = getPlanningStateRaw()
 const selectedAircraftSn = ref('')
 const advancedConfigOpen = ref(false)
+const planningDrawerOpen = ref(false)
+const planningOverlayOpen = ref(false)
+const planningOverlayReady = ref(false)
 const expandedWaypointId = ref<string | null>(null)
+function togglePlanningOverlay () {
+  if (planningOverlayOpen.value) {
+    planningOverlayOpen.value = false
+    planningDrawerOpen.value = false
+    return
+  }
+  planningOverlayOpen.value = true
+  planningDrawerOpen.value = true
+}
 function toggleWaypointExpand (id: string) {
   expandedWaypointId.value = expandedWaypointId.value === id ? null : id
+}
+function selectPlanningWaypoint (id: string) {
+  planningSelectWaypoint(id)
+}
+function formatRouteDistance (meters: number) {
+  if (!Number.isFinite(meters) || meters <= 0) return '0 m'
+  return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`
+}
+function formatRouteDuration (seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0 s'
+  const roundedSeconds = Math.round(seconds)
+  if (roundedSeconds < 60) return `${roundedSeconds} s`
+  const minutes = Math.floor(roundedSeconds / 60)
+  const restSeconds = roundedSeconds % 60
+  return restSeconds > 0 ? `${minutes} min ${restSeconds} s` : `${minutes} min`
 }
 const monitorWorkspaceId = computed(() => localStorage.getItem(ELocalStorageKey.WorkspaceId) || '')
 function onMissionMonitorChange (updated: PlannedWaylineRecord) {
   const idx = plannedWaylinesData.data.findIndex(r => r.plannedWaylineId === updated.plannedWaylineId)
   if (idx >= 0) plannedWaylinesData.data.splice(idx, 1, updated)
-  setFlightPositionFromRecord(updated)
+  applyPlannedWaylineFlightPosition(updated)
 }
 
 interface AircraftSummary {
@@ -965,6 +1063,8 @@ interface AircraftSummary {
   callsign: string
   gatewaySn: string
   aircraftModelKey: string
+  source: 'cloud-topology' | 'msdk-agent'
+  lastSeen?: number
 }
 
 interface FileItem extends File {
@@ -975,7 +1075,34 @@ interface FileItem extends File {
 }
 
 const onlineAircraftMap = reactive({} as Record<string, AircraftSummary>)
+const msdkAircraftMap = reactive({} as Record<string, MsdkDeviceState>)
 const onlineAircrafts = computed<AircraftSummary[]>(() => Object.values(onlineAircraftMap))
+const executeTargetModal = reactive({
+  visible: false,
+  loading: false,
+  record: null as PlannedWaylineRecord | null,
+  targetSn: '',
+})
+const executeTargetOptions = computed<AircraftSummary[]>(() => {
+  const targetMap = new Map<string, AircraftSummary>()
+  onlineAircrafts.value.forEach(aircraft => {
+    if (aircraft.sn) targetMap.set(aircraft.sn, aircraft)
+  })
+  Object.values(store.state.msdkDeviceState.devices || {}).forEach((device: any) => {
+    if (!device?.aircraftSn || !device.online) return
+    if (!targetMap.has(device.aircraftSn)) {
+      targetMap.set(device.aircraftSn, {
+        sn: device.aircraftSn,
+        callsign: device.model || device.aircraftSn,
+        gatewaySn: device.gatewaySn || device.aircraftSn,
+        aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
+        source: 'msdk-agent',
+        lastSeen: device.updatedAt || Date.now(),
+      })
+    }
+  })
+  return Array.from(targetMap.values())
+})
 const plannedWaylinesLoading = ref(false)
 const plannedWaylinesData = reactive({
   data: [] as PlannedWaylineRecord[]
@@ -1147,6 +1274,8 @@ function isDeviceOnline (device: any): boolean {
 function upsertOnlineAircraft (seen: Set<string>, summary: AircraftSummary) {
   if (!summary.sn) return
   seen.add(summary.sn)
+  const existing = onlineAircraftMap[summary.sn]
+  if (existing?.source === 'msdk-agent' && summary.source !== 'msdk-agent') return
   onlineAircraftMap[summary.sn] = summary
 }
 
@@ -1167,31 +1296,112 @@ function syncManagedTopoAircrafts (devices: any[], seen: Set<string>) {
           childSn,
         gatewaySn: pickDeviceField(gateway, 'deviceSn', 'device_sn') || pickDeviceField(child, 'parentSn', 'parent_sn') || '',
         aircraftModelKey: inferAircraftModelKey(child) || DEFAULT_PLANNED_WAYLINE_MODEL,
+        source: 'cloud-topology',
+        lastSeen: Date.now(),
       })
     })
   })
 }
 
 function syncMsdkOnlineAircrafts (devices: MsdkDeviceState[], seen: Set<string>) {
+  store.commit('SET_MSDK_DEVICE_STATE', devices)
+  Object.keys(msdkAircraftMap).forEach(sn => {
+    delete msdkAircraftMap[sn]
+  })
   devices.forEach((device) => {
     if (!device.aircraftSn || !device.online) return
+    msdkAircraftMap[device.aircraftSn] = device
     upsertOnlineAircraft(seen, {
       sn: device.aircraftSn,
       callsign: device.model || device.aircraftSn,
       gatewaySn: device.gatewaySn || device.aircraftSn,
       aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
+      source: 'msdk-agent',
+      lastSeen: device.updatedAt || Date.now(),
     })
+    if ((selectedAircraftSn.value === device.aircraftSn || planningState.aircraftSn === device.aircraftSn) &&
+      device.longitude && device.latitude) {
+      setFlightPositionFromWgs(device.aircraftSn, device.longitude, device.latitude, {
+        height: device.height,
+        updatedAt: device.updatedAt || Date.now(),
+      })
+    }
   })
 }
 
 function syncSelectedAircraftFlightPosition (sn = selectedAircraftSn.value) {
   if (!sn) return
+  const msdkDevice = msdkAircraftMap[sn]
+  if (msdkDevice?.longitude && msdkDevice?.latitude) {
+    setFlightPositionFromWgs(sn, msdkDevice.longitude, msdkDevice.latitude, {
+      height: msdkDevice.height,
+      updatedAt: msdkDevice.updatedAt || Date.now(),
+    })
+    return
+  }
   const osd = store.state.deviceState.deviceInfo[sn]
   if (!osd) return
   setFlightPositionFromWgs(sn, (osd as any).longitude, (osd as any).latitude, {
     height: (osd as any).height,
     updatedAt: Date.now(),
   })
+}
+
+function getRecordAircraftSn (record: PlannedWaylineRecord | null | undefined) {
+  return record?.droneSn || record?.aircraftSn || ''
+}
+
+function getSingleOnlineMsdkAircraft () {
+  const msdkSnList = Object.keys(msdkAircraftMap)
+  return msdkSnList.length === 1 ? msdkSnList[0] : ''
+}
+
+function applyPrepareTargetSelection (sn: string) {
+  if (!sn) return
+  const summary = onlineAircraftMap[sn]
+  if (!summary) return
+  selectedAircraftSn.value = summary.sn
+  planningSetTarget(summary.gatewaySn, summary.sn)
+  syncSelectedAircraftFlightPosition(summary.sn)
+}
+
+function getMsdkAircraftSummary (sn: string): AircraftSummary | null {
+  const device = msdkAircraftMap[sn]
+  if (!device?.aircraftSn || !device.online) return null
+  return {
+    sn: device.aircraftSn,
+    callsign: device.model || device.aircraftSn,
+    gatewaySn: device.gatewaySn || device.aircraftSn,
+    aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
+    source: 'msdk-agent',
+    lastSeen: device.updatedAt || Date.now(),
+  }
+}
+
+function resolvePlanningExecutionTarget (): AircraftSummary | null {
+  const candidateSn = selectedAircraftSn.value || planningState.aircraftSn || getSingleOnlineMsdkAircraft()
+  if (!candidateSn) return null
+  return onlineAircraftMap[candidateSn] || getMsdkAircraftSummary(candidateSn)
+}
+
+function applyPlannedWaylineFlightPosition (record: PlannedWaylineRecord | null | undefined) {
+  const recordAircraftSn = getRecordAircraftSn(record)
+  if (!recordAircraftSn) return
+  const onlineMsdkSnList = Object.keys(msdkAircraftMap)
+  const msdkDevice = msdkAircraftMap[recordAircraftSn]
+  if (msdkDevice?.longitude && msdkDevice?.latitude) {
+    setFlightPositionFromWgs(recordAircraftSn, msdkDevice.longitude, msdkDevice.latitude, {
+      height: msdkDevice.height,
+      updatedAt: msdkDevice.updatedAt || Date.now(),
+      currentWaypointIndex: record?.currentWaypointIndex,
+      totalWaypoints: record?.totalWaypoints,
+    })
+    return
+  }
+  if (onlineMsdkSnList.length > 0) {
+    return
+  }
+  setFlightPositionFromRecord(record)
 }
 
 function syncFc100DeviceFlightPosition (props: DeliveryDeviceProperties | null) {
@@ -1327,6 +1537,10 @@ async function refreshOnlineAircrafts () {
     }
     selectedAircraftSn.value = ''
   }
+  const aircrafts = onlineAircrafts.value
+  if (!selectedAircraftSn.value && !planningState.executing && !planningState.active && aircrafts.length === 1) {
+    onSelectAircraft(aircrafts[0].sn)
+  }
 }
 
 function onSelectAircraft (sn: string) {
@@ -1388,12 +1602,15 @@ function onPlanningMaxSpeedChange (value: number | string | null) {
 }
 
 async function onStartExecution () {
-  const summary = onlineAircraftMap[selectedAircraftSn.value]
+  await refreshOnlineAircrafts()
+  const summary = resolvePlanningExecutionTarget()
   if (!summary) {
-    message.warning('请先选择在线飞行器。')
+    message.warning('执行航线前需要选择在线飞行器。')
     return
   }
+  selectedAircraftSn.value = summary.sn
   planningSetTarget(summary.gatewaySn, summary.sn)
+  syncSelectedAircraftFlightPosition(summary.sn)
   await planningExecute()
 }
 
@@ -1539,7 +1756,7 @@ async function refreshPlannedWaylines (reset = false) {
       return ['executing', 'paused', 'broken'].includes(status) &&
         (record.aircraftGcjLng != null || record.aircraftLng != null)
     })
-    if (activeRecord) setFlightPositionFromRecord(activeRecord)
+    if (activeRecord) applyPlannedWaylineFlightPosition(activeRecord)
     plannedWaylinesPagination.total = res.data?.pagination?.total ?? list.length
     plannedWaylinesPagination.page = res.data?.pagination?.page ?? plannedWaylinesPagination.page
     plannedWaylinesCanRefresh.value = Math.ceil(plannedWaylinesPagination.total / plannedWaylinesPagination.page_size) > plannedWaylinesPagination.page
@@ -1558,7 +1775,12 @@ function onPlannedWaylinesScroll (e: any) {
 
 function onPreviewPlannedWayline (record: PlannedWaylineRecord) {
   resetPlanningDraft()
-  selectedAircraftSn.value = ''
+  const recordAircraftSn = getRecordAircraftSn(record)
+  if (recordAircraftSn && onlineAircraftMap[recordAircraftSn]) {
+    applyPrepareTargetSelection(recordAircraftSn)
+  } else {
+    applyPrepareTargetSelection(getSingleOnlineMsdkAircraft())
+  }
   previewPlannedWayline(record)
 }
 
@@ -1615,12 +1837,19 @@ async function onGeneratePlannedWaylineFile (record: PlannedWaylineRecord) {
 function resolvePrepareTargetDroneSn (record: PlannedWaylineRecord) {
   const selectedSummary = selectedAircraftSn.value ? onlineAircraftMap[selectedAircraftSn.value] : null
   if (selectedSummary?.sn) return selectedSummary.sn
-  if (record.droneSn) return record.droneSn
-  if (record.aircraftSn) return record.aircraftSn
+  const recordAircraftSn = getRecordAircraftSn(record)
+  if (recordAircraftSn && onlineAircraftMap[recordAircraftSn]) {
+    applyPrepareTargetSelection(recordAircraftSn)
+    return recordAircraftSn
+  }
+  const onlyMsdkAircraftSn = getSingleOnlineMsdkAircraft()
+  if (onlyMsdkAircraftSn) {
+    applyPrepareTargetSelection(onlyMsdkAircraftSn)
+    return onlyMsdkAircraftSn
+  }
   if (onlineAircrafts.value.length === 1) {
     const onlyAircraft = onlineAircrafts.value[0]
-    selectedAircraftSn.value = onlyAircraft.sn
-    planningSetTarget(onlyAircraft.gatewaySn, onlyAircraft.sn)
+    applyPrepareTargetSelection(onlyAircraft.sn)
     return onlyAircraft.sn
   }
   return ''
@@ -1651,17 +1880,59 @@ async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
     '航线任务已下发准备')
 }
 
-async function onExecutePlannedWaylineTask (record: PlannedWaylineRecord) {
-  const targetDroneSn = record.droneSn || record.aircraftSn
-  if (targetDroneSn) {
-    const summary = onlineAircraftMap[targetDroneSn]
-    planningSetTarget(summary?.gatewaySn || record.gatewaySn || record.dockSn || '', targetDroneSn)
-    selectedAircraftSn.value = targetDroneSn
+async function openExecuteTargetModal (record: PlannedWaylineRecord) {
+  clearPlannedWaylineTaskReason(record)
+  await refreshOnlineAircrafts()
+  const targetDroneSn = selectedAircraftSn.value ||
+    (record.droneSn && executeTargetOptions.value.some(item => item.sn === record.droneSn) ? record.droneSn : '') ||
+    (record.aircraftSn && executeTargetOptions.value.some(item => item.sn === record.aircraftSn) ? record.aircraftSn : '') ||
+    (executeTargetOptions.value.length === 1 ? executeTargetOptions.value[0].sn : '')
+  executeTargetModal.record = record
+  executeTargetModal.targetSn = targetDroneSn
+  executeTargetModal.visible = true
+}
+
+function onExecutePlannedWaylineTask (record: PlannedWaylineRecord) {
+  openExecuteTargetModal(record)
+}
+
+async function confirmExecuteTarget () {
+  const record = executeTargetModal.record
+  if (!record) return
+  const targetDroneSn = executeTargetModal.targetSn
+  if (!targetDroneSn) {
+    message.warning('请选择在线飞行器后再执行。')
+    return
   }
-  await runPlannedWaylineAction(
-    record,
-    () => executePlannedWaylineTask(workspaceId, record.plannedWaylineId),
-    '执行指令已发出，等待飞行器回传状态')
+  const summary = executeTargetOptions.value.find(item => item.sn === targetDroneSn) || onlineAircraftMap[targetDroneSn]
+  planningSetTarget(summary?.gatewaySn || record.gatewaySn || record.dockSn || targetDroneSn, targetDroneSn)
+  selectedAircraftSn.value = targetDroneSn
+
+  executeTargetModal.loading = true
+  try {
+    const prepareBody: any = {
+      droneSn: targetDroneSn,
+      executeTime: 0,
+      taskType: 'IMMEDIATE',
+    }
+    if (record.dockSn) {
+      prepareBody.dockSn = record.dockSn
+    }
+    const prepareRes = await preparePlannedWaylineTask(workspaceId, record.plannedWaylineId, prepareBody)
+    if (prepareRes.code !== 0) return
+    const executeRes = await executePlannedWaylineTask(workspaceId, record.plannedWaylineId, prepareBody)
+    if (executeRes.code !== 0) return
+    executeTargetModal.visible = false
+    executeTargetModal.record = null
+    executeTargetModal.targetSn = ''
+    message.success('执行指令已发出，等待飞行器回传状态')
+    await refreshPlannedWaylines(true)
+    if (selectedPlannedWayline.value?.plannedWaylineId === record.plannedWaylineId) {
+      await showPlannedWaylineDetail(executeRes.data || record)
+    }
+  } finally {
+    executeTargetModal.loading = false
+  }
 }
 
 async function onCancelPlannedWaylineTask (record: PlannedWaylineRecord) {
@@ -2265,6 +2536,9 @@ const importVisible = computed(() => route.name === ERouterName.WAYLINE)
 const height = ref()
 
 onMounted(() => {
+  nextTick(() => {
+    planningOverlayReady.value = true
+  })
   const parent = document.getElementsByClassName('scrollbar').item(0)?.parentNode as HTMLDivElement
   height.value = document.body.clientHeight - parent.firstElementChild!.clientHeight
   getWaylines()
@@ -2455,6 +2729,291 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
 }
 .project-wayline-wrapper :deep(.ant-btn-sm) {
   font-size: 14px;
+}
+.wayline-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-right: 18px;
+}
+.wayline-header-icon-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #fff;
+  font-size: 22px;
+}
+.wayline-header-icon-button:hover,
+.wayline-header-icon-button:focus {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.wayline-map-planning-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  color: #d9d9d9;
+  font-size: 12px;
+}
+.wayline-map-planning-overlay :deep(.ant-btn) {
+  font-size: 14px;
+}
+.wayline-map-planning-overlay :deep(.ant-btn-sm) {
+  font-size: 14px;
+}
+.wayline-map-planning-bar {
+  display: grid;
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  right: auto;
+  width: min(480px, calc(100% - 36px));
+  min-height: 48px;
+  grid-template-columns: max-content repeat(3, minmax(58px, 1fr)) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  background: rgba(31, 31, 31, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+}
+.wayline-map-planning-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  color: #f5f5f5;
+  font-size: 14px;
+  font-weight: 700;
+}
+.wayline-map-planning-help {
+  flex: 0 0 auto;
+  color: #8c8c8c;
+}
+.wayline-map-planning-chip {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.wayline-map-planning-chip span,
+.planning-drawer-kicker {
+  display: block;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.wayline-map-planning-chip strong {
+  display: block;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wayline-map-planning-actions {
+  grid-column: 5;
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.wayline-map-planning-route-summary {
+  grid-column: 2 / 5;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.wayline-map-planning-route-summary span {
+  min-width: 0;
+  white-space: nowrap;
+}
+.wayline-map-planning-action-stack {
+  display: grid;
+  grid-template-columns: minmax(76px, 1fr);
+  gap: 5px;
+}
+.wayline-map-planning-action-stack .ant-btn {
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+}
+.wayline-map-collapse-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.wayline-map-collapse-button:hover,
+.wayline-map-collapse-button:focus {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.wayline-map-planning-drawer,
+.wayline-map-planning-mini {
+  position: absolute;
+  background: rgba(31, 31, 31, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+}
+.wayline-map-planning-drawer {
+  top: 112px;
+  left: 18px;
+  width: min(480px, calc(100% - 36px));
+  max-height: calc(100% - 130px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+.wayline-map-planning-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.wayline-map-planning-drawer-head strong {
+  display: block;
+  color: #fff;
+  font-size: 15px;
+  line-height: 1.3;
+}
+.wayline-map-planning-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wayline-map-planning-drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.planning-field-card {
+  min-width: 0;
+  margin-bottom: 0;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.09);
+}
+.planning-map-advanced {
+  max-height: 132px;
+  overflow-y: auto;
+  margin: 0 0 8px;
+}
+.wayline-map-planning-content {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  flex: 1;
+}
+.wayline-map-planning-waypoints {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wayline-map-planning-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: #f5f5f5;
+  font-weight: 700;
+}
+.wayline-map-planning-section-title span:last-child {
+  color: #faad14;
+  font-size: 11px;
+  font-weight: 400;
+}
+.planning-waypoints--map {
+  min-height: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.planning-waypoints--map .planning-wp {
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.planning-waypoints--map .planning-wp.selected {
+  border-color: rgba(24, 144, 255, 0.85);
+  background: rgba(24, 144, 255, 0.14);
+}
+.planning-wp-summary {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.wayline-map-planning-command-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.wayline-map-planning-command-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.wayline-map-planning-command-grid .ant-btn {
+  min-width: 0;
+}
+.wayline-map-planning-mini {
+  right: 18px;
+  bottom: 72px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.wayline-map-planning-edge-tab {
+  min-width: 92px;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(31, 31, 31, 0.74);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+  color: #fff;
+  cursor: pointer;
+}
+.wayline-map-planning-edge-tab span,
+.wayline-map-planning-edge-tab small {
+  display: block;
+  line-height: 1.25;
+  text-align: center;
+}
+.wayline-map-planning-edge-tab span {
+  font-size: 13px;
+  font-weight: 700;
+}
+.wayline-map-planning-edge-tab small {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 10px;
 }
 
 .planning-panel {
@@ -2983,5 +3542,28 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   background: #fafafa;
   color: #8c8c8c;
   font-weight: 700;
+}
+
+@media (max-width: 1180px) {
+  .wayline-map-planning-bar {
+    grid-template-columns: max-content repeat(3, minmax(58px, 1fr)) auto;
+  }
+  .wayline-map-planning-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+  .wayline-map-planning-content {
+    grid-template-columns: 1fr;
+  }
+  .wayline-map-planning-drawer {
+    top: 148px;
+    left: 12px;
+    width: min(480px, calc(100% - 24px));
+    max-height: calc(100% - 166px);
+  }
+  .wayline-map-planning-mini {
+    right: 12px;
+    bottom: 64px;
+  }
 }
 </style>

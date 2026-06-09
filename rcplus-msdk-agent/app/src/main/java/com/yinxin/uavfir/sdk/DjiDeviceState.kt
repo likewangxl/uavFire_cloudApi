@@ -4,11 +4,19 @@ import com.yinxin.uavfir.session.AgentConnectionState
 
 data class DjiDeviceState(
     val connectionState: AgentConnectionState,
+    val identity: DjiDeviceIdentity? = null,
     val capability: CameraCapability? = null,
     val telemetry: DjiTelemetry? = null,
     val aircraftModel: String? = null,
     val flightLimit: DjiFlightLimit = DjiFlightLimit(),
 )
+
+data class DjiDeviceIdentity(
+    val gatewaySn: String,
+    val aircraftSn: String,
+) {
+    fun isValid(): Boolean = gatewaySn.isNotBlank() && aircraftSn.isNotBlank()
+}
 
 data class DjiTelemetry(
     val latitude: Double? = null,

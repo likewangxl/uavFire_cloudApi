@@ -7,6 +7,7 @@ import com.yinxin.uavfir.stream.BoundStreamState
 import com.yinxin.uavfir.stream.StreamProvider
 import com.yinxin.uavfir.stream.StreamStartResult
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
+import com.yinxin.uavfir.stream.ThermalMeasuredPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +23,9 @@ class DualStreamSessionManager(
         val playbackStatus: String? = null,
         val thermalCenterTemperatureC: Double? = null,
         val thermalMeasureRegion: ThermalMeasureRegion? = null,
+        val thermalMeasurements: List<ThermalMeasuredPoint> = emptyList(),
+        val thermalSnapshotPath: String? = null,
+        val visibleSnapshotPath: String? = null,
     )
 
     private val _state = MutableStateFlow(DualStreamSessionState.INIT)
@@ -83,6 +87,69 @@ class DualStreamSessionManager(
         reporter.reportStatus(droneSn, deviceState.connectionState, "device-session-ready", runtimeStatus())
         return deviceState
     }
+
+    suspend fun measureThermalHotspot(
+        droneSn: String,
+        seedRegion: ThermalMeasureRegion? = null,
+    ): CommandExecutionResult = runCatching {
+        streamProvider.measureThermalHotspot(droneSn, seedRegion)
+    }.fold(
+        onSuccess = { result ->
+            lastStartResult = result
+            lastPlaybackStatus = result.playbackStatus
+            lastFailureMessage = result.thermalFailureMessage
+            lastThermalCenterTemperatureC = result.thermalCenterTemperatureC
+            CommandExecutionResult(
+                status = "applied",
+                message = result.thermalFailureMessage,
+                visibleState = result.visibleState,
+                thermalState = result.thermalState,
+                playbackStatus = result.playbackStatus,
+                thermalCenterTemperatureC = result.thermalCenterTemperatureC,
+                thermalMeasureRegion = result.thermalMeasureRegion,
+                thermalMeasurements = result.thermalMeasurements,
+                thermalSnapshotPath = result.thermalSnapshotPath,
+            )
+        },
+        onFailure = {
+            lastFailureMessage = it.message ?: "thermal-hotspot-measurement-failed"
+            CommandExecutionResult(
+                status = "failed",
+                message = lastFailureMessage,
+                visibleState = lastStartResult?.visibleState,
+                thermalState = lastStartResult?.thermalState,
+                playbackStatus = lastPlaybackStatus,
+            )
+        },
+    )
+
+    suspend fun captureVisibleSnapshot(droneSn: String): CommandExecutionResult = runCatching {
+        streamProvider.captureVisibleSnapshot(droneSn)
+    }.fold(
+        onSuccess = { result ->
+            lastStartResult = result
+            lastPlaybackStatus = result.playbackStatus
+            lastFailureMessage = result.thermalFailureMessage
+            CommandExecutionResult(
+                status = "applied",
+                message = result.thermalFailureMessage,
+                visibleState = result.visibleState,
+                thermalState = result.thermalState,
+                playbackStatus = result.playbackStatus,
+                visibleSnapshotPath = result.visibleSnapshotPath,
+            )
+        },
+        onFailure = {
+            lastFailureMessage = it.message ?: "visible-snapshot-capture-failed"
+            CommandExecutionResult(
+                status = "failed",
+                message = lastFailureMessage,
+                visibleState = lastStartResult?.visibleState,
+                thermalState = lastStartResult?.thermalState,
+                playbackStatus = lastPlaybackStatus,
+            )
+        },
+    )
 
     override fun runtimeStatus(): DualStreamCommandExecutor.RuntimeStatus = DualStreamCommandExecutor.RuntimeStatus(
         sessionState = state.value,
@@ -179,6 +246,7 @@ class DualStreamSessionManager(
                     playbackStatus = result.playbackStatus,
                     thermalCenterTemperatureC = result.thermalCenterTemperatureC,
                     thermalMeasureRegion = result.thermalMeasureRegion,
+                    thermalSnapshotPath = result.thermalSnapshotPath,
                 )
             },
             onFailure = {
@@ -194,7 +262,8 @@ class DualStreamSessionManager(
         )
 
         "measure-thermal-region" -> runCatching {
-            streamProvider.focusThermal(droneSn, thermalMeasureRegion)
+            val region = thermalMeasureRegion ?: error("thermal-measure-region-required")
+            streamProvider.measureThermalRegion(droneSn, region)
         }.fold(
             onSuccess = { result ->
                 lastStartResult = result
@@ -209,6 +278,7 @@ class DualStreamSessionManager(
                     playbackStatus = result.playbackStatus,
                     thermalCenterTemperatureC = result.thermalCenterTemperatureC,
                     thermalMeasureRegion = result.thermalMeasureRegion,
+                    thermalSnapshotPath = result.thermalSnapshotPath,
                 )
             },
             onFailure = {

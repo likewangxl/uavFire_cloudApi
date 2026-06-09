@@ -40,11 +40,19 @@ def test_thermal_annotation_parser_accepts_backend_snake_case_payload():
         {
             "thermal_temperature": "25.4",
             "thermal_measure_roi": {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4},
+            "thermal_detect_roi": {"x": 0.11, "y": 0.21, "width": 0.1, "height": 0.1},
+            "thermal_measurements": [
+                {"temperature_c": 25.4, "roi": {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}},
+                {"temperatureC": 31.2, "roi": {"x": 0.5, "y": 0.6, "width": 0.1, "height": 0.1}},
+            ],
         }
     )
 
     assert payload.thermal_temperature == 25.4
     assert payload.thermal_measure_roi == {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}
+    assert payload.thermal_detect_roi == {"x": 0.11, "y": 0.21, "width": 0.1, "height": 0.1}
+    assert len(payload.thermal_measurements) == 2
+    assert payload.thermal_measurements[1]["temperatureC"] == 31.2
 
 
 def test_snapshot_writer_draws_thermal_temperature_label(monkeypatch, tmp_path):
@@ -160,6 +168,67 @@ def test_snapshot_writer_draws_measure_roi_relative_to_active_thermal_content(mo
 
     assert ((116, 46), (124, 54), 2) in drawn_rectangles
     assert ("57.6C", (84, 50)) in drawn_text
+
+
+def test_snapshot_writer_draws_detected_hotspot_and_measure_roi(monkeypatch, tmp_path):
+    drawn_rectangles = []
+
+    def fake_rectangle(image, pt1, pt2, color, thickness=None, line_type=None, shift=None):
+        drawn_rectangles.append((pt1, pt2, color, thickness))
+        return image
+
+    monkeypatch.setattr("app.services.snapshot_writer.cv2.rectangle", fake_rectangle)
+
+    writer = SnapshotWriter(str(tmp_path), "http://snapshots")
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+
+    writer.write_pair(
+        "thermal-event",
+        frame,
+        boxes=None,
+        thermal_temperature=57.64,
+        thermal_measure_roi={"x": 0.60, "y": 0.40, "width": 0.08, "height": 0.08},
+        thermal_detect_roi={"x": 0.62, "y": 0.42, "width": 0.04, "height": 0.04},
+    )
+
+    assert ((124, 42), (132, 46), (255, 0, 255), 1) in drawn_rectangles
+    assert ((120, 40), (136, 48), (0, 255, 255), 2) in drawn_rectangles
+
+
+def test_snapshot_writer_draws_all_thermal_measurements(monkeypatch, tmp_path):
+    drawn_text = []
+    drawn_rectangles = []
+
+    def fake_put_text(image, text, org, font_face, font_scale, color, thickness, line_type=None):
+        drawn_text.append((text, org))
+        return image
+
+    def fake_rectangle(image, pt1, pt2, color, thickness=None, line_type=None, shift=None):
+        drawn_rectangles.append((pt1, pt2, color, thickness))
+        return image
+
+    monkeypatch.setattr("app.services.snapshot_writer.cv2.putText", fake_put_text)
+    monkeypatch.setattr("app.services.snapshot_writer.cv2.rectangle", fake_rectangle)
+
+    writer = SnapshotWriter(str(tmp_path), "http://snapshots")
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+
+    writer.write_pair(
+        "thermal-event",
+        frame,
+        boxes=None,
+        thermal_temperature=88.5,
+        thermal_measure_roi={"x": 0.60, "y": 0.40, "width": 0.08, "height": 0.08},
+        thermal_measurements=[
+            {"temperature_c": 88.5, "roi": {"x": 0.60, "y": 0.40, "width": 0.08, "height": 0.08}},
+            {"temperatureC": 57.2, "roi": {"x": 0.10, "y": 0.70, "width": 0.06, "height": 0.06}},
+        ],
+    )
+
+    assert ((120, 40), (136, 48), (0, 255, 255), 2) in drawn_rectangles
+    assert ((20, 70), (32, 76), (0, 200, 255), 1) in drawn_rectangles
+    assert any(text == "88.5C" for text, _ in drawn_text)
+    assert any(text == "57.2C" for text, _ in drawn_text)
 
 
 def test_snapshot_writer_can_refresh_existing_thermal_annotation(monkeypatch, tmp_path):

@@ -1,8 +1,16 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
+import dji.sdk.keyvalue.key.CameraKey
+import dji.sdk.keyvalue.key.DJICameraKey
+import dji.sdk.keyvalue.key.DJIGimbalKey
 import dji.sdk.keyvalue.key.DJIKey
+import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.key.FlightControllerKey
+import dji.sdk.keyvalue.value.camera.CameraNightSceneMode
+import dji.sdk.keyvalue.value.camera.CameraVideoStreamSourceType
+import dji.sdk.keyvalue.value.common.CameraLensType
+import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
@@ -13,6 +21,11 @@ import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VirtualStickFlightControlParam
 import dji.sdk.keyvalue.value.flightcontroller.YawControlMode
+import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
+import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotationMode
+import dji.sdk.keyvalue.value.gimbal.CtrlInfo
+import dji.sdk.keyvalue.value.gimbal.GimbalResetType
+import dji.sdk.keyvalue.value.gimbal.GimbalSpeedRotation
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.et.create
@@ -50,6 +63,10 @@ interface FlightControlActionClient {
 
     suspend fun emergencyStop()
 
+    suspend fun hover()
+
+    suspend fun stopFlyToPoint()
+
     suspend fun sendVirtualStick(
         key: String,
         durationMs: Long,
@@ -63,7 +80,35 @@ interface FlightControlActionClient {
     )
 }
 
-class DjiFlightControlActionClient : FlightControlActionClient {
+interface GimbalActionClient {
+    suspend fun resetGimbal()
+
+    suspend fun rotateGimbal(
+        pitch: Double,
+        yaw: Double,
+        roll: Double,
+    )
+
+    suspend fun rotateGimbalToPitch(pitch: Double)
+}
+
+interface CameraActionClient {
+    suspend fun startShootPhoto()
+
+    suspend fun startRecord()
+
+    suspend fun stopRecord()
+
+    suspend fun setStreamSource(source: String)
+
+    suspend fun setZoom(ratio: Double)
+
+    suspend fun setNightScene(enabled: Boolean)
+
+    suspend fun setLaserFillLight(enabled: Boolean)
+}
+
+class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClient, CameraActionClient {
     private val keyManager: KeyManager
         get() = KeyManager.getInstance()
 
@@ -89,6 +134,14 @@ class DjiFlightControlActionClient : FlightControlActionClient {
 
     override suspend fun emergencyStop() {
         performEmptyAction(FlightControllerKey.KeyEmergencyStop.create())
+    }
+
+    override suspend fun hover() {
+        sendVirtualStick("hover", MIN_VIRTUAL_STICK_DURATION_MS)
+    }
+
+    override suspend fun stopFlyToPoint() {
+        hover()
     }
 
     override suspend fun sendVirtualStick(
@@ -124,12 +177,130 @@ class DjiFlightControlActionClient : FlightControlActionClient {
         performFlyToAction(FlightControllerKey.KeyFlyToPointEx.create(), target)
     }
 
+    override suspend fun resetGimbal() {
+        performAction(
+            KeyTools.createKey(DJIGimbalKey.KeyGimbalReset, ComponentIndexType.LEFT_OR_MAIN),
+            GimbalResetType.RECENTER,
+        )
+    }
+
+    override suspend fun rotateGimbal(
+        pitch: Double,
+        yaw: Double,
+        roll: Double,
+    ) {
+        val rotation = GimbalSpeedRotation(
+            pitch.coerceIn(-30.0, 30.0),
+            yaw.coerceIn(-30.0, 30.0),
+            roll.coerceIn(-30.0, 30.0),
+            CtrlInfo(false, false),
+        )
+        performAction(
+            KeyTools.createKey(DJIGimbalKey.KeyRotateBySpeed, ComponentIndexType.LEFT_OR_MAIN),
+            rotation,
+        )
+    }
+
+    override suspend fun rotateGimbalToPitch(pitch: Double) {
+        val rotation = GimbalAngleRotation(
+            GimbalAngleRotationMode.ABSOLUTE_ANGLE,
+            pitch.coerceIn(-90.0, 30.0),
+            0.0,
+            0.0,
+            false,
+            true,
+            true,
+            GIMBAL_NADIR_ROTATION_DURATION_SEC,
+            false,
+            GIMBAL_NADIR_ROTATION_TIMEOUT_SEC,
+        )
+        performAction(
+            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, ComponentIndexType.LEFT_OR_MAIN),
+            rotation,
+        )
+    }
+
+    override suspend fun startShootPhoto() {
+        performEmptyAction(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyStartShootPhoto,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_WIDE,
+            ),
+        )
+    }
+
+    override suspend fun startRecord() {
+        performEmptyAction(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyStartRecord,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_WIDE,
+            ),
+        )
+    }
+
+    override suspend fun stopRecord() {
+        performEmptyAction(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyStopRecord,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_WIDE,
+            ),
+        )
+    }
+
+    override suspend fun setStreamSource(source: String) {
+        setValue(
+            KeyTools.createKey(CameraKey.KeyCameraVideoStreamSource, ComponentIndexType.LEFT_OR_MAIN),
+            when (source.lowercase(Locale.US)) {
+                "thermal", "infrared", "ir" -> CameraVideoStreamSourceType.INFRARED_CAMERA
+                "zoom" -> CameraVideoStreamSourceType.ZOOM_CAMERA
+                "wide", "visible", "default" -> CameraVideoStreamSourceType.WIDE_CAMERA
+                else -> throw IllegalArgumentException("unsupported-camera-stream-source:$source")
+            },
+        )
+    }
+
+    override suspend fun setZoom(ratio: Double) {
+        setValue(
+            KeyTools.createKey(CameraKey.KeyCameraZoomRatios, ComponentIndexType.LEFT_OR_MAIN),
+            ratio.coerceIn(1.0, 200.0),
+        )
+    }
+
+    override suspend fun setNightScene(enabled: Boolean) {
+        setValue(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyCameraNightSceneMode,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_WIDE,
+            ),
+            if (enabled) CameraNightSceneMode.ENABLE else CameraNightSceneMode.DISABLE,
+        )
+    }
+
+    override suspend fun setLaserFillLight(enabled: Boolean) {
+        setValue(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyLaserFillLightEnabled,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_WIDE,
+            ),
+            enabled,
+        )
+    }
+
     private suspend fun performEmptyAction(key: DJIKey.ActionKey<EmptyMsg, EmptyMsg>) {
+        performAction(key, EmptyMsg())
+    }
+
+    private suspend fun <T> performAction(key: DJIKey.ActionKey<T, EmptyMsg>, value: T) {
         withTimeout(MSDK_ACTION_TIMEOUT_MS) {
             suspendCancellableCoroutine<Unit> { continuation ->
                 keyManager.performAction(
                     key,
-                    EmptyMsg(),
+                    value,
                     object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
                         override fun onSuccess(result: EmptyMsg?) {
                             continuation.takeIf { it.isActive }?.resume(Unit)
@@ -141,6 +312,23 @@ class DjiFlightControlActionClient : FlightControlActionClient {
                         }
                     },
                 )
+            }
+        }
+    }
+
+    private suspend fun <T> setValue(key: DJIKey<T>, value: T) {
+        withTimeout(MSDK_ACTION_TIMEOUT_MS) {
+            suspendCancellableCoroutine<Unit> { continuation ->
+                keyManager.setValue(key, value, object : CommonCallbacks.CompletionCallback {
+                    override fun onSuccess() {
+                        continuation.takeIf { it.isActive }?.resume(Unit)
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        continuation.takeIf { it.isActive }
+                            ?.resumeWithException(IllegalStateException(error.description()))
+                    }
+                })
             }
         }
     }
@@ -223,6 +411,8 @@ class DjiFlightControlActionClient : FlightControlActionClient {
         private const val VIRTUAL_STICK_SEND_INTERVAL_MS: Long = 100
         private const val MIN_FLY_TO_SPEED_MPS: Double = 1.0
         private const val MAX_FLY_TO_SPEED_MPS: Double = 15.0
+        private const val GIMBAL_NADIR_ROTATION_DURATION_SEC: Double = 2.0
+        private const val GIMBAL_NADIR_ROTATION_TIMEOUT_SEC: Int = 5
         private val SUPPORTED_VIRTUAL_STICK_KEYS = setOf(
             "arrowup",
             "arrowdown",
@@ -244,6 +434,8 @@ class DjiFlightControlActionClient : FlightControlActionClient {
 class DualStreamMsdkCommandExecutor(
     private val dualStreamExecutor: DualStreamCommandExecutor,
     private val flightControlClient: FlightControlActionClient? = null,
+    private val gimbalClient: GimbalActionClient? = flightControlClient as? GimbalActionClient,
+    private val cameraClient: CameraActionClient? = flightControlClient as? CameraActionClient,
 ) : MsdkCommandExecutor {
 
     override suspend fun execute(
@@ -257,10 +449,22 @@ class DualStreamMsdkCommandExecutor(
             "land" -> return executeFlightAction(flightAction) { startAutoLanding() }
             "stop_landing" -> return executeFlightAction(flightAction) { stopAutoLanding() }
             "emergency_stop" -> return executeFlightAction(flightAction) { emergencyStop() }
-            "hover" -> return executeFlightAction(flightAction) { emergencyStop() }
-            "stop_fly_to_point" -> return executeFlightAction(flightAction) { emergencyStop() }
+            "hover" -> return executeFlightAction(flightAction) { hover() }
+            "stop_fly_to_point" -> return executeFlightAction(flightAction) { stopFlyToPoint() }
             "virtual_stick" -> return executeVirtualStick(command)
             "fly_to_point" -> return executeFlyToPoint(command)
+        }
+
+        when (val payloadAction = normalizePayloadAction(command.command)) {
+            "gimbal_reset" -> return executeGimbalAction(payloadAction) { resetGimbal() }
+            "gimbal_rotate" -> return executeGimbalRotate(command)
+            "camera_start_photo" -> return executeCameraAction(payloadAction) { startShootPhoto() }
+            "camera_start_record" -> return executeCameraAction(payloadAction) { startRecord() }
+            "camera_stop_record" -> return executeCameraAction(payloadAction) { stopRecord() }
+            "camera_stream_source" -> return executeCameraStreamSource(command)
+            "camera_zoom" -> return executeCameraZoom(command)
+            "night_scene" -> return executeNightScene(command)
+            "laser_fill_light" -> return executeLaserFillLight(command)
         }
 
         val dualStreamAction = when (command.command.lowercase(Locale.US)) {
@@ -278,6 +482,36 @@ class DualStreamMsdkCommandExecutor(
         return MsdkCommandExecutionResult(
             status = result.status.uppercase(Locale.US),
             message = result.message,
+        )
+    }
+
+    private suspend fun executeGimbalAction(
+        action: String,
+        block: suspend GimbalActionClient.() -> Unit,
+    ): MsdkCommandExecutionResult {
+        val client = gimbalClient ?: return MsdkCommandExecutionResult(
+            status = "FAILED",
+            message = "unsupported-msdk-command:$action:gimbal-executor-not-wired",
+        )
+        client.block()
+        return MsdkCommandExecutionResult(
+            status = "APPLIED",
+            message = "$action applied",
+        )
+    }
+
+    private suspend fun executeCameraAction(
+        action: String,
+        block: suspend CameraActionClient.() -> Unit,
+    ): MsdkCommandExecutionResult {
+        val client = cameraClient ?: return MsdkCommandExecutionResult(
+            status = "FAILED",
+            message = "unsupported-msdk-command:$action:camera-executor-not-wired",
+        )
+        client.block()
+        return MsdkCommandExecutionResult(
+            status = "APPLIED",
+            message = "$action applied",
         )
     }
 
@@ -341,6 +575,48 @@ class DualStreamMsdkCommandExecutor(
         )
     }
 
+    private suspend fun executeGimbalRotate(command: MsdkCommandResponse): MsdkCommandExecutionResult {
+        val params = command.params.orEmpty()
+        val pitch = params["pitch"].asDoubleOrNull() ?: 0.0
+        val yaw = params["yaw"].asDoubleOrNull() ?: 0.0
+        val roll = params["roll"].asDoubleOrNull() ?: 0.0
+        return executeGimbalAction("gimbal_rotate") {
+            rotateGimbal(pitch, yaw, roll)
+        }
+    }
+
+    private suspend fun executeCameraStreamSource(command: MsdkCommandResponse): MsdkCommandExecutionResult {
+        val source = command.params?.get("source")?.toString()
+            ?: command.params?.get("streamSource")?.toString()
+            ?: return MsdkCommandExecutionResult(status = "FAILED", message = "camera-stream-source-required")
+        return executeCameraAction("camera_stream_source") {
+            setStreamSource(source)
+        }
+    }
+
+    private suspend fun executeCameraZoom(command: MsdkCommandResponse): MsdkCommandExecutionResult {
+        val ratio = command.params?.get("ratio").asDoubleOrNull()
+            ?: command.params?.get("zoomRatio").asDoubleOrNull()
+            ?: return MsdkCommandExecutionResult(status = "FAILED", message = "camera-zoom-ratio-required")
+        return executeCameraAction("camera_zoom") {
+            setZoom(ratio)
+        }
+    }
+
+    private suspend fun executeNightScene(command: MsdkCommandResponse): MsdkCommandExecutionResult {
+        val enabled = command.params?.get("enabled").asBooleanOrNull() ?: true
+        return executeCameraAction("night_scene") {
+            setNightScene(enabled)
+        }
+    }
+
+    private suspend fun executeLaserFillLight(command: MsdkCommandResponse): MsdkCommandExecutionResult {
+        val enabled = command.params?.get("enabled").asBooleanOrNull() ?: true
+        return executeCameraAction("laser_fill_light") {
+            setLaserFillLight(enabled)
+        }
+    }
+
     private fun normalizeFlightAction(command: String): String? {
         return when (command.lowercase(Locale.US)) {
             "takeoff", "start_takeoff", "start-takeoff" -> "takeoff"
@@ -357,6 +633,21 @@ class DualStreamMsdkCommandExecutor(
         }
     }
 
+    private fun normalizePayloadAction(command: String): String? {
+        return when (command.lowercase(Locale.US)) {
+            "gimbal_reset", "gimbal-reset", "gimbal_recenter", "gimbal-recenter" -> "gimbal_reset"
+            "gimbal_rotate", "gimbal-rotate" -> "gimbal_rotate"
+            "camera_start_photo", "camera-start-photo", "start_photo", "start-photo", "shoot_photo", "shoot-photo" -> "camera_start_photo"
+            "camera_start_record", "camera-start-record", "start_record", "start-record" -> "camera_start_record"
+            "camera_stop_record", "camera-stop-record", "stop_record", "stop-record" -> "camera_stop_record"
+            "camera_stream_source", "camera-stream-source", "stream_source", "stream-source" -> "camera_stream_source"
+            "camera_zoom", "camera-zoom" -> "camera_zoom"
+            "night_scene", "night-scene" -> "night_scene"
+            "laser_fill_light", "laser-fill-light" -> "laser_fill_light"
+            else -> null
+        }
+    }
+
     private fun Any?.asLongOrNull(): Long? {
         return when (this) {
             is Number -> toLong()
@@ -369,6 +660,18 @@ class DualStreamMsdkCommandExecutor(
         return when (this) {
             is Number -> toDouble()
             is String -> toDoubleOrNull()
+            else -> null
+        }
+    }
+
+    private fun Any?.asBooleanOrNull(): Boolean? {
+        return when (this) {
+            is Boolean -> this
+            is String -> when (lowercase(Locale.US)) {
+                "true", "1", "yes", "on", "enabled" -> true
+                "false", "0", "no", "off", "disabled" -> false
+                else -> null
+            }
             else -> null
         }
     }

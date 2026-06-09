@@ -12,10 +12,16 @@ class CommandPollingCoordinator(
     private val sessionManager: DualStreamSessionManager? = null,
     private val commandExecutor: MsdkCommandExecutor? = sessionManager?.let { DualStreamMsdkCommandExecutor(it) },
     private val commandTimeoutMs: Long = DEFAULT_COMMAND_TIMEOUT_MS,
+    private val pollLegacyDualStream: Boolean = true,
+    private val pollMsdk: Boolean = true,
 ) : CommandPoller {
     override suspend fun pollOnce(droneSn: String) {
-        pollLegacyDualStreamCommand(droneSn)
-        pollMsdkCommand(droneSn)
+        if (pollLegacyDualStream) {
+            pollLegacyDualStreamCommand(droneSn)
+        }
+        if (pollMsdk) {
+            pollMsdkCommand(droneSn)
+        }
     }
 
     private suspend fun pollLegacyDualStreamCommand(droneSn: String) {

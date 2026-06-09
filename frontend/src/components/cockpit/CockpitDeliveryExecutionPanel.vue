@@ -1,22 +1,51 @@
 <template>
   <section class="delivery-execution-panel">
-    <header class="panel-head">
-      <div>
-        <p class="panel-kicker">FC100 投放执行画面</p>
-        <h3>FC100 直播画面</h3>
+    <div class="delivery-live-frame" :class="{ unavailable: !livePlayUrl || Boolean(playerState.error) }">
+      <div v-show="livePlayUrl" ref="playerShell" class="delivery-player-shell"></div>
+
+      <div class="delivery-live-badge" :class="{ idle: !playerState.playing }">
+        <span class="live-dot"></span>
+        FC100 投放主画面
       </div>
+
       <button
-        class="refresh-btn"
+        class="delivery-refresh-btn"
         type="button"
         :disabled="loading"
         @click="emit('refresh-targets')"
       >
         刷新
       </button>
-    </header>
 
-    <div class="delivery-live-frame" :class="{ unavailable: !livePlayUrl || Boolean(playerState.error) }">
-      <div v-show="livePlayUrl" ref="playerShell" class="delivery-player-shell"></div>
+      <div class="delivery-live-hud">
+        <span
+          v-for="item in deliveryHud.chips"
+          :key="item"
+          class="delivery-hud-chip"
+        >
+          {{ item }}
+        </span>
+      </div>
+
+      <div class="delivery-flight-hud">
+        <div
+          v-for="(row, rowIndex) in deliveryHud.flightRows"
+          :key="`delivery-row-${rowIndex}`"
+          class="delivery-flight-row"
+          :class="{ 'mode-row': rowIndex === 0 }"
+        >
+          <span
+            v-for="item in row"
+            :key="`${rowIndex}-${item.label}`"
+            class="delivery-flight-item"
+          >
+            <span class="delivery-flight-label">{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </span>
+        </div>
+      </div>
+
+      <p v-if="visibleTaskMessage" class="delivery-hud-message">{{ visibleTaskMessage }}</p>
       <div
         v-if="!livePlayUrl || playerState.loading || playerState.error"
         class="live-overlay"
@@ -26,32 +55,6 @@
         <strong>{{ liveOverlayTitle }}</strong>
         <span>{{ liveOverlayMessage }}</span>
       </div>
-    </div>
-
-    <div class="delivery-status-grid">
-      <section>
-        <span>任务阶段</span>
-        <strong>{{ taskPhase }}</strong>
-      </section>
-      <section>
-        <span>执行进度</span>
-        <strong>{{ taskProgress }}</strong>
-      </section>
-      <section>
-        <span>飞行器状态</span>
-        <strong>{{ aircraftStatus }}</strong>
-      </section>
-      <section>
-        <span>直播来源</span>
-        <strong>{{ liveSource }}</strong>
-      </section>
-    </div>
-
-    <p class="delivery-task-message">{{ taskMessage }}</p>
-
-    <div class="delivery-action-row">
-      <span>{{ selectedDeviceSn || '未选择飞行器' }}</span>
-      <span>{{ deliveryTargetSummary }}</span>
     </div>
   </section>
 </template>
@@ -65,6 +68,7 @@ import type {
   DeliveryTaskStatus,
 } from '/@/api/fire/delivery'
 import type { CockpitStreamTarget } from './CockpitAircraftStreamSelector.vue'
+import { buildDeliveryExecutionHud } from './delivery-execution-hud.mjs'
 
 const props = withDefaults(defineProps<{
   target?: CockpitStreamTarget | null
@@ -177,6 +181,20 @@ const deliveryTargetSummary = computed(() => {
   const count = props.deliveryTargets.length
   return count > 0 ? `可选投放目标 ${count} 架` : '无可选投放目标'
 })
+
+const deliveryHud = computed(() => buildDeliveryExecutionHud({
+  selectedDeviceSn: selectedDeviceSn.value,
+  deliveryTargetSummary: deliveryTargetSummary.value,
+  taskPhase: taskPhase.value,
+  taskProgress: taskProgress.value,
+  aircraftStatus: aircraftStatus.value,
+  liveSource: liveSource.value,
+  taskMessage: taskMessage.value,
+}))
+
+const visibleTaskMessage = computed(() =>
+  deliveryHud.value.message === '暂无投放任务消息' ? '' : deliveryHud.value.message
+)
 
 watch(selectedDeviceSn, () => {
   deviceProps.value = null
@@ -404,71 +422,30 @@ async function refreshPanel () {
 
 <style scoped lang="scss">
 .delivery-execution-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  min-width: 0;
   min-height: 100%;
-  padding: 16px;
   color: #e8f3ff;
-  border: 1px solid rgba(87, 180, 255, 0.22);
-  border-radius: 8px;
-  background: rgba(8, 18, 31, 0.88);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.panel-head,
-.delivery-action-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.panel-head h3 {
-  margin: 4px 0 0;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.panel-kicker,
-.delivery-status-grid span,
-.delivery-action-row {
-  color: rgba(206, 226, 244, 0.68);
-  font-size: 12px;
-}
-
-.panel-kicker {
-  margin: 0;
-}
-
-.refresh-btn {
-  min-width: 64px;
-  height: 32px;
-  color: #d9f0ff;
-  border: 1px solid rgba(100, 191, 255, 0.45);
-  border-radius: 6px;
-  background: rgba(28, 94, 145, 0.32);
-  cursor: pointer;
-}
-
-.refresh-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .delivery-live-frame {
   position: relative;
-  min-height: 220px;
+  width: 100%;
+  min-width: 0;
+  aspect-ratio: 16 / 9;
+  min-height: clamp(560px, 64vh, 860px);
   overflow: hidden;
-  border: 1px solid rgba(97, 203, 255, 0.24);
-  border-radius: 8px;
+  border: 1px solid rgba(69, 221, 255, 0.16);
+  border-radius: 26px;
   background:
-    linear-gradient(135deg, rgba(24, 65, 91, 0.65), rgba(7, 15, 26, 0.92)),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 4px);
+    radial-gradient(circle at top left, rgba(69, 221, 255, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(16, 34, 56, 0.9), rgba(6, 16, 28, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .delivery-live-frame.unavailable {
-  background: rgba(7, 14, 24, 0.92);
+  background:
+    radial-gradient(circle at top left, rgba(69, 221, 255, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(16, 34, 56, 0.84), rgba(6, 16, 28, 0.96));
 }
 
 .delivery-player-shell {
@@ -486,10 +463,153 @@ async function refreshPanel () {
   object-fit: contain;
 }
 
+.delivery-live-badge {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  color: #f7fbff;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(8, 22, 38, 0.78);
+}
+
+.delivery-live-badge.idle {
+  background: rgba(8, 22, 38, 0.62);
+}
+
+.delivery-refresh-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 4;
+  min-width: 76px;
+  height: 38px;
+  padding: 0 18px;
+  color: #dff4ff;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid rgba(97, 203, 255, 0.32);
+  border-radius: 999px;
+  background: rgba(8, 38, 64, 0.78);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26);
+  cursor: pointer;
+}
+
+.delivery-refresh-btn:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
+.delivery-live-hud {
+  position: absolute;
+  top: 72px;
+  right: 18px;
+  left: 18px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-right: 96px;
+  pointer-events: none;
+}
+
+.delivery-hud-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
+  color: #f3f8ff;
+  font-size: 12px;
+  line-height: 1.4;
+  border: 1px solid rgba(95, 165, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(8, 22, 38, 0.9);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.delivery-flight-hud {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(720px, calc(100% - 36px));
+  padding: 10px 14px;
+  color: #e6e9ef;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+  pointer-events: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.delivery-flight-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.delivery-flight-row.mode-row strong {
+  color: #53d492;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.delivery-flight-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.delivery-flight-label {
+  color: rgba(230, 233, 239, 0.72);
+}
+
+.delivery-flight-item strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+.delivery-hud-message {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 4;
+  max-width: min(440px, calc(100% - 36px));
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+  color: rgba(222, 238, 250, 0.78);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: none;
+  border: 1px solid rgba(105, 197, 255, 0.22);
+  border-radius: 10px;
+  border-left: 3px solid rgba(75, 195, 255, 0.78);
+  background: rgba(3, 12, 22, 0.68);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+}
+
 .live-overlay {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -504,8 +624,7 @@ async function refreshPanel () {
     repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.035) 0 1px, transparent 1px 4px);
 }
 
-.live-overlay span,
-.delivery-task-message {
+.live-overlay span {
   max-width: 100%;
   overflow-wrap: anywhere;
   color: rgba(222, 238, 250, 0.72);
@@ -525,45 +644,51 @@ async function refreshPanel () {
   color: #ff9c8a;
 }
 
-.delivery-status-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.delivery-status-grid section {
-  min-width: 0;
-  padding: 10px;
-  border: 1px solid rgba(121, 187, 255, 0.16);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.delivery-status-grid strong {
-  display: block;
-  min-height: 22px;
-  margin-top: 6px;
-  overflow-wrap: anywhere;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.delivery-task-message {
-  min-height: 36px;
-  margin: 0;
-  padding: 10px 12px;
-  border-left: 3px solid rgba(75, 195, 255, 0.7);
-  border-radius: 6px;
-  background: rgba(24, 54, 79, 0.42);
-}
-
-.delivery-action-row {
-  padding-top: 2px;
+.live-overlay.error {
+  inset: auto 24px 24px auto;
+  width: min(420px, calc(100% - 48px));
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 112, 112, 0.28);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(47, 10, 17, 0.86) 0%, rgba(25, 8, 11, 0.94) 100%);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
 }
 
 @media (max-width: 920px) {
-  .delivery-status-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .delivery-live-frame {
+    min-height: clamp(460px, 64vh, 700px);
+  }
+
+  .delivery-live-badge {
+    top: 10px;
+    left: 10px;
+  }
+
+  .delivery-refresh-btn {
+    top: 10px;
+    right: 10px;
+  }
+
+  .delivery-live-hud {
+    top: 62px;
+    right: 10px;
+    left: 10px;
+    padding-right: 0;
+  }
+
+  .delivery-flight-hud {
+    right: 10px;
+    left: 10px;
+    max-width: none;
+  }
+
+  .delivery-hud-message {
+    right: 10px;
+    bottom: 10px;
+    max-width: calc(100% - 20px);
   }
 }
 </style>

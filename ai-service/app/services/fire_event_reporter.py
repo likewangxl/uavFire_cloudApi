@@ -160,6 +160,9 @@ def build_fire_event_payload(
         thermal_measure_roi = event.thermal_measure_roi.model_dump()
         payload["thermal_measure_roi"] = thermal_measure_roi
         payload["thermalMeasureRoi"] = thermal_measure_roi
+    if event.geo_snapshot is not None:
+        payload["geo_snapshot"] = event.geo_snapshot
+        payload["geoSnapshot"] = event.geo_snapshot
     return payload
 
 

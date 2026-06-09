@@ -36,6 +36,8 @@ class SnapshotWriter:
         boxes: Optional[Iterable[dict]] = None,
         thermal_temperature: Optional[float] = None,
         thermal_measure_roi: Optional[Any] = None,
+        thermal_detect_roi: Optional[Any] = None,
+        thermal_measurements: Optional[Iterable[Any]] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
         """Write raw + annotated JPG. Returns (raw_url, annotated_url) or (None,None) on failure."""
         if frame_bgr is None or getattr(frame_bgr, "size", 0) == 0:
@@ -53,6 +55,8 @@ class SnapshotWriter:
                 boxes,
                 thermal_temperature=thermal_temperature,
                 thermal_measure_roi=thermal_measure_roi,
+                thermal_detect_roi=thermal_detect_roi,
+                thermal_measurements=thermal_measurements,
             )
             cv2.imwrite(str(self._dir / annotated_name), annotated)
         except Exception:
@@ -65,6 +69,8 @@ class SnapshotWriter:
         event_id: str,
         thermal_temperature: float,
         thermal_measure_roi: Optional[Any] = None,
+        thermal_detect_roi: Optional[Any] = None,
+        thermal_measurements: Optional[Iterable[Any]] = None,
     ) -> Optional[str]:
         raw_name = f"{event_id}-raw.jpg"
         annotated_name = f"{event_id}-annotated.jpg"
@@ -79,11 +85,28 @@ class SnapshotWriter:
             boxes=None,
             thermal_temperature=thermal_temperature,
             thermal_measure_roi=thermal_measure_roi,
+            thermal_detect_roi=thermal_detect_roi,
+            thermal_measurements=thermal_measurements,
         )
         try:
             cv2.imwrite(str(self._dir / annotated_name), annotated)
         except Exception:
             logger.exception("snapshot refresh failed event=%s", event_id)
+            return None
+        return self._url(annotated_name)
+
+    def write_uploaded_thermal_jpeg(self, event_id: str, content: bytes) -> Optional[str]:
+        if not content:
+            return None
+        raw_name = f"{event_id}-raw.jpg"
+        annotated_name = f"{event_id}-annotated.jpg"
+        try:
+            raw_path = self._dir / raw_name
+            annotated_path = self._dir / annotated_name
+            raw_path.write_bytes(content)
+            annotated_path.write_bytes(content)
+        except Exception:
+            logger.exception("uploaded thermal snapshot write failed event=%s", event_id)
             return None
         return self._url(annotated_name)
 
@@ -93,9 +116,17 @@ class SnapshotWriter:
         boxes: Optional[Iterable[dict]],
         thermal_temperature: Optional[float] = None,
         thermal_measure_roi: Optional[Any] = None,
+        thermal_detect_roi: Optional[Any] = None,
+        thermal_measurements: Optional[Iterable[Any]] = None,
     ) -> np.ndarray:
         out = frame.copy()
-        self._annotate_temperature(out, thermal_temperature, thermal_measure_roi)
+        self._annotate_temperature(
+            out,
+            thermal_temperature,
+            thermal_measure_roi,
+            thermal_detect_roi,
+            thermal_measurements=thermal_measurements,
+        )
         if not boxes:
             return out
         for b in boxes:
@@ -124,7 +155,24 @@ class SnapshotWriter:
         out: np.ndarray,
         thermal_temperature: Optional[float],
         thermal_measure_roi: Optional[Any],
+        thermal_detect_roi: Optional[Any] = None,
+        thermal_measurements: Optional[Iterable[Any]] = None,
     ) -> None:
+        rendered_measurements = _thermal_measurements(thermal_measurements)
+        if thermal_detect_roi is not None:
+            detect_x1, detect_y1, detect_x2, detect_y2 = _thermal_measure_region(out, thermal_detect_roi)
+            cv2.rectangle(out, (detect_x1, detect_y1), (detect_x2, detect_y2), (255, 0, 255), 1)
+        if rendered_measurements:
+            for index, (temperature, roi) in enumerate(rendered_measurements):
+                is_primary = index == 0 and thermal_measure_roi is not None
+                self._draw_temperature_label(
+                    out,
+                    temperature,
+                    roi,
+                    color=(0, 255, 255) if is_primary else (0, 200, 255),
+                    thickness=2 if is_primary else 1,
+                )
+            return
         if thermal_temperature is None:
             return
         try:
@@ -133,9 +181,19 @@ class SnapshotWriter:
             return
         if not np.isfinite(value):
             return
-        caption = f"{value:.1f}C"
-        x1, y1, x2, y2 = _thermal_measure_region(out, thermal_measure_roi)
-        cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 255), 2)
+        self._draw_temperature_label(out, value, thermal_measure_roi, color=(0, 255, 255), thickness=2)
+
+    def _draw_temperature_label(
+        self,
+        out: np.ndarray,
+        temperature: float,
+        roi: Optional[Any],
+        color: Tuple[int, int, int],
+        thickness: int,
+    ) -> None:
+        caption = f"{temperature:.1f}C"
+        x1, y1, x2, y2 = _thermal_measure_region(out, roi)
+        cv2.rectangle(out, (x1, y1), (x2, y2), color, thickness)
         text_x = min(max(x2 + 6, 6), max(out.shape[1] - 116, 6))
         text_y = min(max((y1 + y2) // 2, 22), max(out.shape[0] - 8, 22))
         cv2.rectangle(out, (text_x - 4, text_y - 20), (text_x + 104, text_y + 6), (0, 0, 0), -1)
@@ -269,6 +327,27 @@ def _thermal_measure_region(frame: np.ndarray, roi: Optional[Any]) -> Tuple[int,
     x2 = min(max(x2, x1), width)
     y2 = min(max(y2, y1), height)
     return x1, y1, x2, y2
+
+
+def _thermal_measurements(items: Optional[Iterable[Any]]) -> List[Tuple[float, Any]]:
+    measurements: List[Tuple[float, Any]] = []
+    if not items:
+        return measurements
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw_temperature = item.get("temperature_c", item.get("temperatureC", item.get("temperature")))
+        roi = item.get("roi", item.get("thermal_measure_roi", item.get("thermalMeasureRoi")))
+        if roi is None:
+            continue
+        try:
+            temperature = float(raw_temperature)
+        except (TypeError, ValueError):
+            continue
+        if not np.isfinite(temperature):
+            continue
+        measurements.append((temperature, roi))
+    return measurements
 
 
 def _active_thermal_content_bounds(frame: np.ndarray) -> Tuple[int, int, int, int]:

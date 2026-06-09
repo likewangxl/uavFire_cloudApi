@@ -22,6 +22,17 @@ public class FireEventEntity {
     private Double lng;
     private Double alt;
     private String altitudeReference;
+    private String geoMethod;
+    private Double geoErrorRadiusM;
+    private String geoQuality;
+    private Long geoSourceTs;
+    private Double aircraftLat;
+    private Double aircraftLng;
+    private Double aircraftAlt;
+    private Double gimbalPitch;
+    private Double gimbalYaw;
+    private Double gimbalRoll;
+    private String thermalRoi;
     private Double thermalTemperature;
     private String temperatureUnit;
     private String thermalImageUrl;

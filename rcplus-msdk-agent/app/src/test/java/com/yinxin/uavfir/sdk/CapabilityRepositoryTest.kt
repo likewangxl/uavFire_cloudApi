@@ -31,5 +31,7 @@ class CapabilityRepositoryTest {
         override suspend fun loadAircraftModel(): String? = null
 
         override suspend fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit()
+
+        override suspend fun loadDeviceIdentity(): DjiDeviceIdentity? = null
     }
 }

@@ -61,4 +61,13 @@ class DjiFlightControlActionClientTest {
             timeout != null && timeout >= 180_000L,
         )
     }
+
+    @Test
+    fun gimbalNadirUsesAbsoluteAngleRotation() {
+        val source = File("src/main/java/com/yinxin/uavfir/api/MsdkCommandExecutor.kt").readText()
+
+        assertTrue(source.contains("fun rotateGimbalToPitch("))
+        assertTrue(source.contains("GimbalAngleRotationMode.ABSOLUTE_ANGLE"))
+        assertTrue(source.contains("KeyRotateByAngle"))
+    }
 }

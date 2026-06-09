@@ -34,6 +34,7 @@ class DjiDeviceSessionTest {
         val state = session.initialize()
 
         assertEquals(AgentConnectionState.CAPABILITY_READY, state.connectionState)
+        assertEquals(DjiDeviceIdentity("RC-001", "AIRCRAFT-001"), state.identity)
         assertEquals(capability, state.capability)
         assertEquals("MATRICE 4T", state.aircraftModel)
         assertEquals(flightLimit, state.flightLimit)
@@ -99,6 +100,7 @@ class DjiDeviceSessionTest {
         ),
         private val aircraftModel: String? = null,
         private val flightLimit: DjiFlightLimit = DjiFlightLimit(),
+        private val identity: DjiDeviceIdentity? = DjiDeviceIdentity("RC-001", "AIRCRAFT-001"),
     ) : DjiSdkGateway {
         override suspend fun initialize(): Boolean = initializeResult
 
@@ -109,6 +111,8 @@ class DjiDeviceSessionTest {
         override suspend fun loadAircraftModel(): String? = aircraftModel
 
         override suspend fun loadFlightLimit(): DjiFlightLimit = flightLimit
+
+        override suspend fun loadDeviceIdentity(): DjiDeviceIdentity? = identity
     }
 
     private class BlockingDjiSdkGateway : DjiSdkGateway {
@@ -150,6 +154,8 @@ class DjiDeviceSessionTest {
         override suspend fun loadAircraftModel(): String? = "MATRICE 4T"
 
         override suspend fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit()
+
+        override suspend fun loadDeviceIdentity(): DjiDeviceIdentity? = DjiDeviceIdentity("RC-001", "AIRCRAFT-001")
 
         suspend fun awaitInitializeEntered() {
             initializeEntered.await()

@@ -91,6 +91,8 @@ class DeliveryControllerApifoxWorkflowTest {
         event.setLng(113.654321);
         event.setAlt(12.0);
         event.setConfidence(new BigDecimal("0.96"));
+        event.setGeoQuality("AUTO_WAYPOINT_READY");
+        event.setGeoErrorRadiusM(6.0);
 
         SafetyCheckResult safe = new SafetyCheckResult();
         safe.setPassed(true);
@@ -136,6 +138,42 @@ class DeliveryControllerApifoxWorkflowTest {
         verify(stateMachine, times(2)).transit(transit.capture());
         assertEquals(FireMissionEvent.GEN_WP, transit.getAllValues().get(0).getEvent());
         assertEquals(FireMissionEvent.CREATE_DELIVERY_TASK, transit.getAllValues().get(1).getEvent());
+    }
+
+    @Test
+    void prepareFireMissionDeliveryTaskRejectsLowQualityFireCoordinates() throws Exception {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireEventMapper eventMapper = mock(FireEventMapper.class);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        SafetyCheckService safety = mock(SafetyCheckService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, eventMapper, planner, safety);
+
+        FireMissionEntity approved = fireMission("M-LOW-GEO-001", "APPROVED");
+        FireEventEntity event = new FireEventEntity();
+        event.setId(99L);
+        event.setLat(22.123456);
+        event.setLng(113.654321);
+        event.setGeoQuality("DEM_MISSING");
+        event.setGeoErrorRadiusM(99.0);
+
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(approved);
+        when(eventMapper.selectById(99L)).thenReturn(event);
+
+        DeliveryController.PrepareFireMissionDeliveryTaskParam param =
+            new DeliveryController.PrepareFireMissionDeliveryTaskParam();
+        param.setOperatorId("operator-1");
+
+        Fc100BusinessException ex = org.junit.jupiter.api.Assertions.assertThrows(
+            Fc100BusinessException.class,
+            () -> controller.prepareFireMissionDeliveryTask("M-LOW-GEO-001", param, request));
+        assertEquals(Fc100ErrorCode.INVALID_PARAM, ex.getErrorCode());
+        verify(planner, never()).plan(any(WaypointGenerateParam.class));
     }
 
     @Test

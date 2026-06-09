@@ -1,327 +1,38 @@
 <template>
   <div class="leadership-cockpit">
-    <section class="hero-grid">
-      <article class="shell-card hero-title">
-        <p class="eyebrow">Emergency Leadership Cockpit</p>
-        <h1>智能集群大载重无人机灭火系统</h1>
-        <p class="hero-subtitle">陕西省森林消防应急指挥中心驾驶舱</p>
-      </article>
+    <section class="cockpit-shell">
+      <header class="cockpit-topbar">
+        <div class="cockpit-title">
+          <h1>森林灭火综合驾驶舱</h1>
+          <p>火情识别 / 双光复核 / FC100 投放 / 飞机状态</p>
+        </div>
+        <div class="cockpit-actions">
+          <span class="status-pill default" :title="cockpitLastRefreshText">{{ cockpitRefreshLabel }}</span>
+          <span class="status-pill" :class="cockpitDataStatusClass">{{ cockpitDataStatusText }}</span>
+        </div>
+      </header>
 
-      <article class="shell-card hero-brief">
-        <div class="section-meta">处置简报</div>
-        <h2>秦岭北坡 2 号山火处于可控压制阶段</h2>
-        <p>
-          当前主火点 1 处、次生火点 2 处，火线向东南缓慢扩展，已形成空地协同封控圈。
-          现场无人机集群、补给、通信和道路管制均保持稳定。
-        </p>
-        <span class="status-pill danger">一级关注事件</span>
-      </article>
+      <section class="summary-grid">
+        <article
+          v-for="item in cockpitSummary.metrics"
+          :key="item.key"
+          class="shell-card summary-card"
+          :class="item.tone"
+          :title="item.source"
+        >
+          <div class="section-meta">{{ item.label }}</div>
+          <div class="summary-value">{{ item.value }}</div>
+          <p>{{ item.note }}</p>
+        </article>
+      </section>
 
-      <article class="shell-card hero-clock">
-        <div class="section-meta">当前时间</div>
-        <div class="clock-value">14:26</div>
-        <p>2026-03-30 周一</p>
-        <p>指挥值守正常</p>
-      </article>
-    </section>
-
-    <section class="summary-grid">
-      <article
-        v-for="item in summaryCards"
-        :key="item.label"
-        class="shell-card summary-card"
-      >
-        <div class="section-meta">{{ item.label }}</div>
-        <div class="summary-value">{{ item.value }}</div>
-        <p>{{ item.note }}</p>
-      </article>
-    </section>
-
-    <section class="content-grid">
+      <section class="content-grid">
       <div class="column">
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>领导决策摘要</h3>
-              <p>面向值班领导的核心结论，不展示飞控级操作细节。</p>
-            </div>
-          </header>
-
-          <div class="decision-list">
-            <section
-              v-for="item in decisions"
-              :key="item.title"
-              class="decision-card"
-            >
-              <div class="decision-top">
-                <h4>{{ item.title }}</h4>
-                <span
-                  class="status-pill"
-                  :class="item.type"
-                >
-                  {{ item.tag }}
-                </span>
-              </div>
-              <p>{{ item.content }}</p>
-            </section>
-          </div>
-        </article>
-
-        <article class="shell-card panel-card">
-          <header class="panel-header">
-            <div>
-              <h3>现场风险与民生影响</h3>
-              <p>突出群众、道路、设施、重点坡向等消防领导最关心的要点。</p>
-            </div>
-          </header>
-
-          <div class="small-metric-grid">
-            <section
-              v-for="item in impactMetrics"
-              :key="item.label"
-              class="small-metric-card"
-            >
-              <div class="section-meta">{{ item.label }}</div>
-              <div class="small-metric-value">{{ item.value }}</div>
-            </section>
-          </div>
-
-          <div class="info-list">
-            <section
-              v-for="item in riskItems"
-              :key="item.title"
-              class="info-card"
-            >
-              <div class="info-top">
-                <h4>{{ item.title }}</h4>
-                <span
-                  class="status-pill"
-                  :class="item.type"
-                >
-                  {{ item.level }}
-                </span>
-              </div>
-              <p>{{ item.content }}</p>
-            </section>
-          </div>
-        </article>
-      </div>
-
-      <article class="shell-card panel-card map-panel" :class="{ 'live-mode': activeVisualTab !== 'map' }">
-        <header class="panel-header map-header">
-          <div>
-            <h3>{{ visualPanelTitle }}</h3>
-            <p>{{ visualPanelDescription }}</p>
-          </div>
-          <div class="map-header-actions">
-            <div class="visual-tabs">
-              <button
-                v-for="tab in visualTabs"
-                :key="tab.key"
-                class="visual-tab"
-                :class="{ active: activeVisualTab === tab.key }"
-                type="button"
-                @click="activeVisualTab = tab.key"
-              >
-                {{ tab.label }}
-              </button>
-            </div>
-            <span class="status-pill" :class="visualPanelPillClass">
-              {{ visualPanelPillText }}
-            </span>
-          </div>
-        </header>
-
-        <div v-if="activeVisualTab === 'map'" class="map-stage">
-          <div class="mountain mountain-one"></div>
-          <div class="mountain mountain-two"></div>
-          <div class="mountain mountain-three"></div>
-          <div class="fire-zone fire-major"></div>
-          <div class="fire-zone fire-secondary"></div>
-          <div class="protection-zone zone-one"></div>
-          <div class="protection-zone zone-two"></div>
-          <div class="route route-one"></div>
-          <div class="route route-two"></div>
-          <div class="route route-three"></div>
-
-          <div
-            v-for="node in mapNodes"
-            :key="node.name"
-            class="map-node"
-            :style="{ top: node.top, left: node.left }"
-          >
-            <span class="map-node-dot"></span>
-            <span class="map-node-label">{{ node.name }}</span>
-          </div>
-        </div>
-
-        <div v-else-if="activeVisualTab === 'fire-monitor'" class="livestream-stage dual-stream-stage">
-          <div class="dual-stream-shell">
-            <div class="dual-stream-stage-head">
-              <CockpitAircraftStreamSelector
-                v-model:value="selectedFireMonitorTargetKey"
-                role="fire-monitor"
-                :targets="fireMonitorTargets"
-                :loading="dualStreamState.loading"
-                @change="handleFireMonitorTargetChange"
-              />
-              <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
-              <button
-                class="fire-detect-btn"
-                :class="{ active: fireDetectionState.running }"
-                :disabled="fireDetectionState.loading"
-                @click="onToggleFireDetection"
-              >
-                {{ fireDetectionState.running ? '停止火情监测' : '开始火情监测' }}
-              </button>
-            </div>
-
-            <div class="dual-stream-player-stage">
-              <div ref="primaryPlayerShell" class="dual-stream-player primary"></div>
-
-              <div v-if="!livePaneState.primary.url" class="dual-stream-overlay">
-                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
-                <div class="stream-value">{{ primaryPaneMeta.status }}</div>
-                <p>{{ primaryPaneMeta.unavailableHint }}</p>
-              </div>
-              <div v-else-if="primaryPlayerState.loading" class="dual-stream-overlay">
-                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
-                <div class="stream-value">播放器加载中</div>
-                <p>{{ livePaneState.primary.url }}</p>
-              </div>
-              <div v-else-if="primaryPlayerState.error" class="dual-stream-overlay error">
-                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
-                <div class="stream-value">播放失败</div>
-                <p>{{ primaryPlayerState.error }}</p>
-              </div>
-              <div v-if="focusSwitching" class="dual-stream-switch-overlay">
-                <span class="dual-stream-switch-spinner"></span>
-                <strong>{{ focusSwitchLabel }}</strong>
-                <small>正在切换直播画面</small>
-              </div>
-
-              <div class="live-badge" :class="{ idle: !primaryPlayerState.playing }">
-                <span class="live-dot"></span>{{ primaryPaneMeta.badge }}
-              </div>
-
-              <div class="dual-stream-hud">
-                <span
-                  v-for="item in liveHudItems"
-                  :key="item"
-                  class="dual-stream-hud-chip"
-                >
-                  {{ item }}
-                </span>
-              </div>
-
-              <div class="flight-hud-overlay">
-                <div class="flight-hud-row mode-row">
-                  <span class="mode" :class="{ warn: flightHud.modeWarn }">{{ flightHud.modeText }}</span>
-                </div>
-                <div class="flight-hud-row">
-                  <span class="flight-hud-item battery">⚡ {{ flightHud.battery }}%</span>
-                  <span class="flight-hud-item" :class="{ fixed: flightHud.isFixed, unfixed: !flightHud.isFixed }">
-                    <span class="dot"></span>{{ flightHud.isFixed ? '定点' : '浮动' }}
-                  </span>
-                  <span class="flight-hud-item">GPS {{ flightHud.gps }}</span>
-                  <span class="flight-hud-item">R {{ flightHud.rtk }}</span>
-                </div>
-                <div class="flight-hud-row">
-                  <span class="flight-hud-item">ASL {{ flightHud.asl }} m</span>
-                  <span class="flight-hud-item">H {{ flightHud.height }} m</span>
-                  <span class="flight-hud-item">返航点 {{ flightHud.homeDist }} 米</span>
-                </div>
-                <div class="flight-hud-row">
-                  <span class="flight-hud-item">纬度 {{ flightHud.lat }}</span>
-                  <span class="flight-hud-item">经度 {{ flightHud.lng }}</span>
-                </div>
-                <div class="flight-hud-row">
-                  <span class="flight-hud-item">H.S {{ flightHud.hSpeed }} m/s</span>
-                  <span class="flight-hud-item">V.S {{ flightHud.vSpeed }} m/s</span>
-                  <span class="flight-hud-item">W.S {{ flightHud.wSpeed }} m/s</span>
-                </div>
-              </div>
-
-              <button
-                class="dual-stream-preview"
-                :class="{ clickable: livePaneState.preview.clickable && !focusSwitching, switching: focusSwitching }"
-                type="button"
-                :disabled="!livePaneState.preview.clickable || focusSwitching"
-                @click="handlePreviewSwap"
-              >
-                <div ref="previewPlayerShell" class="dual-stream-player preview"></div>
-
-                <div v-if="!livePaneState.preview.url" class="dual-stream-preview-overlay placeholder">
-                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
-                  <strong v-if="previewPaneMeta.status">{{ previewPaneMeta.status }}</strong>
-                  <small>{{ previewPaneMeta.helper }}</small>
-                </div>
-                <div v-else-if="previewPlayerState.loading" class="dual-stream-preview-overlay">
-                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
-                  <strong>加载中</strong>
-                  <small>{{ previewPaneMeta.helper }}</small>
-                </div>
-                <div v-else-if="previewPlayerState.error" class="dual-stream-preview-overlay error">
-                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
-                  <strong>播放失败</strong>
-                  <small>{{ previewPlayerState.error }}</small>
-                </div>
-
-                <div
-                  v-if="livePaneState.preview.url && !previewPlayerState.loading && !previewPlayerState.error"
-                  class="dual-stream-preview-label"
-                >
-                  <span>{{ previewPaneMeta.title }}</span>
-                  <small>{{ previewPaneMeta.helper }}</small>
-                </div>
-              </button>
-            </div>
-
-            <div class="dual-stream-reason" v-if="dualStreamSummary.reason">
-              <span class="section-meta">当前约束</span>
-              <p>{{ dualStreamSummary.reason }}</p>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="livestream-stage delivery-stage">
-          <div class="dual-stream-shell">
-            <div class="dual-stream-stage-head">
-              <CockpitAircraftStreamSelector
-                v-model:value="selectedDeliveryTargetKey"
-                role="delivery"
-                :targets="deliveryExecutionTargets"
-                :loading="deliveryTargetsLoading"
-              />
-              <span class="status-pill" :class="deliveryPanelPillClass">{{ deliveryPanelPillText }}</span>
-            </div>
-            <CockpitDeliveryExecutionPanel
-              :target="selectedDeliveryTarget"
-              :delivery-targets="deliveryExecutionTargets"
-              :loading="deliveryTargetsLoading"
-              @refresh-targets="loadDeliveryExecutionTargets"
-            />
-          </div>
-        </div>
-
-        <div class="map-kpi-grid">
-          <section
-            v-for="item in visualKpis"
-            :key="item.label"
-            class="map-kpi"
-          >
-            <div class="section-meta">{{ item.label }}</div>
-            <div class="map-kpi-value">{{ item.value }}</div>
-          </section>
-        </div>
-      </article>
-
-      <div class="column">
-        <article class="shell-card panel-card">
-          <header class="panel-header">
-            <div>
-              <h3>重点告警与处置状态</h3>
-              <p>只保留对决策有价值的高等级告警和处置结果。</p>
+              <h3>AI 识别记录</h3>
+              <p>来自 dual-stream task events，展示最近识别和复核状态。</p>
             </div>
           </header>
 
@@ -364,25 +75,304 @@
               </div>
             </section>
           </div>
+        </article>
 
-          <div class="alert-divider"></div>
+        <article class="shell-card panel-card">
+          <header class="panel-header">
+            <div>
+              <h3>火情事件队列</h3>
+              <p>来自 /api/fire/events，按风险等级和最近更新时间排序。</p>
+            </div>
+          </header>
 
-          <div class="info-list">
+          <div v-if="fireEventState.error" class="ai-risk-empty error">
+            {{ fireEventState.error }}
+          </div>
+          <div v-else-if="cockpitSummary.recentFireEvents.length === 0" class="ai-risk-empty">
+            暂无火情事件
+          </div>
+          <div v-else class="info-list">
             <section
-              v-for="item in alertItems"
-              :key="item.title"
+              v-for="event in cockpitSummary.recentFireEvents"
+              :key="event.eventId"
               class="info-card"
             >
               <div class="info-top">
-                <h4>{{ item.title }}</h4>
+                <h4>{{ event.fireLevel || 'UNKNOWN' }} · {{ event.eventId }}</h4>
                 <span
                   class="status-pill"
-                  :class="item.type"
+                  :class="fireEventLevelClass(event.fireLevel)"
                 >
-                  {{ item.level }}
+                  {{ event.status }}
                 </span>
               </div>
-              <p>{{ item.content }}</p>
+              <p>
+                置信度 {{ formatFireConfidence(event.confidence) }} ·
+                定位 {{ event.geoQuality || '未知' }} ·
+                任务 {{ event.missionNo || '未关联' }}
+              </p>
+              <p>
+                {{ formatFireEventLocation(event) }} ·
+                通知版本 {{ event.notificationVersion ?? 1 }}
+              </p>
+            </section>
+          </div>
+        </article>
+      </div>
+
+      <article class="shell-card panel-card map-panel" :class="{ 'live-mode': activeVisualTab !== 'map' }">
+        <header class="panel-header map-header">
+          <div>
+            <h3>{{ visualPanelTitle }}</h3>
+            <p>{{ visualPanelDescription }}</p>
+          </div>
+          <div class="map-header-actions">
+            <div class="visual-tabs">
+              <button
+                v-for="tab in visualTabs"
+                :key="tab.key"
+                class="visual-tab"
+                :class="{ active: activeVisualTab === tab.key }"
+                type="button"
+                @click="activeVisualTab = tab.key"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+            <span
+              v-if="activeVisualTab !== 'delivery-execution'"
+              class="status-pill"
+              :class="visualPanelPillClass"
+            >
+              {{ visualPanelPillText }}
+            </span>
+          </div>
+        </header>
+
+        <div v-if="activeVisualTab === 'map'" class="map-stage">
+          <div class="mountain mountain-one"></div>
+          <div class="mountain mountain-two"></div>
+          <div class="mountain mountain-three"></div>
+          <div class="fire-zone fire-major"></div>
+          <div class="fire-zone fire-secondary"></div>
+          <div class="protection-zone zone-one"></div>
+          <div class="protection-zone zone-two"></div>
+          <div class="route route-one"></div>
+          <div class="route route-two"></div>
+          <div class="route route-three"></div>
+
+          <div
+            v-for="node in mapNodes"
+            :key="node.name"
+            class="map-node"
+            :style="{ top: node.top, left: node.left }"
+          >
+            <span class="map-node-dot"></span>
+            <span class="map-node-label">{{ node.name }}</span>
+          </div>
+        </div>
+
+        <div v-else-if="activeVisualTab === 'fire-monitor'" class="livestream-stage dual-stream-stage">
+          <div
+            ref="fireMonitorFullscreenShell"
+            class="dual-stream-shell"
+            :class="{ fullscreen: fireMonitorFullscreen }">
+            <div class="dual-stream-stage-head">
+              <CockpitAircraftStreamSelector
+                v-model:value="selectedFireMonitorTargetKey"
+                role="fire-monitor"
+                :targets="fireMonitorTargets"
+                :loading="dualStreamState.loading"
+                @change="handleFireMonitorTargetChange"
+              />
+              <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
+              <button
+                class="fire-detect-btn"
+                :class="{ active: fireDetectionState.running }"
+                :disabled="fireDetectionState.loading"
+                @click="onToggleFireDetection"
+              >
+                {{ fireDetectionState.running ? '停止火情监测' : '开始火情监测' }}
+              </button>
+            </div>
+
+            <div class="dual-stream-player-stage">
+              <div ref="primaryPlayerShell" class="dual-stream-player primary"></div>
+
+              <div v-if="!livePaneState.primary.url" class="dual-stream-overlay">
+                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
+                <div class="stream-value">{{ primaryPaneMeta.status }}</div>
+                <p>{{ primaryPaneMeta.unavailableHint }}</p>
+              </div>
+              <div v-else-if="primaryPlayerState.loading" class="dual-stream-status-card loading">
+                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
+                <div class="stream-value">播放器加载中</div>
+                <p>{{ livePaneState.primary.url }}</p>
+              </div>
+              <div v-else-if="primaryPlayerState.error" class="dual-stream-status-card error">
+                <div class="stream-label">{{ primaryPaneMeta.title }}</div>
+                <div class="stream-value">播放失败</div>
+                <p>{{ primaryPlayerState.error }}</p>
+              </div>
+              <div v-if="focusSwitching" class="dual-stream-switch-overlay">
+                <span class="dual-stream-switch-spinner"></span>
+                <strong>{{ focusSwitchLabel }}</strong>
+                <small>正在切换直播画面</small>
+              </div>
+
+              <div class="live-badge" :class="{ idle: !primaryPlayerState.playing }">
+                <span class="live-dot"></span>{{ primaryPaneMeta.badge }}
+              </div>
+
+              <button
+                class="dual-stream-fullscreen-btn"
+                type="button"
+                @click="toggleFireMonitorFullscreen"
+              >
+                {{ fireMonitorFullscreen ? '退出全屏' : '全屏' }}
+              </button>
+
+              <div class="dual-stream-hud">
+                <span
+                  v-for="item in liveHudItems"
+                  :key="item"
+                  class="dual-stream-hud-chip"
+                >
+                  {{ item }}
+                </span>
+              </div>
+
+              <div class="flight-hud-overlay">
+                <div class="flight-hud-row mode-row">
+                  <span class="mode" :class="{ warn: flightHudData.modeWarn }">{{ flightHudData.modeText }}</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item battery">⚡ {{ flightHudData.battery }}%</span>
+                  <span class="flight-hud-item" :class="{ fixed: flightHudData.isFixed, unfixed: !flightHudData.isFixed }">
+                    <span class="dot"></span>{{ flightHudData.isFixed ? '定点' : '浮动' }}
+                  </span>
+                  <span class="flight-hud-item">GPS {{ flightHudData.gps }}</span>
+                  <span class="flight-hud-item">R {{ flightHudData.rtk }}</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item">ASL {{ flightHudData.asl }} m</span>
+                  <span class="flight-hud-item">H {{ flightHudData.height }} m</span>
+                  <span class="flight-hud-item">返航点 {{ flightHudData.homeDist }} 米</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item">纬度 {{ flightHudData.lat }}</span>
+                  <span class="flight-hud-item">经度 {{ flightHudData.lng }}</span>
+                </div>
+                <div class="flight-hud-row">
+                  <span class="flight-hud-item">H.S {{ flightHudData.hSpeed }} m/s</span>
+                  <span class="flight-hud-item">V.S {{ flightHudData.vSpeed }} m/s</span>
+                  <span class="flight-hud-item">W.S {{ flightHudData.wSpeed }} m/s</span>
+                </div>
+              </div>
+
+              <button
+                class="dual-stream-preview"
+                :class="{ clickable: livePaneState.preview.clickable && !focusSwitching, switching: focusSwitching }"
+                type="button"
+                :disabled="!livePaneState.preview.clickable || focusSwitching"
+                @click="handlePreviewSwap"
+              >
+                <div ref="previewPlayerShell" class="dual-stream-player preview"></div>
+
+                <div v-if="!livePaneState.preview.url" class="dual-stream-preview-overlay placeholder">
+                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
+                  <strong v-if="previewPaneMeta.status">{{ previewPaneMeta.status }}</strong>
+                  <small>{{ previewPaneMeta.helper }}</small>
+                </div>
+                <div v-else-if="previewPlayerState.loading" class="dual-stream-preview-overlay">
+                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
+                  <strong>加载中</strong>
+                  <small>{{ previewPaneMeta.helper }}</small>
+                </div>
+                <div v-else-if="previewPlayerState.error" class="dual-stream-preview-overlay error">
+                  <span class="preview-title">{{ previewPaneMeta.title }}</span>
+                  <strong>播放失败</strong>
+                  <small>{{ previewPlayerState.error }}</small>
+                </div>
+
+                <div
+                  v-if="livePaneState.preview.url && !previewPlayerState.loading && !previewPlayerState.error"
+                  class="dual-stream-preview-label"
+                >
+                  <span>{{ previewPaneMeta.title }}</span>
+                  <small>{{ previewPaneMeta.helper }}</small>
+                </div>
+              </button>
+
+              <CockpitFlightControlPanel
+                v-if="activeVisualTab === 'fire-monitor'"
+                class="fire-monitor-flight-panel"
+                :target="selectedFireMonitorTarget"
+                :msdk-device="selectedFireMonitorMsdkDevice"
+                :osd="selectedFireMonitorOsd"
+              />
+            </div>
+
+          </div>
+        </div>
+
+        <div v-else class="livestream-stage delivery-stage">
+          <div class="dual-stream-shell">
+            <div class="dual-stream-stage-head">
+              <CockpitAircraftStreamSelector
+                v-model:value="selectedDeliveryTargetKey"
+                role="delivery"
+                :targets="deliveryExecutionTargets"
+                :loading="deliveryTargetsLoading"
+              />
+            </div>
+            <CockpitDeliveryExecutionPanel
+              :target="selectedDeliveryTarget"
+              :delivery-targets="deliveryExecutionTargets"
+              :loading="deliveryTargetsLoading"
+              @refresh-targets="loadDeliveryExecutionTargets"
+            />
+          </div>
+        </div>
+
+        <div v-if="activeVisualTab === 'map'" class="map-kpi-grid">
+          <section
+            v-for="item in visualKpis"
+            :key="item.label"
+            class="map-kpi"
+          >
+            <div class="section-meta">{{ item.label }}</div>
+            <div class="map-kpi-value">{{ item.value }}</div>
+          </section>
+        </div>
+      </article>
+
+      <div class="column">
+        <article class="shell-card panel-card">
+          <header class="panel-header">
+            <div>
+              <h3>飞机与直播状态</h3>
+              <p>聚合 MSDK Agent、双光直播和 FC100 投放设备状态。</p>
+            </div>
+          </header>
+
+          <div v-if="cockpitSummary.aircraftRows.length === 0" class="ai-risk-empty">
+            暂无飞机状态，请确认 MSDK Agent 或 FC100 投放平台已接入。
+          </div>
+          <div v-else class="info-list">
+            <section
+              v-for="aircraft in cockpitSummary.aircraftRows"
+              :key="aircraft.key"
+              class="info-card"
+            >
+              <div class="info-top">
+                <h4>{{ aircraft.name }}</h4>
+                <span class="status-pill" :class="aircraft.online ? 'safe' : 'danger'">
+                  {{ aircraft.role }}
+                </span>
+              </div>
+              <p>{{ aircraft.status }} · 电量 {{ formatAircraftBattery(aircraft.battery) }}</p>
+              <p>{{ aircraft.detail }}</p>
             </section>
           </div>
         </article>
@@ -390,69 +380,39 @@
         <article class="shell-card panel-card">
           <header class="panel-header">
             <div>
-              <h3>力量与保障资源</h3>
-              <p>面向连续作战场景，突出力量、药剂、电池与补能保障状态。</p>
+              <h3>FC100 投放与链路状态</h3>
+              <p>投放任务来自 delivery 接口；系统链路健康没有统一 health 汇总接口的部分明确标注。</p>
             </div>
           </header>
 
           <div class="info-list">
             <section
-              v-for="item in resourceItems"
-              :key="item.title"
+              v-for="task in cockpitSummary.taskRows"
+              :key="task.taskId || task.missionId || task.deviceSn"
               class="info-card"
             >
               <div class="info-top">
-                <h4>{{ item.title }}</h4>
-                <span
-                  class="status-pill"
-                  :class="item.type"
-                >
-                  {{ item.level }}
-                </span>
+                <h4>{{ task.taskName || task.taskId || '投放任务' }}</h4>
+                <span class="status-pill default">{{ task.status || task.phase || '同步中' }}</span>
               </div>
-              <p>{{ item.content }}</p>
+              <p>阶段 {{ task.phase || '--' }} · 进度 {{ formatTaskProgress(task.progressPercent) }}</p>
+              <p>{{ task.message || task.displayMessage || task.reason || '等待投放平台返回任务消息' }}</p>
+            </section>
+            <section
+              v-for="gap in cockpitSummary.dataGaps"
+              :key="gap.key"
+              class="info-card"
+            >
+              <div class="info-top">
+                <h4>{{ gap.label }}</h4>
+                <span class="status-pill default">{{ gap.value }}</span>
+              </div>
+              <p>{{ gap.note }}</p>
             </section>
           </div>
         </article>
       </div>
-    </section>
-
-    <section class="footer-grid">
-      <article class="shell-card footer-card">
-        <h3>处置成效趋势</h3>
-        <p>火场受控比例持续提升，说明当前策略有效。</p>
-        <div class="trend-bars">
-          <span
-            v-for="(height, index) in trendBars"
-            :key="index"
-            :class="{ active: index >= 3 }"
-            :style="{ height }"
-          ></span>
-        </div>
-      </article>
-
-      <article class="shell-card footer-card">
-        <h3>火势扩展预测</h3>
-        <p>未来 30 分钟整体向东南缓慢扩展，仍处可压制区间。</p>
-        <div class="progress-track">
-          <i class="progress-danger" style="width: 42%;"></i>
-        </div>
-      </article>
-
-      <article class="shell-card footer-card">
-        <h3>无人机轮换健康度</h3>
-        <p>主力机队状态良好，轮换节奏平稳。</p>
-        <div class="progress-track">
-          <i class="progress-safe" style="width: 86%;"></i>
-        </div>
-      </article>
-
-      <article class="shell-card footer-card">
-        <h3>建议领导关注事项</h3>
-        <ul class="focus-list">
-          <li v-for="item in focusItems" :key="item">{{ item }}</li>
-        </ul>
-      </article>
+      </section>
     </section>
   </div>
 </template>
@@ -478,6 +438,7 @@ import { useMyStore } from '/@/store'
 import { EModeCode } from '/@/types/device'
 import CockpitAircraftStreamSelector, { type CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
 import CockpitDeliveryExecutionPanel from '/@/components/cockpit/CockpitDeliveryExecutionPanel.vue'
+import CockpitFlightControlPanel from '/@/components/cockpit/CockpitFlightControlPanel.vue'
 import {
   buildDualStreamCandidateSns,
   buildLivePaneState,
@@ -485,6 +446,7 @@ import {
   resolveAppliedFocusPreference,
   swapPrimaryPreference
 } from './leadership-cockpit-live-layout.mjs'
+import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
 
 const store = useMyStore()
 const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
@@ -575,69 +537,46 @@ const flightHud = computed(() => {
     wSpeed: fmtHud(osd?.wind_speed),
   }
 })
+const flightHudData = computed(() => flightHud.value || {
+  modeText: '等待 OSD 数据',
+  modeWarn: true,
+  battery: '--',
+  isFixed: false,
+  gps: '--',
+  rtk: '--',
+  asl: '--',
+  height: '--',
+  homeDist: '--',
+  lat: '--',
+  lng: '--',
+  hSpeed: '--',
+  vSpeed: '--',
+  wSpeed: '--'
+})
 
 const AI_EVENT_TASK_ID = 'manual-ai-001'
 
-const summaryCards = [
-  { label: '受控火场面积', value: '68%', note: '较 30 分钟前提升 14%' },
-  { label: '受威胁群众点位', value: '2', note: '均已完成提前疏散' },
-  { label: '投入无人机力量', value: '12', note: '侦察 4 / 灭火 6 / 中继 2' },
-  { label: '累计投送灭火弹', value: '29', note: '有效命中率 92%' },
-  { label: '预计扑灭窗口', value: '23', note: '分钟内进入残火清理' },
-  { label: '保障资源到位率', value: '96%', note: '电池、药剂、通信均充足' }
-]
+const fireEventState = reactive({
+  loading: false,
+  error: '',
+  events: [] as FireEventDTO[]
+})
+const deliveryTaskStatuses = ref<any[]>([])
+const cockpitLastRefreshAt = ref(0)
 
-const decisions = [
-  {
-    title: '总体判断',
-    tag: '态势可控',
-    type: 'safe',
-    content: '现阶段火势已被主封控圈限制，未出现跨山脊跃迁，建议维持当前空中压制强度。'
-  },
-  {
-    title: '下一步建议',
-    tag: '建议批示',
-    type: 'default',
-    content: '保持 2 个侦察架次持续巡查东南回燃区，同时提前调度补给组进入待命，不建议新增地面冒进扑救。'
+const mapNodes = computed(() => {
+  const events = cockpitSummary.value.recentFireEvents
+  if (events.length === 0) {
+    return [{ name: '等待火情定位', top: '48%', left: '48%' }]
   }
-]
+  return events.slice(0, 5).map((event, index) => ({
+    name: `${event.fireLevel || 'UNKNOWN'} ${event.eventId}`,
+    top: `${20 + (index % 3) * 22}%`,
+    left: `${24 + (index % 2) * 34}%`
+  }))
+})
 
-const impactMetrics = [
-  { label: '受威胁村组', value: '1' },
-  { label: '重要设施点', value: '3' },
-  { label: '道路管制段', value: '2' },
-  { label: '需重点盯防坡向', value: '东南坡' }
-]
-
-const riskItems = [
-  {
-    title: '东南坡回燃风险',
-    level: '高',
-    type: 'danger',
-    content: '地表温升回弹明显，若风向继续偏东，20 分钟内有局部复燃可能。'
-  },
-  {
-    title: '通信链路冗余',
-    level: '中',
-    type: 'default',
-    content: '中继链路整体稳定，但建议继续保留专网备份，避免山谷遮挡造成盲区。'
-  }
-]
-
-const mapNodes = [
-  { name: '侦察组 A-01', top: '23%', left: '28%' },
-  { name: '投送组 B-02', top: '52%', left: '23%' },
-  { name: '中继组 C-01', top: '38%', left: '61%' },
-  { name: '封控组 D-03', top: '60%', left: '55%' },
-  { name: '补位组 E-02', top: '16%', left: '72%' }
-]
-
-const mapKpis = [
-  { label: '当前主火点', value: '1' },
-  { label: '次生火点', value: '2' },
-  { label: '封控圈完整度', value: '91%' },
-  { label: '预计稳控时间', value: '23 分钟' }
-]
+const mapKpis = computed(() => cockpitSummary.value.metrics.slice(0, 4))
 
 const visualTabs = [
   { key: 'map', label: '态势图' },
@@ -651,6 +590,8 @@ const selectedFireMonitorTargetKey = ref('')
 const deliveryExecutionTargets = ref<CockpitStreamTarget[]>([])
 const selectedDeliveryTargetKey = ref('')
 const deliveryTargetsLoading = ref(false)
+const fireMonitorFullscreenShell = ref<HTMLElement | null>(null)
+const fireMonitorFullscreen = ref(false)
 const primaryPlayerShell = ref<HTMLElement | null>(null)
 const previewPlayerShell = ref<HTMLElement | null>(null)
 const primaryPreference = ref<'visible' | 'thermal'>('visible')
@@ -662,6 +603,42 @@ const dualStreamState = reactive({
   error: '',
   group: null as DualStreamGroup | null
 })
+
+const cockpitSummary = computed(() => buildCockpitSummary({
+  fireEvents: fireEventState.events,
+  aiEvents: aiRiskState.events,
+  msdkDevices: msdkDeviceSnapshots.value,
+  deliveryTargets: deliveryExecutionTargets.value,
+  deliveryTaskStatuses: deliveryTaskStatuses.value,
+  dualStreamGroup: dualStreamState.group,
+  deliveryTargetsLoading: deliveryTargetsLoading.value,
+  fireEventsError: fireEventState.error,
+  aiEventsError: aiRiskState.error,
+  dualStreamError: dualStreamState.error
+}))
+
+const cockpitDataStatusText = computed(() => {
+  if (fireEventState.error || aiRiskState.error || dualStreamState.error) return '部分接口异常'
+  if (fireEventState.loading || aiRiskState.loading || dualStreamState.loading || deliveryTargetsLoading.value) return '数据同步中'
+  return '已接入现有接口'
+})
+
+const cockpitDataStatusClass = computed(() => {
+  if (fireEventState.error || aiRiskState.error || dualStreamState.error) return 'danger'
+  return 'safe'
+})
+
+const cockpitRefreshLabel = computed(() => {
+  if (!cockpitLastRefreshAt.value) return '等待'
+  const seconds = Math.max(0, Math.floor((Date.now() - cockpitLastRefreshAt.value) / 1000))
+  return `${seconds}s`
+})
+
+const cockpitLastRefreshText = computed(() => (
+  cockpitLastRefreshAt.value
+    ? `最近火情同步 ${new Date(cockpitLastRefreshAt.value).toLocaleTimeString('zh-CN', { hour12: false })}`
+    : '等待后端返回火情数据'
+))
 
 const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
   const targets = new Map<string, CockpitStreamTarget>()
@@ -722,6 +699,17 @@ const selectedFireMonitorTarget = computed(() => {
     null
 })
 
+const selectedFireMonitorMsdkDevice = computed(() => {
+  const sn = selectedFireMonitorTarget.value?.deviceSn
+  if (!sn) return null
+  return msdkDeviceSnapshots.value.find(device => device.aircraftSn === sn) || null
+})
+
+const selectedFireMonitorOsd = computed(() => {
+  const sn = selectedFireMonitorTarget.value?.deviceSn
+  return sn ? store.state.deviceState.deviceInfo[sn] || null : null
+})
+
 const selectedDeliveryTarget = computed(() => {
   return deliveryExecutionTargets.value.find(target => target.key === selectedDeliveryTargetKey.value) ||
     deliveryExecutionTargets.value[0] ||
@@ -778,17 +766,9 @@ const fireMonitorKpis = computed(() => [
   { label: 'AI 识别记录', value: `${recentAiRiskEvents.value.length} 条` }
 ])
 
-const deliveryExecutionKpis = computed(() => [
-  { label: '播放对象', value: selectedDeliveryTarget.value?.callsign || '未选择' },
-  { label: 'FC100 在线状态', value: selectedDeliveryTarget.value?.online ? '在线' : '离线' },
-  { label: '任务阶段', value: selectedDeliveryTarget.value?.taskStatus || '待命' },
-  { label: '执行进度', value: selectedDeliveryTarget.value?.progressPercent != null ? `${selectedDeliveryTarget.value.progressPercent}%` : '--' }
-])
-
 const visualKpis = computed(() => {
-  if (activeVisualTab.value === 'map') return mapKpis
-  if (activeVisualTab.value === 'fire-monitor') return fireMonitorKpis.value
-  return deliveryExecutionKpis.value
+  if (activeVisualTab.value === 'map') return mapKpis.value
+  return fireMonitorKpis.value
 })
 
 const aiRiskState = reactive({
@@ -823,6 +803,27 @@ let primaryPlayer: any = null
 let previewPlayer: any = null
 let zlmClientLoader: Promise<any> | null = null
 let lastMirroredFocusCommand = ''
+
+const syncFireMonitorFullscreenState = () => {
+  fireMonitorFullscreen.value = document.fullscreenElement === fireMonitorFullscreenShell.value
+}
+
+const toggleFireMonitorFullscreen = async () => {
+  const shell = fireMonitorFullscreenShell.value
+  if (!shell) return
+  try {
+    if (document.fullscreenElement === shell) {
+      await document.exitFullscreen?.()
+      return
+    }
+    await shell.requestFullscreen()
+  } catch (error: any) {
+    notification.warning({
+      message: '无法进入全屏',
+      description: error?.message || '当前浏览器未允许页面进入全屏。'
+    })
+  }
+}
 
 const loadZlmRtcClient = (streamUrl: string) => {
   const existing = (window as any).ZLMRTCClient
@@ -1141,17 +1142,21 @@ function handleFireMonitorTargetChange (target: CockpitStreamTarget) {
 function toDeliveryTarget (device: DeliveryDeviceDTO): CockpitStreamTarget {
   const onlineText = String(device.online || '').toLowerCase()
   const online = onlineText === 'true' || onlineText === 'online' || onlineText === '1'
-  const suffix = device.deviceSn ? device.deviceSn.slice(-4) : '--'
   return {
     key: `delivery:${device.deviceSn}`,
     role: 'delivery',
     deviceSn: device.deviceSn,
-    callsign: `FC100 投放 ${suffix}`,
+    callsign: 'FC100',
     online,
-    taskStatus: device.bindStatus || device.deviceType || '待命',
     streamStatus: online ? 'idle' : 'offline',
-    message: device.deviceType || undefined
+    compactLabel: true
   }
+}
+
+function isFc100DeliveryAircraftDevice (device: DeliveryDeviceDTO) {
+  const deviceType = String(device.deviceType || '').trim().toLowerCase()
+  const bindStatus = String(device.bindStatus || '').trim().toLowerCase()
+  return Boolean(device.deviceSn) && deviceType !== 'rc' && bindStatus !== 'rc'
 }
 
 async function loadDeliveryExecutionTargets () {
@@ -1160,22 +1165,26 @@ async function loadDeliveryExecutionTargets () {
     const response = await deliveryApi.listDevices()
     const devices = response.data?.data || []
     const targets = devices
-      .filter((device) => !!device.deviceSn)
+      .filter(isFc100DeliveryAircraftDevice)
       .map(toDeliveryTarget)
 
     const enriched = await Promise.all(targets.map(async (target) => {
       try {
-        const liveRes = await deliveryApi.deviceLive(target.deviceSn)
+        const [liveRes, propsRes] = await Promise.all([
+          deliveryApi.deviceLive(target.deviceSn),
+          deliveryApi.deviceProps(target.deviceSn).catch(() => null)
+        ])
         const live = liveRes.data?.data
-        if (!live) return target
+        const props = propsRes?.data?.data
         const enrichedTarget: CockpitStreamTarget = {
           ...target,
-          primaryPlayUrl: live.playUrl || '',
-          streamStatus: live.streamStatus === 'running'
+          online: props?.onlineStatus ?? target.online,
+          primaryPlayUrl: live?.playUrl || '',
+          streamStatus: live?.streamStatus === 'running'
             ? 'running'
-            : (target.online ? 'idle' : 'offline'),
-          message: live.message || target.message
-        }
+            : (target.online ? 'idle' : 'offline')
+        } as CockpitStreamTarget
+        ;(enrichedTarget as any).batteryPercent = props?.batteryPercent
         return enrichedTarget
       } catch {
         return target
@@ -1323,16 +1332,39 @@ const lastSeenFireEventId = ref(0)
 const fireEventsBootstrapped = ref(false)
 const lastNotifiedFireEventVersions = new Map<number, number>()
 
-async function loadNewFireEvents (): Promise<void> {
-  let events: FireEventDTO[] = []
+async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
+  fireEventState.loading = true
   try {
     const res = await fireEventApi.list()
-    events = res.data.data ?? []
+    const events = res.data.data ?? []
+    fireEventState.events = events
+    fireEventState.error = ''
+    cockpitLastRefreshAt.value = Date.now()
+    const missionNos = Array.from(new Set(events.map(event => event.missionNo).filter(Boolean))) as string[]
+    const statuses = await Promise.all(missionNos.slice(0, 6).map(async (missionNo) => {
+      try {
+        const statusRes = await deliveryApi.status(missionNo)
+        return statusRes.data?.data || null
+      } catch {
+        return null
+      }
+    }))
+    deliveryTaskStatuses.value = statuses.filter(Boolean)
+    return events
   } catch (e) {
     console.warn('[cockpit] fire event poll failed', e)
+    fireEventState.error = (e as any)?.message || 'fire-events-unavailable'
+    return []
+  } finally {
+    fireEventState.loading = false
+  }
+}
+
+async function loadNewFireEvents (): Promise<void> {
+  const events = await loadCockpitFireEvents()
+  if (events.length === 0) {
     return
   }
-  if (events.length === 0) return
   const maxId = events.reduce((m, e) => (e.id > m ? e.id : m), 0)
   if (!fireEventsBootstrapped.value) {
     lastSeenFireEventId.value = maxId
@@ -1407,6 +1439,7 @@ function shouldNotifyFireEvent (evt: FireEventDTO) {
 }
 
 onMounted(async () => {
+  document.addEventListener('fullscreenchange', syncFireMonitorFullscreenState)
   refreshMsdkHudDevices()
   loadDualStreamState()
   loadDeliveryExecutionTargets()
@@ -1419,6 +1452,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncFireMonitorFullscreenState)
   if (msdkHudTimer != null) {
     window.clearInterval(msdkHudTimer)
   }
@@ -1530,7 +1564,7 @@ const liveHudItems = computed(() => [
   dualStreamSummary.value.droneSn,
   `模式 ${dualStreamSummary.value.mode}`,
   `主通道 ${primaryPaneMeta.value.status}`,
-  `中心温度 ${formatThermalTemperature(dualStreamSummary.value.thermalCenterTemperatureC)}`,
+  `画面温度 ${formatThermalTemperature(dualStreamSummary.value.thermalCenterTemperatureC)}`,
   `播放 ${dualStreamSummary.value.playbackStatus}`
 ])
 
@@ -1563,6 +1597,37 @@ const formatAiScore = (score?: number) => {
     return '--'
   }
   return score.toFixed(3)
+}
+
+const formatFireConfidence = (confidence: number | string) => {
+  const n = Number(confidence)
+  return Number.isFinite(n) ? n.toFixed(2) : '--'
+}
+
+const formatFireEventLocation = (event: FireEventDTO) => {
+  const lat = Number(event.lat)
+  const lng = Number(event.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '位置未返回'
+  const errorRadius = Number(event.geoErrorRadiusM)
+  const errorText = Number.isFinite(errorRadius) ? ` · 误差 ${errorRadius.toFixed(1)}m` : ''
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}${errorText}`
+}
+
+const fireEventLevelClass = (level?: string | null) => {
+  const normalized = String(level || '').toUpperCase()
+  if (normalized === 'HIGH' || normalized === 'MEDIUM') return 'danger'
+  if (normalized === 'LOW') return 'default'
+  return 'safe'
+}
+
+const formatAircraftBattery = (battery?: number) => {
+  const n = Number(battery)
+  return Number.isFinite(n) ? `${n.toFixed(0)}%` : '--'
+}
+
+const formatTaskProgress = (progress?: number | null) => {
+  const n = Number(progress)
+  return Number.isFinite(n) ? `${n.toFixed(0)}%` : '--'
 }
 
 const formatAiEventTime = (sourceTs?: number) => {
@@ -1676,66 +1741,13 @@ watch(
   { immediate: true }
 )
 
-const resourceItems = [
-  {
-    title: '空中作战力量',
-    level: '充足',
-    type: 'safe',
-    content: '在线 12 架，可立即补位 2 架，核心灭火力量满足连续两轮压制要求。'
-  },
-  {
-    title: '药剂与投送载荷',
-    level: '充足',
-    type: 'safe',
-    content: '可支持后续 31 次标准投送，满足本次事件全程处置。'
-  },
-  {
-    title: '电池与补能保障',
-    level: '可持续',
-    type: 'default',
-    content: '轮换电池 24 组，现场补能车 1 台，预计可支撑 4 小时连续作战。'
-  }
-]
-
-const alertItems = [
-  {
-    title: '东南坡热成像温升回弹',
-    level: '需持续关注',
-    type: 'danger',
-    content: '已安排 2 架侦察无人机轮巡，暂未触发新的扩大蔓延。'
-  },
-  {
-    title: '山谷链路抖动',
-    level: '已采取备份',
-    type: 'default',
-    content: '专网备链已启用，中继高度已调整，未对当前任务造成实质影响。'
-  },
-  {
-    title: '群众点位风险',
-    level: '已解除',
-    type: 'safe',
-    content: '下风向村组已完成疏散和交通管制，目前无人员被困报告。'
-  }
-]
-
-const trendBars = ['24%', '36%', '48%', '62%', '74%', '86%']
-
-const focusItems = [
-  '东南坡复燃风险',
-  '保持交通管制',
-  '视风向变化决定是否增援'
-]
 </script>
 
 <style lang="scss" scoped>
 .leadership-cockpit {
   min-height: calc(100vh - 60px);
   padding: 16px;
-  background:
-    radial-gradient(circle at 14% 18%, rgba(69, 221, 255, 0.12), transparent 18%),
-    radial-gradient(circle at 88% 12%, rgba(255, 97, 114, 0.12), transparent 16%),
-    radial-gradient(circle at 50% 85%, rgba(103, 184, 255, 0.08), transparent 24%),
-    linear-gradient(180deg, #081424 0%, #07111d 52%, #030912 100%);
+  background: linear-gradient(180deg, #07111d 0%, #030812 100%);
   color: #f0f6ff;
   overflow: auto;
 }
@@ -1746,7 +1758,6 @@ const focusItems = [
   overflow-wrap: anywhere;
 }
 
-.hero-grid,
 .summary-grid,
 .content-grid,
 .footer-grid,
@@ -1756,13 +1767,49 @@ const focusItems = [
   gap: 14px;
 }
 
-.hero-grid {
-  grid-template-columns: 420px minmax(0, 1fr) 260px;
+.cockpit-shell {
+  min-height: calc(100vh - 92px);
+  padding: 18px;
+  border: 1px solid rgba(69, 221, 255, 0.42);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #071321 0%, #050b14 100%);
+  box-shadow:
+    0 18px 45px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(157, 237, 255, 0.08);
+}
+
+.cockpit-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
   margin-bottom: 14px;
 }
 
+.cockpit-title h1 {
+  margin: 0;
+  color: #e9f8ff;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.cockpit-title p {
+  margin: 8px 0 0;
+  color: #7f9eb7;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cockpit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .summary-grid {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   margin-bottom: 14px;
 }
 
@@ -1785,10 +1832,9 @@ const focusItems = [
 .shell-card {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(17, 36, 60, 0.84), rgba(5, 15, 27, 0.9));
-  border: 1px solid rgba(113, 179, 255, 0.2);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(16px);
+  background: #0a2130;
+  border: 1px solid rgba(69, 221, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(168, 239, 255, 0.06);
 }
 
 .shell-card::after {
@@ -1799,18 +1845,13 @@ const focusItems = [
   pointer-events: none;
 }
 
-.hero-title,
-.hero-brief,
-.hero-clock,
 .summary-card,
 .panel-card,
 .footer-card {
-  border-radius: 22px;
-  padding: 18px 20px;
+  border-radius: 8px;
+  padding: 16px;
 }
 
-.hero-title h1,
-.hero-brief h2,
 .panel-header h3,
 .footer-card h3,
 .decision-card h4,
@@ -1827,15 +1868,6 @@ const focusItems = [
   text-transform: uppercase;
 }
 
-.hero-title h1 {
-  margin-top: 8px;
-  font-size: 30px;
-  line-height: 1.15;
-}
-
-.hero-subtitle,
-.hero-brief p,
-.hero-clock p,
 .summary-card p,
 .panel-header p,
 .decision-card p,
@@ -1955,33 +1987,6 @@ const focusItems = [
   background: linear-gradient(90deg, rgba(113, 179, 255, 0.2), transparent);
 }
 
-.hero-brief {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.hero-brief h2 {
-  color: #ffd36b;
-  font-size: 18px;
-  line-height: 1.4;
-}
-
-.hero-clock {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  text-align: right;
-}
-
-.clock-value {
-  font-size: 34px;
-  font-weight: 700;
-  line-height: 1.1;
-  margin: 10px 0 6px;
-}
-
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -2017,13 +2022,27 @@ const focusItems = [
 
 .summary-card {
   min-width: 0;
+  min-height: 108px;
 }
 
 .summary-value {
   margin: 8px 0;
-  font-size: 30px;
+  color: #e9f8ff;
+  font-size: 28px;
   font-weight: 700;
   line-height: 1.1;
+}
+
+.summary-card.danger .summary-value {
+  color: #ff6978;
+}
+
+.summary-card.safe .summary-value {
+  color: #72ff6a;
+}
+
+.summary-card.default .summary-value {
+  color: #ffd866;
 }
 
 .panel-card {
@@ -2032,6 +2051,10 @@ const focusItems = [
 
 .panel-header {
   margin-bottom: 14px;
+}
+
+.panel-header h3 {
+  color: #7ee8ff;
 }
 
 .decision-list,
@@ -2062,6 +2085,7 @@ const focusItems = [
 
 .decision-card h4,
 .info-card h4 {
+  color: #d8f3ff;
   font-size: 15px;
   line-height: 1.4;
 }
@@ -2090,19 +2114,33 @@ const focusItems = [
 
 .map-header {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
 }
 
+.map-header > div:first-child {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
 .map-header-actions {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
 }
 
 .visual-tabs {
   display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 6px;
@@ -2158,6 +2196,7 @@ const focusItems = [
 
 .livestream-stage {
   min-height: 0;
+  min-width: 0;
   overflow: visible;
 }
 
@@ -2169,10 +2208,54 @@ const focusItems = [
   display: grid;
   gap: 14px;
   min-height: 0;
+  min-width: 0;
+}
+
+.dual-stream-shell.fullscreen {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  padding: 6px;
+  background:
+    radial-gradient(circle at top left, rgba(69, 221, 255, 0.12), transparent 34%),
+    linear-gradient(180deg, #06111f 0%, #02070d 100%);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+}
+
+.dual-stream-shell.fullscreen .dual-stream-stage-head {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.dual-stream-shell.fullscreen .dual-stream-stage-head > * {
+  pointer-events: auto;
+}
+
+.dual-stream-shell.fullscreen .dual-stream-player-stage {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 12px;
+}
+
+.dual-stream-shell.fullscreen .fire-monitor-flight-panel {
+  left: 50%;
+  right: auto;
+  bottom: 10px;
+  width: min(1120px, calc(100% - 36px));
+  transform: translateX(-50%);
 }
 
 .dual-stream-stage-head {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
@@ -2252,9 +2335,51 @@ const focusItems = [
     linear-gradient(180deg, rgba(5, 14, 24, 0.28) 0%, rgba(5, 14, 24, 0.88) 100%);
 }
 
-.dual-stream-overlay.error {
+.dual-stream-status-card {
+  position: absolute;
+  inset: auto 24px 24px auto;
+  z-index: 5;
+  width: min(420px, calc(100% - 48px));
+  min-height: 0;
+  padding: 16px 18px;
+  color: #f4f8ff;
+  pointer-events: none;
+  border: 1px solid rgba(103, 184, 255, 0.24);
+  border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(47, 10, 17, 0.38) 0%, rgba(25, 8, 11, 0.92) 100%);
+    linear-gradient(180deg, rgba(13, 31, 51, 0.92), rgba(6, 17, 31, 0.92));
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dual-stream-status-card.loading {
+  border-color: rgba(69, 221, 255, 0.34);
+}
+
+.dual-stream-status-card.error {
+  border-color: rgba(255, 190, 105, 0.34);
+}
+
+.dual-stream-status-card .stream-label {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.dual-stream-status-card .stream-value {
+  margin: 8px 0 8px;
+  font-size: 26px;
+  line-height: 1.12;
+}
+
+.dual-stream-status-card.error .stream-value {
+  color: #ffd38a;
+}
+
+.dual-stream-status-card p {
+  margin: 0;
+  color: #9fb0c5;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .live-badge {
@@ -2276,6 +2401,32 @@ const focusItems = [
 
 .live-badge.idle {
   background: rgba(8, 22, 38, 0.62);
+}
+
+.dual-stream-fullscreen-btn {
+  position: absolute;
+  top: 18px;
+  right: 236px;
+  z-index: 6;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(95, 165, 255, 0.42);
+  border-radius: 999px;
+  background: rgba(8, 22, 38, 0.82);
+  color: #f3f8ff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+}
+
+.dual-stream-fullscreen-btn:hover {
+  background: rgba(17, 52, 86, 0.9);
+  border-color: rgba(95, 165, 255, 0.72);
+}
+
+.dual-stream-shell.fullscreen .dual-stream-fullscreen-btn {
+  right: 238px;
 }
 
 .live-dot {
@@ -2715,7 +2866,7 @@ const focusItems = [
 
 @media (max-width: 1680px) {
   .summary-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .content-grid {
@@ -2728,7 +2879,6 @@ const focusItems = [
 }
 
 @media (max-width: 1280px) {
-  .hero-grid,
   .content-grid,
   .footer-grid {
     grid-template-columns: 1fr;
@@ -2740,9 +2890,8 @@ const focusItems = [
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .hero-clock {
-    align-items: flex-start;
-    text-align: left;
+  .cockpit-topbar {
+    flex-direction: column;
   }
 
   .map-header {

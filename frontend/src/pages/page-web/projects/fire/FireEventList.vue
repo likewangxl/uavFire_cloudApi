@@ -105,13 +105,13 @@
       placement="right"
     >
       <div class="history-summary">
-        历史快照从历史功能上线后开始逐次记录；早期已经累计到识别次数里的命中，只能保留累计次数，无法还原成逐条快照。
+        热源识别包含首次确认和同一火点复检；可见光确认是同一次热源识别后的补充证据，不单独计入热源识别次数。
       </div>
       <a-table
         :columns="historyColumns"
-        :data-source="historyEvents"
+        :data-source="historyDisplayRows"
         :loading="historyLoading"
-        :row-key="(r: FireEventHistoryDTO) => r.id"
+        :row-key="(r: FireEventHistoryRow) => r.rowKey"
         :pagination="{ pageSize: 8, showTotal: (total: number) => `共 ${total} 条` }"
         :locale="{ emptyText: '暂无历史记录' }"
         size="small"
@@ -171,6 +171,11 @@ const historyLoading = ref(false)
 const historyEvents = ref<FireEventHistoryDTO[]>([])
 const historyEvent = ref<FireEventDTO | null>(null)
 
+type FireEventHistoryRow = FireEventHistoryDTO & {
+  rowKey: string;
+  visibleConfirmation?: FireEventHistoryDTO;
+}
+
 const defaultForm = (): FireEventCreateRequest => ({
   eventId: '',
   deviceSn: '',
@@ -193,9 +198,15 @@ const previewCurrentUrl = computed(() => {
   return recognitionImageUrlForMode(previewBaseUrl.value, previewMode.value)
 })
 const historyDrawerTitle = computed(() => {
-  const total = historyEvent.value?.reportCount ?? historyEvents.value.length
-  return `火情历史信息（已记录 ${historyEvents.value.length} 条 / 识别 ${total} 次）`
+  const total = historyEvent.value?.reportCount ?? thermalHistoryCount.value
+  return `火情历史信息（热源识别 ${total} 次 / 历史记录 ${historyEvents.value.length} 条）`
 })
+
+const thermalHistoryCount = computed(() =>
+  historyEvents.value.filter(item => !isVisibleHistoryAction(item.action)).length,
+)
+
+const historyDisplayRows = computed(() => groupHistoryEvents(historyEvents.value))
 
 function openPreview (url: string) {
   previewBaseUrl.value = url
@@ -273,12 +284,127 @@ function displayEventStatus (status: string | null | undefined) {
   return status ? labels[status] ?? status : '-'
 }
 
+function displayGeoQuality (record: FireEventDTO | FireEventHistoryDTO) {
+  const labels: Record<string, string> = {
+    AUTO_WAYPOINT_READY: '可自动航线',
+    DEM_MISSING: '缺DEM',
+    RTK_NOT_FIXED: 'RTK未固定',
+    GEO_SNAPSHOT_INCOMPLETE: '快照不完整',
+    LOW_ACCURACY: '精度不足',
+  }
+  const quality = record.geoQuality
+  const label = quality ? labels[quality] ?? quality : '人工确认'
+  const radius = Number(record.geoErrorRadiusM)
+  return Number.isFinite(radius) ? `${label} / ${radius.toFixed(1)}m` : label
+}
+
+function displayThermalRoi (record: FireEventDTO | FireEventHistoryDTO) {
+  if (!record.thermalRoi) return '-'
+  try {
+    const roi = JSON.parse(record.thermalRoi)
+    const x = Number(roi.x)
+    const y = Number(roi.y)
+    const width = Number(roi.width)
+    const height = Number(roi.height)
+    if ([x, y, width, height].every(Number.isFinite)) {
+      return `x=${x.toFixed(3)}, y=${y.toFixed(3)}, w=${width.toFixed(3)}, h=${height.toFixed(3)}`
+    }
+  } catch (e) {
+    return record.thermalRoi
+  }
+  return record.thermalRoi
+}
+
 function displayHistoryAction (action: string | null | undefined) {
   const labels: Record<string, string> = {
-    CREATED: '新建事件',
-    MERGED: '合并命中',
+    CREATED: '首次热源确认',
+    MERGED: '热源复检',
+    VISIBLE_CONFIRM: '可见光确认',
+    VISIBLE_PENDING: '可见光确认中',
+    VISIBLE_REJECTED: '可见光未确认',
+    VISIBLE_CAPTURE_FAILED: '可见光抓图失败',
+    VISIBLE_CONFIRM_FAILED: '可见光确认失败',
+    VISIBLE_VALIDATION_FAILED: '可见光图无效',
   }
   return action ? labels[action] ?? action : '-'
+}
+
+function isVisibleHistoryAction (action: string | null | undefined) {
+  return Boolean(action?.startsWith('VISIBLE_'))
+}
+
+function groupHistoryEvents (events: FireEventHistoryDTO[]): FireEventHistoryRow[] {
+  const ordered = [...events].sort((a, b) => {
+    const timeDiff = Number(a.eventTimestamp ?? 0) - Number(b.eventTimestamp ?? 0)
+    if (timeDiff !== 0) return timeDiff
+    return Number(a.id ?? 0) - Number(b.id ?? 0)
+  })
+  const groups: FireEventHistoryRow[] = []
+  let latestThermal: FireEventHistoryRow | null = null
+
+  ordered.forEach(item => {
+    const row = toHistoryRow(item)
+    if (isVisibleHistoryAction(item.action) && latestThermal) {
+      groups[groups.length - 1] = withVisibleConfirmation(latestThermal, row)
+      latestThermal = groups[groups.length - 1]
+      return
+    }
+    groups.push(row)
+    latestThermal = isVisibleHistoryAction(item.action) ? null : row
+  })
+
+  return groups.reverse()
+}
+
+function toHistoryRow (item: FireEventHistoryDTO): FireEventHistoryRow {
+  return {
+    ...item,
+    rowKey: `${item.action || 'history'}-${item.id || item.sourceEventId}`,
+  }
+}
+
+function withVisibleConfirmation (
+  thermal: FireEventHistoryRow,
+  visible: FireEventHistoryRow,
+): FireEventHistoryRow {
+  return {
+    ...thermal,
+    visibleConfirmation: visible,
+  }
+}
+
+function historyImageLinks (record: FireEventHistoryRow) {
+  const links = []
+  if (record.thermalImageUrl) {
+    links.push(historyImageLink(record.thermalImageUrl, '红外证据图', '#ff7875'))
+  }
+  if (record.visibleConfirmation?.visibleImageUrl) {
+    links.push(historyImageLink(record.visibleConfirmation.visibleImageUrl, '可见光确认图', '#1677ff'))
+  } else if (record.visibleImageUrl) {
+    links.push(historyImageLink(record.visibleImageUrl, '可见光确认图', '#1677ff'))
+  }
+  const visibleStatus = visibleStatusText(record)
+  if (visibleStatus) {
+    links.push(h('span', { style: 'color: #8c8c8c' }, visibleStatus))
+  }
+  return links.length ? h('span', { class: 'history-evidence-links' }, links) : '-'
+}
+
+function visibleStatusText (record: FireEventHistoryRow) {
+  const action = record.visibleConfirmation?.action
+  if (!action || action === 'VISIBLE_CONFIRM') return ''
+  return displayHistoryAction(action)
+}
+
+function historyImageLink (url: string, label: string, color: string) {
+  return h('a', {
+    href: '#',
+    style: `margin-right: 8px; color: ${color}`,
+    onClick: (event: Event) => {
+      event.preventDefault()
+      openPreview(url)
+    },
+  }, label)
 }
 
 async function handleCreate () {
@@ -310,7 +436,7 @@ async function handleCreate () {
 }
 
 const ACTION_COLUMN_WIDTH = 110
-const tableScrollX = 1920
+const tableScrollX = 2060
 
 const columns = [
   { title: '事件编号', key: 'eventId', width: 230, slots: { customRender: 'eventIdCell' } },
@@ -347,6 +473,12 @@ const columns = [
     width: 160,
     customRender: ({ record }: { record: FireEventDTO }) =>
       `${record.lat.toFixed(4)}, ${record.lng.toFixed(4)}`,
+  },
+  {
+    title: '测绘质量',
+    key: 'geoQuality',
+    width: 140,
+    customRender: ({ record }: { record: FireEventDTO }) => displayGeoQuality(record),
   },
   {
     title: '热成像温度(°C)',
@@ -430,38 +562,28 @@ const historyColumns = [
       `${record.lat.toFixed(4)}, ${record.lng.toFixed(4)}`,
   },
   {
+    title: '测绘质量',
+    key: 'geoQuality',
+    width: 140,
+    customRender: ({ record }: { record: FireEventHistoryDTO }) => displayGeoQuality(record),
+  },
+  {
+    title: '测温ROI',
+    key: 'thermalRoi',
+    width: 220,
+    customRender: ({ record }: { record: FireEventHistoryDTO }) => displayThermalRoi(record),
+  },
+  {
     title: '源事件',
     dataIndex: 'sourceEventId',
     key: 'sourceEventId',
     width: 220,
   },
   {
-    title: '图片',
+    title: '证据图片',
     key: 'images',
-    width: 140,
-    customRender: ({ record }: { record: FireEventHistoryDTO }) => {
-      const links = []
-      if (record.visibleImageUrl) {
-        links.push(h('a', {
-          href: '#',
-          style: 'margin-right: 8px',
-          onClick: (event: Event) => {
-            event.preventDefault()
-            openPreview(record.visibleImageUrl!)
-          },
-        }, '可见光'))
-      }
-      if (record.thermalImageUrl) {
-        links.push(h('a', {
-          href: '#',
-          onClick: (event: Event) => {
-            event.preventDefault()
-            openPreview(record.thermalImageUrl!)
-          },
-        }, '红外'))
-      }
-      return links.length ? h('span', links) : '-'
-    },
+    width: 180,
+    customRender: ({ record }: { record: FireEventHistoryRow }) => historyImageLinks(record),
   },
 ]
 

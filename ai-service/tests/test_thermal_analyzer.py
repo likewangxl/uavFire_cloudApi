@@ -159,3 +159,63 @@ def test_hotspot_measure_roi_ignores_large_edge_hot_distractor():
         "width": 0.08,
         "height": 0.08,
     }
+
+
+def test_hotspot_measure_roi_ignores_sparse_osd_like_overlay():
+    analyzer = HotSpotThermalAnalyzer(intensity_threshold=200, saturation_ratio=0.5)
+    frame = np.zeros((120, 200, 3), dtype=np.uint8)
+    frame[:, :, :] = 40
+    frame[82:94, 146:158, :] = 255
+    frame[52:54, 80:120, :] = 255
+    frame[52:78, 80:82, :] = 255
+    frame[52:78, 118:120, :] = 255
+    frame[76:78, 80:120, :] = 255
+    packet = FramePacket(source_ts=1, channel="thermal", frame=frame)
+
+    analyzer.analyze(packet)
+
+    assert analyzer.last_measure_roi is not None
+    assert analyzer.last_measure_roi.model_dump() == {
+        "x": 0.72,
+        "y": 0.6833,
+        "width": 0.08,
+        "height": 0.1,
+    }
+
+
+def test_hotspot_measure_roi_prefers_scene_hotspot_over_top_timestamp_overlay():
+    analyzer = HotSpotThermalAnalyzer(intensity_threshold=200, saturation_ratio=0.5)
+    frame = np.zeros((120, 200, 3), dtype=np.uint8)
+    frame[:, :, :] = 40
+    frame[0:8, 8:76, :] = 255
+    frame[96:108, 152:172, :] = 245
+    packet = FramePacket(source_ts=1, channel="thermal", frame=frame)
+
+    analyzer.analyze(packet)
+
+    assert analyzer.last_measure_roi is not None
+    assert analyzer.last_measure_roi.model_dump() == {
+        "x": 0.76,
+        "y": 0.8,
+        "width": 0.1,
+        "height": 0.1,
+    }
+
+
+def test_hotspot_measure_roi_prefers_compact_fire_over_large_bright_foliage():
+    analyzer = HotSpotThermalAnalyzer(intensity_threshold=200, saturation_ratio=0.5)
+    frame = np.zeros((120, 200, 3), dtype=np.uint8)
+    frame[:, :, :] = 40
+    frame[35:75, 140:185, :] = 255
+    frame[92:104, 96:112, :] = 245
+    packet = FramePacket(source_ts=1, channel="thermal", frame=frame)
+
+    analyzer.analyze(packet)
+
+    assert analyzer.last_measure_roi is not None
+    assert analyzer.last_measure_roi.model_dump() == {
+        "x": 0.48,
+        "y": 0.7667,
+        "width": 0.08,
+        "height": 0.1,
+    }

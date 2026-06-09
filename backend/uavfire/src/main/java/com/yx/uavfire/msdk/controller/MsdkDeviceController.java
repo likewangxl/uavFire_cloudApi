@@ -41,7 +41,11 @@ public class MsdkDeviceController {
     @PostMapping("/{aircraftSn}/commands")
     public HttpResultResponse<MsdkCommandDTO> enqueueCommand(@PathVariable String aircraftSn,
                                                             @RequestBody MsdkCommandParam param) {
-        return HttpResultResponse.success(stateService.enqueueCommand(aircraftSn, param));
+        try {
+            return HttpResultResponse.success(stateService.enqueueCommand(aircraftSn, param));
+        } catch (IllegalArgumentException ex) {
+            return HttpResultResponse.error(ex.getMessage());
+        }
     }
 
     @PostMapping("/{aircraftSn}/commands/poll")

@@ -19,9 +19,11 @@ import org.mockito.ArgumentCaptor;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -186,6 +188,68 @@ class FireEventServiceImplMergeTest {
     }
 
     @Test
+    void createPersistsGeoQualityFieldsForSolvedFirePoint() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(9L);
+            return 1;
+        });
+
+        FireEventCreateParam p = param("geo-event", 34.658600, 109.340600, "HIGH", "0.95", 1779163440000L);
+        p.setGeoMethod("RAY_DEM_RTK");
+        p.setGeoQuality("AUTO_WAYPOINT_READY");
+        p.setGeoErrorRadiusM(6.5);
+        p.setGeoSourceTs(1779163439900L);
+        p.setAircraftLat(34.658000);
+        p.setAircraftLng(109.340000);
+        p.setAircraftAlt(120.0);
+        p.setGimbalPitch(-45.0);
+        p.setGimbalYaw(12.0);
+        p.setGimbalRoll(0.0);
+        p.setThermalRoi("{\"x\":0.4,\"y\":0.4,\"width\":0.2,\"height\":0.2}");
+
+        build().create(p);
+
+        ArgumentCaptor<FireEventEntity> eventCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).insert(eventCaptor.capture());
+        FireEventEntity persisted = eventCaptor.getValue();
+        assertEquals("RAY_DEM_RTK", persisted.getGeoMethod());
+        assertEquals("AUTO_WAYPOINT_READY", persisted.getGeoQuality());
+        assertEquals(6.5, persisted.getGeoErrorRadiusM(), 1e-6);
+        assertEquals(1779163439900L, persisted.getGeoSourceTs());
+        assertEquals(34.658000, persisted.getAircraftLat(), 1e-6);
+        assertEquals("{\"x\":0.4,\"y\":0.4,\"width\":0.2,\"height\":0.2}", persisted.getThermalRoi());
+
+        ArgumentCaptor<FireEventHistoryEntity> historyCaptor = ArgumentCaptor.forClass(FireEventHistoryEntity.class);
+        verify(histories).insert(historyCaptor.capture());
+        assertEquals("AUTO_WAYPOINT_READY", historyCaptor.getValue().getGeoQuality());
+    }
+
+    @Test
+    void createPersistsThermalMeasureRoiWhenGeoSnapshotIsAbsent() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(9L);
+            return 1;
+        });
+
+        FireEventCreateParam p = param("roi-event", 34.658600, 109.340600, "MEDIUM", "0.48", 1779163440000L);
+        p.setThermalMeasureRoi(Map.of("x", 0.62, "y", 0.44, "width", 0.07, "height", 0.07));
+
+        build().create(p);
+
+        ArgumentCaptor<FireEventEntity> eventCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).insert(eventCaptor.capture());
+        assertEquals("{\"x\":0.62,\"y\":0.44,\"width\":0.07,\"height\":0.07}", eventCaptor.getValue().getThermalRoi());
+
+        ArgumentCaptor<FireEventHistoryEntity> historyCaptor = ArgumentCaptor.forClass(FireEventHistoryEntity.class);
+        verify(histories).insert(historyCaptor.capture());
+        assertEquals("{\"x\":0.62,\"y\":0.44,\"width\":0.07,\"height\":0.07}", historyCaptor.getValue().getThermalRoi());
+    }
+
+    @Test
     void getSupportsNumericFireEventIdFromMissionDetailPage() {
         FireEventEntity event = existingEvent(555L, 34.658600, 109.340600, "HIGH", "0.95", 1779163200000L);
         event.setEventId("fire-event-555");
@@ -197,6 +261,109 @@ class FireEventServiceImplMergeTest {
         assertEquals("fire-event-555", dto.getEventId());
         assertEquals(34.658600, dto.getLat());
         assertEquals(109.340600, dto.getLng());
+    }
+
+    @Test
+    void attachVisibleImageUpdatesExistingEventAndWritesHistory() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "HIGH", "1.0000", 1779163200000L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(existing);
+
+        boolean updated = build().attachVisibleImage(
+                "old-event",
+                "visible-confirmation",
+                "http://snapshots/actual-visible.jpg",
+                "2026-05-18T18:40:05Z");
+
+        assertTrue(updated);
+        ArgumentCaptor<FireEventEntity> updateCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(updateCaptor.capture());
+        assertEquals("http://snapshots/actual-visible.jpg", updateCaptor.getValue().getVisibleImageUrl());
+
+        ArgumentCaptor<FireEventHistoryEntity> historyCaptor = ArgumentCaptor.forClass(FireEventHistoryEntity.class);
+        verify(histories).insert(historyCaptor.capture());
+        FireEventHistoryEntity history = historyCaptor.getValue();
+        assertEquals("old-event", history.getEventId());
+        assertEquals("visible-confirmation", history.getSourceEventId());
+        assertEquals("VISIBLE_CONFIRM", history.getAction());
+        assertEquals("http://snapshots/actual-visible.jpg", history.getVisibleImageUrl());
+    }
+
+    @Test
+    void attachVisibleImageUsesAssociatedThermalImageInHistory() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "HIGH", "1.0000", 1779163200000L);
+        existing.setThermalImageUrl("http://snapshots/stale-thermal.jpg");
+        existing.setThermalRoi("{\"x\":0.42,\"y\":0.46,\"width\":0.08,\"height\":0.08}");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(existing);
+
+        boolean updated = build().attachVisibleImage(
+                "old-event",
+                "visible-confirmation",
+                "http://snapshots/actual-visible.jpg",
+                "2026-05-18T18:40:05Z",
+                "thermal-confirmation",
+                "http://snapshots/associated-thermal.jpg");
+
+        assertTrue(updated);
+        ArgumentCaptor<FireEventEntity> updateCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(updateCaptor.capture());
+        assertEquals("http://snapshots/associated-thermal.jpg", updateCaptor.getValue().getThermalImageUrl());
+
+        ArgumentCaptor<FireEventHistoryEntity> historyCaptor = ArgumentCaptor.forClass(FireEventHistoryEntity.class);
+        verify(histories).insert(historyCaptor.capture());
+        FireEventHistoryEntity history = historyCaptor.getValue();
+        assertEquals("visible-confirmation", history.getSourceEventId());
+        assertEquals("VISIBLE_CONFIRM", history.getAction());
+        assertEquals("http://snapshots/associated-thermal.jpg", history.getThermalImageUrl());
+        assertEquals("http://snapshots/actual-visible.jpg", history.getVisibleImageUrl());
+        assertEquals("{\"x\":0.42,\"y\":0.46,\"width\":0.08,\"height\":0.08}", history.getThermalRoi());
+    }
+
+    @Test
+    void attachVisibleImageRejectsExplicitAssociationWithoutThermalImage() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "HIGH", "1.0000", 1779163200000L);
+        existing.setThermalImageUrl("http://snapshots/stale-thermal.jpg");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(existing);
+
+        boolean updated = build().attachVisibleImage(
+                "old-event",
+                "visible-confirmation",
+                "http://snapshots/actual-visible.jpg",
+                "2026-05-18T18:40:05Z",
+                "thermal-confirmation",
+                null);
+
+        assertFalse(updated);
+        verify(events, never()).updateById(any(FireEventEntity.class));
+        verify(histories, never()).insert(any(FireEventHistoryEntity.class));
+    }
+
+    @Test
+    void recordVisibleConfirmationStatusWritesAssociatedThermalAndVisibleEvidence() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "HIGH", "1.0000", 1779163200000L);
+        existing.setThermalImageUrl("http://snapshots/stale-thermal.jpg");
+        existing.setThermalRoi("{\"x\":0.42,\"y\":0.46,\"width\":0.08,\"height\":0.08}");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(existing);
+
+        boolean recorded = build().recordVisibleConfirmationStatus(
+                "old-event",
+                "visible-rejected",
+                "VISIBLE_REJECTED",
+                "http://snapshots/visible-low-score.jpg",
+                "2026-05-18T18:40:05Z",
+                "thermal-confirmation",
+                "http://snapshots/associated-thermal.jpg");
+
+        assertTrue(recorded);
+        verify(events, never()).updateById(any(FireEventEntity.class));
+        ArgumentCaptor<FireEventHistoryEntity> historyCaptor = ArgumentCaptor.forClass(FireEventHistoryEntity.class);
+        verify(histories).insert(historyCaptor.capture());
+        FireEventHistoryEntity history = historyCaptor.getValue();
+        assertEquals("old-event", history.getEventId());
+        assertEquals("visible-rejected", history.getSourceEventId());
+        assertEquals("VISIBLE_REJECTED", history.getAction());
+        assertEquals("http://snapshots/associated-thermal.jpg", history.getThermalImageUrl());
+        assertEquals("http://snapshots/visible-low-score.jpg", history.getVisibleImageUrl());
+        assertEquals("{\"x\":0.42,\"y\":0.46,\"width\":0.08,\"height\":0.08}", history.getThermalRoi());
     }
 
     private FireEventCreateParam param(String eventId, double lat, double lng, String level, String confidence, long ts) {

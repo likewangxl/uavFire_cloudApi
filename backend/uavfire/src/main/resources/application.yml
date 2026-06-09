@@ -178,12 +178,12 @@ cloud-server:
 
 livestream:
   playback:
-    webrtc-host: 1916dn17xs12.vicp.fun
-    webrtc-port: 55932
+    webrtc-host: ${LIVESTREAM_WEBRTC_HOST:localhost}
+    webrtc-port: ${LIVESTREAM_WEBRTC_PORT:58925}
   url:
     # RTMP  Note: This IP is the address of the streaming server. If you want to see livestream on web page, you need to convert the RTMP stream to WebRTC stream.
     rtmp:
-      url: rtmp://1916dn17xs12.vicp.fun:56920/live/  # Example: 'rtmp://192.168.1.1/live/'
+      url: ${LIVESTREAM_RTMP_URL:rtmp://localhost:1935/live/}  # Example: 'rtmp://192.168.1.1/live/'
     rtsp:
       username: test
       password: test
@@ -191,7 +191,7 @@ livestream:
 
     # GB28181 Note:If you don't know what these parameters mean, you can go to Pilot2 and select the GB28181 page in the cloud platform. Where the parameters same as these parameters.
     gb28181:
-      serverIP: 192.168.0.204
+      serverIP: ${LIVESTREAM_GB28181_SERVER_IP:localhost}
       serverPort: 10001
       serverID: 1001
       agentID: 2001
@@ -201,7 +201,7 @@ livestream:
 
     # Webrtc: Only supports using whip standard
     whip:
-      url: http://1916dn17xs12.vicp.fun:55932/index/api/whip?app=live&stream=  # ZLMediaKit WHIP path on HTTP port; SRS template would be http://host:1985/rtc/v1/whip/?app=live&stream=
+      url: ${LIVESTREAM_WHIP_URL:http://localhost:58925/index/api/whip?app=live&stream=}  # ZLMediaKit WHIP path on HTTP port; SRS template would be http://host:1985/rtc/v1/whip/?app=live&stream=
 
 # ---------------------------------------------------------------------------
 # fc100 灭火模块(合并自 fc100-backend,2026-05-15 feature/fc100-merge 分支)

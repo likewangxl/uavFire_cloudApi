@@ -1,5 +1,6 @@
 package com.yx.uavfire.manage.service.impl;
 
+import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentCapabilityDTO;
@@ -45,17 +46,26 @@ import java.util.function.Consumer;
 public class DualStreamServiceImpl implements IDualStreamService {
 
     private static final double FIRE_DETECTION_FLOOR = 0.01;
+    private static final double VISIBLE_CONFIRMATION_FLOOR = 0.5;
+    private static final double HIGH_TEMPERATURE_VISIBLE_CONFIRMATION_FLOOR = 0.1;
     private static final double THERMAL_WEAK_IMAGE_FLOOR = 0.006;
     private static final double THERMAL_WARM_TEMPERATURE_C = 45.0;
     private static final double THERMAL_MEDIUM_TEMPERATURE_C = 60.0;
     private static final double THERMAL_HIGH_TEMPERATURE_C = 80.0;
     private static final long CONFIRMED_FIRE_EVENT_DEBOUNCE_MS = 60_000L;
+    private static final long VISIBLE_ATTACHMENT_WINDOW_MS = 60_000L;
     private static final String COMMAND_STATUS_PENDING = "pending";
     private static final String COMMAND_STATUS_DISPATCHED = "dispatched";
     private static final String COMMAND_STATUS_EXPIRED = "expired";
     private static final String REVIEW_STATUS_THERMAL_MEASURING = "THERMAL_MEASURING";
     private static final String REVIEW_STATUS_THERMAL_MEASUREMENT_TIMEOUT = "THERMAL_MEASUREMENT_TIMEOUT";
+    private static final String REVIEW_STATUS_THERMAL_IMAGE_MISSING = "THERMAL_IMAGE_MISSING";
     private static final String REVIEW_STATUS_THERMAL_REJECTED = "THERMAL_REJECTED";
+    private static final String REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM = "THERMAL_NEEDS_VISIBLE_CONFIRM";
+    private static final String REVIEW_STATUS_VISIBLE_PENDING = "VISIBLE_PENDING";
+    private static final String REVIEW_STATUS_VISIBLE_CONFIRMED = "VISIBLE_CONFIRMED";
+    private static final String REVIEW_STATUS_VISIBLE_REJECTED = "VISIBLE_REJECTED";
+    private static final String REVIEW_STATUS_VISIBLE_SKIPPED_THERMAL_FIRST = "VISIBLE_SKIPPED_THERMAL_FIRST";
 
     private static final String GROUP_KEY_PREFIX = "dual-stream:group:";
     private static final String TASK_EVENTS_KEY_PREFIX = "dual-stream:task-events:";
@@ -68,6 +78,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private final Map<String, DualStreamEventDTO> visibleTriggerByTask = new ConcurrentHashMap<>();
     private final Map<String, Long> confirmedFireEventByTask = new ConcurrentHashMap<>();
     private final Map<String, Long> lastThermalMeasurementCompletedAtByDrone = new ConcurrentHashMap<>();
+    private final Map<String, DualStreamEventDTO> thermalTriggerByTask = new ConcurrentHashMap<>();
+    private final Map<String, DualStreamEventDTO> confirmedThermalEventByTask = new ConcurrentHashMap<>();
+    private final Map<String, String> confirmedThermalFireEventIdByTask = new ConcurrentHashMap<>();
 
     @Value("${livestream.playback.webrtc-host:}")
     private String webrtcPlaybackHost;
@@ -652,8 +665,14 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setReviewStatus(event.getReviewStatus())
                 .setVisibleImageUrl(event.getVisibleImageUrl())
                 .setThermalImageUrl(event.getThermalImageUrl())
+                .setThermalSourceEventId(event.getThermalSourceEventId())
                 .setThermalTemperature(event.getThermalTemperature())
-                .setThermalMeasureRoi(event.getThermalMeasureRoi());
+                .setThermalMeasureRoi(event.getThermalMeasureRoi())
+                .setThermalMeasurements(event.getThermalMeasurements())
+                .setGeoSnapshot(event.getGeoSnapshot())
+                .setGeoQuality(event.getGeoQuality())
+                .setGeoErrorRadiusM(event.getGeoErrorRadiusM())
+                .setGeoMethod(event.getGeoMethod());
     }
 
     private DualStreamEventDTO applySingleStreamReview(DualStreamEventDTO event, List<DualStreamEventDTO> priorEvents) {
@@ -677,10 +696,54 @@ public class DualStreamServiceImpl implements IDualStreamService {
             return reviewed;
         }
 
-        if ("visible".equals(channel) && hasFireDetection(reviewed)) {
-            reviewed.setReviewStatus("VISIBLE_SUSPECTED");
+        if ("visible".equals(channel) && thermalTriggerByTask.containsKey(reviewed.getTaskId())) {
+            DualStreamEventDTO thermalTrigger = thermalTriggerByTask.remove(reviewed.getTaskId());
+            if (!hasThermalImage(thermalTrigger)) {
+                reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_IMAGE_MISSING);
+                requestThermalFocusAfterVisibleReview(droneSn);
+                return reviewed;
+            }
+            if (hasVisibleFireDetection(reviewed, thermalTrigger)) {
+                reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_CONFIRMED);
+                visibleTriggerByTask.put(reviewed.getTaskId(), copyEvent(reviewed));
+                createConfirmedFireEvent(thermalTrigger, priorEvents);
+            } else {
+                reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_REJECTED);
+            }
+            requestThermalFocusAfterVisibleReview(droneSn);
+            return reviewed;
+        }
+
+        if ("visible".equals(channel) && REVIEW_STATUS_VISIBLE_PENDING.equals(reviewed.getReviewStatus())) {
+            recordVisibleStatusForRecentThermalConfirmation(reviewed, reviewed.getReviewStatus());
+            return reviewed;
+        }
+
+        if ("visible".equals(channel) && isVisibleTerminalStatus(reviewed.getReviewStatus())) {
+            recordVisibleStatusForRecentThermalConfirmation(reviewed, reviewed.getReviewStatus());
+            requestThermalFocusAfterVisibleReview(droneSn);
+            return reviewed;
+        }
+
+        if ("visible".equals(channel) && confirmedThermalEventByTask.containsKey(reviewed.getTaskId())) {
+            if (hasVisibleFireDetection(reviewed, confirmedThermalEventByTask.get(reviewed.getTaskId()))) {
+                if (attachVisibleImageToRecentThermalConfirmation(reviewed)) {
+                    reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_CONFIRMED);
+                    requestThermalFocusAfterVisibleReview(droneSn);
+                    return reviewed;
+                }
+            } else if (StringUtils.hasText(reviewed.getVisibleImageUrl())) {
+                reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_REJECTED);
+                recordVisibleStatusForRecentThermalConfirmation(reviewed, REVIEW_STATUS_VISIBLE_REJECTED);
+                requestThermalFocusAfterVisibleReview(droneSn);
+                return reviewed;
+            }
+        }
+
+        if ("visible".equals(channel)) {
+            reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_SKIPPED_THERMAL_FIRST);
+            rememberVisibleTrigger(reviewed, droneSn);
             if (shouldIssueFocus(droneSn, "focus-thermal")) {
-                rememberVisibleTrigger(reviewed, droneSn);
                 issueCommand(droneSn, "focus-thermal");
             }
             return reviewed;
@@ -710,11 +773,23 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 issueThermalMeasurementCommand(reviewed);
                 return reviewed;
             }
-            reviewed.setReviewStatus(hasThermalConfirmation(reviewed) ? "THERMAL_CONFIRMED" : "THERMAL_REJECTED");
+            boolean thermalConfirmed = hasThermalConfirmation(reviewed);
+            if (thermalConfirmed && !hasThermalImage(reviewed)) {
+                reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_IMAGE_MISSING);
+                confirmedThermalEventByTask.put(reviewed.getTaskId(), copyEvent(reviewed));
+                confirmedThermalFireEventIdByTask.remove(reviewed.getTaskId());
+                log.warn(
+                        "dual-stream thermal confirmation skipped without thermal image task={} drone={} ts={}",
+                        reviewed.getTaskId(),
+                        droneSn,
+                        reviewed.getSourceTs());
+                return reviewed;
+            }
+            reviewed.setReviewStatus(thermalConfirmed ? "THERMAL_CONFIRMED" : "THERMAL_REJECTED");
             if ("THERMAL_CONFIRMED".equals(reviewed.getReviewStatus())) {
                 createConfirmedFireEvent(reviewed, priorEvents);
             }
-            if (shouldIssueFocus(droneSn, "focus-visible")) {
+            if (shouldIssueVisibleFocusForThermalEvent(reviewed)) {
                 issueCommand(droneSn, "focus-visible");
             }
         }
@@ -824,7 +899,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                         event.setThermalMeasureRoi(ack.getThermalMeasureRoi());
                     }
                 }
-                event.setReviewStatus(hasThermalConfirmation(event) ? "THERMAL_CONFIRMED" : "THERMAL_REJECTED");
+                event.setReviewStatus(resolveThermalPostMeasurementReviewStatus(event));
                 log.info(
                         "dual-stream thermal measurement ack applied task={} drone={} ts={} temp={} roi={} review={}",
                         taskId,
@@ -836,10 +911,16 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 refreshThermalSnapshotAnnotation(event);
                 if ("THERMAL_CONFIRMED".equals(event.getReviewStatus())) {
                     createConfirmedFireEvent(event, events);
+                    if (!thermalMeasurementAckRestoredVisible(ack)
+                            && shouldIssueVisibleFocusForThermalEvent(event)) {
+                        issueCommand(event.getDroneSn(), "focus-visible");
+                    }
+                } else if (REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM.equals(event.getReviewStatus())) {
+                    thermalTriggerByTask.put(taskId, copyEvent(event));
                 }
-                if (StringUtils.hasText(event.getDroneSn())
+                if (REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM.equals(event.getReviewStatus())
                         && !thermalMeasurementAckRestoredVisible(ack)
-                        && shouldIssueFocus(event.getDroneSn(), "focus-visible")) {
+                        && shouldIssueVisibleFocusForThermalEvent(event)) {
                     issueCommand(event.getDroneSn(), "focus-visible");
                 }
                 break;
@@ -853,13 +934,46 @@ public class DualStreamServiceImpl implements IDualStreamService {
         return ack != null && normalize(ack.getMessage()).contains("visible-restored");
     }
 
+    private boolean shouldIssueVisibleFocusForThermalEvent(DualStreamEventDTO event) {
+        return event != null
+                && StringUtils.hasText(event.getDroneSn())
+                && !isMsdkLocalVisibleSnapshotThermalEvent(event)
+                && shouldIssueFocus(event.getDroneSn(), "focus-visible");
+    }
+
+    private boolean isMsdkLocalVisibleSnapshotThermalEvent(DualStreamEventDTO event) {
+        if (event == null
+                || !"thermal".equals(normalize(event.getAnalysisChannel()))
+                || !hasThermalImage(event)
+                || !StringUtils.hasText(event.getTaskId())
+                || !StringUtils.hasText(event.getDroneSn())
+                || !event.getTaskId().equals("fire-" + event.getDroneSn())) {
+            return false;
+        }
+        DualStreamLiveGroupDTO group = groups.get(event.getDroneSn());
+        if (group == null) {
+            group = restoreGroupFromRedis(event.getDroneSn());
+        }
+        if (group == null) {
+            return false;
+        }
+        String playbackStatus = normalize(group.getPlaybackStatus());
+        String statusReason = normalize(group.getStatusReason());
+        return "shared-side-by-side-preview".equals(playbackStatus)
+                || statusReason.contains("single-liveview-source-shared-side-by-side-preview");
+    }
+
     private void createConfirmedFireEvent(DualStreamEventDTO event, List<DualStreamEventDTO> priorEvents) {
         if (fireEventService == null || event == null || !StringUtils.hasText(event.getTaskId())) {
             return;
         }
         Long sourceTs = event.getSourceTs() != null ? event.getSourceTs() : System.currentTimeMillis();
+        refreshThermalSnapshotAnnotation(event);
         Long lastConfirmedTs = confirmedFireEventByTask.get(event.getTaskId());
         if (lastConfirmedTs != null && sourceTs - lastConfirmedTs < CONFIRMED_FIRE_EVENT_DEBOUNCE_MS) {
+            if ("THERMAL_CONFIRMED".equals(event.getReviewStatus())) {
+                confirmedThermalEventByTask.put(event.getTaskId(), copyEvent(event));
+            }
             return;
         }
         confirmedFireEventByTask.put(event.getTaskId(), sourceTs);
@@ -878,6 +992,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
             param.setTemperatureUnit("C");
         }
         param.setThermalMeasureRoi(event.getThermalMeasureRoi());
+        param.setGeoSnapshot(event.getGeoSnapshot());
+        param.setGeoQuality(event.getGeoQuality());
+        param.setGeoErrorRadiusM(event.getGeoErrorRadiusM());
+        param.setGeoMethod(event.getGeoMethod());
         param.setTimestamp(Instant.ofEpochMilli(sourceTs).toString());
         log.info(
                 "dual-stream confirmed fire event creating eventId={} drone={} confidence={} level={} temp={} visibleImage={} thermalImage={}",
@@ -888,7 +1006,125 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 param.getThermalTemperature(),
                 param.getVisibleImageUrl(),
                 param.getThermalImageUrl());
-        fireEventService.create(param);
+        FireEventCreateResponse response = fireEventService.create(param);
+        if ("THERMAL_CONFIRMED".equals(event.getReviewStatus())) {
+            confirmedThermalEventByTask.put(event.getTaskId(), copyEvent(event));
+            confirmedThermalFireEventIdByTask.put(
+                    event.getTaskId(),
+                    response != null && StringUtils.hasText(response.getEventId())
+                            ? response.getEventId()
+                            : param.getEventId());
+        }
+    }
+
+    private boolean attachVisibleImageToRecentThermalConfirmation(DualStreamEventDTO visibleEvent) {
+        if (fireEventService == null
+                || visibleEvent == null
+                || !StringUtils.hasText(visibleEvent.getTaskId())
+                || !StringUtils.hasText(visibleEvent.getVisibleImageUrl())) {
+            return false;
+        }
+        DualStreamEventDTO thermalEvent = confirmedThermalEventByTask.get(visibleEvent.getTaskId());
+        if (thermalEvent == null || thermalEvent.getSourceTs() == null || visibleEvent.getSourceTs() == null) {
+            return false;
+        }
+        long delta = visibleEvent.getSourceTs() - thermalEvent.getSourceTs();
+        if (delta < 0 || delta > VISIBLE_ATTACHMENT_WINDOW_MS) {
+            confirmedThermalEventByTask.remove(visibleEvent.getTaskId());
+            confirmedThermalFireEventIdByTask.remove(visibleEvent.getTaskId());
+            return false;
+        }
+        String eventId = confirmedThermalFireEventIdByTask.get(visibleEvent.getTaskId());
+        if (!StringUtils.hasText(eventId)) {
+            eventId = visibleEvent.getTaskId() + "-" + thermalEvent.getSourceTs();
+        }
+        String sourceEventId = visibleEvent.getTaskId() + "-" + visibleEvent.getSourceTs();
+        String thermalSourceEventId = StringUtils.hasText(visibleEvent.getThermalSourceEventId())
+                ? visibleEvent.getThermalSourceEventId()
+                : visibleEvent.getTaskId() + "-" + thermalEvent.getSourceTs();
+        String thermalImageUrl = StringUtils.hasText(visibleEvent.getThermalImageUrl())
+                ? visibleEvent.getThermalImageUrl()
+                : thermalEvent.getThermalImageUrl();
+        if (!StringUtils.hasText(thermalImageUrl)) {
+            log.warn(
+                    "dual-stream visible confirmation skipped without associated thermal image task={} visibleTs={} thermalTs={}",
+                    visibleEvent.getTaskId(),
+                    visibleEvent.getSourceTs(),
+                    thermalEvent.getSourceTs());
+            return false;
+        }
+        boolean attached = fireEventService.attachVisibleImage(
+                eventId,
+                sourceEventId,
+                visibleEvent.getVisibleImageUrl(),
+                Instant.ofEpochMilli(visibleEvent.getSourceTs()).toString(),
+                thermalSourceEventId,
+                thermalImageUrl);
+        if (attached) {
+            visibleTriggerByTask.put(visibleEvent.getTaskId(), copyEvent(visibleEvent));
+            confirmedThermalEventByTask.remove(visibleEvent.getTaskId());
+            confirmedThermalFireEventIdByTask.remove(visibleEvent.getTaskId());
+        }
+        return attached;
+    }
+
+    private boolean recordVisibleStatusForRecentThermalConfirmation(DualStreamEventDTO visibleEvent, String action) {
+        if (fireEventService == null
+                || visibleEvent == null
+                || !StringUtils.hasText(action)
+                || !StringUtils.hasText(visibleEvent.getTaskId())) {
+            return false;
+        }
+        DualStreamEventDTO thermalEvent = confirmedThermalEventByTask.get(visibleEvent.getTaskId());
+        if (thermalEvent == null || thermalEvent.getSourceTs() == null || visibleEvent.getSourceTs() == null) {
+            return false;
+        }
+        long delta = visibleEvent.getSourceTs() - thermalEvent.getSourceTs();
+        if (delta < 0 || delta > VISIBLE_ATTACHMENT_WINDOW_MS) {
+            confirmedThermalEventByTask.remove(visibleEvent.getTaskId());
+            confirmedThermalFireEventIdByTask.remove(visibleEvent.getTaskId());
+            return false;
+        }
+        String eventId = confirmedThermalFireEventIdByTask.get(visibleEvent.getTaskId());
+        if (!StringUtils.hasText(eventId)) {
+            eventId = visibleEvent.getTaskId() + "-" + thermalEvent.getSourceTs();
+        }
+        String sourceEventId = visibleEvent.getTaskId() + "-" + visibleEvent.getSourceTs();
+        String thermalSourceEventId = StringUtils.hasText(visibleEvent.getThermalSourceEventId())
+                ? visibleEvent.getThermalSourceEventId()
+                : visibleEvent.getTaskId() + "-" + thermalEvent.getSourceTs();
+        String thermalImageUrl = StringUtils.hasText(visibleEvent.getThermalImageUrl())
+                ? visibleEvent.getThermalImageUrl()
+                : thermalEvent.getThermalImageUrl();
+        if (!StringUtils.hasText(thermalImageUrl)) {
+            log.warn(
+                    "dual-stream visible status skipped without associated thermal image task={} action={} visibleTs={} thermalTs={}",
+                    visibleEvent.getTaskId(),
+                    action,
+                    visibleEvent.getSourceTs(),
+                    thermalEvent.getSourceTs());
+            return false;
+        }
+        boolean recorded = fireEventService.recordVisibleConfirmationStatus(
+                eventId,
+                sourceEventId,
+                action,
+                visibleEvent.getVisibleImageUrl(),
+                Instant.ofEpochMilli(visibleEvent.getSourceTs()).toString(),
+                thermalSourceEventId,
+                thermalImageUrl);
+        if (recorded && !REVIEW_STATUS_VISIBLE_PENDING.equals(action)) {
+            confirmedThermalEventByTask.remove(visibleEvent.getTaskId());
+            confirmedThermalFireEventIdByTask.remove(visibleEvent.getTaskId());
+        }
+        return recorded;
+    }
+
+    private boolean isVisibleTerminalStatus(String status) {
+        return StringUtils.hasText(status)
+                && status.startsWith("VISIBLE_")
+                && !REVIEW_STATUS_VISIBLE_PENDING.equals(status)
+                && !REVIEW_STATUS_VISIBLE_CONFIRMED.equals(status);
     }
 
     private Double resolveThermalTemperature(DualStreamEventDTO event) {
@@ -919,6 +1155,8 @@ public class DualStreamServiceImpl implements IDualStreamService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("thermal_temperature", thermalTemperature);
             payload.put("thermal_measure_roi", event.getThermalMeasureRoi());
+            payload.put("thermal_detect_roi", event.getThermalMeasureRoi());
+            payload.put("thermal_measurements", event.getThermalMeasurements());
             ObjectMapper mapper = objectMapper != null ? objectMapper : new ObjectMapper();
             String eventId = event.getTaskId() + "-" + event.getSourceTs();
             String encodedEventId = URLEncoder.encode(eventId, StandardCharsets.UTF_8);
@@ -972,7 +1210,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
     }
 
     private String resolveConfirmedVisibleImageUrl(DualStreamEventDTO event, DualStreamEventDTO visibleEvent) {
-        if (visibleEvent != null && StringUtils.hasText(visibleEvent.getVisibleImageUrl())) {
+        if (visibleEvent != null
+                && REVIEW_STATUS_VISIBLE_CONFIRMED.equals(visibleEvent.getReviewStatus())
+                && StringUtils.hasText(visibleEvent.getVisibleImageUrl())) {
             return visibleEvent.getVisibleImageUrl();
         }
         if (isThermalConfirmation(event)
@@ -980,7 +1220,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 && !StringUtils.hasText(event.getThermalImageUrl())) {
             return null;
         }
-        return event.getVisibleImageUrl();
+        return "visible".equals(normalize(event.getAnalysisChannel())) ? event.getVisibleImageUrl() : null;
     }
 
     private void rememberVisibleTrigger(DualStreamEventDTO event, String droneSn) {
@@ -990,11 +1230,24 @@ public class DualStreamServiceImpl implements IDualStreamService {
         if (!isVisibleCaptureTrusted(droneSn)) {
             return;
         }
+        DualStreamEventDTO current = visibleTriggerByTask.get(event.getTaskId());
+        if (current != null && event.getSourceTs() == null) {
+            return;
+        }
+        if (current != null
+                && current.getSourceTs() != null
+                && event.getSourceTs() != null
+                && event.getSourceTs() < current.getSourceTs()) {
+            return;
+        }
         visibleTriggerByTask.put(event.getTaskId(), copyEvent(event));
     }
 
     private boolean isVisibleCaptureTrusted(String droneSn) {
         if (!StringUtils.hasText(droneSn)) {
+            return false;
+        }
+        if ("thermal".equals(inferChannelFromAppliedFocusCommand(droneSn))) {
             return false;
         }
         DualStreamLiveGroupDTO group = groups.get(droneSn);
@@ -1101,6 +1354,21 @@ public class DualStreamServiceImpl implements IDualStreamService {
         return true;
     }
 
+    private void requestThermalFocusAfterVisibleReview(String droneSn) {
+        if (!StringUtils.hasText(droneSn)) {
+            return;
+        }
+        DualStreamCommandDTO existing = commandByDrone.get(droneSn);
+        if (existing != null
+                && "focus-thermal".equals(existing.getAction())
+                && COMMAND_STATUS_PENDING.equals(normalize(existing.getStatus()))) {
+            return;
+        }
+        if (!isFocusActionCurrentlyActive(droneSn, "focus-thermal")) {
+            issueCommand(droneSn, "focus-thermal");
+        }
+    }
+
     private boolean isFocusActionCurrentlyActive(String droneSn, String action) {
         if (!StringUtils.hasText(droneSn) || !StringUtils.hasText(action)) {
             return false;
@@ -1145,8 +1413,38 @@ public class DualStreamServiceImpl implements IDualStreamService {
         return thermalImageScore >= FIRE_DETECTION_FLOOR;
     }
 
+    private String resolveThermalPostMeasurementReviewStatus(DualStreamEventDTO event) {
+        if (!hasThermalConfirmation(event)) {
+            return REVIEW_STATUS_THERMAL_REJECTED;
+        }
+        if (!hasThermalImage(event)) {
+            return REVIEW_STATUS_THERMAL_IMAGE_MISSING;
+        }
+        if (isTemperatureAtLeast(resolveThermalTemperature(event), THERMAL_HIGH_TEMPERATURE_C)) {
+            return "THERMAL_CONFIRMED";
+        }
+        return REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM;
+    }
+
+    private boolean hasThermalImage(DualStreamEventDTO event) {
+        return event != null && StringUtils.hasText(event.getThermalImageUrl());
+    }
+
     private boolean hasFireDetection(DualStreamEventDTO event) {
         return resolveFireDetectionScore(event) >= FIRE_DETECTION_FLOOR;
+    }
+
+    private boolean hasVisibleFireDetection(DualStreamEventDTO event) {
+        return hasVisibleFireDetection(event, null);
+    }
+
+    private boolean hasVisibleFireDetection(DualStreamEventDTO event, DualStreamEventDTO thermalContext) {
+        double floor = isTemperatureAtLeast(resolveThermalTemperature(thermalContext), THERMAL_HIGH_TEMPERATURE_C)
+                ? HIGH_TEMPERATURE_VISIBLE_CONFIRMATION_FLOOR
+                : VISIBLE_CONFIRMATION_FLOOR;
+        return event != null
+                && event.getVisibleScore() != null
+                && clampConfidence(event.getVisibleScore()) >= floor;
     }
 
     private String resolveConfirmedFireLevel(DualStreamEventDTO event) {

@@ -112,9 +112,10 @@ public class PlannedWaylineController {
     @PostMapping("/{workspace_id}/planned-waylines/{id}/execute")
     public HttpResultResponse<PlannedWaylineDTO> execute(@PathVariable("workspace_id") String workspaceId,
                                                          @PathVariable("id") String id,
+                                                         @RequestBody(required = false) PreparePlannedWaylineTaskParam param,
                                                          HttpServletRequest request) {
         String trustedWorkspaceId = resolveWorkspaceId(workspaceId, resolveClaim(request));
-        return HttpResultResponse.success(plannedWaylineService.executeTask(trustedWorkspaceId, id));
+        return HttpResultResponse.success(plannedWaylineService.executeTask(trustedWorkspaceId, id, param));
     }
 
     @PostMapping("/{workspace_id}/planned-waylines/{id}/cancel")

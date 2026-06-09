@@ -84,6 +84,8 @@ public class DeliveryController {
     private static final double AUTO_RELEASE_DROP_RADIUS_M = 5.0;
     private static final double AUTO_RELEASE_HORIZONTAL_SPEED_MPS = 0.6;
     private static final double AUTO_RELEASE_VERTICAL_SPEED_MPS = 0.5;
+    private static final double AUTO_WAYPOINT_MAX_GEO_ERROR_RADIUS_M = 10.0;
+    private static final String GEO_QUALITY_AUTO_WAYPOINT_READY = "AUTO_WAYPOINT_READY";
 
     private final DeliverySyncAdapter adapter;
     private final DeliverySyncProperties props;
@@ -707,6 +709,13 @@ public class DeliveryController {
         if (event == null || event.getLat() == null || event.getLng() == null) {
             throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
                 "fire event coordinate is required");
+        }
+        if (!GEO_QUALITY_AUTO_WAYPOINT_READY.equals(event.getGeoQuality())
+            || event.getGeoErrorRadiusM() == null
+            || event.getGeoErrorRadiusM() > AUTO_WAYPOINT_MAX_GEO_ERROR_RADIUS_M) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
+                "fire event coordinate is not accurate enough for automatic waypoint generation: "
+                    + event.getGeoQuality());
         }
 
         SafetyCheckResult sc = safetyCheckService.check(SafetyCheckPhase.BEFORE_ROUTE, mission.getMissionNo());

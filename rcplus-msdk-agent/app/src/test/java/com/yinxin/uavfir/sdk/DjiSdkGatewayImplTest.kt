@@ -26,6 +26,7 @@ class DjiSdkGatewayImplTest {
         assertEquals(capability, gateway.loadCapability())
         assertEquals("MATRICE 4T", gateway.loadAircraftModel())
         assertEquals(DjiFlightLimit(heightLimitMeters = 120), gateway.loadFlightLimit())
+        assertEquals(DjiDeviceIdentity("RC-001", "AIRCRAFT-001"), gateway.loadDeviceIdentity())
     }
 
     @Test
@@ -60,5 +61,7 @@ class DjiSdkGatewayImplTest {
         override suspend fun loadAircraftModel(): String? = "MATRICE 4T"
 
         override suspend fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit(heightLimitMeters = 120)
+
+        override suspend fun loadDeviceIdentity(): DjiDeviceIdentity? = DjiDeviceIdentity("RC-001", "AIRCRAFT-001")
     }
 }

@@ -74,11 +74,11 @@ test('leadership cockpit suppresses duplicate fire event notifications by notifi
   assert.match(cockpitSource, /通知版本: \$\{evt\.notificationVersion \?\? 1\}/)
 })
 
-test('right side column puts key alerts above resources', () => {
-  const keyAlertIndex = cockpitSource.indexOf('<h3>重点告警与处置状态</h3>')
-  const resourceIndex = cockpitSource.indexOf('<h3>力量与保障资源</h3>')
+test('right side column puts aircraft status above FC100 and link status', () => {
+  const aircraftIndex = cockpitSource.indexOf('<h3>飞机与直播状态</h3>')
+  const fc100Index = cockpitSource.indexOf('<h3>FC100 投放与链路状态</h3>')
 
-  assert.notEqual(keyAlertIndex, -1)
-  assert.notEqual(resourceIndex, -1)
-  assert.ok(keyAlertIndex < resourceIndex)
+  assert.notEqual(aircraftIndex, -1)
+  assert.notEqual(fc100Index, -1)
+  assert.ok(aircraftIndex < fc100Index)
 })

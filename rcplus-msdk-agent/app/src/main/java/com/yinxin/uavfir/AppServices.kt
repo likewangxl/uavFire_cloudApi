@@ -11,6 +11,8 @@ import com.yinxin.uavfir.api.CommandPollingCoordinator
 import com.yinxin.uavfir.api.CompositeCommandPoller
 import com.yinxin.uavfir.api.DjiFlightControlActionClient
 import com.yinxin.uavfir.api.DualStreamMsdkCommandExecutor
+import com.yinxin.uavfir.api.ThermalHotspotMonitor
+import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
 import com.yinxin.uavfir.sdk.HmsReporter
@@ -49,14 +51,27 @@ class AppServices(
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val sessionManager = DualStreamSessionManager(RealMsdkStreamProvider())
+    private val flightControlClient = DjiFlightControlActionClient()
     private val msdkCommandExecutor = DualStreamMsdkCommandExecutor(
         dualStreamExecutor = sessionManager,
-        flightControlClient = DjiFlightControlActionClient(),
+        flightControlClient = flightControlClient,
     )
     private val dualStreamPoller = CommandPollingCoordinator(
         client = backendClient,
         sessionManager = sessionManager,
         commandExecutor = msdkCommandExecutor,
+        pollMsdk = false,
+    )
+    private val msdkControlPoller = CommandPollingCoordinator(
+        client = backendClient,
+        sessionManager = null,
+        commandExecutor = msdkCommandExecutor,
+        pollLegacyDualStream = false,
+    )
+    private val thermalHotspotMonitor = ThermalHotspotMonitor(
+        client = backendClient,
+        sessionManager = sessionManager,
+        visibleConfirmationScope = appScope,
     )
 
     // Wayline-agent control plane (HTTP) + event plane (MQTT).
@@ -72,7 +87,11 @@ class AppServices(
         password = BuildConfig.AGENT_MQTT_BROKER_PASSWORD.takeIf { it.isNotEmpty() },
     )
     private val eventForwarder = WaylineEventForwarder(mqttPublisher, appScope)
-    private val waypointExecutor = WaypointMissionExecutor(eventForwarder)
+    private val waypointExecutor = WaypointMissionExecutor(
+        listener = eventForwarder,
+        gimbalActionClient = flightControlClient,
+        scope = appScope,
+    )
     private val kmzHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -107,7 +126,9 @@ class AppServices(
         defaultKmzFile = File(localKmzDir, "Kmz2.kmz"),
     )
 
-    private val commandPoller = CompositeCommandPoller(listOf(dualStreamPoller, waylineRouter))
+    private val commandPoller = CompositeCommandPoller(listOf(thermalHotspotMonitor, dualStreamPoller, waylineRouter))
+    private var activeReporterIdentity: DjiDeviceIdentity? = null
+    private val autoStartedStreamAircraft = mutableSetOf<String>()
 
     val validationController = ValidationConsoleController(
         deviceSession = deviceSession,
@@ -118,8 +139,12 @@ class AppServices(
         deviceSession = deviceSession,
         reporter = reporter,
         commandPoller = commandPoller,
+        urgentCommandPoller = msdkControlPoller,
         sessionManager = sessionManager,
         scope = appScope,
+        onIdentityActivated = { identity ->
+            activateDynamicIdentity(identity)
+        },
         onError = { stage, throwable ->
             Log.e(TAG, "runtime loop $stage failed", throwable)
         },
@@ -138,6 +163,24 @@ class AppServices(
         mqttPublisher.setDefaultDroneSn(droneSn)
     }
 
+    private fun activateDynamicIdentity(identity: DjiDeviceIdentity) {
+        if (!identity.isValid()) {
+            return
+        }
+        setActiveDroneSn(identity.aircraftSn)
+        if (activeReporterIdentity != identity) {
+            osdReporter.stop()
+            hmsReporter.stop()
+            Log.i(TAG, "starting OSD+HMS reporters aircraftSn=${identity.aircraftSn} gatewaySn=${identity.gatewaySn}")
+            osdReporter.start(identity.aircraftSn, identity.gatewaySn)
+            hmsReporter.start(identity.aircraftSn, identity.gatewaySn)
+            activeReporterIdentity = identity
+        }
+        if (autoStartedStreamAircraft.add(identity.aircraftSn)) {
+            startDualStreamOnBoot(identity.aircraftSn)
+        }
+    }
+
     /**
      * Start Cloud SDK protocol reporters (OSD now, HMS coming in Task #4)
      * so backend sees device telemetry from the agent the same way it sees
@@ -147,7 +190,7 @@ class AppServices(
         val aircraftSn = BuildConfig.AGENT_AIRCRAFT_SN
         val gatewaySn = BuildConfig.AGENT_GATEWAY_SN
         if (aircraftSn.isBlank() || gatewaySn.isBlank()) {
-            Log.i(TAG, "OSD reporter disabled — AGENT_AIRCRAFT_SN/AGENT_GATEWAY_SN not configured")
+            Log.i(TAG, "OSD reporter waits for dynamic MSDK aircraft/RC identity")
             return
         }
         Log.i(TAG, "starting OSD+HMS reporters aircraftSn=$aircraftSn gatewaySn=$gatewaySn")

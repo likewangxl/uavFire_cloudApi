@@ -68,7 +68,6 @@ import { message } from 'ant-design-vue'
 import type { PlannedWaylineRecord } from '/@/types/wayline'
 import {
   cancelPlannedWaylineTask,
-  executePlannedWaylineTask,
   getPlannedWayline,
   pausePlannedWaylineTask,
   queryPlannedWaylineBreakpoint,
@@ -82,7 +81,10 @@ const props = defineProps<{
   pollIntervalMs?: number
 }>()
 
-const emit = defineEmits<{ change: [record: PlannedWaylineRecord] }>()
+const emit = defineEmits<{
+  change: [record: PlannedWaylineRecord]
+  execute: [record: PlannedWaylineRecord]
+}>()
 
 const busy = ref(false)
 let pollTimer: number | null = null
@@ -168,7 +170,9 @@ async function wrap (fn: () => Promise<any>, label: string) {
     busy.value = false
   }
 }
-function onExecute () { wrap(() => executePlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '执行') }
+function onExecute () {
+  emit('execute', props.record)
+}
 function onPause () { wrap(() => pausePlannedWaylineTask(props.workspaceId, props.record.plannedWaylineId), '暂停') }
 function onRecovery () {
   wrap(async () => {

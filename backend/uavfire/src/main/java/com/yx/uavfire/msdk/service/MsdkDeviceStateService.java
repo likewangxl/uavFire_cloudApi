@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +21,33 @@ import java.util.function.LongSupplier;
 public class MsdkDeviceStateService {
 
     private static final long COMMAND_DISPATCH_TTL_MS = 15_000L;
+    private static final long ONLINE_STATE_TTL_MS = 15_000L;
+    private static final Set<String> SUPPORTED_COMMANDS = Set.of(
+            "start",
+            "stop",
+            "start_stream",
+            "stop_stream",
+            "focus_visible",
+            "focus_thermal",
+            "takeoff",
+            "land",
+            "return_home",
+            "cancel_return_home",
+            "hover",
+            "emergency_stop",
+            "virtual_stick",
+            "fly_to_point",
+            "stop_fly_to_point",
+            "gimbal_reset",
+            "gimbal_rotate",
+            "camera_start_photo",
+            "camera_start_record",
+            "camera_stop_record",
+            "camera_stream_source",
+            "camera_zoom",
+            "night_scene",
+            "laser_fill_light"
+    );
 
     private final LongSupplier clock;
 
@@ -41,6 +69,9 @@ public class MsdkDeviceStateService {
         if (state == null || !StringUtils.hasText(state.getAircraftSn())) {
             return;
         }
+        if (state.getUpdatedAt() == null || state.getUpdatedAt() <= 0) {
+            state.setUpdatedAt(clock.getAsLong());
+        }
         latestByAircraftSn.put(state.getAircraftSn(), state);
     }
 
@@ -54,7 +85,7 @@ public class MsdkDeviceStateService {
     public List<MsdkDeviceStateDTO> listOnline() {
         List<MsdkDeviceStateDTO> result = new ArrayList<>();
         for (MsdkDeviceStateDTO state : latestByAircraftSn.values()) {
-            if (isOnline(state)) {
+            if (isOnline(state) && isFresh(state)) {
                 result.add(state);
             }
         }
@@ -62,11 +93,15 @@ public class MsdkDeviceStateService {
     }
 
     public MsdkCommandDTO enqueueCommand(String aircraftSn, MsdkCommandParam param) {
+        String commandName = param == null ? "" : param.getCommand();
+        if (!isSupportedCommand(commandName)) {
+            throw new IllegalArgumentException("unsupported-msdk-command:" + commandName);
+        }
         long now = clock.getAsLong();
         MsdkCommandDTO command = new MsdkCommandDTO()
                 .setCommandId("msdk-" + now + "-" + UUID.randomUUID().toString().substring(0, 8))
                 .setAircraftSn(aircraftSn)
-                .setCommand(param == null ? "" : param.getCommand())
+                .setCommand(commandName)
                 .setParams(param == null ? null : param.getParams())
                 .setStatus("PENDING")
                 .setCreatedAt(now)
@@ -74,6 +109,10 @@ public class MsdkDeviceStateService {
         commandQueues.computeIfAbsent(aircraftSn, key -> new ConcurrentLinkedQueue<>()).add(command);
         commandById.put(command.getCommandId(), command);
         return command;
+    }
+
+    public boolean isSupportedCommand(String command) {
+        return StringUtils.hasText(command) && SUPPORTED_COMMANDS.contains(command);
     }
 
     public Optional<MsdkCommandDTO> pollCommand(String aircraftSn) {
@@ -128,5 +167,13 @@ public class MsdkDeviceStateService {
             return false;
         }
         return !"DISCONNECTED".equalsIgnoreCase(state.getConnectionState());
+    }
+
+    private boolean isFresh(MsdkDeviceStateDTO state) {
+        Long updatedAt = state == null ? null : state.getUpdatedAt();
+        if (updatedAt == null || updatedAt <= 0) {
+            return false;
+        }
+        return clock.getAsLong() - updatedAt <= ONLINE_STATE_TTL_MS;
     }
 }

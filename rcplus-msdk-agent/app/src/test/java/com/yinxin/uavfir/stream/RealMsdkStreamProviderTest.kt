@@ -124,31 +124,10 @@ class RealMsdkStreamProviderTest {
     }
 
     @Test
-    fun focusThermal_usesAgentHotspotMeasurementResultInsteadOfRequestedRegion() = runTest {
-        val requestedRegion = ThermalMeasureRegion(x = 0.20, y = 0.30, width = 0.25, height = 0.20)
-        val measuredRegion = ThermalMeasureRegion(x = 0.42, y = 0.46, width = 0.08, height = 0.08)
-        val binder = RecordingMsdkStreamBinder(
-            hotspotMeasurement = ThermalMeasurementResult(
-                temperatureC = 153.0,
-                region = measuredRegion,
-            ),
-        )
-        val provider = RealMsdkStreamProvider(
-            binder = binder,
-            liveStreamController = RecordingLiveStreamController(),
-        )
-
-        val result = provider.focusThermal("DRONE-001", requestedRegion)
-
-        assertEquals(requestedRegion, binder.lastHotspotSeedRegion)
-        assertEquals(153.0, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
-        assertEquals(measuredRegion, result.thermalMeasureRegion)
-    }
-
-    @Test
-    fun focusThermal_restoresVisibleSourceAfterRegionMeasurement() = runTest {
+    fun focusThermal_usesRequestedRegionInsteadOfRelocatingToNearbyHotspot() = runTest {
         val requestedRegion = ThermalMeasureRegion(x = 0.20, y = 0.30, width = 0.25, height = 0.20)
         val binder = RecordingMsdkStreamBinder(
+            regionTemperatureC = 68.5,
             hotspotMeasurement = ThermalMeasurementResult(
                 temperatureC = 153.0,
                 region = ThermalMeasureRegion(x = 0.42, y = 0.46, width = 0.08, height = 0.08),
@@ -161,11 +140,61 @@ class RealMsdkStreamProviderTest {
 
         val result = provider.focusThermal("DRONE-001", requestedRegion)
 
-        assertTrue(binder.visibleFocused)
+        assertEquals(requestedRegion, binder.lastMeasuredRegion)
+        assertEquals(0, binder.hotspotMeasureCalls)
+        assertEquals(68.5, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
+        assertEquals(requestedRegion, result.thermalMeasureRegion)
+    }
+
+    @Test
+    fun measureThermalRegion_keepsThermalPreviewAndAvoidsRtmpRestart() = runTest {
+        val requestedRegion = ThermalMeasureRegion(x = 0.20, y = 0.30, width = 0.25, height = 0.20)
+        val binder = RecordingMsdkStreamBinder(
+            regionTemperatureC = 153.0,
+        )
+        val liveStreamController = RecordingLiveStreamController()
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = liveStreamController,
+        )
+
+        val result = provider.measureThermalRegion("DRONE-001", requestedRegion)
+
         assertEquals(BoundStreamState.BOUND, result.visibleState)
-        assertEquals(BoundStreamState.IDLE, result.thermalState)
-        assertEquals("visible-live-ready", result.playbackStatus)
+        assertEquals(BoundStreamState.BOUND, result.thermalState)
+        assertEquals("shared-side-by-side-preview", result.playbackStatus)
+        assertEquals("thermal-measured", result.thermalFailureMessage)
         assertEquals(153.0, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
+        assertEquals(requestedRegion, result.thermalMeasureRegion)
+        assertTrue(binder.thermalFocused)
+        assertEquals(false, binder.visibleFocused)
+        assertEquals(false, liveStreamController.stopped)
+        assertTrue(liveStreamController.startedDroneSns.isEmpty())
+    }
+
+    @Test
+    fun measureThermalHotspot_usesMsdkHotspotScanAndAvoidsRtmpRestart() = runTest {
+        val hotspotRegion = ThermalMeasureRegion(x = 0.42, y = 0.46, width = 0.08, height = 0.08)
+        val binder = RecordingMsdkStreamBinder(
+            hotspotMeasurement = ThermalMeasurementResult(
+                temperatureC = 153.0,
+                region = hotspotRegion,
+            ),
+        )
+        val liveStreamController = RecordingLiveStreamController()
+        val provider = RealMsdkStreamProvider(
+            binder = binder,
+            liveStreamController = liveStreamController,
+        )
+
+        val result = provider.measureThermalHotspot("DRONE-001")
+
+        assertEquals(1, binder.hotspotMeasureCalls)
+        assertEquals(153.0, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
+        assertEquals(hotspotRegion, result.thermalMeasureRegion)
+        assertTrue(binder.thermalFocused)
+        assertEquals(false, liveStreamController.stopped)
+        assertTrue(liveStreamController.startedDroneSns.isEmpty())
     }
 
     @Test

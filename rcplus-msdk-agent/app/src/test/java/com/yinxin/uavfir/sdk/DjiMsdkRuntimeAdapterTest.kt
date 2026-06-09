@@ -63,6 +63,7 @@ class DjiMsdkRuntimeAdapterTest {
         )
         assertEquals("MATRICE 4T", adapter.loadAircraftModel())
         assertEquals(DjiFlightLimit(heightLimitMeters = 120), adapter.loadFlightLimit())
+        assertEquals(DjiDeviceIdentity("RC-001", "AIRCRAFT-001"), adapter.loadDeviceIdentity())
     }
 
     private class FakeMsdkSdkClient(
@@ -78,6 +79,7 @@ class DjiMsdkRuntimeAdapterTest {
         private val aircraftConnected: Boolean = false,
         private val visibleSupported: Boolean = false,
         private val thermalSupported: Boolean = false,
+        private val identity: DjiDeviceIdentity? = DjiDeviceIdentity("RC-001", "AIRCRAFT-001"),
     ) : MsdkKeyValueClient {
         override fun isAircraftConnected(): Boolean = aircraftConnected
 
@@ -89,5 +91,7 @@ class DjiMsdkRuntimeAdapterTest {
         override fun loadAircraftModel(): String? = "MATRICE 4T"
 
         override fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit(heightLimitMeters = 120)
+
+        override suspend fun loadDeviceIdentity(): DjiDeviceIdentity? = identity
     }
 }

@@ -1,10 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   buildLivePaneState,
   swapPrimaryPreference
 } from '../leadership-cockpit-live-layout.mjs'
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..')
+
+function readSource (path) {
+  return readFileSync(resolve(root, path), 'utf8')
+}
 
 test('defaults to visible primary and thermal preview when both urls exist', () => {
   const state = buildLivePaneState({
@@ -39,6 +48,8 @@ test('thermal preference reuses the visible stream url while RC Plus switches th
     visiblePlayUrl: 'webrtc://visible',
     thermalPlayUrl: '',
     primaryPreference: 'thermal',
+    appliedFocusAction: 'focus-thermal',
+    appliedFocusStatus: 'applied',
     allowSharedThermalPreview: true
   })
 
@@ -105,4 +116,34 @@ test('shared single-source stream plays thermal as primary after thermal prefere
 test('swap toggles visible and thermal preferences', () => {
   assert.equal(swapPrimaryPreference('visible'), 'thermal')
   assert.equal(swapPrimaryPreference('thermal'), 'visible')
+})
+
+test('primary player loading and failure share the same right-side status HUD', () => {
+  const cockpitSource = readSource('src/pages/page-web/projects/leadership-cockpit.vue')
+
+  assert.match(
+    cockpitSource,
+    /v-else-if="primaryPlayerState\.loading"[\s\S]{0,180}class="dual-stream-status-card loading"/,
+    'loading state should use the compact status card'
+  )
+  assert.match(
+    cockpitSource,
+    /v-else-if="primaryPlayerState\.error"[\s\S]{0,180}class="dual-stream-status-card error"/,
+    'failure state should use the same compact status card'
+  )
+  assert.doesNotMatch(
+    cockpitSource,
+    /v-else-if="primaryPlayerState\.(?:loading|error)"[\s\S]{0,120}class="dual-stream-overlay/,
+    'loading and failure states should not use the full-stage overlay'
+  )
+  assert.match(
+    cockpitSource,
+    /\.dual-stream-status-card\s*\{[\s\S]*?inset:\s*auto 24px 24px auto;[\s\S]*?width:\s*min\(420px,\s*calc\(100% - 48px\)\);/,
+    'status card should live at the same right-side position previously used by playback failure'
+  )
+  assert.doesNotMatch(
+    cockpitSource,
+    /\.dual-stream-status-card\.error\s*\{[^}]*rgba\(47,\s*10,\s*17/,
+    'failure status should not use the old heavy red panel background'
+  )
 })

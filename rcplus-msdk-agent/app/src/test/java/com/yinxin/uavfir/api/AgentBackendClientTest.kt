@@ -199,8 +199,14 @@ class AgentBackendClientTest {
         assertEquals(true, payload.capabilities["thermalFocus"])
         assertEquals(false, payload.capabilities["thermalSecondStream"])
         assertEquals(false, payload.capabilities["takeoff"])
+        assertEquals(false, payload.capabilities["land"])
         assertEquals(false, payload.capabilities["flyToPoint"])
         assertEquals(false, payload.capabilities["returnHome"])
+        assertEquals(false, payload.capabilities["gimbalReset"])
+        assertEquals(false, payload.capabilities["gimbalRotate"])
+        assertEquals(false, payload.capabilities["cameraPhoto"])
+        assertEquals(false, payload.capabilities["cameraRecord"])
+        assertEquals(false, payload.capabilities["cameraStreamSource"])
     }
 
     @Test
@@ -261,6 +267,82 @@ class AgentBackendClientTest {
     }
 
     @Test
+    fun recordThermalHotspotEvent_postsThermalEventToTaskEndpoint() = runTest {
+        val api = RecordingDualStreamApi()
+        val client = AgentBackendClient(api = api)
+        val roi = mapOf("x" to 0.42, "y" to 0.46, "width" to 0.08, "height" to 0.08)
+        val measurements = listOf(
+            ThermalMeasurementPayload(
+                temperatureC = 153.0,
+                roi = roi,
+            ),
+            ThermalMeasurementPayload(
+                temperatureC = 88.5,
+                roi = mapOf("x" to 0.10, "y" to 0.75, "width" to 0.06, "height" to 0.06),
+            ),
+        )
+
+        client.recordThermalHotspotEvent(
+            taskId = "fire-DRONE-001",
+            droneSn = "DRONE-001",
+            sourceTs = 1780059017562L,
+            temperatureC = 153.0,
+            thermalMeasureRoi = roi,
+            thermalMeasurements = measurements,
+        )
+
+        assertEquals("fire-DRONE-001", api.lastTaskEventTaskId)
+        assertEquals("DRONE-001", api.lastTaskEventBody?.droneSn)
+        assertEquals("thermal", api.lastTaskEventBody?.analysisChannel)
+        assertEquals("HIGH", api.lastTaskEventBody?.riskLevel)
+        assertEquals(153.0, api.lastTaskEventBody?.thermalTemperature ?: -1.0, 1e-6)
+        assertEquals(roi, api.lastTaskEventBody?.thermalMeasureRoi)
+        assertEquals(measurements, api.lastTaskEventBody?.thermalMeasurements)
+    }
+
+    @Test
+    fun recordThermalHotspotEvent_includesThermalImageUrlWhenAvailable() = runTest {
+        val api = RecordingDualStreamApi()
+        val client = AgentBackendClient(api = api)
+
+        client.recordThermalHotspotEvent(
+            taskId = "fire-DRONE-001",
+            droneSn = "DRONE-001",
+            sourceTs = 1780059017562L,
+            temperatureC = 153.0,
+            thermalMeasureRoi = mapOf("x" to 0.42, "y" to 0.46, "width" to 0.08, "height" to 0.08),
+            thermalImageUrl = "http://ai/snapshots/fire-DRONE-001-1780059017562-annotated.jpg",
+        )
+
+        assertEquals(
+            "http://ai/snapshots/fire-DRONE-001-1780059017562-annotated.jpg",
+            api.lastTaskEventBody?.thermalImageUrl,
+        )
+    }
+
+    @Test
+    fun recordVisibleConfirmationStatus_postsVisibleStatusToTaskEndpoint() = runTest {
+        val api = RecordingDualStreamApi()
+        val client = AgentBackendClient(api = api)
+
+        client.recordVisibleConfirmationStatus(
+            taskId = "fire-DRONE-001",
+            droneSn = "DRONE-001",
+            sourceTs = 1780059018562L,
+            reviewStatus = "VISIBLE_CAPTURE_FAILED",
+            thermalSourceEventId = "fire-DRONE-001-1780059017562",
+            thermalImageUrl = "http://ai/snapshots/thermal.jpg",
+        )
+
+        assertEquals("fire-DRONE-001", api.lastTaskEventTaskId)
+        assertEquals("DRONE-001", api.lastTaskEventBody?.droneSn)
+        assertEquals("visible", api.lastTaskEventBody?.analysisChannel)
+        assertEquals("VISIBLE_CAPTURE_FAILED", api.lastTaskEventBody?.reviewStatus)
+        assertEquals("fire-DRONE-001-1780059017562", api.lastTaskEventBody?.thermalSourceEventId)
+        assertEquals("http://ai/snapshots/thermal.jpg", api.lastTaskEventBody?.thermalImageUrl)
+    }
+
+    @Test
     fun pollMsdkCommand_returnsCommandAndParamsFromMsdkApi() = runTest {
         val api = RecordingDualStreamApi().apply {
             nextMsdkCommand = AgentApiEnvelope(
@@ -311,6 +393,8 @@ class AgentBackendClientTest {
         var nextCommand: AgentApiEnvelope<AgentCommandResponse>? = null
         var lastAckDroneSn: String? = null
         var lastAckBody: AgentCommandAckRequest? = null
+        var lastTaskEventTaskId: String? = null
+        var lastTaskEventBody: DualStreamEventRequest? = null
         var lastMsdkDeviceState: MsdkDeviceStateRequest? = null
         var nextMsdkCommand: AgentApiEnvelope<MsdkCommandResponse>? = null
         var lastMsdkPollAircraftSn: String? = null
@@ -349,6 +433,14 @@ class AgentBackendClientTest {
         ) {
             lastAckDroneSn = droneSn
             lastAckBody = body
+        }
+
+        override suspend fun recordTaskEvent(
+            taskId: String,
+            body: DualStreamEventRequest,
+        ) {
+            lastTaskEventTaskId = taskId
+            lastTaskEventBody = body
         }
 
         override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) {

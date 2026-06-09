@@ -1,6 +1,8 @@
 package com.yx.uavfire.fc100.event.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.dji.sdk.cloudapi.device.OsdDockDrone;
 import com.dji.sdk.cloudapi.device.OsdRcDrone;
 import com.yx.uavfire.fc100.common.Clock;
@@ -17,18 +19,23 @@ import com.yx.uavfire.fc100.event.model.entity.FireEventHistoryEntity;
 import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
+import com.yx.uavfire.fc100.event.service.FireGeoLocationResult;
+import com.yx.uavfire.fc100.event.service.FireGeoLocationService;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.manage.service.IDeviceRedisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -40,6 +47,7 @@ public class FireEventServiceImpl implements FireEventService {
     private static final BigDecimal HIGH = new BigDecimal("0.90");
     private static final double MERGE_RADIUS_METERS = 10.0;
     private static final long MERGE_WINDOW_MS = 30 * 60 * 1000L;
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /** 已绑定活跃任务的 mission 状态集合（用于同 eventId 去重） */
     private static final Set<String> ACTIVE_MISSION_STATUSES = Set.of(
@@ -66,21 +74,33 @@ public class FireEventServiceImpl implements FireEventService {
     private final MissionNoGenerator noGen;
     private final Clock clock;
     private final IDeviceRedisService deviceRedisService;
+    private final FireGeoLocationService fireGeoLocationService;
 
     public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
                                 MissionNoGenerator g, Clock c,
                                 IDeviceRedisService deviceRedisService) {
+        this(em, hm, mm, g, c, deviceRedisService, null);
+    }
+
+    @Autowired
+    public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
+                                MissionNoGenerator g, Clock c,
+                                IDeviceRedisService deviceRedisService,
+                                FireGeoLocationService fireGeoLocationService) {
         this.eventMapper = em;
         this.historyMapper = hm;
         this.missionMapper = mm;
         this.noGen = g;
         this.clock = c;
         this.deviceRedisService = deviceRedisService;
+        this.fireGeoLocationService = fireGeoLocationService;
     }
 
     @Override
     @Transactional
     public FireEventCreateResponse create(FireEventCreateParam param) {
+        resolveFirePointFromGeoSnapshot(param);
+        fillThermalRoiFromMeasureRoi(param);
         fillPositionFromOsdIfMissing(param);
         long eventTs = Instant.parse(param.getTimestamp()).toEpochMilli();
 
@@ -170,6 +190,157 @@ public class FireEventServiceImpl implements FireEventService {
             true, false, true, "CREATED");
     }
 
+    @Override
+    @Transactional
+    public boolean attachVisibleImage(
+        String eventId,
+        String sourceEventId,
+        String visibleImageUrl,
+        String timestamp,
+        String thermalSourceEventId,
+        String thermalImageUrl) {
+        if (eventId == null || eventId.isBlank() || visibleImageUrl == null || visibleImageUrl.isBlank()) {
+            return false;
+        }
+        if (thermalSourceEventId != null && !thermalSourceEventId.isBlank()
+            && (thermalImageUrl == null || thermalImageUrl.isBlank())) {
+            log.warn(
+                "visible confirmation rejected without associated thermal image eventId={} sourceEventId={} thermalSourceEventId={}",
+                eventId,
+                sourceEventId,
+                thermalSourceEventId);
+            return false;
+        }
+        FireEventEntity existing = eventMapper.selectOne(
+            new QueryWrapper<FireEventEntity>().eq("event_id", eventId));
+        if (existing == null) {
+            return false;
+        }
+        long eventTs = timestamp != null && !timestamp.isBlank()
+            ? Instant.parse(timestamp).toEpochMilli()
+            : clock.now();
+        long now = clock.now();
+        String associatedThermalImageUrl = thermalImageUrl != null && !thermalImageUrl.isBlank()
+            ? thermalImageUrl
+            : thermalSourceEventId != null && !thermalSourceEventId.isBlank()
+                ? null
+                : existing.getThermalImageUrl();
+        existing.setVisibleImageUrl(visibleImageUrl);
+        if (thermalImageUrl != null && !thermalImageUrl.isBlank()) {
+            existing.setThermalImageUrl(thermalImageUrl);
+        }
+        existing.setLastSourceEventId(sourceEventId != null && !sourceEventId.isBlank() ? sourceEventId : eventId);
+        existing.setUpdateTime(now);
+        eventMapper.updateById(existing);
+
+        FireEventHistoryEntity history = new FireEventHistoryEntity();
+        history.setFireEventId(existing.getId());
+        history.setEventId(existing.getEventId());
+        history.setSourceEventId(existing.getLastSourceEventId());
+        history.setWorkspaceId(existing.getWorkspaceId());
+        history.setSource(existing.getSource());
+        history.setDeviceSn(existing.getDeviceSn());
+        history.setConfidence(existing.getConfidence());
+        history.setFireLevel(existing.getFireLevel());
+        history.setLat(existing.getLat());
+        history.setLng(existing.getLng());
+        history.setAlt(existing.getAlt());
+        history.setAltitudeReference(existing.getAltitudeReference());
+        history.setGeoMethod(existing.getGeoMethod());
+        history.setGeoErrorRadiusM(existing.getGeoErrorRadiusM());
+        history.setGeoQuality(existing.getGeoQuality());
+        history.setGeoSourceTs(existing.getGeoSourceTs());
+        history.setAircraftLat(existing.getAircraftLat());
+        history.setAircraftLng(existing.getAircraftLng());
+        history.setAircraftAlt(existing.getAircraftAlt());
+        history.setGimbalPitch(existing.getGimbalPitch());
+        history.setGimbalYaw(existing.getGimbalYaw());
+        history.setGimbalRoll(existing.getGimbalRoll());
+        history.setThermalRoi(existing.getThermalRoi());
+        history.setThermalTemperature(existing.getThermalTemperature());
+        history.setTemperatureUnit(existing.getTemperatureUnit());
+        history.setThermalImageUrl(associatedThermalImageUrl);
+        history.setVisibleImageUrl(visibleImageUrl);
+        history.setEventTimestamp(eventTs);
+        history.setAction("VISIBLE_CONFIRM");
+        history.setCreateTime(now);
+        historyMapper.insert(history);
+        return true;
+    }
+
+    @Override
+    @Transactional
+    public boolean recordVisibleConfirmationStatus(
+        String eventId,
+        String sourceEventId,
+        String action,
+        String visibleImageUrl,
+        String timestamp,
+        String thermalSourceEventId,
+        String thermalImageUrl) {
+        if (eventId == null || eventId.isBlank() || action == null || !action.startsWith("VISIBLE_")) {
+            return false;
+        }
+        if (thermalSourceEventId != null && !thermalSourceEventId.isBlank()
+            && (thermalImageUrl == null || thermalImageUrl.isBlank())) {
+            log.warn(
+                "visible status rejected without associated thermal image eventId={} sourceEventId={} thermalSourceEventId={} action={}",
+                eventId,
+                sourceEventId,
+                thermalSourceEventId,
+                action);
+            return false;
+        }
+        FireEventEntity existing = eventMapper.selectOne(
+            new QueryWrapper<FireEventEntity>().eq("event_id", eventId));
+        if (existing == null) {
+            return false;
+        }
+        long eventTs = timestamp != null && !timestamp.isBlank()
+            ? Instant.parse(timestamp).toEpochMilli()
+            : clock.now();
+        long now = clock.now();
+        String associatedThermalImageUrl = thermalImageUrl != null && !thermalImageUrl.isBlank()
+            ? thermalImageUrl
+            : thermalSourceEventId != null && !thermalSourceEventId.isBlank()
+                ? null
+                : existing.getThermalImageUrl();
+
+        FireEventHistoryEntity history = new FireEventHistoryEntity();
+        history.setFireEventId(existing.getId());
+        history.setEventId(existing.getEventId());
+        history.setSourceEventId(sourceEventId != null && !sourceEventId.isBlank() ? sourceEventId : eventId);
+        history.setWorkspaceId(existing.getWorkspaceId());
+        history.setSource(existing.getSource());
+        history.setDeviceSn(existing.getDeviceSn());
+        history.setConfidence(existing.getConfidence());
+        history.setFireLevel(existing.getFireLevel());
+        history.setLat(existing.getLat());
+        history.setLng(existing.getLng());
+        history.setAlt(existing.getAlt());
+        history.setAltitudeReference(existing.getAltitudeReference());
+        history.setGeoMethod(existing.getGeoMethod());
+        history.setGeoErrorRadiusM(existing.getGeoErrorRadiusM());
+        history.setGeoQuality(existing.getGeoQuality());
+        history.setGeoSourceTs(existing.getGeoSourceTs());
+        history.setAircraftLat(existing.getAircraftLat());
+        history.setAircraftLng(existing.getAircraftLng());
+        history.setAircraftAlt(existing.getAircraftAlt());
+        history.setGimbalPitch(existing.getGimbalPitch());
+        history.setGimbalYaw(existing.getGimbalYaw());
+        history.setGimbalRoll(existing.getGimbalRoll());
+        history.setThermalRoi(existing.getThermalRoi());
+        history.setThermalTemperature(existing.getThermalTemperature());
+        history.setTemperatureUnit(existing.getTemperatureUnit());
+        history.setThermalImageUrl(associatedThermalImageUrl);
+        history.setVisibleImageUrl(visibleImageUrl);
+        history.setEventTimestamp(eventTs);
+        history.setAction(action);
+        history.setCreateTime(now);
+        historyMapper.insert(history);
+        return true;
+    }
+
     private FireEventEntity findMergeCandidate(FireEventCreateParam param, long eventTs) {
         if (param.getLat() == null || param.getLng() == null || param.getDeviceSn() == null || param.getDeviceSn().isBlank()) {
             return null;
@@ -230,6 +401,7 @@ public class FireEventServiceImpl implements FireEventService {
         if (param.getVisibleImageUrl() != null && !param.getVisibleImageUrl().isBlank()) {
             existing.setVisibleImageUrl(param.getVisibleImageUrl());
         }
+        copyGeoFields(param, existing);
         eventMapper.updateById(existing);
         return levelUpgraded
             ? new MergeResult(true, "LEVEL_UPGRADED")
@@ -251,6 +423,7 @@ public class FireEventServiceImpl implements FireEventService {
         history.setAlt(param.getAlt());
         history.setAltitudeReference(param.getAltitudeReference() != null
             ? param.getAltitudeReference() : parent.getAltitudeReference());
+        copyGeoFields(param, history);
         history.setThermalTemperature(param.getThermalTemperature());
         history.setTemperatureUnit(param.getTemperatureUnit() != null
             ? param.getTemperatureUnit() : parent.getTemperatureUnit());
@@ -264,6 +437,123 @@ public class FireEventServiceImpl implements FireEventService {
 
     private String workspaceIdOf(FireEventCreateParam param) {
         return param.getWorkspaceId() != null ? param.getWorkspaceId() : "DEFAULT";
+    }
+
+    private void resolveFirePointFromGeoSnapshot(FireEventCreateParam param) {
+        if (param == null || param.getGeoSnapshot() == null || fireGeoLocationService == null) {
+            copyGeoSnapshotTelemetry(param);
+            return;
+        }
+        copyGeoSnapshotTelemetry(param);
+        FireGeoLocationResult result = fireGeoLocationService.resolve(param.getGeoSnapshot());
+        if (result == null) {
+            return;
+        }
+        if (result.getLat() != null && result.getLng() != null) {
+            param.setLat(result.getLat());
+            param.setLng(result.getLng());
+            param.setAlt(result.getAlt());
+        }
+        if (result.getGeoMethod() != null) {
+            param.setGeoMethod(result.getGeoMethod());
+        }
+        if (result.getGeoQuality() != null) {
+            param.setGeoQuality(result.getGeoQuality());
+        }
+        if (result.getGeoErrorRadiusM() != null) {
+            param.setGeoErrorRadiusM(result.getGeoErrorRadiusM());
+        }
+        if (result.getGeoSourceTs() != null) {
+            param.setGeoSourceTs(result.getGeoSourceTs());
+        }
+    }
+
+    private void copyGeoSnapshotTelemetry(FireEventCreateParam param) {
+        if (param == null || param.getGeoSnapshot() == null) {
+            return;
+        }
+        var snapshot = param.getGeoSnapshot();
+        if (snapshot.getSourceTs() != null && param.getGeoSourceTs() == null) {
+            param.setGeoSourceTs(snapshot.getSourceTs());
+        }
+        if (snapshot.getAircraftPosition() != null) {
+            if (param.getAircraftLat() == null) param.setAircraftLat(snapshot.getAircraftPosition().getLat());
+            if (param.getAircraftLng() == null) param.setAircraftLng(snapshot.getAircraftPosition().getLng());
+            if (param.getAircraftAlt() == null) param.setAircraftAlt(snapshot.getAircraftPosition().getAlt());
+        }
+        if (snapshot.getGimbalAttitude() != null) {
+            if (param.getGimbalPitch() == null) param.setGimbalPitch(snapshot.getGimbalAttitude().getPitch());
+            if (param.getGimbalYaw() == null) param.setGimbalYaw(snapshot.getGimbalAttitude().getYaw());
+            if (param.getGimbalRoll() == null) param.setGimbalRoll(snapshot.getGimbalAttitude().getRoll());
+        }
+        if (snapshot.getThermalRoi() != null && param.getThermalRoi() == null) {
+            try {
+                param.setThermalRoi(JSON.writeValueAsString(snapshot.getThermalRoi()));
+            } catch (JsonProcessingException e) {
+                param.setThermalRoi(snapshot.getThermalRoi().toString());
+            }
+        }
+    }
+
+    private void fillThermalRoiFromMeasureRoi(FireEventCreateParam param) {
+        if (param == null || param.getThermalRoi() != null || param.getThermalMeasureRoi() == null) {
+            return;
+        }
+        try {
+            param.setThermalRoi(JSON.writeValueAsString(orderedThermalRoi(param.getThermalMeasureRoi())));
+        } catch (JsonProcessingException e) {
+            param.setThermalRoi(param.getThermalMeasureRoi().toString());
+        }
+    }
+
+    private Map<String, Double> orderedThermalRoi(Map<String, Double> roi) {
+        Map<String, Double> ordered = new LinkedHashMap<>();
+        copyRoiValue(roi, ordered, "x");
+        copyRoiValue(roi, ordered, "y");
+        copyRoiValue(roi, ordered, "width");
+        copyRoiValue(roi, ordered, "height");
+        roi.forEach((key, value) -> {
+            if (!ordered.containsKey(key)) {
+                ordered.put(key, value);
+            }
+        });
+        return ordered;
+    }
+
+    private void copyRoiValue(Map<String, Double> source, Map<String, Double> target, String key) {
+        if (source.containsKey(key)) {
+            target.put(key, source.get(key));
+        }
+    }
+
+    private void copyGeoFields(FireEventCreateParam param, FireEventEntity target) {
+        if (param == null || target == null) return;
+        if (param.getGeoMethod() != null) target.setGeoMethod(param.getGeoMethod());
+        if (param.getGeoErrorRadiusM() != null) target.setGeoErrorRadiusM(param.getGeoErrorRadiusM());
+        if (param.getGeoQuality() != null) target.setGeoQuality(param.getGeoQuality());
+        if (param.getGeoSourceTs() != null) target.setGeoSourceTs(param.getGeoSourceTs());
+        if (param.getAircraftLat() != null) target.setAircraftLat(param.getAircraftLat());
+        if (param.getAircraftLng() != null) target.setAircraftLng(param.getAircraftLng());
+        if (param.getAircraftAlt() != null) target.setAircraftAlt(param.getAircraftAlt());
+        if (param.getGimbalPitch() != null) target.setGimbalPitch(param.getGimbalPitch());
+        if (param.getGimbalYaw() != null) target.setGimbalYaw(param.getGimbalYaw());
+        if (param.getGimbalRoll() != null) target.setGimbalRoll(param.getGimbalRoll());
+        if (param.getThermalRoi() != null) target.setThermalRoi(param.getThermalRoi());
+    }
+
+    private void copyGeoFields(FireEventCreateParam param, FireEventHistoryEntity target) {
+        if (param == null || target == null) return;
+        target.setGeoMethod(param.getGeoMethod());
+        target.setGeoErrorRadiusM(param.getGeoErrorRadiusM());
+        target.setGeoQuality(param.getGeoQuality());
+        target.setGeoSourceTs(param.getGeoSourceTs());
+        target.setAircraftLat(param.getAircraftLat());
+        target.setAircraftLng(param.getAircraftLng());
+        target.setAircraftAlt(param.getAircraftAlt());
+        target.setGimbalPitch(param.getGimbalPitch());
+        target.setGimbalYaw(param.getGimbalYaw());
+        target.setGimbalRoll(param.getGimbalRoll());
+        target.setThermalRoi(param.getThermalRoi());
     }
 
     private int fireLevelRank(String level) {

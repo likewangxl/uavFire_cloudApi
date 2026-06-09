@@ -9,6 +9,8 @@ interface MsdkStreamBinder {
 
     suspend fun focusThermal(droneSn: String)
 
+    suspend fun captureVisibleSnapshot(droneSn: String): String? = null
+
     suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double?
 
     suspend fun measureThermalCenterTemperatureC(): Double?
@@ -21,6 +23,7 @@ interface MsdkStreamBinder {
         return ThermalMeasurementResult(
             temperatureC = temperature,
             region = region,
+            measurements = listOf(ThermalMeasuredPoint(temperature, region)),
         )
     }
 
@@ -28,6 +31,13 @@ interface MsdkStreamBinder {
 }
 
 data class ThermalMeasurementResult(
+    val temperatureC: Double,
+    val region: ThermalMeasureRegion,
+    val thermalSnapshotPath: String? = null,
+    val measurements: List<ThermalMeasuredPoint> = listOf(ThermalMeasuredPoint(temperatureC, region)),
+)
+
+data class ThermalMeasuredPoint(
     val temperatureC: Double,
     val region: ThermalMeasureRegion,
 )

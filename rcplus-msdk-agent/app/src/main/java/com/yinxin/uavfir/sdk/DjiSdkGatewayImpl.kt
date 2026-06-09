@@ -12,6 +12,8 @@ class DjiSdkGatewayImpl(
     override suspend fun loadAircraftModel(): String? = runtimeAdapter.loadAircraftModel()
 
     override suspend fun loadFlightLimit(): DjiFlightLimit = runtimeAdapter.loadFlightLimit()
+
+    override suspend fun loadDeviceIdentity(): DjiDeviceIdentity? = runtimeAdapter.loadDeviceIdentity()
 }
 
 private class StubDjiRuntimeAdapter : DjiRuntimeAdapter {
@@ -27,6 +29,8 @@ private class StubDjiRuntimeAdapter : DjiRuntimeAdapter {
     override suspend fun loadAircraftModel(): String? = null
 
     override suspend fun loadFlightLimit(): DjiFlightLimit = DjiFlightLimit()
+
+    override suspend fun loadDeviceIdentity(): DjiDeviceIdentity? = null
 }
 
 private fun defaultRuntimeAdapter(): DjiRuntimeAdapter {

@@ -1,4 +1,5 @@
 import pytest
+import numpy as np
 
 from app.video.source import (
     OpenCvVideoSource,
@@ -142,6 +143,24 @@ def test_read_passes_through_zero_sized_frame_without_shape_attribute():
     assert packet is not None
     assert packet.width == 0
     assert packet.height == 0
+
+
+def test_read_stamps_capture_time_on_frame():
+    frame = np.zeros((80, 320, 3), dtype=np.uint8)
+    cap = _FakeCap(frames=[frame])
+    source = OpenCvVideoSource(
+        url="rtsp://example.com/live/stream",
+        channel="thermal",
+        capture_factory=lambda url: cap,
+        clock=lambda: 1_700_000_000.0,
+    )
+
+    source.open()
+    packet = source.read()
+
+    assert packet is not None
+    assert packet.frame is frame
+    assert int(frame.sum()) > 0
 
 
 def test_module_import_does_not_require_cv2():

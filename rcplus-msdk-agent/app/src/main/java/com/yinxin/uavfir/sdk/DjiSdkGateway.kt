@@ -10,4 +10,6 @@ interface DjiSdkGateway {
     suspend fun loadAircraftModel(): String?
 
     suspend fun loadFlightLimit(): DjiFlightLimit
+
+    suspend fun loadDeviceIdentity(): DjiDeviceIdentity?
 }

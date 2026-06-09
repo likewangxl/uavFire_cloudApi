@@ -1,4 +1,5 @@
 import logging
+from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING
 
 from app.clients.backend_client import BackendClient
@@ -9,6 +10,8 @@ from app.video.source import VideoSource
 
 
 logger = logging.getLogger(__name__)
+_visible_detector_cache: Dict[Tuple[Any, ...], Any] = {}
+_visible_detector_cache_lock = Lock()
 
 
 class SupportsBackendEventReporting(Protocol):
@@ -136,6 +139,8 @@ class TaskRegistry:
             visible_boxes=visible_boxes,
             thermal_frame=thermal_frame,
         )
+        visible_image_url = visible_image_url or event.visible_image_url
+        thermal_image_url = thermal_image_url or event.thermal_image_url
         record = EventRecord(
             task_id=task_id,
             event_type="detection",
@@ -147,6 +152,7 @@ class TaskRegistry:
             analysis_channel=event.analysis_channel,
             visible_image_url=visible_image_url,
             thermal_image_url=thermal_image_url,
+            thermal_source_event_id=event.thermal_source_event_id,
             thermal_temperature=event.thermal_temperature,
             thermal_measure_roi=event.thermal_measure_roi,
         )
@@ -177,6 +183,8 @@ class TaskRegistry:
                         "visibleImageUrl": visible_image_url,
                         "thermal_image_url": thermal_image_url,
                         "thermalImageUrl": thermal_image_url,
+                        "thermal_source_event_id": event.thermal_source_event_id,
+                        "thermalSourceEventId": event.thermal_source_event_id,
                         "thermal_temperature": event.thermal_temperature,
                         "thermalTemperature": event.thermal_temperature,
                         "thermal_measure_roi": _roi_payload(event.thermal_measure_roi),
@@ -256,29 +264,53 @@ class TaskRegistry:
 
 
 def _looks_like_thermal_frame(frame: Any) -> bool:
+    return bool(_thermal_frame_stats(frame)["looks_thermal"])
+
+
+def _thermal_frame_stats(frame: Any) -> Dict[str, Any]:
     try:
         import numpy as np
 
         arr = np.asarray(frame)
     except Exception:
-        return False
+        return {
+            "looks_thermal": False,
+            "shape": "-",
+            "grayscale_ratio": 0.0,
+            "intensity_range": 0.0,
+            "intensity_std": 0.0,
+            "obvious_visible": True,
+        }
     if arr.ndim != 3 or arr.shape[2] < 3 or arr.size == 0:
-        return False
+        return {
+            "looks_thermal": False,
+            "shape": str(getattr(arr, "shape", "-")),
+            "grayscale_ratio": 0.0,
+            "intensity_range": 0.0,
+            "intensity_std": 0.0,
+            "obvious_visible": True,
+        }
 
     sample = arr[..., :3].astype("float32", copy=False)
-    blue = sample[..., 0]
-    green = sample[..., 1]
-    red = sample[..., 2]
     channel_delta = sample.max(axis=2) - sample.min(axis=2)
     grayscale_ratio = float((channel_delta < 4).mean())
     intensity = sample.mean(axis=2)
     intensity_range = float(np.percentile(intensity, 95) - np.percentile(intensity, 5))
     intensity_std = float(intensity.std())
-    return (
+    looks_thermal = (
         grayscale_ratio >= 0.95
         and intensity_range >= 35
         and intensity_std >= 12
     )
+    obvious_visible = grayscale_ratio < 0.50
+    return {
+        "looks_thermal": looks_thermal,
+        "shape": str(arr.shape),
+        "grayscale_ratio": grayscale_ratio,
+        "intensity_range": intensity_range,
+        "intensity_std": intensity_std,
+        "obvious_visible": obvious_visible,
+    }
 
 
 def _roi_payload(roi: Optional[ThermalMeasureRoi]) -> Optional[dict]:
@@ -295,11 +327,13 @@ def _build_visible_detector(settings: Settings):
                 name.strip() for name in settings.visible_target_classes.split(",") if name.strip()
             ],
             confidence_floor=settings.visible_confidence_floor,
+            imgsz=settings.visible_yolo_imgsz,
         )
         logger.info(
-            "visible_detector=YoloVisibleDetector model=%s floor=%s classes=%s",
+            "visible_detector=YoloVisibleDetector model=%s floor=%s imgsz=%s classes=%s",
             settings.visible_yolo_model_path,
             settings.visible_confidence_floor,
+            settings.visible_yolo_imgsz,
             settings.visible_target_classes,
         )
         return det
@@ -314,6 +348,33 @@ def _build_visible_detector(settings: Settings):
     return ColorFireVisibleDetector(
         saturation_ratio=settings.visible_fire_saturation_ratio,
     )
+
+
+def _visible_detector_cache_key(settings: Settings) -> Tuple[Any, ...]:
+    target_classes = tuple(
+        name.strip().lower()
+        for name in settings.visible_target_classes.split(",")
+        if name.strip()
+    )
+    return (
+        settings.visible_detector_mode.lower(),
+        settings.visible_yolo_model_path,
+        int(settings.visible_yolo_imgsz),
+        float(settings.visible_confidence_floor),
+        target_classes,
+        float(settings.visible_fire_saturation_ratio),
+    )
+
+
+def _get_cached_visible_detector(settings: Settings):
+    key = _visible_detector_cache_key(settings)
+    with _visible_detector_cache_lock:
+        detector = _visible_detector_cache.get(key)
+        if detector is None:
+            detector = _build_visible_detector(settings)
+            _visible_detector_cache.clear()
+            _visible_detector_cache[key] = detector
+        return detector
 
 
 def _build_thermal_analyzer(settings: Settings):
@@ -383,7 +444,7 @@ def build_registry() -> TaskRegistry:
             ContinuousTaskSupervisor(
                 runner=ContinuousTaskRunner(
                     registry=registry,
-                    visible_detector=_build_visible_detector(settings),
+                    visible_detector=_get_cached_visible_detector(settings),
                     thermal_analyzer=_build_thermal_analyzer(settings),
                     fusion_service=fusion,
                 ),
