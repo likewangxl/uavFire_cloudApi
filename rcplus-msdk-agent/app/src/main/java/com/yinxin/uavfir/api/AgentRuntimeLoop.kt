@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.sdk.CameraCapability
+import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSessionAdapter
 import com.yinxin.uavfir.session.AgentConnectionState
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
@@ -20,11 +21,17 @@ class AgentRuntimeLoop(
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
+    private val urgentCommandPoller: CommandPoller? = null,
+    private val urgentCommandIntervalMs: Long = DEFAULT_URGENT_COMMAND_INTERVAL_MS,
     private val gatewaySn: String = DEFAULT_GATEWAY_SN,
+    private val onIdentityActivated: suspend (DjiDeviceIdentity) -> Unit = {},
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
 ) {
     private var loopJob: Job? = null
+    private var urgentCommandJob: Job? = null
     private var lastReportedCapability: CameraCapability? = null
+    @Volatile
+    private var activeIdentity: DjiDeviceIdentity? = null
 
     fun start(droneSn: String) {
         if (loopJob?.isActive == true) {
@@ -38,12 +45,32 @@ class AgentRuntimeLoop(
                 delay(intervalMs)
             }
         }
+        startUrgentCommandLoop(droneSn)
     }
 
     fun stop() {
         debug("stopping runtime loop")
         loopJob?.cancel()
         loopJob = null
+        urgentCommandJob?.cancel()
+        urgentCommandJob = null
+    }
+
+    private fun startUrgentCommandLoop(droneSn: String) {
+        val poller = urgentCommandPoller ?: return
+        if (urgentCommandJob?.isActive == true) {
+            return
+        }
+        urgentCommandJob = scope.launch(dispatcher) {
+            while (isActive) {
+                val pollSn = activeIdentity?.aircraftSn ?: droneSn.takeIf { it.isNotBlank() }
+                if (pollSn != null) {
+                    runCatching { poller.pollOnce(pollSn) }
+                        .onFailure { onError("urgent-command-poll", it) }
+                }
+                delay(urgentCommandIntervalMs)
+            }
+        }
     }
 
     suspend fun tickOnce(droneSn: String) {
@@ -51,8 +78,12 @@ class AgentRuntimeLoop(
         val deviceState = runCatching { deviceSession.initialize() }
             .getOrElse { throwable ->
                 onError("device-session", throwable)
+                val fallbackSn = droneSn.takeIf { it.isNotBlank() }
+                if (fallbackSn == null) {
+                    return
+                }
                 safeReportStatus(
-                    droneSn = droneSn,
+                    droneSn = fallbackSn,
                     connectionState = AgentConnectionState.ERROR,
                     message = "runtime-loop-device-session-error:${throwable.message ?: throwable::class.simpleName}",
                     runtimeStatus = sessionManager.runtimeStatus(),
@@ -60,28 +91,79 @@ class AgentRuntimeLoop(
                 return
             }
 
+        val identity = resolveIdentity(deviceState.identity, droneSn)
+        if (identity == null) {
+            debug("identity unavailable, skip SN-scoped reporting connection=${deviceState.connectionState}")
+            handleIdentityUnavailable(deviceState.connectionState)
+            return
+        }
+        handleIdentityChange(identity)
+        val activeDroneSn = identity.aircraftSn
+
         safeReportHeartbeat(
-            droneSn = droneSn,
+            droneSn = activeDroneSn,
             connectionState = deviceState.connectionState,
         )
-        debug("heartbeat reported for $droneSn state=${deviceState.connectionState}")
+        debug("heartbeat reported for $activeDroneSn state=${deviceState.connectionState}")
         safeReportStatus(
-            droneSn = droneSn,
+            droneSn = activeDroneSn,
             connectionState = deviceState.connectionState,
             message = buildStatusMessage(deviceState.connectionState),
             runtimeStatus = sessionManager.runtimeStatus(),
         )
-        debug("status reported for $droneSn session=${sessionManager.sessionState}")
+        debug("status reported for $activeDroneSn session=${sessionManager.sessionState}")
         deviceState.capability?.let { capability ->
             if (capability != lastReportedCapability) {
-                safeReportCapability(droneSn, capability)
+                safeReportCapability(activeDroneSn, capability)
                 lastReportedCapability = capability
-                debug("capability reported for $droneSn visible=${capability.visibleSupported} thermal=${capability.thermalSupported}")
+                debug("capability reported for $activeDroneSn visible=${capability.visibleSupported} thermal=${capability.thermalSupported}")
             }
         }
-        safeReportMsdkDeviceState(droneSn, deviceState)
-        runCatching { commandPoller.pollOnce(droneSn) }
+        safeReportMsdkDeviceState(identity, deviceState)
+        runCatching { commandPoller.pollOnce(activeDroneSn) }
             .onFailure { onError("command-poll", it) }
+    }
+
+    private fun resolveIdentity(
+        discovered: DjiDeviceIdentity?,
+        configuredDroneSn: String,
+    ): DjiDeviceIdentity? {
+        if (discovered?.isValid() == true) {
+            return discovered
+        }
+        return configuredDroneSn
+            .takeIf { it.isNotBlank() }
+            ?.let {
+                DjiDeviceIdentity(
+                    gatewaySn = gatewaySn,
+                    aircraftSn = it,
+                )
+            }
+    }
+
+    private suspend fun handleIdentityChange(identity: DjiDeviceIdentity) {
+        val previous = activeIdentity
+        if (previous == identity) {
+            return
+        }
+        if (previous != null && previous.aircraftSn != identity.aircraftSn) {
+            safeReportDisconnected(previous)
+            lastReportedCapability = null
+        }
+        activeIdentity = identity
+        runCatching { onIdentityActivated(identity) }
+            .onFailure { onError("identity-activated", it) }
+    }
+
+    private suspend fun handleIdentityUnavailable(connectionState: AgentConnectionState) {
+        if (connectionState != AgentConnectionState.SDK_READY && connectionState != AgentConnectionState.ERROR) {
+            return
+        }
+        activeIdentity?.let { previous ->
+            safeReportDisconnected(previous)
+            activeIdentity = null
+            lastReportedCapability = null
+        }
     }
 
     private fun debug(message: String) {
@@ -126,7 +208,7 @@ class AgentRuntimeLoop(
     }
 
     private suspend fun safeReportMsdkDeviceState(
-        droneSn: String,
+        identity: DjiDeviceIdentity,
         deviceState: com.yinxin.uavfir.sdk.DjiDeviceState,
     ) {
         val capability = deviceState.capability
@@ -134,10 +216,11 @@ class AgentRuntimeLoop(
         runCatching {
             reporter.reportMsdkDeviceState(
                 MsdkDeviceStateRequest(
-                    gatewaySn = gatewaySn,
-                    aircraftSn = droneSn,
+                    gatewaySn = identity.gatewaySn,
+                    aircraftSn = identity.aircraftSn,
                     online = deviceState.connectionState != AgentConnectionState.ERROR,
                     connectionState = deviceState.connectionState.name,
+                    model = deviceState.aircraftModel,
                     latitude = telemetry?.latitude,
                     longitude = telemetry?.longitude,
                     height = telemetry?.height,
@@ -149,12 +232,21 @@ class AgentRuntimeLoop(
                         "takeoff" to true,
                         "land" to true,
                         "returnHome" to true,
+                        "cancelReturnHome" to true,
                         "emergencyStop" to true,
                         "hover" to true,
                         "virtualStick" to true,
                         "flyToPoint" to true,
-                        "gimbal" to false,
-                        "camera" to false,
+                        "gimbal" to true,
+                        "gimbalReset" to true,
+                        "gimbalRotate" to true,
+                        "camera" to true,
+                        "cameraPhoto" to true,
+                        "cameraRecord" to true,
+                        "cameraStreamSource" to true,
+                        "cameraZoom" to true,
+                        "nightScene" to true,
+                        "laserFillLight" to true,
                         "visibleStream" to (capability?.visibleSupported == true),
                         "thermalFocus" to (capability?.thermalSupported == true),
                         "thermalSecondStream" to false,
@@ -162,6 +254,20 @@ class AgentRuntimeLoop(
                 ),
             )
         }.onFailure { onError("msdk-device-state", it) }
+    }
+
+    private suspend fun safeReportDisconnected(identity: DjiDeviceIdentity) {
+        runCatching {
+            reporter.reportMsdkDeviceState(
+                MsdkDeviceStateRequest(
+                    gatewaySn = identity.gatewaySn,
+                    aircraftSn = identity.aircraftSn,
+                    online = false,
+                    connectionState = "DISCONNECTED",
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }.onFailure { onError("msdk-device-disconnect", it) }
     }
 
     private fun buildStatusMessage(connectionState: AgentConnectionState): String {
@@ -172,6 +278,7 @@ class AgentRuntimeLoop(
         private const val TAG = "AgentRuntimeLoop"
         const val DEFAULT_GATEWAY_SN: String = "RC_PLUS_LOCAL"
         const val DEFAULT_INTERVAL_MS: Long = 5_000
+        const val DEFAULT_URGENT_COMMAND_INTERVAL_MS: Long = 500
     }
 }
 

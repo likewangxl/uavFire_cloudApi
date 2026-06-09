@@ -561,10 +561,16 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     @Override
     public PlannedWaylineDTO executeTask(String workspaceId, String id) {
+        return executeTask(workspaceId, id, null);
+    }
+
+    @Override
+    public PlannedWaylineDTO executeTask(String workspaceId, String id, PreparePlannedWaylineTaskParam param) {
         PlannedWaylineEntity existing = getExisting(workspaceId, id);
         if (!StringUtils.hasText(existing.getFlightId())) {
             throw new IllegalArgumentException("Prepare the planned wayline task before executing it.");
         }
+        applyExecutionTarget(existing, param);
         long now = System.currentTimeMillis();
         existing.setStatus(STATUS_EXECUTING);
         existing.setTaskStatus(STATUS_EXECUTING);
@@ -583,6 +589,19 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
         updateTaskFields(existing);
         return entity2Dto(existing);
+    }
+
+    private void applyExecutionTarget(PlannedWaylineEntity existing, PreparePlannedWaylineTaskParam param) {
+        if (param == null) {
+            return;
+        }
+        if (StringUtils.hasText(param.getDroneSn())) {
+            existing.setDroneSn(param.getDroneSn());
+            existing.setAircraftSn(param.getDroneSn());
+        }
+        if (StringUtils.hasText(param.getDockSn())) {
+            existing.setDockSn(param.getDockSn());
+        }
     }
 
     private String waylineDroneSn(PlannedWaylineEntity existing) {
@@ -1057,6 +1076,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .flightId(existing.getFlightId())
                 .dockSn(existing.getDockSn())
                 .droneSn(existing.getDroneSn())
+                .aircraftSn(existing.getAircraftSn())
                 .taskStatus(existing.getTaskStatus())
                 .taskStatusReason(existing.getTaskStatusReason())
                 .taskProgress(existing.getTaskProgress())

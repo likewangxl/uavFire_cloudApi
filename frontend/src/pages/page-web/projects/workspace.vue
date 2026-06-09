@@ -10,6 +10,7 @@
       <div class="map-wrapper">
         <GMap />
       </div>
+      <div id="wayline-planning-overlay-host" class="wayline-planning-overlay-host" v-if="isWaylineRoute"></div>
       <div class="media-wrapper" v-if="root.$route.name === ERouterName.MEDIA">
         <MediaPanel />
       </div>
@@ -47,6 +48,7 @@ const FIRE_ROUTES = new Set<string>([
   ERouterName.FIRE_PAYLOAD_RELEASE,
 ])
 const isFireRoute = computed(() => FIRE_ROUTES.has(root.$route.name as string))
+const isWaylineRoute = computed(() => root.$route.name === ERouterName.WAYLINE)
 
 const messageHandler = async (payload: any) => {
   if (!payload) {
@@ -201,6 +203,16 @@ useConnectWebSocket(messageHandler)
     .map-wrapper{
       width: 100%;
       height: 100%;
+    }
+
+    .wayline-planning-overlay-host {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 80;
+      pointer-events: none;
     }
 
     .media-wrapper,

@@ -11,6 +11,7 @@ import com.yx.uavfire.wayline.model.dto.PlannedWaylineDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaypointDTO;
 import com.yx.uavfire.wayline.model.entity.PlannedWaylineEntity;
 import com.yx.uavfire.wayline.model.param.CreatePlannedWaylineParam;
+import com.yx.uavfire.wayline.model.param.PreparePlannedWaylineTaskParam;
 import com.yx.uavfire.wayline.model.param.PublishPlannedWaylineResponse;
 import com.yx.uavfire.wayline.model.param.UpdatePlannedWaylineParam;
 import com.yx.uavfire.wayline.service.impl.PlannedWaylineServiceImpl;
@@ -260,8 +261,8 @@ class PlannedWaylineServiceTest {
         assertAll(
                 () -> assertEquals(108.654321, dto.getAircraftLng()),
                 () -> assertEquals(34.123456, dto.getAircraftLat()),
-                () -> assertNotNull(dto.getAircraftGcjLng()),
-                () -> assertNotNull(dto.getAircraftGcjLat()),
+                () -> assertEquals(108.6588387712004, dto.getAircraftGcjLng()),
+                () -> assertEquals(34.12184034579389, dto.getAircraftGcjLat()),
                 () -> assertEquals(42.0, dto.getAircraftHeight()),
                 () -> assertEquals(123456789L, dto.getAircraftUpdatedAt()));
     }
@@ -1811,6 +1812,48 @@ class PlannedWaylineServiceTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 any(com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO.class));
         verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+    }
+
+    @Test
+    void executeAgentWaylineShouldUseRequestAircraftTargetWhenRecordMissingTarget() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        Path kmzPath = Files.createTempFile("pw-agent-request-target", ".kmz");
+        Files.write(kmzPath, new byte[]{1, 2, 3});
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3005)
+                .plannedWaylineId("pw-agent-request-target")
+                .workspaceId("workspace-001")
+                .flightId("flight-agent-request-target")
+                .name("Agent Request Target")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[]")
+                .status("ready")
+                .taskStatus("ready")
+                .kmzUrl(kmzPath.toUri().toURL().toString())
+                .kmzMd5("md5-request-target")
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+        setField(service, "waylineAgentService", waylineAgentService);
+
+        PreparePlannedWaylineTaskParam param = new PreparePlannedWaylineTaskParam();
+        param.setDroneSn("1581F7K3D249W00AF7PE");
+        service.executeTask("workspace-001", "pw-agent-request-target", param);
+
+        verify(waylineAgentService).prepareKmz(
+                eq("1581F7K3D249W00AF7PE"),
+                eq("flight-agent-request-target"),
+                org.mockito.ArgumentMatchers.any(byte[].class));
+        verify(waylineAgentService).dispatchWayline(
+                eq("1581F7K3D249W00AF7PE"),
+                any(com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO.class));
     }
 
     @Test

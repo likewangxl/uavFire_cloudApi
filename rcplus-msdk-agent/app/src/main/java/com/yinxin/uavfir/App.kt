@@ -26,13 +26,10 @@ class App : Application() {
         AppContextHolder.initialize(this)
         initializeUxSdkDefaults()
         services = AppServices(this)
-        services.setActiveDroneSn(LOCAL_DRONE_SN)
-        Log.i(TAG, "application created, runtime loop ready for ${LOCAL_DRONE_SN}")
+        Log.i(TAG, "application created, runtime loop ready for dynamic MSDK identity")
         if (runtimeLoopLifecyclePolicy.startOnApplicationCreate) {
-            Log.i(TAG, "application created, starting runtime loop for ${LOCAL_DRONE_SN}")
+            Log.i(TAG, "application created, starting runtime loop")
             services.runtimeLoop.start(LOCAL_DRONE_SN)
-            services.startDualStreamOnBoot(LOCAL_DRONE_SN)
-            services.startReportersOnBoot()
         }
     }
 
@@ -51,6 +48,6 @@ class App : Application() {
         private const val TAG = "UavfireApp"
         val LOCAL_DRONE_SN: String = BuildConfig.AGENT_AIRCRAFT_SN
             .takeIf { it.isNotBlank() }
-            ?: "RC_PLUS_LOCAL"
+            ?: ""
     }
 }

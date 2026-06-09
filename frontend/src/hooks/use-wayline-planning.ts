@@ -90,6 +90,7 @@ const state = reactive({
   waypoints: [] as PlannedWaypoint[],
   previewWaypoints: [] as PlannedWaypoint[],
   previewTitle: '',
+  selectedWaypointId: '',
   currentIndex: -1,
   gatewaySn: '',
   aircraftSn: '',
@@ -224,6 +225,25 @@ function distanceMeters (lng1: number, lat1: number, lng2: number, lat2: number)
   return 2 * earthRadiusM * Math.asin(Math.min(1, Math.sqrt(a)))
 }
 
+function routeWaypoints () {
+  return state.previewWaypoints.length > 0 ? state.previewWaypoints : state.waypoints
+}
+
+export const planningRouteStats = computed(() => {
+  const waypoints = routeWaypoints()
+  let totalDistanceM = 0
+  for (let i = 1; i < waypoints.length; i++) {
+    const prev = waypoints[i - 1]
+    const current = waypoints[i]
+    totalDistanceM += distanceMeters(prev.gcjLng, prev.gcjLat, current.gcjLng, current.gcjLat)
+  }
+  const speed = normalizePositiveNumber(state.maxSpeed, DEFAULT_MAX_SPEED)
+  return {
+    totalDistanceM,
+    estimatedSeconds: speed > 0 ? totalDistanceM / speed : 0,
+  }
+})
+
 function finiteNumber (value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null
   const numberValue = Number(value)
@@ -327,6 +347,35 @@ export function setFlightPositionFromWgs (
   })
 }
 
+export function setFlightPositionFromGcj (
+  aircraftSn: string,
+  gcjLngValue: unknown,
+  gcjLatValue: unknown,
+  options: {
+    wgsLng?: unknown
+    wgsLat?: unknown
+    height?: unknown
+    updatedAt?: unknown
+    currentWaypointIndex?: number
+    totalWaypoints?: number
+  } = {},
+) {
+  const gcjLng = finiteNumber(gcjLngValue)
+  const gcjLat = finiteNumber(gcjLatValue)
+  if (!aircraftSn || gcjLng === null || gcjLat === null || gcjLng === 0 || gcjLat === 0) return
+  updateAircraftFlightPosition({
+    aircraftSn,
+    gcjLng,
+    gcjLat,
+    wgsLng: finiteNumber(options.wgsLng) ?? undefined,
+    wgsLat: finiteNumber(options.wgsLat) ?? undefined,
+    height: finiteNumber(options.height) ?? undefined,
+    updatedAt: finiteNumber(options.updatedAt) ?? Date.now(),
+    currentWaypointIndex: options.currentWaypointIndex,
+    totalWaypoints: options.totalWaypoints,
+  })
+}
+
 export function setFlightPositionFromRecord (record: PlannedWaylineRecord | null | undefined) {
   if (!record) return
   const aircraftSn = record.droneSn || record.aircraftSn || ''
@@ -420,6 +469,7 @@ export function clearWaypoints () {
     return
   }
   state.waypoints = []
+  state.selectedWaypointId = ''
   state.currentIndex = -1
   persistDraft()
 }
@@ -427,6 +477,10 @@ export function clearWaypoints () {
 export function clearPlannedWaylinePreview () {
   state.previewWaypoints = []
   state.previewTitle = ''
+}
+
+export function selectWaypoint (id: string) {
+  state.selectedWaypointId = id
 }
 
 export function addWaypointGcj (gcjLng: number, gcjLat: number, height?: number): PlannedWaypoint | null {
@@ -450,6 +504,7 @@ export function addWaypointGcj (gcjLng: number, gcjLat: number, height?: number)
     height: Number.isFinite(height) ? (height as number) : state.defaultHeight,
   }
   state.waypoints.push(wp)
+  state.selectedWaypointId = wp.id
   persistDraft()
   return wp
 }
@@ -462,6 +517,9 @@ export function removeWaypoint (id: string) {
   const idx = state.waypoints.findIndex(w => w.id === id)
   if (idx >= 0) {
     state.waypoints.splice(idx, 1)
+    if (state.selectedWaypointId === id) {
+      state.selectedWaypointId = state.waypoints[Math.min(idx, state.waypoints.length - 1)]?.id || ''
+    }
     persistDraft()
   }
 }

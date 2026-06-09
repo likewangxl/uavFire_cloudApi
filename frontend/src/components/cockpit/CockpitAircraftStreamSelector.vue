@@ -56,7 +56,7 @@
                 <strong>{{ target.callsign }}</strong>
                 <span class="option-sn">{{ snSuffix(target.deviceSn) }}</span>
               </span>
-              <span class="option-subtitle">
+              <span v-if="!target.compactLabel" class="option-subtitle">
                 {{ streamStatusLabel(target) }}
                 <template v-if="target.taskStatus"> · {{ target.taskStatus }}</template>
                 <template v-if="target.message"> · {{ target.message }}</template>
@@ -95,6 +95,7 @@ export interface CockpitStreamTarget {
   thermalPlayUrl?: string
   streamStatus: 'running' | 'idle' | 'offline' | 'error'
   message?: string
+  compactLabel?: boolean
 }
 
 type CockpitStreamRole = CockpitStreamTarget['role']
@@ -344,12 +345,13 @@ onBeforeUnmount(() => {
 .stream-target-menu {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
+  right: auto;
   z-index: 20;
   width: min(420px, 92vw);
   max-height: 390px;
   padding: 8px;
-  overflow-y: auto;
+  overflow: hidden auto;
   background:
     linear-gradient(180deg, rgba(10, 25, 42, 0.98), rgba(4, 12, 22, 0.98));
   border: 1px solid rgba(103, 184, 255, 0.22);

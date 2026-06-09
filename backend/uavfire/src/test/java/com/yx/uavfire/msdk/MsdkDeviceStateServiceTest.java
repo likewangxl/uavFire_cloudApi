@@ -11,7 +11,7 @@ class MsdkDeviceStateServiceTest {
 
     @Test
     void upsertAndListOnlineAircraftState() {
-        MsdkDeviceStateService service = new MsdkDeviceStateService();
+        MsdkDeviceStateService service = new MsdkDeviceStateService(() -> 1779380000000L);
         MsdkDeviceStateDTO state = new MsdkDeviceStateDTO();
         state.setGatewaySn("RC_PLUS_LOCAL");
         state.setAircraftSn("1581F7K3D249E00AM3Q3");
@@ -34,7 +34,7 @@ class MsdkDeviceStateServiceTest {
 
     @Test
     void staleOrDisconnectedDeviceIsNotListedOnline() {
-        MsdkDeviceStateService service = new MsdkDeviceStateService();
+        MsdkDeviceStateService service = new MsdkDeviceStateService(() -> 1779380000000L);
         MsdkDeviceStateDTO state = new MsdkDeviceStateDTO();
         state.setAircraftSn("AIRCRAFT-1");
         state.setOnline(false);
@@ -44,5 +44,27 @@ class MsdkDeviceStateServiceTest {
         service.upsert(state);
 
         assertTrue(service.listOnline().isEmpty());
+    }
+
+    @Test
+    void onlineListExcludesDevicesThatHaveNotReportedWithinTtl() {
+        long[] now = {1_000_000L};
+        MsdkDeviceStateService service = new MsdkDeviceStateService(() -> now[0]);
+        MsdkDeviceStateDTO current = new MsdkDeviceStateDTO();
+        current.setAircraftSn("AIRCRAFT-CURRENT");
+        current.setOnline(true);
+        current.setConnectionState("CAPABILITY_READY");
+        current.setUpdatedAt(now[0]);
+        MsdkDeviceStateDTO stale = new MsdkDeviceStateDTO();
+        stale.setAircraftSn("AIRCRAFT-STALE");
+        stale.setOnline(true);
+        stale.setConnectionState("CAPABILITY_READY");
+        stale.setUpdatedAt(now[0] - 15_001L);
+
+        service.upsert(current);
+        service.upsert(stale);
+
+        assertEquals(1, service.listOnline().size());
+        assertEquals("AIRCRAFT-CURRENT", service.listOnline().get(0).getAircraftSn());
     }
 }

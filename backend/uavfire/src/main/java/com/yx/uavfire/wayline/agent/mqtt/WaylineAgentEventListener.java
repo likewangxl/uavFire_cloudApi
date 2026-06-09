@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -133,17 +134,30 @@ public class WaylineAgentEventListener {
     }
 
     private void persistProgress(String missionId, WaylineProgressDTO pr) {
+        Optional<PlannedWaylineEntity> existing = findPlannedWaylineByFlightId(missionId);
+        Integer totalWaypoints = firstPositive(pr.getTotalWaypoints(),
+                existing.map(PlannedWaylineEntity::getTotalWaypoints).orElse(null),
+                existing.map(entity -> countWaypoints(entity.getWaypointsJson())).orElse(null));
+        Integer percent = pr.getPercent();
+        if (percent == null) {
+            percent = deriveProgressPercent(pr.getCurrentWaypointIndex(), totalWaypoints);
+        }
+
         LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
                 .eq(PlannedWaylineEntity::getFlightId, missionId)
                 .set(PlannedWaylineEntity::getLastProgressTime, System.currentTimeMillis());
-        if (pr.getPercent() != null) {
-            update.set(PlannedWaylineEntity::getTaskProgress, pr.getPercent());
+        if (percent != null) {
+            update.set(PlannedWaylineEntity::getTaskProgress, percent);
         }
         if (pr.getCurrentWaypointIndex() != null) {
             update.set(PlannedWaylineEntity::getCurrentWaypointIndex, pr.getCurrentWaypointIndex());
         }
-        if (pr.getTotalWaypoints() != null) {
-            update.set(PlannedWaylineEntity::getTotalWaypoints, pr.getTotalWaypoints());
+        if (totalWaypoints != null) {
+            update.set(PlannedWaylineEntity::getTotalWaypoints, totalWaypoints);
+        }
+        if (!isTerminalStatus(existing.map(PlannedWaylineEntity::getTaskStatus).orElse(null))) {
+            update.set(PlannedWaylineEntity::getStatus, "executing");
+            update.set(PlannedWaylineEntity::getTaskStatus, "executing");
         }
         plannedWaylineMapper.update(null, update);
     }
@@ -172,18 +186,24 @@ public class WaylineAgentEventListener {
     private void persistStateChange(String missionId, WaylineStateChangeDTO sc) {
         String mappedStatus = mapBusinessState(sc.getBusinessState());
         if (mappedStatus == null) {
-            mappedStatus = mapMsdkState(sc.getMsdkState());
+            mappedStatus = mapMsdkState(sc.getMsdkState(), sc.getPreviousMsdkState());
         }
         if ((sc.getError() != null && !sc.getError().isEmpty())
                 || "failed".equals(mappedStatus)) {
             mappedStatus = "failed";
         }
+        long now = System.currentTimeMillis();
         LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
                 .eq(PlannedWaylineEntity::getFlightId, missionId)
-                .set(PlannedWaylineEntity::getLastProgressTime, System.currentTimeMillis());
+                .set(PlannedWaylineEntity::getLastProgressTime, now)
+                .set(PlannedWaylineEntity::getUpdateTime, now);
         if (mappedStatus != null) {
             update.set(PlannedWaylineEntity::getStatus, mappedStatus);
             update.set(PlannedWaylineEntity::getTaskStatus, mappedStatus);
+            if ("finished".equals(mappedStatus)) {
+                update.set(PlannedWaylineEntity::getTaskProgress, 100);
+                update.set(PlannedWaylineEntity::getTaskStatusReason, null);
+            }
         }
         if (sc.getError() != null && !sc.getError().isEmpty()) {
             update.set(PlannedWaylineEntity::getTaskStatusReason, sc.getError());
@@ -206,14 +226,19 @@ public class WaylineAgentEventListener {
         }
     }
 
-    private static String mapMsdkState(String msdkState) {
+    private static String mapMsdkState(String msdkState, String previousMsdkState) {
         if (msdkState == null) return null;
         switch (msdkState.toUpperCase()) {
             case "ERROR":
             case "FAILED":
                 return "failed";
             case "EXECUTING":
+            case "ENTER_WAYLINE":
+            case "RECOVERING":
+            case "RETURN_TO_START_POINT":
                 return "executing";
+            case "INTERRUPTED":
+                return "broken";
             case "PAUSED":
                 return "paused";
             case "STOPPED":
@@ -221,8 +246,85 @@ public class WaylineAgentEventListener {
             case "FINISHED":
             case "COMPLETED":
                 return "finished";
+            case "READY":
+            case "IDLE":
+                return wasActiveMsdkState(previousMsdkState) ? "finished" : null;
             default:
                 return null;
+        }
+    }
+
+    private Optional<PlannedWaylineEntity> findPlannedWaylineByFlightId(String missionId) {
+        try {
+            return Optional.ofNullable(plannedWaylineMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PlannedWaylineEntity>()
+                            .eq(PlannedWaylineEntity::getFlightId, missionId)));
+        } catch (RuntimeException e) {
+            log.debug("wayline-agent lookup planned_wayline by flightId failed mission={}: {}", missionId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private static Integer deriveProgressPercent(Integer currentWaypointIndex, Integer totalWaypoints) {
+        if (currentWaypointIndex == null || totalWaypoints == null || totalWaypoints <= 0) {
+            return null;
+        }
+        int completed = Math.max(0, currentWaypointIndex + 1);
+        int percent = (int) Math.round(Math.min(completed, totalWaypoints) * 100.0 / totalWaypoints);
+        return Math.max(0, Math.min(100, percent));
+    }
+
+    private Integer countWaypoints(String waypointsJson) {
+        if (!StringUtils.hasText(waypointsJson)) {
+            return null;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(waypointsJson);
+            return node.isArray() ? node.size() : null;
+        } catch (JsonProcessingException e) {
+            log.debug("wayline-agent count waypoints failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static Integer firstPositive(Integer... values) {
+        for (Integer value : values) {
+            if (value != null && value > 0) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isTerminalStatus(String status) {
+        if (status == null) {
+            return false;
+        }
+        switch (status.toLowerCase()) {
+            case "finished":
+            case "completed":
+            case "failed":
+            case "stopped":
+            case "canceled":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static boolean wasActiveMsdkState(String previousMsdkState) {
+        if (previousMsdkState == null) {
+            return false;
+        }
+        switch (previousMsdkState.toUpperCase()) {
+            case "EXECUTING":
+            case "ENTER_WAYLINE":
+            case "RETURN_TO_START_POINT":
+            case "RECOVERING":
+            case "FINISHED":
+                return true;
+            default:
+                return false;
         }
     }
 

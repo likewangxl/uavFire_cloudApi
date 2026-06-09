@@ -225,9 +225,13 @@ export const preparePlannedWaylineTask = async function (
   return normalizePlannedWaylineResult(result.data)
 }
 
-export const executePlannedWaylineTask = async function (workspaceId: string, plannedWaylineId: string): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
+export const executePlannedWaylineTask = async function (
+  workspaceId: string,
+  plannedWaylineId: string,
+  body?: PreparePlannedWaylineTaskBody
+): Promise<IWorkspaceResponse<PlannedWaylineRecord>> {
   const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/planned-waylines/${plannedWaylineId}/execute`
-  const result = await request.post(url)
+  const result = await request.post(url, body || {})
   return normalizePlannedWaylineResult(result.data)
 }
 

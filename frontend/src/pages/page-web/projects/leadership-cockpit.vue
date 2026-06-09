@@ -139,7 +139,11 @@
                 {{ tab.label }}
               </button>
             </div>
-            <span class="status-pill" :class="visualPanelPillClass">
+            <span
+              v-if="activeVisualTab !== 'delivery-execution'"
+              class="status-pill"
+              :class="visualPanelPillClass"
+            >
               {{ visualPanelPillText }}
             </span>
           </div>
@@ -169,7 +173,10 @@
         </div>
 
         <div v-else-if="activeVisualTab === 'fire-monitor'" class="livestream-stage dual-stream-stage">
-          <div class="dual-stream-shell">
+          <div
+            ref="fireMonitorFullscreenShell"
+            class="dual-stream-shell"
+            :class="{ fullscreen: fireMonitorFullscreen }">
             <div class="dual-stream-stage-head">
               <CockpitAircraftStreamSelector
                 v-model:value="selectedFireMonitorTargetKey"
@@ -197,12 +204,12 @@
                 <div class="stream-value">{{ primaryPaneMeta.status }}</div>
                 <p>{{ primaryPaneMeta.unavailableHint }}</p>
               </div>
-              <div v-else-if="primaryPlayerState.loading" class="dual-stream-overlay">
+              <div v-else-if="primaryPlayerState.loading" class="dual-stream-status-card loading">
                 <div class="stream-label">{{ primaryPaneMeta.title }}</div>
                 <div class="stream-value">播放器加载中</div>
                 <p>{{ livePaneState.primary.url }}</p>
               </div>
-              <div v-else-if="primaryPlayerState.error" class="dual-stream-overlay error">
+              <div v-else-if="primaryPlayerState.error" class="dual-stream-status-card error">
                 <div class="stream-label">{{ primaryPaneMeta.title }}</div>
                 <div class="stream-value">播放失败</div>
                 <p>{{ primaryPlayerState.error }}</p>
@@ -217,6 +224,14 @@
                 <span class="live-dot"></span>{{ primaryPaneMeta.badge }}
               </div>
 
+              <button
+                class="dual-stream-fullscreen-btn"
+                type="button"
+                @click="toggleFireMonitorFullscreen"
+              >
+                {{ fireMonitorFullscreen ? '退出全屏' : '全屏' }}
+              </button>
+
               <div class="dual-stream-hud">
                 <span
                   v-for="item in liveHudItems"
@@ -229,29 +244,29 @@
 
               <div class="flight-hud-overlay">
                 <div class="flight-hud-row mode-row">
-                  <span class="mode" :class="{ warn: flightHud.modeWarn }">{{ flightHud.modeText }}</span>
+                  <span class="mode" :class="{ warn: flightHudData.modeWarn }">{{ flightHudData.modeText }}</span>
                 </div>
                 <div class="flight-hud-row">
-                  <span class="flight-hud-item battery">⚡ {{ flightHud.battery }}%</span>
-                  <span class="flight-hud-item" :class="{ fixed: flightHud.isFixed, unfixed: !flightHud.isFixed }">
-                    <span class="dot"></span>{{ flightHud.isFixed ? '定点' : '浮动' }}
+                  <span class="flight-hud-item battery">⚡ {{ flightHudData.battery }}%</span>
+                  <span class="flight-hud-item" :class="{ fixed: flightHudData.isFixed, unfixed: !flightHudData.isFixed }">
+                    <span class="dot"></span>{{ flightHudData.isFixed ? '定点' : '浮动' }}
                   </span>
-                  <span class="flight-hud-item">GPS {{ flightHud.gps }}</span>
-                  <span class="flight-hud-item">R {{ flightHud.rtk }}</span>
+                  <span class="flight-hud-item">GPS {{ flightHudData.gps }}</span>
+                  <span class="flight-hud-item">R {{ flightHudData.rtk }}</span>
                 </div>
                 <div class="flight-hud-row">
-                  <span class="flight-hud-item">ASL {{ flightHud.asl }} m</span>
-                  <span class="flight-hud-item">H {{ flightHud.height }} m</span>
-                  <span class="flight-hud-item">返航点 {{ flightHud.homeDist }} 米</span>
+                  <span class="flight-hud-item">ASL {{ flightHudData.asl }} m</span>
+                  <span class="flight-hud-item">H {{ flightHudData.height }} m</span>
+                  <span class="flight-hud-item">返航点 {{ flightHudData.homeDist }} 米</span>
                 </div>
                 <div class="flight-hud-row">
-                  <span class="flight-hud-item">纬度 {{ flightHud.lat }}</span>
-                  <span class="flight-hud-item">经度 {{ flightHud.lng }}</span>
+                  <span class="flight-hud-item">纬度 {{ flightHudData.lat }}</span>
+                  <span class="flight-hud-item">经度 {{ flightHudData.lng }}</span>
                 </div>
                 <div class="flight-hud-row">
-                  <span class="flight-hud-item">H.S {{ flightHud.hSpeed }} m/s</span>
-                  <span class="flight-hud-item">V.S {{ flightHud.vSpeed }} m/s</span>
-                  <span class="flight-hud-item">W.S {{ flightHud.wSpeed }} m/s</span>
+                  <span class="flight-hud-item">H.S {{ flightHudData.hSpeed }} m/s</span>
+                  <span class="flight-hud-item">V.S {{ flightHudData.vSpeed }} m/s</span>
+                  <span class="flight-hud-item">W.S {{ flightHudData.wSpeed }} m/s</span>
                 </div>
               </div>
 
@@ -288,12 +303,16 @@
                   <small>{{ previewPaneMeta.helper }}</small>
                 </div>
               </button>
+
+              <CockpitFlightControlPanel
+                v-if="activeVisualTab === 'fire-monitor'"
+                class="fire-monitor-flight-panel"
+                :target="selectedFireMonitorTarget"
+                :msdk-device="selectedFireMonitorMsdkDevice"
+                :osd="selectedFireMonitorOsd"
+              />
             </div>
 
-            <div class="dual-stream-reason" v-if="dualStreamSummary.reason">
-              <span class="section-meta">当前约束</span>
-              <p>{{ dualStreamSummary.reason }}</p>
-            </div>
           </div>
         </div>
 
@@ -306,7 +325,6 @@
                 :targets="deliveryExecutionTargets"
                 :loading="deliveryTargetsLoading"
               />
-              <span class="status-pill" :class="deliveryPanelPillClass">{{ deliveryPanelPillText }}</span>
             </div>
             <CockpitDeliveryExecutionPanel
               :target="selectedDeliveryTarget"
@@ -317,7 +335,7 @@
           </div>
         </div>
 
-        <div v-if="activeVisualTab !== 'delivery-execution'" class="map-kpi-grid">
+        <div v-if="activeVisualTab === 'map'" class="map-kpi-grid">
           <section
             v-for="item in visualKpis"
             :key="item.label"
@@ -420,6 +438,7 @@ import { useMyStore } from '/@/store'
 import { EModeCode } from '/@/types/device'
 import CockpitAircraftStreamSelector, { type CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
 import CockpitDeliveryExecutionPanel from '/@/components/cockpit/CockpitDeliveryExecutionPanel.vue'
+import CockpitFlightControlPanel from '/@/components/cockpit/CockpitFlightControlPanel.vue'
 import {
   buildDualStreamCandidateSns,
   buildLivePaneState,
@@ -518,6 +537,22 @@ const flightHud = computed(() => {
     wSpeed: fmtHud(osd?.wind_speed),
   }
 })
+const flightHudData = computed(() => flightHud.value || {
+  modeText: '等待 OSD 数据',
+  modeWarn: true,
+  battery: '--',
+  isFixed: false,
+  gps: '--',
+  rtk: '--',
+  asl: '--',
+  height: '--',
+  homeDist: '--',
+  lat: '--',
+  lng: '--',
+  hSpeed: '--',
+  vSpeed: '--',
+  wSpeed: '--'
+})
 
 const AI_EVENT_TASK_ID = 'manual-ai-001'
 
@@ -555,6 +590,8 @@ const selectedFireMonitorTargetKey = ref('')
 const deliveryExecutionTargets = ref<CockpitStreamTarget[]>([])
 const selectedDeliveryTargetKey = ref('')
 const deliveryTargetsLoading = ref(false)
+const fireMonitorFullscreenShell = ref<HTMLElement | null>(null)
+const fireMonitorFullscreen = ref(false)
 const primaryPlayerShell = ref<HTMLElement | null>(null)
 const previewPlayerShell = ref<HTMLElement | null>(null)
 const primaryPreference = ref<'visible' | 'thermal'>('visible')
@@ -662,6 +699,17 @@ const selectedFireMonitorTarget = computed(() => {
     null
 })
 
+const selectedFireMonitorMsdkDevice = computed(() => {
+  const sn = selectedFireMonitorTarget.value?.deviceSn
+  if (!sn) return null
+  return msdkDeviceSnapshots.value.find(device => device.aircraftSn === sn) || null
+})
+
+const selectedFireMonitorOsd = computed(() => {
+  const sn = selectedFireMonitorTarget.value?.deviceSn
+  return sn ? store.state.deviceState.deviceInfo[sn] || null : null
+})
+
 const selectedDeliveryTarget = computed(() => {
   return deliveryExecutionTargets.value.find(target => target.key === selectedDeliveryTargetKey.value) ||
     deliveryExecutionTargets.value[0] ||
@@ -755,6 +803,27 @@ let primaryPlayer: any = null
 let previewPlayer: any = null
 let zlmClientLoader: Promise<any> | null = null
 let lastMirroredFocusCommand = ''
+
+const syncFireMonitorFullscreenState = () => {
+  fireMonitorFullscreen.value = document.fullscreenElement === fireMonitorFullscreenShell.value
+}
+
+const toggleFireMonitorFullscreen = async () => {
+  const shell = fireMonitorFullscreenShell.value
+  if (!shell) return
+  try {
+    if (document.fullscreenElement === shell) {
+      await document.exitFullscreen?.()
+      return
+    }
+    await shell.requestFullscreen()
+  } catch (error: any) {
+    notification.warning({
+      message: '无法进入全屏',
+      description: error?.message || '当前浏览器未允许页面进入全屏。'
+    })
+  }
+}
 
 const loadZlmRtcClient = (streamUrl: string) => {
   const existing = (window as any).ZLMRTCClient
@@ -1073,17 +1142,21 @@ function handleFireMonitorTargetChange (target: CockpitStreamTarget) {
 function toDeliveryTarget (device: DeliveryDeviceDTO): CockpitStreamTarget {
   const onlineText = String(device.online || '').toLowerCase()
   const online = onlineText === 'true' || onlineText === 'online' || onlineText === '1'
-  const suffix = device.deviceSn ? device.deviceSn.slice(-4) : '--'
   return {
     key: `delivery:${device.deviceSn}`,
     role: 'delivery',
     deviceSn: device.deviceSn,
-    callsign: `FC100 投放 ${suffix}`,
+    callsign: 'FC100',
     online,
-    taskStatus: device.bindStatus || device.deviceType || '待命',
     streamStatus: online ? 'idle' : 'offline',
-    message: device.deviceType || undefined
+    compactLabel: true
   }
+}
+
+function isFc100DeliveryAircraftDevice (device: DeliveryDeviceDTO) {
+  const deviceType = String(device.deviceType || '').trim().toLowerCase()
+  const bindStatus = String(device.bindStatus || '').trim().toLowerCase()
+  return Boolean(device.deviceSn) && deviceType !== 'rc' && bindStatus !== 'rc'
 }
 
 async function loadDeliveryExecutionTargets () {
@@ -1092,7 +1165,7 @@ async function loadDeliveryExecutionTargets () {
     const response = await deliveryApi.listDevices()
     const devices = response.data?.data || []
     const targets = devices
-      .filter((device) => !!device.deviceSn)
+      .filter(isFc100DeliveryAircraftDevice)
       .map(toDeliveryTarget)
 
     const enriched = await Promise.all(targets.map(async (target) => {
@@ -1109,11 +1182,9 @@ async function loadDeliveryExecutionTargets () {
           primaryPlayUrl: live?.playUrl || '',
           streamStatus: live?.streamStatus === 'running'
             ? 'running'
-            : (target.online ? 'idle' : 'offline'),
-          message: live?.message || target.message
+            : (target.online ? 'idle' : 'offline')
         } as CockpitStreamTarget
         ;(enrichedTarget as any).batteryPercent = props?.batteryPercent
-        ;(enrichedTarget as any).taskStatus = props?.aircraftMode != null ? `模式 ${props.aircraftMode}` : enrichedTarget.taskStatus
         return enrichedTarget
       } catch {
         return target
@@ -1368,6 +1439,7 @@ function shouldNotifyFireEvent (evt: FireEventDTO) {
 }
 
 onMounted(async () => {
+  document.addEventListener('fullscreenchange', syncFireMonitorFullscreenState)
   refreshMsdkHudDevices()
   loadDualStreamState()
   loadDeliveryExecutionTargets()
@@ -1380,6 +1452,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncFireMonitorFullscreenState)
   if (msdkHudTimer != null) {
     window.clearInterval(msdkHudTimer)
   }
@@ -1491,7 +1564,7 @@ const liveHudItems = computed(() => [
   dualStreamSummary.value.droneSn,
   `模式 ${dualStreamSummary.value.mode}`,
   `主通道 ${primaryPaneMeta.value.status}`,
-  `中心温度 ${formatThermalTemperature(dualStreamSummary.value.thermalCenterTemperatureC)}`,
+  `画面温度 ${formatThermalTemperature(dualStreamSummary.value.thermalCenterTemperatureC)}`,
   `播放 ${dualStreamSummary.value.playbackStatus}`
 ])
 
@@ -2041,19 +2114,33 @@ watch(
 
 .map-header {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
 }
 
+.map-header > div:first-child {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+
 .map-header-actions {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
 }
 
 .visual-tabs {
   display: inline-flex;
+  min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 6px;
@@ -2109,6 +2196,7 @@ watch(
 
 .livestream-stage {
   min-height: 0;
+  min-width: 0;
   overflow: visible;
 }
 
@@ -2120,10 +2208,54 @@ watch(
   display: grid;
   gap: 14px;
   min-height: 0;
+  min-width: 0;
+}
+
+.dual-stream-shell.fullscreen {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  padding: 6px;
+  background:
+    radial-gradient(circle at top left, rgba(69, 221, 255, 0.12), transparent 34%),
+    linear-gradient(180deg, #06111f 0%, #02070d 100%);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+}
+
+.dual-stream-shell.fullscreen .dual-stream-stage-head {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  right: 14px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.dual-stream-shell.fullscreen .dual-stream-stage-head > * {
+  pointer-events: auto;
+}
+
+.dual-stream-shell.fullscreen .dual-stream-player-stage {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 12px;
+}
+
+.dual-stream-shell.fullscreen .fire-monitor-flight-panel {
+  left: 50%;
+  right: auto;
+  bottom: 10px;
+  width: min(1120px, calc(100% - 36px));
+  transform: translateX(-50%);
 }
 
 .dual-stream-stage-head {
   display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
@@ -2203,17 +2335,51 @@ watch(
     linear-gradient(180deg, rgba(5, 14, 24, 0.28) 0%, rgba(5, 14, 24, 0.88) 100%);
 }
 
-.dual-stream-overlay.error {
+.dual-stream-status-card {
+  position: absolute;
   inset: auto 24px 24px auto;
+  z-index: 5;
   width: min(420px, calc(100% - 48px));
   min-height: 0;
-  justify-content: flex-start;
   padding: 16px 18px;
-  border: 1px solid rgba(255, 112, 112, 0.28);
-  border-radius: 12px;
+  color: #f4f8ff;
+  pointer-events: none;
+  border: 1px solid rgba(103, 184, 255, 0.24);
+  border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(47, 10, 17, 0.86) 0%, rgba(25, 8, 11, 0.94) 100%);
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34);
+    linear-gradient(180deg, rgba(13, 31, 51, 0.92), rgba(6, 17, 31, 0.92));
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.dual-stream-status-card.loading {
+  border-color: rgba(69, 221, 255, 0.34);
+}
+
+.dual-stream-status-card.error {
+  border-color: rgba(255, 190, 105, 0.34);
+}
+
+.dual-stream-status-card .stream-label {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.dual-stream-status-card .stream-value {
+  margin: 8px 0 8px;
+  font-size: 26px;
+  line-height: 1.12;
+}
+
+.dual-stream-status-card.error .stream-value {
+  color: #ffd38a;
+}
+
+.dual-stream-status-card p {
+  margin: 0;
+  color: #9fb0c5;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .live-badge {
@@ -2235,6 +2401,32 @@ watch(
 
 .live-badge.idle {
   background: rgba(8, 22, 38, 0.62);
+}
+
+.dual-stream-fullscreen-btn {
+  position: absolute;
+  top: 18px;
+  right: 236px;
+  z-index: 6;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(95, 165, 255, 0.42);
+  border-radius: 999px;
+  background: rgba(8, 22, 38, 0.82);
+  color: #f3f8ff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+}
+
+.dual-stream-fullscreen-btn:hover {
+  background: rgba(17, 52, 86, 0.9);
+  border-color: rgba(95, 165, 255, 0.72);
+}
+
+.dual-stream-shell.fullscreen .dual-stream-fullscreen-btn {
+  right: 238px;
 }
 
 .live-dot {

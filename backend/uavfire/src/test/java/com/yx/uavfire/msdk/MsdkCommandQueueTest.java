@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MsdkCommandQueueTest {
@@ -42,6 +43,22 @@ class MsdkCommandQueueTest {
         MsdkCommandDTO updated = service.getCommand(queued.getCommandId()).orElseThrow();
         assertEquals("APPLIED", updated.getStatus());
         assertEquals("ok", updated.getMessage());
+    }
+
+    @Test
+    void enqueueRejectsUnsupportedCommandBeforeQueueing() {
+        MsdkDeviceStateService service = new MsdkDeviceStateService();
+        MsdkCommandParam param = new MsdkCommandParam();
+        param.setCommand("unsupported_payload_magic");
+        param.setParams(Map.of());
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> service.enqueueCommand("AIRCRAFT-1", param)
+        );
+
+        assertEquals("unsupported-msdk-command:unsupported_payload_magic", error.getMessage());
+        assertTrue(service.pollCommand("AIRCRAFT-1").isEmpty());
     }
 
     @Test

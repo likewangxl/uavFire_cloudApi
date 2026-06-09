@@ -422,6 +422,7 @@ async function refreshPanel () {
 
 <style scoped lang="scss">
 .delivery-execution-panel {
+  min-width: 0;
   min-height: 100%;
   color: #e8f3ff;
 }
@@ -429,6 +430,7 @@ async function refreshPanel () {
 .delivery-live-frame {
   position: relative;
   width: 100%;
+  min-width: 0;
   aspect-ratio: 16 / 9;
   min-height: clamp(560px, 64vh, 860px);
   overflow: hidden;

@@ -199,8 +199,14 @@ class AgentBackendClientTest {
         assertEquals(true, payload.capabilities["thermalFocus"])
         assertEquals(false, payload.capabilities["thermalSecondStream"])
         assertEquals(false, payload.capabilities["takeoff"])
+        assertEquals(false, payload.capabilities["land"])
         assertEquals(false, payload.capabilities["flyToPoint"])
         assertEquals(false, payload.capabilities["returnHome"])
+        assertEquals(false, payload.capabilities["gimbalReset"])
+        assertEquals(false, payload.capabilities["gimbalRotate"])
+        assertEquals(false, payload.capabilities["cameraPhoto"])
+        assertEquals(false, payload.capabilities["cameraRecord"])
+        assertEquals(false, payload.capabilities["cameraStreamSource"])
     }
 
     @Test

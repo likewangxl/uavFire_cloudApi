@@ -473,6 +473,116 @@ class CommandPollingCoordinatorTest {
         assertEquals("fly_to_point applied", api.lastMsdkAck?.message)
     }
 
+    @Test
+    fun pollOnce_msdkHoverAndStopFlyToPointDoNotUseEmergencyStop() = runTest {
+        val hoverClient = RecordingFlightControlActionClient()
+        val hoverCoordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(
+                RecordingDualStreamApi(
+                    nextCommand = null,
+                    nextMsdkCommand = AgentApiEnvelope(
+                        data = MsdkCommandResponse(
+                            commandId = "msdk-hover-1",
+                            aircraftSn = "AIRCRAFT-001",
+                            command = "hover",
+                            params = emptyMap(),
+                            status = "PENDING",
+                        ),
+                    ),
+                ),
+            ),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = hoverClient,
+            ),
+        )
+        hoverCoordinator.pollOnce("AIRCRAFT-001")
+
+        val stopClient = RecordingFlightControlActionClient()
+        val stopCoordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(
+                RecordingDualStreamApi(
+                    nextCommand = null,
+                    nextMsdkCommand = AgentApiEnvelope(
+                        data = MsdkCommandResponse(
+                            commandId = "msdk-stop-fly-1",
+                            aircraftSn = "AIRCRAFT-001",
+                            command = "stop_fly_to_point",
+                            params = emptyMap(),
+                            status = "PENDING",
+                        ),
+                    ),
+                ),
+            ),
+            commandExecutor = DualStreamMsdkCommandExecutor(
+                dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                flightControlClient = stopClient,
+            ),
+        )
+        stopCoordinator.pollOnce("AIRCRAFT-001")
+
+        assertEquals(listOf("hover"), hoverClient.actions)
+        assertEquals(listOf("stop_fly_to_point"), stopClient.actions)
+    }
+
+    @Test
+    fun pollOnce_msdkGimbalAndCameraCommandsUsePayloadClients() = runTest {
+        val payloadClient = RecordingPayloadActionClient()
+        val commands = listOf(
+            "gimbal_reset" to emptyMap<String, Any>(),
+            "gimbal_rotate" to mapOf("pitch" to 8.0, "yaw" to -4.0, "roll" to 0.0),
+            "camera_start_photo" to emptyMap(),
+            "camera_start_record" to emptyMap(),
+            "camera_stop_record" to emptyMap(),
+            "camera_stream_source" to mapOf("source" to "thermal"),
+            "camera_zoom" to mapOf("ratio" to 4.0),
+            "night_scene" to mapOf("enabled" to true),
+            "laser_fill_light" to mapOf("enabled" to false),
+        )
+
+        for ((index, command) in commands.withIndex()) {
+            val api = RecordingDualStreamApi(
+                nextCommand = null,
+                nextMsdkCommand = AgentApiEnvelope(
+                    data = MsdkCommandResponse(
+                        commandId = "msdk-payload-$index",
+                        aircraftSn = "AIRCRAFT-001",
+                        command = command.first,
+                        params = command.second,
+                        status = "PENDING",
+                    ),
+                ),
+            )
+            val coordinator = CommandPollingCoordinator(
+                client = AgentBackendClient(api),
+                commandExecutor = DualStreamMsdkCommandExecutor(
+                    dualStreamExecutor = DualStreamSessionManager(MockStreamProvider()),
+                    gimbalClient = payloadClient,
+                    cameraClient = payloadClient,
+                ),
+            )
+
+            coordinator.pollOnce("AIRCRAFT-001")
+
+            assertEquals("APPLIED", api.lastMsdkAck?.status)
+        }
+
+        assertEquals(
+            listOf(
+                "gimbal_reset",
+                "gimbal_rotate:8.0:-4.0:0.0",
+                "camera_start_photo",
+                "camera_start_record",
+                "camera_stop_record",
+                "camera_stream_source:thermal",
+                "camera_zoom:4.0",
+                "night_scene:true",
+                "laser_fill_light:false",
+            ),
+            payloadClient.actions,
+        )
+    }
+
     private class RecordingDualStreamApi(
         private val nextCommand: AgentApiEnvelope<AgentCommandResponse>?,
         private val nextMsdkCommand: AgentApiEnvelope<MsdkCommandResponse>? = null,
@@ -620,6 +730,14 @@ class CommandPollingCoordinatorTest {
             actions += "emergency_stop"
         }
 
+        override suspend fun hover() {
+            actions += "hover"
+        }
+
+        override suspend fun stopFlyToPoint() {
+            actions += "stop_fly_to_point"
+        }
+
         override suspend fun sendVirtualStick(
             key: String,
             durationMs: Long,
@@ -634,6 +752,54 @@ class CommandPollingCoordinatorTest {
             speed: Double,
         ) {
             actions += "fly_to_point:$latitude:$longitude:$height:$speed"
+        }
+    }
+
+    private class RecordingPayloadActionClient : GimbalActionClient, CameraActionClient {
+        val actions = mutableListOf<String>()
+
+        override suspend fun resetGimbal() {
+            actions += "gimbal_reset"
+        }
+
+        override suspend fun rotateGimbal(
+            pitch: Double,
+            yaw: Double,
+            roll: Double,
+        ) {
+            actions += "gimbal_rotate:$pitch:$yaw:$roll"
+        }
+
+        override suspend fun rotateGimbalToPitch(pitch: Double) {
+            actions += "gimbal_pitch:$pitch"
+        }
+
+        override suspend fun startShootPhoto() {
+            actions += "camera_start_photo"
+        }
+
+        override suspend fun startRecord() {
+            actions += "camera_start_record"
+        }
+
+        override suspend fun stopRecord() {
+            actions += "camera_stop_record"
+        }
+
+        override suspend fun setStreamSource(source: String) {
+            actions += "camera_stream_source:$source"
+        }
+
+        override suspend fun setZoom(ratio: Double) {
+            actions += "camera_zoom:$ratio"
+        }
+
+        override suspend fun setNightScene(enabled: Boolean) {
+            actions += "night_scene:$enabled"
+        }
+
+        override suspend fun setLaserFillLight(enabled: Boolean) {
+            actions += "laser_fill_light:$enabled"
         }
     }
 

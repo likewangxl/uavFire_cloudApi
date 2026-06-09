@@ -21,6 +21,17 @@
         <a style="color: red;"><CloseOutlined /></a>
       </div>
     </div>
+    <div v-if="isWaylineRoute" class="wayline-map-toolbox">
+      <button type="button" :class="{'active': waylineMapLayer === 'standard'}" @click="setWaylineMapLayer('standard')">
+        标准
+      </button>
+      <button type="button" :class="{'active': waylineMapLayer === 'satellite'}" @click="setWaylineMapLayer('satellite')">
+        卫星
+      </button>
+      <button type="button" :class="{'active': rangingToolActive}" @click="toggleRangingTool">
+        {{ rangingToolActive ? '停止测距' : '测距' }}
+      </button>
+    </div>
     <!-- 飞机OSD -->
     <div v-if="osdVisible.visible && !osdVisible.is_dock" v-drag-window class="osd-panel fz12">
       <div class="drag-title pl5 pr5 flex-align-center flex-row flex-justify-between" style="border-bottom: 1px solid #515151; height: 18%;">
@@ -422,9 +433,8 @@
     <a-tooltip title="切换到飞机位置">
       <button
         class="aircraft-follow-control"
-        :class="{ active: aircraftFollowEnabled }"
         :disabled="!hasFlightPosition"
-        @click="toggleAircraftFollow">
+        @click="locateAircraftPosition">
         <AimOutlined />
       </button>
     </a-tooltip>
@@ -463,7 +473,7 @@ import {
   FieldTimeOutlined, CloudOutlined, CloudFilled, FolderOpenOutlined, RobotFilled, ArrowUpOutlined, CarryOutOutlined,
   AimOutlined
 } from '@ant-design/icons-vue'
-import { EDeviceTypeName } from '../types'
+import { EDeviceTypeName, ERouterName } from '../types'
 import DockControlPanel from './g-map/DockControlPanel.vue'
 import { useDockControl } from './g-map/use-dock-control'
 import DroneControlPanel from './g-map/DroneControlPanel.vue'
@@ -473,7 +483,7 @@ import FlightAreaActionIcon from './flight-area/FlightAreaActionIcon.vue'
 import { EFlightAreaType } from '../types/flight-area'
 import { useFlightArea } from './flight-area/use-flight-area'
 import { useFlightAreaDroneLocationEvent } from './flight-area/use-flight-area-drone-location-event'
-import { addWaypointGcj, getPlanningStateRaw, setFlightPositionFromWgs } from '/@/hooks/use-wayline-planning'
+import { addWaypointGcj, getPlanningStateRaw, selectWaypoint, setFlightPositionFromWgs } from '/@/hooks/use-wayline-planning'
 
 export default defineComponent({
   components: {
@@ -512,7 +522,9 @@ export default defineComponent({
     const planningState = getPlanningStateRaw()
 
     const mouseMode = ref(false)
-    const aircraftFollowEnabled = ref(false)
+    const waylineMapLayer = ref<'standard' | 'satellite'>('standard')
+    const rangingToolActive = ref(false)
+    const isWaylineRoute = computed(() => root.$route.name === ERouterName.WAYLINE)
     const hasFlightPosition = computed(() => !!planningState.flightPosition)
     const store = useMyStore()
     const state = reactive({
@@ -608,9 +620,10 @@ export default defineComponent({
         }
       }
       if (data.currentType === EDeviceTypeName.Aircraft && data.deviceInfo[data.currentSn]) {
-        const coordinate = wgs84togcj02(data.deviceInfo[data.currentSn].longitude, data.deviceInfo[data.currentSn].latitude)
+        const osd = data.deviceInfo[data.currentSn]
+        const coordinate = wgs84togcj02(osd.longitude, osd.latitude)
         deviceTsaUpdateHook.moveTo(data.currentSn, coordinate[0], coordinate[1])
-        updateFlightPositionFromOsd(data.currentSn, data.deviceInfo[data.currentSn], coordinate[0], coordinate[1])
+        updateFlightPositionFromOsd(data.currentSn, osd, coordinate[0], coordinate[1])
         if (osdVisible.value.visible && osdVisible.value.sn !== '') {
           deviceInfo.device = data.deviceInfo[osdVisible.value.sn]
         }
@@ -723,6 +736,12 @@ export default defineComponent({
       unbindPlanningClick()
       clearPlanningOverlays()
       clearFlightPositionOverlay()
+      stopRangingTool()
+      rangingTool = null
+      if (satelliteLayer) {
+        satelliteLayer.setMap(null)
+        satelliteLayer = null
+      }
     })
 
     const { getDrawFlightAreaCallback, onFlightAreaDroneLocationWs } = useFlightArea()
@@ -743,6 +762,10 @@ export default defineComponent({
     let planningPolyline: any = null
     let flightPositionMarker: any = null
     let flightTrackPolyline: any = null
+    let standardLayer: any = null
+    let satelliteLayer: any = null
+    let rangingTool: any = null
+    let flightTrackAircraftSn = ''
     const flightTrackPath: any[] = []
     let planningClickBound = false
 
@@ -774,7 +797,19 @@ export default defineComponent({
         map?.remove(flightTrackPolyline)
         flightTrackPolyline = null
       }
+      flightTrackAircraftSn = ''
       flightTrackPath.length = 0
+    }
+
+    function waypointMarkerContent (idx: number, id: string) {
+      const isStart = idx === 0
+      const isSelected = planningState.selectedWaypointId === id
+      const classes = [
+        'wayline-planning-marker',
+        isStart ? 'wayline-planning-marker--start' : '',
+        isSelected ? 'wayline-planning-marker--selected' : '',
+      ].filter(Boolean).join(' ')
+      return `<div class="${classes}"><span>${idx + 1}</span></div>`
     }
 
     function rebuildPlanningOverlays () {
@@ -787,21 +822,23 @@ export default defineComponent({
       waypoints.forEach((wp, idx) => {
         const marker = new AMap.Marker({
           position: [wp.gcjLng, wp.gcjLat],
-          label: {
-            content: `<span style="color:#000;font-weight:700;padding:0 4px;">${idx + 1}</span>`,
-            direction: 'top',
-          },
+          content: waypointMarkerContent(idx, wp.id),
+          anchor: 'bottom-center',
+          zIndex: planningState.selectedWaypointId === wp.id ? 130 : 110,
           extData: { waylinePlanningId: wp.id },
         })
+        marker.on('click', () => selectWaypoint(wp.id))
         map.add(marker)
         planningMarkers.push(marker)
       })
       if (waypoints.length >= 2) {
         planningPolyline = new AMap.Polyline({
           path: waypoints.map(w => [w.gcjLng, w.gcjLat]),
-          strokeColor: '#faad14',
-          strokeWeight: 3,
-          strokeStyle: 'dashed',
+          strokeColor: '#00e5ff',
+          strokeOpacity: 0.92,
+          strokeWeight: 4,
+          strokeStyle: 'solid',
+          showDir: true,
         })
         map.add(planningPolyline)
       }
@@ -822,15 +859,78 @@ export default defineComponent({
       map.setZoomAndCenter(zoom, [position.gcjLng, position.gcjLat])
     }
 
-    function toggleAircraftFollow () {
-      aircraftFollowEnabled.value = !aircraftFollowEnabled.value
-      if (aircraftFollowEnabled.value) {
-        setAircraftView()
+    function locateAircraftPosition () {
+      setAircraftView()
+    }
+
+    function ensureStandardLayer () {
+      const AMap = root?.$aMap
+      if (!AMap || standardLayer) return standardLayer
+      if (typeof AMap.createDefaultLayer === 'function') {
+        standardLayer = AMap.createDefaultLayer()
+      }
+      return standardLayer
+    }
+
+    function ensureSatelliteLayer () {
+      const AMap = root?.$aMap
+      if (!AMap || satelliteLayer) return satelliteLayer
+      satelliteLayer = new AMap.TileLayer.Satellite()
+      return satelliteLayer
+    }
+
+    function setWaylineMapLayer (layer: 'standard' | 'satellite') {
+      const map = root?.$map
+      if (!map) return
+      const standard = ensureStandardLayer()
+      const satellite = ensureSatelliteLayer()
+      if (!satellite) return
+      waylineMapLayer.value = layer
+      if (typeof map.setLayers === 'function' && standard) {
+        if (layer === 'standard') {
+          map.setLayers([standard])
+        } else {
+          map.setLayers([standard, satellite])
+        }
+        return
+      }
+      if (layer === 'satellite') {
+        satellite.setMap(map)
+      } else {
+        satellite.setMap(null)
       }
     }
 
+    function stopRangingTool () {
+      if (rangingTool) {
+        rangingTool.turnOff()
+      }
+      rangingToolActive.value = false
+    }
+
+    function toggleRangingTool () {
+      const AMap = root?.$aMap
+      const map = root?.$map
+      if (!AMap || !map) return
+      if (!rangingTool) {
+        rangingTool = new AMap.RangingTool(map)
+      }
+      if (rangingToolActive.value) {
+        stopRangingTool()
+        return
+      }
+      if (mouseMode.value) draw('off', false)
+      rangingTool.turnOn()
+      rangingToolActive.value = true
+    }
+
+    watch(() => planningState.active, active => {
+      if (active) stopRangingTool()
+    })
+
     function updateFlightPositionFromOsd (sn: string, osd: any, gcjLng: number, gcjLat: number) {
       const trackingSn = planningState.flightPosition?.aircraftSn || planningState.aircraftSn
+      if (!trackingSn) return
       if (trackingSn && sn !== trackingSn) return
       if (!Number.isFinite(gcjLng) || !Number.isFinite(gcjLat) || gcjLng === 0 || gcjLat === 0) return
       setFlightPositionFromWgs(sn, osd?.longitude, osd?.latitude, {
@@ -851,6 +951,17 @@ export default defineComponent({
       }
       if (!AMap || !map) return
       const lngLat = [position.gcjLng, position.gcjLat]
+      const lastTrackPoint = flightTrackPath[flightTrackPath.length - 1]
+      const jumpLng = lastTrackPoint ? Math.abs(Number(lastTrackPoint[0]) - position.gcjLng) : 0
+      const jumpLat = lastTrackPoint ? Math.abs(Number(lastTrackPoint[1]) - position.gcjLat) : 0
+      if (flightTrackAircraftSn !== position.aircraftSn || jumpLng > 0.003 || jumpLat > 0.003) {
+        flightTrackPath.length = 0
+        flightTrackAircraftSn = position.aircraftSn
+        if (flightTrackPolyline) {
+          map.remove(flightTrackPolyline)
+          flightTrackPolyline = null
+        }
+      }
       const label = position.currentWaypointIndex != null && position.totalWaypoints != null
         ? `${position.currentWaypointIndex + 1}/${position.totalWaypoints}`
         : ''
@@ -878,9 +989,6 @@ export default defineComponent({
         map.add(flightTrackPolyline)
       } else {
         flightTrackPolyline.setPath(flightTrackPath)
-      }
-      if (aircraftFollowEnabled.value) {
-        setAircraftView(position)
       }
     }
 
@@ -918,7 +1026,7 @@ export default defineComponent({
     })
 
     watch(
-      () => renderPlanningWaypoints.value.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|'),
+      () => `${planningState.selectedWaypointId}|${renderPlanningWaypoints.value.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|')}`,
       () => rebuildPlanningOverlays()
     )
 
@@ -1110,9 +1218,13 @@ export default defineComponent({
       closeLivestreamOthers,
       qualityStyle,
       selectFlightAreaAction,
-      aircraftFollowEnabled,
       hasFlightPosition,
-      toggleAircraftFollow,
+      locateAircraftPosition,
+      isWaylineRoute,
+      waylineMapLayer,
+      rangingToolActive,
+      setWaylineMapLayer,
+      toggleRangingTool,
     }
   }
 })
@@ -1146,6 +1258,92 @@ export default defineComponent({
   .selection {
     border: 1px solid $primary;
     border-radius: 2px;
+  }
+
+  .wayline-map-toolbox {
+    position: absolute;
+    top: 16px;
+    right: 64px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    background: rgba(31, 31, 31, 0.76);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+
+    button {
+      min-width: 44px;
+      height: 28px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    button:hover,
+    button.active {
+      background: #1890ff;
+      color: #fff;
+    }
+  }
+
+  &:deep(.wayline-planning-marker) {
+    position: relative;
+    width: 26px;
+    height: 30px;
+    transform: translateY(1px);
+  }
+
+  &:deep(.wayline-planning-marker span) {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    width: 24px;
+    height: 24px;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    background: #00bcd4;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  &:deep(.wayline-planning-marker::after) {
+    content: '';
+    position: absolute;
+    left: 9px;
+    bottom: 2px;
+    width: 8px;
+    height: 8px;
+    transform: rotate(45deg);
+    border-right: 2px solid #fff;
+    border-bottom: 2px solid #fff;
+    background: #00bcd4;
+  }
+
+  &:deep(.wayline-planning-marker--start span),
+  &:deep(.wayline-planning-marker--start::after) {
+    background: #21c45d;
+  }
+
+  &:deep(.wayline-planning-marker--selected span) {
+    border-color: #ffd666;
+    background: #1677ff;
+    transform: scale(1.12);
+  }
+
+  &:deep(.wayline-planning-marker--selected::after) {
+    border-color: #ffd666;
+    background: #1677ff;
   }
 
   // antd button 光晕

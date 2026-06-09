@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
@@ -608,7 +609,9 @@ class PlannedWaylineControllerTest {
 
     @Test
     void executePlannedWaylineTaskShouldReturnExecutingStatus() throws Exception {
-        when(plannedWaylineService.executeTask("workspace-001", "pw-001"))
+        when(plannedWaylineService.executeTask(org.mockito.ArgumentMatchers.eq("workspace-001"),
+                org.mockito.ArgumentMatchers.eq("pw-001"),
+                any(PreparePlannedWaylineTaskParam.class)))
                 .thenReturn(PlannedWaylineDTO.builder()
                         .plannedWaylineId("pw-001")
                         .status("executing")
@@ -618,13 +621,20 @@ class PlannedWaylineControllerTest {
 
         mockMvc.perform(post("/wayline/api/v1/workspaces/workspace-001/planned-waylines/pw-001/execute")
                         .requestAttr(com.yx.uavfire.component.AuthInterceptor.TOKEN_CLAIM,
-                                new CustomClaim("1", "alice", 1, "workspace-001")))
+                                new CustomClaim("1", "alice", 1, "workspace-001"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"droneSn\":\"1581F7K3D249W00AF7PE\",\"executeTime\":0,\"taskType\":\"IMMEDIATE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.taskStatus").value("executing"))
                 .andExpect(jsonPath("$.data.executedTime").value(5000L));
 
-        verify(plannedWaylineService).executeTask("workspace-001", "pw-001");
+        ArgumentCaptor<PreparePlannedWaylineTaskParam> paramCaptor =
+                ArgumentCaptor.forClass(PreparePlannedWaylineTaskParam.class);
+        verify(plannedWaylineService).executeTask(org.mockito.ArgumentMatchers.eq("workspace-001"),
+                org.mockito.ArgumentMatchers.eq("pw-001"),
+                paramCaptor.capture());
+        assertEquals("1581F7K3D249W00AF7PE", paramCaptor.getValue().getDroneSn());
     }
 
     @Test

@@ -136,10 +136,10 @@ test('tsa page renders fc100 delivery verification controls', () => {
   assert.match(tsaTemplateSource, /fc100DeliveryFormState\.devices/)
   assert.match(tsaTemplateSource, /handleFc100RefreshDevices/)
   assert.match(tsaTemplateSource, /handleFc100SelectDevice/)
-  assert.match(tsaTemplateSource, /@click="handleFc100SelectDevice\(device\.deviceSn\)"/)
+  assert.match(tsaTemplateSource, /@click="handleFc100SelectDevice\(selectedFc100DeliveryDevice\.deviceSn\)"/)
   assert.doesNotMatch(tsaTemplateSource, />\s*物模型\s*</)
-  assert.match(tsaTemplateSource, /<div class="fc100-device-sn">\{\{ formatFc100DeviceModel\(device\) \}\}<\/div>/)
-  assert.match(tsaTemplateSource, /\{\{ device\.deviceSn \}\} · \{\{ device\.bindStatus \|\| '--' \}\}/)
+  assert.match(tsaTemplateSource, /<div class="fc100-device-sn">\{\{ formatFc100DeviceModel\(selectedFc100DeliveryDevice\) \}\}<\/div>/)
+  assert.match(tsaTemplateSource, /\{\{ selectedFc100DeliveryDevice\.deviceSn \}\} · \{\{ selectedFc100DeliveryDevice\.bindStatus \|\| '--' \}\}/)
   assert.match(tsaSource, /fc100-link-status--online/)
   assert.match(tsaTemplateSource, /formatFc100ConnectionLabel\(fc100DeliveryFormState\.selectedDeviceProps\.onlineStatus\)/)
   assert.match(tsaSource, /function formatFc100DeviceModel/)
@@ -163,6 +163,35 @@ test('tsa page renders fc100 delivery verification controls', () => {
   assert.match(tsaTemplateSource, /开钩投放/)
   assert.match(tsaTemplateSource, /FC100 降落/)
   assert.match(tsaTemplateSource, /命令状态/)
+})
+
+test('tsa fc100 device card uses an inline aircraft-only dropdown menu', () => {
+  assert.doesNotMatch(tsaTemplateSource, /<a-select[\s\S]*fc100DeliveryFormState\.selectedDeviceSn/)
+  assert.match(tsaTemplateSource, /class="fc100-device-card-dropdown delivery-device-card-dropdown"/)
+  assert.match(tsaTemplateSource, /v-if="selectableFc100DeliveryDevices\.length > 0"/)
+  assert.match(tsaTemplateSource, /<a-dropdown[\s\S]*class="fc100-device-card-dropdown delivery-device-card-dropdown"/)
+  assert.match(tsaTemplateSource, /v-for="device in selectableFc100DeliveryDevices"/)
+  assert.match(tsaSource, /function isFc100AircraftDevice[\s\S]*bindStatus[\s\S]*!== 'rc'/)
+  assert.match(tsaSource, /const selectableFc100DeliveryDevices\s*=\s*computed/)
+  assert.match(tsaSource, /fc100DeliveryFormState\.devices\.filter\(isFc100AircraftDevice\)/)
+})
+
+test('tsa monitoring device card reuses the fc100 card dropdown and telemetry grid', () => {
+  assert.doesNotMatch(tsaTemplateSource, /<a-select[\s\S]*selectedMonitoringDeviceSn/)
+  assert.doesNotMatch(tsaTemplateSource, /placeholder="选择监测飞行器"/)
+  assert.match(tsaTemplateSource, /class="fc100-device-card-dropdown monitoring-device-card-dropdown"/)
+  assert.match(tsaTemplateSource, /v-if="selectableMonitoringDevices\.length > 0"/)
+  assert.match(tsaTemplateSource, /v-for="option in selectableMonitoringDevices"/)
+  assert.match(tsaSource, /function isMonitoringAircraftDevice[\s\S]*rc plus/)
+  assert.match(tsaSource, /function normalizeMonitoringModelName[\s\S]*Matrice 4T/)
+  assert.match(tsaSource, /function formatMonitoringDeviceModel[\s\S]*normalizeMonitoringModelName\(device\.model\) \|\| device\.callsign \|\| device\.sn/)
+  assert.doesNotMatch(tsaSource, /MSDK Aircraft/)
+  assert.doesNotMatch(tsaSource, /\$\{device\.model\} - \$\{device\.callsign\}/)
+  assert.match(tsaSource, /const selectableMonitoringDevices\s*=\s*computed/)
+  assert.match(tsaSource, /selectedMonitoringDeviceSn\.value = pickSelectedDeviceSn\(selectableMonitoringDevices\.value/)
+  for (const label of ['连接状态', '电量', 'RTK', '飞行模式', '飞行中', '经度', '纬度', '高度', '水平速度', '垂直速度', '返航距离', '风速', '更新时间']) {
+    assert.match(tsaTemplateSource, new RegExp(`<span>${label}</span>`))
+  }
 })
 
 test('tsa page calls fc100 delivery endpoints from visible handlers', () => {

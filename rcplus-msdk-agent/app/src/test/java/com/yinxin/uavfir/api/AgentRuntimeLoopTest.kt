@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.sdk.CameraCapability
+import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSessionAdapter
 import com.yinxin.uavfir.sdk.DjiDeviceState
 import com.yinxin.uavfir.sdk.DjiTelemetry
@@ -40,6 +41,7 @@ class AgentRuntimeLoopTest {
                         verticalSpeed = -0.4,
                         batteryPercent = 86,
                     ),
+                    aircraftModel = "Matrice 4T",
                 ),
             ),
             reporter = reporter,
@@ -62,6 +64,7 @@ class AgentRuntimeLoopTest {
         assertEquals("RC_PLUS_LOCAL", api.lastMsdkDeviceState?.gatewaySn)
         assertEquals(true, api.lastMsdkDeviceState?.online)
         assertEquals("CAPABILITY_READY", api.lastMsdkDeviceState?.connectionState)
+        assertEquals("Matrice 4T", api.lastMsdkDeviceState?.model)
         assertEquals(34.123456, api.lastMsdkDeviceState?.latitude)
         assertEquals(108.123456, api.lastMsdkDeviceState?.longitude)
         assertEquals(12.5, api.lastMsdkDeviceState?.height)
@@ -74,11 +77,89 @@ class AgentRuntimeLoopTest {
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("takeoff"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("land"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("returnHome"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("cancelReturnHome"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("emergencyStop"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("hover"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("virtualStick"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("flyToPoint"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("gimbal"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("gimbalReset"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("gimbalRotate"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("camera"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("cameraPhoto"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("cameraRecord"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("cameraStreamSource"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("cameraZoom"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("nightScene"))
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("laserFillLight"))
         assertEquals(1, poller.pollCount)
+    }
+
+    @Test
+    fun tickOnce_usesDynamicDeviceIdentityInsteadOfConfiguredDroneSn() = runTest {
+        val api = RecordingDualStreamApi()
+        val reporter = AgentReporter(AgentBackendClient(api))
+        val poller = RecordingCommandPoller()
+        val loop = AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(
+                    connectionState = AgentConnectionState.CAPABILITY_READY,
+                    identity = DjiDeviceIdentity(
+                        gatewaySn = "RC-DYNAMIC",
+                        aircraftSn = "AIRCRAFT-DYNAMIC",
+                    ),
+                    capability = CameraCapability(
+                        visibleSupported = true,
+                        thermalSupported = false,
+                    ),
+                ),
+            ),
+            reporter = reporter,
+            commandPoller = poller,
+            sessionManager = FakeCommandExecutor(DualStreamSessionState.RUNNING),
+            scope = backgroundScope,
+        )
+
+        loop.tickOnce("CONFIGURED-SN")
+
+        assertEquals("AIRCRAFT-DYNAMIC", api.lastHeartbeatDroneSn)
+        assertEquals("AIRCRAFT-DYNAMIC", api.lastStatusDroneSn)
+        assertEquals("AIRCRAFT-DYNAMIC", api.lastCapabilityDroneSn)
+        assertEquals("AIRCRAFT-DYNAMIC", api.lastMsdkDeviceState?.aircraftSn)
+        assertEquals("RC-DYNAMIC", api.lastMsdkDeviceState?.gatewaySn)
+        assertEquals("AIRCRAFT-DYNAMIC", poller.lastDroneSn)
+    }
+
+    @Test
+    fun tickOnce_marksPreviousIdentityOfflineWhenAircraftIdentityChanges() = runTest {
+        val api = RecordingDualStreamApi()
+        val loop = AgentRuntimeLoop(
+            deviceSession = SequenceDeviceSession(
+                listOf(
+                    DjiDeviceState(
+                        connectionState = AgentConnectionState.CAPABILITY_READY,
+                        identity = DjiDeviceIdentity("RC-1", "AIRCRAFT-OLD"),
+                    ),
+                    DjiDeviceState(
+                        connectionState = AgentConnectionState.CAPABILITY_READY,
+                        identity = DjiDeviceIdentity("RC-2", "AIRCRAFT-NEW"),
+                    ),
+                ),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = RecordingCommandPoller(),
+            sessionManager = FakeCommandExecutor(DualStreamSessionState.RUNNING),
+            scope = backgroundScope,
+        )
+
+        loop.tickOnce("CONFIGURED-SN")
+        loop.tickOnce("CONFIGURED-SN")
+
+        assertTrue(api.msdkDeviceStates.any {
+            it.aircraftSn == "AIRCRAFT-OLD" && !it.online && it.connectionState == "DISCONNECTED"
+        })
+        assertEquals("AIRCRAFT-NEW", api.lastMsdkDeviceState?.aircraftSn)
+        assertEquals(true, api.lastMsdkDeviceState?.online)
     }
 
     @Test
@@ -107,10 +188,51 @@ class AgentRuntimeLoopTest {
         assertEquals(heartbeatCountBefore, api.heartbeatCount)
     }
 
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun start_pollsUrgentCommandsMoreFrequentlyThanHeartbeat() = runTest {
+        val api = RecordingDualStreamApi()
+        val regularPoller = RecordingCommandPoller()
+        val urgentPoller = RecordingCommandPoller()
+        val loop = AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(connectionState = AgentConnectionState.SDK_READY),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = regularPoller,
+            urgentCommandPoller = urgentPoller,
+            sessionManager = FakeCommandExecutor(DualStreamSessionState.INIT),
+            scope = backgroundScope,
+            dispatcher = StandardTestDispatcher(testScheduler),
+            intervalMs = 1_000,
+            urgentCommandIntervalMs = 200,
+        )
+
+        loop.start("DRONE-LOOP")
+        advanceTimeBy(450)
+        loop.stop()
+
+        assertEquals(1, api.heartbeatCount)
+        assertEquals(1, regularPoller.pollCount)
+        assertTrue(urgentPoller.pollCount >= 3)
+    }
+
     private class FakeDeviceSession(
         private val state: DjiDeviceState,
     ) : DjiDeviceSessionAdapter {
         override suspend fun initialize(): DjiDeviceState = state
+    }
+
+    private class SequenceDeviceSession(
+        private val states: List<DjiDeviceState>,
+    ) : DjiDeviceSessionAdapter {
+        private var index = 0
+
+        override suspend fun initialize(): DjiDeviceState {
+            val state = states[index.coerceAtMost(states.lastIndex)]
+            index += 1
+            return state
+        }
     }
 
     private class FakeCommandExecutor(
@@ -133,9 +255,11 @@ class AgentRuntimeLoopTest {
 
     private class RecordingCommandPoller : CommandPoller {
         var pollCount: Int = 0
+        var lastDroneSn: String? = null
 
         override suspend fun pollOnce(droneSn: String) {
             pollCount += 1
+            lastDroneSn = droneSn
         }
     }
 
@@ -148,6 +272,7 @@ class AgentRuntimeLoopTest {
         var lastCapabilityDroneSn: String? = null
         var lastCapabilityBody: CapabilityReportRequest? = null
         var lastMsdkDeviceState: MsdkDeviceStateRequest? = null
+        val msdkDeviceStates: MutableList<MsdkDeviceStateRequest> = mutableListOf()
 
         override suspend fun heartbeat(
             droneSn: String,
@@ -188,6 +313,7 @@ class AgentRuntimeLoopTest {
 
         override suspend fun reportMsdkDeviceState(body: MsdkDeviceStateRequest) {
             lastMsdkDeviceState = body
+            msdkDeviceStates.add(body)
         }
 
         override suspend fun pollMsdkCommand(aircraftSn: String): AgentApiEnvelope<MsdkCommandResponse>? = null

@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.wayline
 
 import android.util.Log
+import com.yinxin.uavfir.api.GimbalActionClient
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.manager.aircraft.waypoint3.WaylineExecutingInfoListener
@@ -9,6 +10,11 @@ import dji.v5.manager.aircraft.waypoint3.WaypointMissionManager
 import dji.v5.manager.aircraft.waypoint3.model.BreakPointInfo
 import dji.v5.manager.aircraft.waypoint3.model.WaylineExecutingInfo
 import dji.v5.manager.aircraft.waypoint3.model.WaypointMissionExecuteState
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -22,6 +28,9 @@ import java.util.concurrent.atomic.AtomicReference
 class WaypointMissionExecutor(
     private val listener: Listener,
     private val diagnostics: WaypointMissionDiagnostics = DjiWaypointMissionDiagnostics(),
+    private val gimbalActionClient: GimbalActionClient? = null,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     interface Listener {
@@ -48,8 +57,10 @@ class WaypointMissionExecutor(
     }
 
     fun attach() {
-        WaypointMissionManager.getInstance().addWaypointMissionExecuteStateListener(stateListener)
-        WaypointMissionManager.getInstance().addWaylineExecutingInfoListener(progressListener)
+        val manager = WaypointMissionManager.getInstance()
+        manager.init()
+        manager.addWaypointMissionExecuteStateListener(stateListener)
+        manager.addWaylineExecutingInfoListener(progressListener)
     }
 
     fun detach() {
@@ -153,6 +164,7 @@ class WaypointMissionExecutor(
             Log.d(TAG, "$stage success missionId=$missionId")
             if (stage == "startMission") {
                 listener.onStartAccepted(missionId)
+                tiltGimbalToNadir(missionId)
             }
         }
 
@@ -161,7 +173,21 @@ class WaypointMissionExecutor(
         }
     }
 
+    private fun tiltGimbalToNadir(missionId: String?) {
+        val client = gimbalActionClient ?: return
+        scope.launch(dispatcher) {
+            runCatching {
+                client.rotateGimbalToPitch(NADIR_GIMBAL_PITCH_DEGREES)
+            }.onSuccess {
+                Log.i(TAG, "gimbal tilted to nadir missionId=$missionId pitch=$NADIR_GIMBAL_PITCH_DEGREES")
+            }.onFailure { error ->
+                Log.w(TAG, "gimbal nadir adjustment failed missionId=$missionId: ${error.message}")
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "WaypointMissionExecutor"
+        private const val NADIR_GIMBAL_PITCH_DEGREES: Double = -90.0
     }
 }
