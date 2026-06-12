@@ -14,7 +14,7 @@ import type { PlannedWaypoint } from '/@/hooks/use-wayline-planning'
 import { getPlannerUiRaw } from '/@/hooks/use-planner-ui'
 import { WAYPOINT_ACTION_LABELS } from '/@/components/wayline-planner/wayline-format'
 // @ts-ignore .mjs 共用模块（node 测试可直跑）
-import { haversineMeters } from '/@/components/wayline-planner/planner-utils.mjs'
+import { buildSimulationTimeline, haversineMeters, positionAtTime } from '/@/components/wayline-planner/planner-utils.mjs'
 
 /** 低于该缩放级别时收起信息牌/距离标签，防止覆盖物拥挤 */
 const LABEL_MIN_ZOOM = 15
@@ -367,6 +367,48 @@ export function usePlannerOverlays (
     () => updateFlightPositionOverlay()
   )
 
+  // ---------- 模拟预演幻影飞机 ----------
+  let simGhostMarker: any = null
+
+  function clearSimGhost () {
+    const map = getMap()
+    if (simGhostMarker) {
+      map?.remove(simGhostMarker)
+      simGhostMarker = null
+    }
+  }
+
+  function updateSimGhost () {
+    const AMap = getAMap()
+    const map = getMap()
+    if (!AMap || !map) return
+    if (!plannerUi.simulating) {
+      clearSimGhost()
+      return
+    }
+    const timeline = buildSimulationTimeline(planningState.waypoints, planningState.maxSpeed)
+    const pos = positionAtTime(timeline, plannerUi.simulationTimeS)
+    if (!pos) {
+      clearSimGhost()
+      return
+    }
+    const content = `<div class="planner-sim-ghost"><span>✈️</span><em>${Math.round(pos.height)}m</em></div>`
+    if (!simGhostMarker) {
+      simGhostMarker = new AMap.Marker({
+        position: [pos.gcjLng, pos.gcjLat],
+        content,
+        anchor: 'center',
+        zIndex: 125,
+      })
+      map.add(simGhostMarker)
+    } else {
+      simGhostMarker.setPosition([pos.gcjLng, pos.gcjLat])
+      simGhostMarker.setContent(content)
+    }
+  }
+
+  watch(() => `${plannerUi.simulating}|${plannerUi.simulationTimeS}`, () => updateSimGhost())
+
   // 进入航线页面时 wayline.vue 会自增 recenterAircraftToken：
   // 若此刻已有飞机位置则立即居中，否则挂起，等位置到达后由 updateFlightPositionOverlay 居中一次。
   watch(() => planningState.recenterAircraftToken, () => {
@@ -389,6 +431,7 @@ export function usePlannerOverlays (
     unbindPlanningClick()
     clearPlanningOverlays()
     clearFlightPositionOverlay()
+    clearSimGhost()
   }
 
   return {

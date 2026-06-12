@@ -14,6 +14,7 @@
       :on-save="onSave" />
     <WaypointParamDrawer />
     <ElevationProfile />
+    <SimulationBar />
     <slot />
   </div>
 </template>
@@ -25,6 +26,7 @@ import MissionParamsPanel from './MissionParamsPanel.vue'
 import PlannerToolbar from './PlannerToolbar.vue'
 import WaypointParamDrawer from './WaypointParamDrawer.vue'
 import ElevationProfile from './ElevationProfile.vue'
+import SimulationBar from './SimulationBar.vue'
 
 defineProps<{
   canExecute: boolean

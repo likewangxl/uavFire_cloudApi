@@ -1177,6 +1177,23 @@ export default defineComponent({
     white-space: nowrap;
   }
 
+  &:deep(.planner-sim-ghost) {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    opacity: 0.85;
+    font-size: 18px;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+    em {
+      font-style: normal;
+      font-size: 10px;
+      padding: 0 5px;
+      border-radius: 6px;
+      background: rgba(13, 17, 23, 0.85);
+      color: #9fd0ff;
+    }
+  }
+
   &:deep(.planner-insert-ghost) {
     display: flex;
     width: 18px;
