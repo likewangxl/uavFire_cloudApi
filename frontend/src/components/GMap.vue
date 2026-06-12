@@ -795,9 +795,17 @@ export default defineComponent({
       if (typeof map.setLayers === 'function' && standard) {
         if (layer === 'standard') {
           map.setLayers([standard])
+          // 恢复矢量图全要素
+          if (typeof map.setFeatures === 'function') {
+            map.setFeatures(['bg', 'point', 'road', 'building'])
+          }
         } else {
-          // 卫星影像叠加路网标注（司空2 风格）
-          map.setLayers([standard, satellite, roadNet].filter(Boolean))
+          // 卫星影像 + 路网/路名 + 矢量层只留 POI 点注记（司空2 混合注记风格）：
+          // 矢量默认层置顶且只渲染 point 要素，背景/楼块透明，商铺/楼栋/地名标注浮在影像上
+          map.setLayers([satellite, roadNet, standard].filter(Boolean))
+          if (typeof map.setFeatures === 'function') {
+            map.setFeatures(['point'])
+          }
         }
         return
       }

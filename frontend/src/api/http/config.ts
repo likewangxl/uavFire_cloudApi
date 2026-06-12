@@ -1,4 +1,4 @@
-const backendHost = (import.meta.env.VITE_APP_APIGATEWAY_BACKEND_HOST || 'http://192.168.0.204:6789').replace(/\/$/, '')
+const backendHost = (import.meta.env.VITE_APP_APIGATEWAY_BACKEND_HOST || 'http://127.0.0.1:6789').replace(/\/$/, '')
 const websocketHost = import.meta.env.VITE_APP_APIGATEWAY_WEBSOCKET_HOST || backendHost.replace(/^http/, 'ws')
 const rtmpUrl = import.meta.env.VITE_APP_LIVESTREAM_RTMP_URL || 'rtmp://localhost:1935/live/'
 
