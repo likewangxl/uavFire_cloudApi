@@ -30,15 +30,14 @@
       </a-row>
     </div>
     <div :style="{ height : height + 'px'}" class="scrollbar">
-      <a-collapse
+      <a-tabs
         v-if="showPlanningTools"
-        class="wayline-mode-collapse"
-        :bordered="false"
-        expandIconPosition="right"
-        accordion
-        default-active-key="monitor-wayline"
-        style="background: #232323;">
-        <a-collapse-panel key="monitor-wayline" header="监测火情航线" style="border-bottom: 1px solid #4f4f4f;">
+        v-model:activeKey="plannerTab"
+        class="planner-mode-tabs">
+        <a-tab-pane key="monitor" tab="监测规划" />
+        <a-tab-pane key="delivery" tab="投放任务" />
+      </a-tabs>
+      <div v-if="showPlanningTools" v-show="plannerTab === 'monitor'">
       <div class="planned-wayline-panel">
         <div class="planned-wayline-title">
           <span>监测航线库</span>
@@ -99,214 +98,20 @@
           <div class="planned-wayline-list-footer" v-else-if="plannedWaylinesData.data.length > 0 && !plannedWaylinesCanRefresh">已加载全部</div>
         </div>
       </div>
-        </a-collapse-panel>
-        <a-collapse-panel key="delivery-wayline" header="投放执行航线" style="border-bottom: 1px solid #4f4f4f;">
-      <div class="fc100-planning-panel">
-        <div class="fc100-planning-title">
-          <span>投放执行面板</span>
-          <a-button size="small" type="link" :loading="fc100PlanningState.loadingAction === 'devices'" @click="handleFc100RefreshDevices">
-            刷新设备
-          </a-button>
-        </div>
-        <div class="planning-row">
-          <span class="planning-label">FC100云端设备</span>
-          <a-select
-            size="small"
-            style="width: 100%;"
-            :value="fc100PlanningState.selectedDeviceSn"
-            placeholder="请选择FC100飞机设备"
-            option-label-prop="label"
-            :loading="fc100PlanningState.loadingAction === 'devices'"
-            @change="handleFc100SelectDevice">
-            <a-select-option
-              v-for="device in fc100AircraftDevices"
-              :key="device.deviceSn"
-              :value="device.deviceSn"
-              :label="formatFc100DeviceSelectLabel(device)">
-              <div class="fc100-device-option">
-                <div class="fc100-device-option-main">
-                  <span class="fc100-device-option-model">{{ formatFc100DeliveryAircraftModel() }}</span>
-                  <span class="fc100-device-option-status" :class="{ online: isFc100DeviceOnline(device) }">
-                    {{ isFc100DeviceOnline(device) ? '在线' : '离线' }}
-                  </span>
-                </div>
-                <div class="fc100-device-option-sn">{{ device.deviceSn }}</div>
-              </div>
-            </a-select-option>
-          </a-select>
-        </div>
-        <div class="fc100-device-props" v-if="fc100PlanningState.selectedDeviceProps">
-          <span>电量 {{ fc100PlanningState.selectedDeviceProps.batteryPercent ?? '-' }}%</span>
-          <span>RTK {{ fc100PlanningState.selectedDeviceProps.rtkStatus || '-' }}</span>
-          <span>{{ fc100PlanningState.selectedDeviceProps.onlineStatus === false ? '离线' : '在线' }}</span>
-        </div>
-        <div class="planning-row">
-          <a-upload
-            class="fc100-direct-wayline-upload"
-            name="file"
-            accept=".kmz,.kml"
-            :multiple="false"
-            :before-upload="beforeFc100WaylineUpload"
-            :show-upload-list="false"
-            :custom-request="uploadFc100WaylineFile"
-          >
-          <a-button
-              class="wayline-button-wrap"
-              size="small"
-              :loading="fc100PlanningState.loadingAction === 'directImport'">
-              <SelectOutlined />
-              导入FC100任务
-            </a-button>
-          </a-upload>
-        </div>
-        <div class="planning-row">
-          <span class="planning-label">当前规划航线</span>
-          <div class="fc100-selected-wayline">
-            {{ fc100SelectedRecordName }}
-          </div>
-        </div>
-        <div class="planning-row planning-actions fc100-task-actions">
-          <a-button
-            class="wayline-button-wrap"
-            size="small"
-            type="primary"
-            :loading="fc100PlanningState.loadingAction === 'import'"
-            :disabled="!fc100PlanningState.selectedRecord || !fc100PlanningState.selectedRecord.kmzUrl"
-            @click="handleFc100ImportGeneratedWaylineTask()">
-            创建FC100任务
-          </a-button>
-          <a-button
-            size="small"
-            :loading="fc100PlanningState.loadingAction === 'start'"
-            :disabled="!fc100PlanningState.taskId"
-            @click="handleFc100StartGeneratedWaylineTask">
-            开始执行
-          </a-button>
-          <a-button
-            size="small"
-            :loading="fc100PlanningState.loadingAction === 'status'"
-            :disabled="!fc100PlanningState.taskId"
-            @click="handleFc100GeneratedWaylineTaskStatus">
-            刷新任务
-          </a-button>
-        </div>
-        <div class="fc100-task-summary" v-if="fc100PlanningState.taskId || fc100PlanningState.taskStatus">
-          <span>FC100任务ID {{ fc100PlanningState.taskId || '-' }}</span>
-          <span>状态 {{ fc100PlanningState.taskStatus?.status || fc100PlanningState.taskStatus?.phase || '-' }}</span>
-          <span v-if="fc100PlanningState.taskStatus?.progressPercent !== null && fc100PlanningState.taskStatus?.progressPercent !== undefined">
-            进度 {{ fc100PlanningState.taskStatus.progressPercent }}%
-          </span>
-        </div>
-        <div class="fc100-terminal-panel" v-if="fc100PlanningState.taskId">
-          <div class="fc100-terminal-head">
-            <span>到点后投放控制</span>
-            <small>{{ fc100TerminalControlHint }}</small>
-          </div>
-          <div class="fc100-terminal-note">
-            确认航线到达终点并悬停后再操作。
-          </div>
-          <div class="fc100-terminal-actions">
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__primary"
-              :loading="fc100PlanningState.loadingAction === 'ropeDown'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100RopeDown">
-              放绳
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__neutral"
-              :loading="fc100PlanningState.loadingAction === 'ropeStop'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100RopeStop">
-              停止
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__primary"
-              :loading="fc100PlanningState.loadingAction === 'ropeUp'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100RopeUp">
-              收绳
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__danger"
-              :loading="fc100PlanningState.loadingAction === 'releaseHook'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100ReleaseHook">
-              脱钩
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__return"
-              :loading="fc100PlanningState.loadingAction === 'returnHome'"
-              :disabled="!getSelectedFc100DeviceSn() || isFc100TerminalCommandLoading"
-              @click="handleFc100ReturnHome">
-              返航
-            </a-button>
-          </div>
-        </div>
-        <div class="fc100-result" v-if="fc100PlanningState.lastResult">
-          {{ fc100PlanningState.lastResult }}
-        </div>
       </div>
-      <div class="planning-section-gap"></div>
-      <div class="planned-wayline-panel planned-wayline-panel--delivery">
-        <div class="planned-wayline-title">
-          <span>FC100 投放航线库</span>
-          <a-button size="small" type="link" :loading="plannedWaylinesLoading" @click="refreshPlannedWaylines">
-            刷新
-          </a-button>
-        </div>
-        <div class="planning-empty" v-if="!plannedWaylinesLoading && plannedWaylinesData.data.length === 0">
-          暂无可用于投放的已保存规划航线。
-        </div>
-        <div v-else class="planned-wayline-list" @scroll="onPlannedWaylinesScroll">
-          <div
-            class="planned-wayline-card"
-            :class="{ 'planned-wayline-card--selected': fc100PlanningState.selectedRecord?.plannedWaylineId === record.plannedWaylineId }"
-            v-for="record in plannedWaylinesData.data"
-            :key="`fc100-${record.plannedWaylineId}`"
-            @click="onFc100PreviewGeneratedWayline(record)">
-            <div class="planned-wayline-card-head">
-              <a-tooltip :title="record.name">
-                <span class="planned-wayline-name">{{ record.name }}</span>
-              </a-tooltip>
-              <span class="planned-wayline-status" :class="{ failed: normalizePlannedWaylineStatus(record) === PlannedWaylineStatus.FAILED }">
-                {{ formatPlannedWaylineStatus(record) }}
-              </span>
-            </div>
-            <div class="planned-wayline-meta">
-              <span>航点 {{ record.waypoints?.length || 0 }}</span>
-              <span>高度 {{ formatNumber(record.defaultHeight) }} m</span>
-              <span>速度 {{ formatNumber(record.maxSpeed) }} m/s</span>
-            </div>
-            <div class="planned-wayline-meta muted">
-              <span>机型 {{ formatFc100DeliveryAircraftModel() }}</span>
-              <span>更新于 {{ formatTimestamp(record.updateTime) }}</span>
-            </div>
-            <div class="planned-wayline-actions planned-wayline-actions--minimal">
-              <a-button size="small" @click.stop="showPlannedWaylineDetail(record)">详情</a-button>
-              <a-button
-                size="small"
-                type="primary"
-                :disabled="!record.kmzUrl"
-                @click.stop="selectFc100GeneratedWayline(record)">
-                选择
-              </a-button>
-              <a-button size="small" danger @click.stop="onDeletePlannedWayline(record)">删除</a-button>
-            </div>
-          </div>
-          <div class="planned-wayline-list-footer" v-if="plannedWaylinesLoading">加载中...</div>
-          <div class="planned-wayline-list-footer" v-else-if="plannedWaylinesData.data.length > 0 && !plannedWaylinesCanRefresh">已加载全部</div>
-        </div>
-      </div>
-        </a-collapse-panel>
-      </a-collapse>
+      <Fc100DeliveryView
+        v-if="showPlanningTools"
+        v-show="plannerTab === 'delivery'"
+        :planned-waylines-data="plannedWaylinesData"
+        :planned-waylines-loading="plannedWaylinesLoading"
+        :planned-waylines-can-refresh="plannedWaylinesCanRefresh"
+        :refresh-planned-waylines="refreshPlannedWaylines"
+        :on-planned-waylines-scroll="onPlannedWaylinesScroll"
+        :show-planned-wayline-detail="showPlannedWaylineDetail"
+        :on-delete-planned-wayline="onDeletePlannedWayline" />
       <a-collapse
         v-if="showPlanningTools"
+        v-show="plannerTab === 'monitor'"
         class="wayline-mode-collapse generated-wayline-collapse"
         :bordered="false"
         expandIconPosition="right"
@@ -968,7 +773,7 @@ import {
   updatePlannedWayline,
 } from '/@/api/wayline'
 import { ELocalStorageKey, ERouterName, EDeviceTypeName } from '/@/types'
-import { EllipsisOutlined, CameraFilled, UserOutlined, SelectOutlined, QuestionCircleOutlined, ImportOutlined, PlusOutlined, MinusOutlined, DownOutlined } from '@ant-design/icons-vue'
+import { EllipsisOutlined, CameraFilled, UserOutlined, QuestionCircleOutlined, ImportOutlined, PlusOutlined, MinusOutlined, DownOutlined } from '@ant-design/icons-vue'
 import { DEVICE_MODEL_KEY, DEVICE_NAME, EModeCode } from '/@/types/device'
 import { useMyStore } from '/@/store'
 import { CreatePlannedWaylineBody, PlannedWaypoint, PlannedWaylineRecord, PlannedWaylineStatus, WaylineFile } from '/@/types/wayline'
@@ -1007,10 +812,13 @@ import {
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
 import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
-import { deliveryApi } from '/@/api/fire/delivery'
-import type { DeliveryCommandBody, DeliveryCommandRef, DeliveryDeviceDTO, DeliveryDeviceProperties, DeliveryTaskOperationResult, DeliveryTaskStatus } from '/@/api/fire/delivery'
 import WaypointActionEditor from '/@/components/WaypointActionEditor.vue'
 import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
+import Fc100DeliveryView from '/@/components/wayline-planner/Fc100DeliveryView.vue'
+import { setPlannerTab, usePlannerUi } from '/@/hooks/use-planner-ui'
+import { getFc100GeneratedWaylineActions } from '/@/hooks/use-fc100-delivery'
+import type { FileItem } from '/@/components/wayline-planner/wayline-format'
+import { canOverwritePlannedWayline, formatNumber, formatPlannedWaylineStatus, formatSafePlannedWaylineTimestamp, formatTimestamp, getPlannedWaylineTaskReason, normalizePlannedWaylineStatus, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
 
 const loading = ref(false)
 const store = useMyStore()
@@ -1020,6 +828,11 @@ const showPlanningTools = computed(() => !isTaskRouteSelector.value)
 
 // ---------- Planned wayline (click-to-fly) ----------
 const planningState = getPlanningStateRaw()
+const plannerUi = usePlannerUi()
+const plannerTab = computed({
+  get: () => plannerUi.activeTab,
+  set: (v: 'monitor' | 'delivery') => setPlannerTab(v),
+})
 const selectedAircraftSn = ref('')
 const advancedConfigOpen = ref(false)
 const planningDrawerOpen = ref(false)
@@ -1067,13 +880,6 @@ interface AircraftSummary {
   aircraftModelKey: string
   source: 'cloud-topology' | 'msdk-agent'
   lastSeen?: number
-}
-
-interface FileItem extends File {
-  uid?: string;
-  status?: string;
-  response?: string;
-  url?: string;
 }
 
 const onlineAircraftMap = reactive({} as Record<string, AircraftSummary>)
@@ -1126,49 +932,8 @@ const savePlannedWaylineModal = reactive({
   maxSpeed: 10,
   waypointCount: 0,
 })
-const fc100PlanningState = reactive({
-  devices: [] as DeliveryDeviceDTO[],
-  selectedDeviceSn: '',
-  selectedDeviceProps: null as DeliveryDeviceProperties | null,
-  selectedRecord: null as PlannedWaylineRecord | null,
-  taskId: '',
-  taskStatus: null as DeliveryTaskStatus | null,
-  lastResult: '',
-  loadingAction: '',
-})
-function isFc100AircraftDevice (device: DeliveryDeviceDTO) {
-  const bindStatus = String(device.bindStatus || '').toLowerCase()
-  const deviceType = String(device.deviceType || '').toLowerCase()
-  return bindStatus !== 'rc' && deviceType !== 'rc'
-}
-const fc100AircraftDevices = computed(() => fc100PlanningState.devices.filter(isFc100AircraftDevice))
-const fc100SelectedRecordName = computed(() => {
-  const record = fc100PlanningState.selectedRecord
-  if (!record) return '请在下方已保存规划航线中选择已生成KMZ的记录。'
-  return record.kmzUrl ? record.name : `${record.name}（请先生成航线文件）`
-})
-function formatFc100DeliveryAircraftModel () {
-  return 'DJI FlyCart 100'
-}
-function formatFc100DeviceSelectLabel (device: DeliveryDeviceDTO) {
-  return `${formatFc100DeliveryAircraftModel()} · ${device.deviceSn}`
-}
-function isFc100DeviceOnline (device: DeliveryDeviceDTO) {
-  const online = String(device.online || '').toLowerCase()
-  return online === 'true' || online === 'online' || online === '1'
-}
-const isFc100TerminalCommandLoading = computed(() => [
-  'ropeDown',
-  'ropeStop',
-  'ropeUp',
-  'releaseHook',
-  'returnHome',
-].includes(fc100PlanningState.loadingAction))
-const fc100TerminalControlHint = computed(() => getFc100TerminalControlBlockedReason() || '已满足投放控制条件')
 
 let topoTimer: number | null = null
-let fc100RealtimeTimer: number | null = null
-let fc100RealtimeRefreshing = false
 
 const AIRCRAFT_MODEL_KEY_MAP: Record<string, string> = {
   [DEVICE_MODEL_KEY.M30]: 'M30',
@@ -1418,35 +1183,6 @@ function applyPlannedWaylineFlightPosition (record: PlannedWaylineRecord | null 
     return
   }
   setFlightPositionFromRecord(record)
-}
-
-function syncFc100DeviceFlightPosition (props: DeliveryDeviceProperties | null) {
-  if (!props) return
-  const deviceSn = props.deviceSn || fc100PlanningState.selectedDeviceSn
-  if (!deviceSn) return
-  // FC100 有进行中的投放任务 → 该机认领地图跟踪，挡掉其它(停地)飞机的位置写入。
-  if (fc100PlanningState.taskId && !isFc100TaskTerminal(fc100PlanningState.taskStatus)) {
-    setTrackedAircraft(deviceSn)
-  }
-  setFlightPositionFromWgs(deviceSn, props.longitude, props.latitude, {
-    height: props.altitude,
-    updatedAt: props.osdTimestamp || Date.now(),
-  })
-}
-
-function formatSafePlannedWaylineTimestamp (date: Date): string {
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())} ${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-}
-
-function sanitizeDjiWaylineName (name: string, fallback = '规划航线'): string {
-  const sanitized = String(name || '')
-    .trim()
-    .replace(/[<>:"/|?*._\\]+/g, '-')
-    .replace(/\s+/g, ' ')
-    .replace(/^-+|-+$/g, '')
-    .trim()
-  return sanitized || fallback
 }
 
 function finiteSaveNumber (value: unknown): number | null {
@@ -2003,28 +1739,6 @@ async function showPlannedWaylineDetail (record: PlannedWaylineRecord) {
   }
 }
 
-function formatNumber (value: unknown): string {
-  const n = Number(value)
-  return Number.isFinite(n) ? String(n) : '-'
-}
-
-function formatTimestamp (value: unknown): string {
-  const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? new Date(n).toLocaleString() : '-'
-}
-
-function normalizePlannedWaylineStatus (recordOrStatus: PlannedWaylineRecord | string): string {
-  const raw = typeof recordOrStatus === 'string' ? recordOrStatus : (recordOrStatus.taskStatus || recordOrStatus.status)
-  return (raw || PlannedWaylineStatus.DRAFT).toLowerCase()
-}
-
-function getPlannedWaylineTaskReason (record: PlannedWaylineRecord | null): string {
-  if (!record) return ''
-  return normalizePlannedWaylineStatus(record) === PlannedWaylineStatus.FAILED
-    ? (record.taskStatusReason || '')
-    : ''
-}
-
 function clearPlannedWaylineTaskReason (record: PlannedWaylineRecord) {
   record.taskStatusReason = ''
   const cached = plannedWaylinesData.data.find(item => item.plannedWaylineId === record.plannedWaylineId)
@@ -2032,25 +1746,6 @@ function clearPlannedWaylineTaskReason (record: PlannedWaylineRecord) {
   if (selectedPlannedWayline.value?.plannedWaylineId === record.plannedWaylineId) {
     selectedPlannedWayline.value.taskStatusReason = ''
   }
-}
-
-function formatPlannedWaylineStatus (status: string): string {
-  const labels: Record<string, string> = {
-    [PlannedWaylineStatus.DRAFT]: '草稿',
-    [PlannedWaylineStatus.FILE_GENERATED]: '航线文件已生成',
-    [PlannedWaylineStatus.PUBLISHING]: '下发中',
-    [PlannedWaylineStatus.PREPARED]: '已准备',
-    [PlannedWaylineStatus.EXECUTING]: '执行中',
-    [PlannedWaylineStatus.COMPLETED]: '已完成',
-    [PlannedWaylineStatus.FAILED]: '失败',
-    [PlannedWaylineStatus.CANCELED]: '已取消',
-    published: '已发布',
-  }
-  return labels[normalizePlannedWaylineStatus(status)] || status || '草稿'
-}
-
-function canOverwritePlannedWayline (record: PlannedWaylineRecord): boolean {
-  return normalizePlannedWaylineStatus(record) === PlannedWaylineStatus.DRAFT && !record.publishedWaylineId
 }
 
 function getPlannedWaylineActions (record: PlannedWaylineRecord) {
@@ -2083,462 +1778,6 @@ function getPlannedWaylineActions (record: PlannedWaylineRecord) {
   return []
 }
 
-function getFc100GeneratedWaylineActions (record: PlannedWaylineRecord) {
-  return [{
-    key: 'fc100-import-generated',
-    label: '导入生成KMZ并创建任务',
-    primary: false,
-    wrap: true,
-    disabled: !record.kmzUrl,
-    handler: (record: PlannedWaylineRecord) => onFc100UseGeneratedWayline(record),
-  }]
-}
-
-function getFc100ApiBody (res: any) {
-  return res?.data ?? res
-}
-
-function formatFc100OperationResult (result: DeliveryTaskOperationResult | null | undefined, fallback: string): string {
-  if (!result) return fallback
-  return result.displayMessage || result.apiMessage || result.reason || fallback
-}
-
-function formatFc100TaskStatus (status: DeliveryTaskStatus | null | undefined): string {
-  if (!status) return '未返回任务状态'
-  const parts = [
-    status.displayMessage || status.message || status.reason || '',
-    status.status ? `状态 ${status.status}` : '',
-    status.phase ? `阶段 ${status.phase}` : '',
-    status.progressPercent !== null && status.progressPercent !== undefined ? `进度 ${status.progressPercent}%` : '',
-    status.taskCode !== null && status.taskCode !== undefined ? `任务码 ${status.taskCode}` : '',
-  ].filter(Boolean)
-  return parts.join('；') || '任务状态已刷新'
-}
-
-function getFc100ErrorText (error: any, fallback: string): string {
-  return error?.response?.data?.message || error?.message || fallback
-}
-
-function getSelectedFc100DeviceSn (): string {
-  const selected = fc100AircraftDevices.value.find(device => device.deviceSn === fc100PlanningState.selectedDeviceSn)
-  const firstDrone = fc100AircraftDevices.value.find(device => device.bindStatus === 'drone')
-  const firstAircraft = fc100AircraftDevices.value[0]
-  return selected?.deviceSn || firstDrone?.deviceSn || firstAircraft?.deviceSn || ''
-}
-
-function getFc100OperatorId (): string {
-  return localStorage.getItem(ELocalStorageKey.Username) || 'web'
-}
-
-function getFc100WaylineFileTaskName (filename: string): string {
-  const baseName = String(filename || '')
-    .replace(/\.(kmz|kml)$/i, '')
-    .trim()
-  return sanitizeDjiWaylineName(baseName || 'FC100航线', 'FC100航线')
-}
-
-function beforeFc100WaylineUpload (file: FileItem) {
-  if (!file.name || !/\.(kmz|kml)$/i.test(file.name)) {
-    message.error('文件格式错误，请选择 FC100 KMZ/KML 航线文件。')
-    return false
-  }
-  return true
-}
-
-const uploadFc100WaylineFile = async (options?: { file?: FileItem; onSuccess?: (res: any) => void; onError?: (err: any) => void }) => {
-  const file = options?.file
-  if (!file) {
-    message.error('请选择 FC100 KMZ/KML 航线文件。')
-    return
-  }
-  const deviceSn = getSelectedFc100DeviceSn()
-  if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
-    options?.onError?.(new Error('FC100 device is required'))
-    return
-  }
-  fc100PlanningState.selectedDeviceSn = deviceSn
-  fc100PlanningState.loadingAction = 'directImport'
-  const fileData = new FormData()
-  fileData.append('file', file, file.name)
-  fileData.append('deviceSn', deviceSn)
-  fileData.append('taskName', sanitizeDjiWaylineName(getFc100WaylineFileTaskName(file.name), 'FC100航线'))
-  fileData.append('operatorId', getFc100OperatorId())
-  fileData.append('remark', `created from uploaded fc100 wayline ${file.name}`)
-  try {
-    const res = await deliveryApi.importCreateWaylineTask(fileData)
-    const body = getFc100ApiBody(res)
-    if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100导入航线文件并创建任务失败：${body.message || '接口返回异常'}`
-      options?.onError?.(new Error(body.message || 'FC100 direct wayline import failed'))
-      return
-    }
-    fc100PlanningState.taskId = body.data?.taskId || ''
-    fc100PlanningState.taskStatus = null
-    fc100PlanningState.selectedRecord = null
-    fc100PlanningState.lastResult = `FC100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
-    message.success('FC100航线文件已导入并创建任务')
-    options?.onSuccess?.(res)
-  } catch (error) {
-    fc100PlanningState.lastResult = `FC100导入航线文件并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
-    options?.onError?.(error)
-  } finally {
-    fc100PlanningState.loadingAction = ''
-  }
-}
-
-function buildFc100CommandBody (data?: Record<string, unknown>): DeliveryCommandBody {
-  return {
-    operatorId: getFc100OperatorId(),
-    data,
-  }
-}
-
-function isFc100TaskTerminal (status: DeliveryTaskStatus | null): boolean {
-  if (!status) return false
-  const text = `${status.status || ''} ${status.phase || ''}`.toLowerCase()
-  return status.progressPercent === 100 ||
-    ['completed', 'complete', 'finished', 'finish', 'success', 'succeeded', 'done'].some(key => text.includes(key))
-}
-
-function isFc100HoveringEnough (props: DeliveryDeviceProperties | null): boolean {
-  if (!props) return false
-  if (props.onlineStatus === false) return false
-  const horizontalSpeed = Number(props.horizontalSpeed ?? 0)
-  const verticalSpeed = Number(props.verticalSpeed ?? 0)
-  return Math.abs(horizontalSpeed) <= 0.5 && Math.abs(verticalSpeed) <= 0.3
-}
-
-function getFc100TerminalControlBlockedReason (): string {
-  if (!fc100PlanningState.taskId) return '请先创建FC100航线任务'
-  if (!isFc100TaskTerminal(fc100PlanningState.taskStatus)) return '等待航线完成'
-  if (!fc100PlanningState.selectedDeviceProps) return '请先刷新FC100状态'
-  if (fc100PlanningState.selectedDeviceProps.onlineStatus === false) return 'FC100设备离线'
-  if (!isFc100HoveringEnough(fc100PlanningState.selectedDeviceProps)) return '等待飞机悬停稳定'
-  return ''
-}
-
-function canUseFc100TerminalControls (): boolean {
-  return !getFc100TerminalControlBlockedReason()
-}
-
-function confirmFc100TerminalAction (title: string, actionText: string, danger = false): Promise<boolean> {
-  const deviceSn = getSelectedFc100DeviceSn() || '-'
-  const status = fc100PlanningState.taskStatus?.status || fc100PlanningState.taskStatus?.phase || '-'
-  return new Promise(resolve => {
-    Modal.confirm({
-      title,
-      content: `设备 ${deviceSn}，当前任务状态 ${status}。请确认飞机已到达终点并处于安全悬停状态后执行${actionText}。`,
-      okText: `确认${actionText}`,
-      cancelText: '取消',
-      okButtonProps: danger ? { danger: true } : undefined,
-      onOk: () => resolve(true),
-      onCancel: () => resolve(false),
-    })
-  })
-}
-
-function formatFc100CommandResult (result: DeliveryCommandRef | null | undefined, fallback: string): string {
-  if (!result) return fallback
-  const parts = [
-    result.deviceCmdMethod ? `方法 ${result.deviceCmdMethod}` : '',
-    result.status ? `状态 ${result.status}` : '',
-    result.bid ? `指令 ${result.bid}` : '',
-  ].filter(Boolean)
-  return parts.length ? `${fallback}：${parts.join('；')}` : fallback
-}
-
-async function sendFc100TerminalCommand (
-  loadingAction: string,
-  actionText: string,
-  danger: boolean,
-  request: (deviceSn: string, body: DeliveryCommandBody) => Promise<any>,
-) {
-  const deviceSn = getSelectedFc100DeviceSn()
-  if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
-    return
-  }
-  if (loadingAction !== 'returnHome' && !canUseFc100TerminalControls()) {
-    const reason = getFc100TerminalControlBlockedReason()
-    message.warning(reason || '当前状态不允许投放控制。')
-    return
-  }
-  const confirmed = await confirmFc100TerminalAction(`确认执行${actionText}吗？`, actionText, danger)
-  if (!confirmed) return
-  fc100PlanningState.loadingAction = loadingAction
-  try {
-    const res = await request(deviceSn, buildFc100CommandBody())
-    const body = getFc100ApiBody(res)
-    if (body.code !== 0) {
-      fc100PlanningState.lastResult = `${actionText}失败：${body.message || '接口返回异常'}`
-      return
-    }
-    fc100PlanningState.lastResult = formatFc100CommandResult(body.data, `${actionText}指令已发送`)
-    message.success(`${actionText}指令已发送`)
-    await refreshFc100SelectedDeviceProps(deviceSn)
-  } catch (error) {
-    fc100PlanningState.lastResult = `${actionText}失败：${getFc100ErrorText(error, '接口调用失败')}`
-  } finally {
-    fc100PlanningState.loadingAction = ''
-  }
-}
-
-function handleFc100RopeDown () {
-  return sendFc100TerminalCommand('ropeDown', '放绳', false, deliveryApi.sendFc100RopeDownCommand)
-}
-
-function handleFc100RopeStop () {
-  return sendFc100TerminalCommand('ropeStop', '停止放收绳', false, deliveryApi.sendFc100RopeStopCommand)
-}
-
-function handleFc100RopeUp () {
-  return sendFc100TerminalCommand('ropeUp', '收绳', false, deliveryApi.sendFc100RopeUpCommand)
-}
-
-function handleFc100ReleaseHook () {
-  return sendFc100TerminalCommand('releaseHook', '脱钩', true, deliveryApi.sendFc100ReleaseHookCommand)
-}
-
-function handleFc100ReturnHome () {
-  return sendFc100TerminalCommand('returnHome', '返航', true, (deviceSn, body) =>
-    deliveryApi.sendDeviceCommand(deviceSn, 'return_home', body))
-}
-
-async function handleFc100RefreshDevices () {
-  fc100PlanningState.loadingAction = 'devices'
-  try {
-    const res = await deliveryApi.listDevices(workspaceId)
-    const body = getFc100ApiBody(res)
-    if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100设备列表获取失败：${body.message || '接口返回异常'}`
-      return
-    }
-    fc100PlanningState.devices = body.data || []
-    if (!fc100AircraftDevices.value.some(device => device.deviceSn === fc100PlanningState.selectedDeviceSn)) {
-      fc100PlanningState.selectedDeviceSn = fc100AircraftDevices.value.find(device => device.bindStatus === 'drone')?.deviceSn ||
-        fc100AircraftDevices.value[0]?.deviceSn ||
-        ''
-    }
-    if (fc100PlanningState.selectedDeviceSn) {
-      await handleFc100SelectDevice(fc100PlanningState.selectedDeviceSn)
-    } else {
-      fc100PlanningState.selectedDeviceProps = null
-      fc100PlanningState.lastResult = 'FC100设备列表为空，请确认飞机已绑定到当前FC100 workspace/group。'
-    }
-  } catch (error) {
-    fc100PlanningState.lastResult = `FC100设备列表获取失败：${getFc100ErrorText(error, '接口调用失败')}`
-  } finally {
-    fc100PlanningState.loadingAction = ''
-  }
-}
-
-async function handleFc100SelectDevice (deviceSn: string) {
-  fc100PlanningState.selectedDeviceSn = deviceSn
-  if (!deviceSn) {
-    fc100PlanningState.selectedDeviceProps = null
-    return
-  }
-  // 用户选择 FC100 设备即设为跟踪目标（进行中的任务会在轮询里持续覆盖）。
-  setTrackedAircraft(deviceSn)
-  await refreshFc100SelectedDeviceProps(deviceSn)
-}
-
-async function refreshFc100SelectedDeviceProps (deviceSn = fc100PlanningState.selectedDeviceSn) {
-  if (!deviceSn) return null
-  const res = await deliveryApi.deviceProps(deviceSn)
-  const body = getFc100ApiBody(res)
-  if (body.code !== 0) {
-    fc100PlanningState.lastResult = `FC100设备物模型获取失败：${body.message || '接口返回异常'}`
-    return null
-  }
-  fc100PlanningState.selectedDeviceProps = body.data || null
-  syncFc100DeviceFlightPosition(fc100PlanningState.selectedDeviceProps)
-  return fc100PlanningState.selectedDeviceProps
-}
-
-async function refreshFc100TaskStatus (showLoading = true) {
-  const taskId = fc100PlanningState.taskId
-  if (!taskId) return null
-  if (showLoading) {
-    fc100PlanningState.loadingAction = 'status'
-  }
-  try {
-    const res = await deliveryApi.waylineTaskStatus(taskId)
-    const body = getFc100ApiBody(res)
-    if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100任务状态获取失败：${body.message || '接口返回异常'}`
-      return null
-    }
-    fc100PlanningState.taskStatus = body.data || null
-    fc100PlanningState.lastResult = formatFc100TaskStatus(fc100PlanningState.taskStatus)
-    return fc100PlanningState.taskStatus
-  } catch (error) {
-    fc100PlanningState.lastResult = `FC100任务状态获取失败：${getFc100ErrorText(error, '接口调用失败')}`
-    return null
-  } finally {
-    if (showLoading) {
-      fc100PlanningState.loadingAction = ''
-    }
-  }
-}
-
-async function refreshFc100RealtimeState () {
-  if (fc100RealtimeRefreshing) return
-  if (!showPlanningTools.value) return
-  fc100RealtimeRefreshing = true
-  try {
-    if (fc100PlanningState.selectedDeviceSn) {
-      await refreshFc100SelectedDeviceProps()
-    }
-    if (fc100PlanningState.taskId) {
-      await refreshFc100TaskStatus(false)
-    }
-  } catch (error) {
-    // Realtime refresh stays quiet; explicit refresh/actions still show errors.
-  } finally {
-    fc100RealtimeRefreshing = false
-  }
-}
-
-function startFc100RealtimeRefresh () {
-  if (fc100RealtimeTimer !== null) return
-  fc100RealtimeTimer = window.setInterval(refreshFc100RealtimeState, 3000)
-}
-
-function stopFc100RealtimeRefresh () {
-  if (fc100RealtimeTimer === null) return
-  window.clearInterval(fc100RealtimeTimer)
-  fc100RealtimeTimer = null
-  fc100RealtimeRefreshing = false
-}
-
-function buildFc100StartPreflightWarnings (props: DeliveryDeviceProperties | null) {
-  const warnings: string[] = []
-  if (!props) {
-    warnings.push('未获取到飞行器状态')
-    return warnings
-  }
-  if (props.onlineStatus === false) warnings.push('飞行器离线')
-  if (props.batteryPercent !== null && props.batteryPercent !== undefined && props.batteryPercent < 30) warnings.push('电量低于30%')
-  if (!props.rtkStatus) warnings.push('RTK/GPS状态未知')
-  if (props.latitude === null || props.latitude === undefined || props.longitude === null || props.longitude === undefined) warnings.push('未获取到经纬度')
-  return warnings
-}
-
-async function onFc100UseGeneratedWayline (record: PlannedWaylineRecord) {
-  fc100PlanningState.selectedRecord = record
-  previewPlannedWayline(record)
-  if (!fc100PlanningState.devices.length) {
-    await handleFc100RefreshDevices()
-  }
-  await handleFc100ImportGeneratedWaylineTask(record)
-}
-
-function onFc100PreviewGeneratedWayline (record: PlannedWaylineRecord) {
-  fc100PlanningState.selectedRecord = record
-  previewPlannedWayline(record)
-}
-
-function selectFc100GeneratedWayline (record: PlannedWaylineRecord) {
-  fc100PlanningState.selectedRecord = record
-  previewPlannedWayline(record)
-  if (!record.kmzUrl) {
-    message.warning('请先生成航线文件后再创建FC100任务。')
-  }
-}
-
-async function handleFc100ImportGeneratedWaylineTask (record = fc100PlanningState.selectedRecord) {
-  if (!record) {
-    message.warning('请先选择已保存规划航线。')
-    return
-  }
-  if (!record.kmzUrl) {
-    message.warning('请先生成航线文件后再导入FC100。')
-    return
-  }
-  const deviceSn = getSelectedFc100DeviceSn()
-  if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
-    return
-  }
-  fc100PlanningState.selectedRecord = record
-  fc100PlanningState.selectedDeviceSn = deviceSn
-  fc100PlanningState.loadingAction = 'import'
-  try {
-    const res = await deliveryApi.importGeneratedPlannedWaylineTask({
-      workspaceId,
-      plannedWaylineId: record.plannedWaylineId,
-      deviceSn,
-      taskName: sanitizeDjiWaylineName(record.name || 'FC100规划航线'),
-      operatorId: localStorage.getItem(ELocalStorageKey.Username) || 'web',
-      remark: `created from planned wayline ${record.plannedWaylineId}`,
-    })
-    const body = getFc100ApiBody(res)
-    if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100导入生成KMZ并创建任务失败：${body.message || '接口返回异常'}`
-      return
-    }
-    fc100PlanningState.taskId = body.data?.taskId || ''
-    fc100PlanningState.taskStatus = null
-    fc100PlanningState.lastResult = `FC100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
-    message.success('FC100航线任务已创建')
-  } catch (error) {
-    fc100PlanningState.lastResult = `FC100导入生成KMZ并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
-  } finally {
-    fc100PlanningState.loadingAction = ''
-  }
-}
-
-async function handleFc100StartGeneratedWaylineTask () {
-  const taskId = fc100PlanningState.taskId
-  if (!taskId) {
-    message.warning('请先创建FC100任务。')
-    return
-  }
-  const deviceSn = getSelectedFc100DeviceSn()
-  if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
-    return
-  }
-  fc100PlanningState.loadingAction = 'start'
-  try {
-    const props = await refreshFc100SelectedDeviceProps(deviceSn)
-    const warnings = buildFc100StartPreflightWarnings(props)
-    if (warnings.length) {
-      const text = `FC100 开始执行航线前检查未通过：${warnings.join('；')}`
-      fc100PlanningState.lastResult = text
-      message.warning(text)
-      return
-    }
-    const res = await deliveryApi.startWaylineTask(taskId, deviceSn)
-    const body = getFc100ApiBody(res)
-    if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100开始执行失败：${body.message || '接口返回异常'}`
-      return
-    }
-    const operation = body.data as DeliveryTaskOperationResult | null
-    fc100PlanningState.lastResult = formatFc100OperationResult(operation, 'FC100开始执行航线指令已发送。')
-    if (operation?.accepted === false) {
-      message.warning(fc100PlanningState.lastResult)
-    } else {
-      message.success('FC100开始执行航线指令已发送')
-    }
-    await handleFc100GeneratedWaylineTaskStatus()
-  } catch (error) {
-    fc100PlanningState.lastResult = `FC100开始执行失败：${getFc100ErrorText(error, '接口调用失败')}`
-  } finally {
-    fc100PlanningState.loadingAction = ''
-  }
-}
-
-async function handleFc100GeneratedWaylineTaskStatus () {
-  if (!fc100PlanningState.taskId) {
-    message.warning('请先创建FC100任务。')
-    return
-  }
-  await refreshFc100TaskStatus(true)
-}
 const pagination :IPage = {
   page: 1,
   total: -1,
@@ -2582,8 +1821,6 @@ onMounted(() => {
     // Populate online aircraft list for planning target selection.
     selectedAircraftSn.value = planningState.aircraftSn || ''
     refreshOnlineAircrafts()
-    handleFc100RefreshDevices().catch(() => {})
-    startFc100RealtimeRefresh()
     topoTimer = window.setInterval(refreshOnlineAircrafts, 5000)
   }
   // 每次进入航线页面：请求地图以飞机当前位置为中心（飞机位置就绪后由 GMap 居中一次）。
@@ -2591,7 +1828,6 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  stopFc100RealtimeRefresh()
   if (topoTimer !== null) {
     window.clearInterval(topoTimer)
     topoTimer = null
@@ -3588,6 +2824,18 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   .wayline-map-planning-mini {
     right: 12px;
     bottom: 64px;
+  }
+}
+.planner-mode-tabs {
+  padding: 0 10px;
+  :deep(.ant-tabs-nav) {
+    margin-bottom: 0;
+  }
+  :deep(.ant-tabs-tab) {
+    color: #8c8c8c;
+  }
+  :deep(.ant-tabs-tab-active .ant-tabs-tab-btn) {
+    color: #4da3ff;
   }
 }
 </style>
