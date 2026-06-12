@@ -1120,57 +1120,76 @@ export default defineComponent({
     }
   }
 
-  &:deep(.wayline-planning-marker) {
-    position: relative;
-    width: 26px;
-    height: 30px;
-    transform: translateY(1px);
+  // S2 信息常显航点（司空2 风格）：序号圆点 + 常驻信息牌
+  &:deep(.planner-wp-marker) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transform: translateY(11px); // anchor bottom-center 时圆点中心对准坐标
   }
 
-  &:deep(.wayline-planning-marker span) {
-    position: relative;
-    z-index: 1;
+  &:deep(.planner-wp-dot) {
+    flex: 0 0 auto;
+    display: flex;
+    width: 22px;
+    height: 22px;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #43d675;
+    border-radius: 50%;
+    background: #10243a;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+    color: #d7ffe8;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  &:deep(.planner-wp-card) {
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(10, 18, 30, 0.85);
+    color: #b8c8da;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  &:deep(.planner-wp-marker--selected .planner-wp-dot) {
+    background: #43d675;
+    color: #06270f;
+    transform: scale(1.18);
+  }
+
+  &:deep(.planner-wp-marker--selected .planner-wp-card) {
+    border: 1px solid #43d675;
+    color: #d7ffe8;
+  }
+
+  &:deep(.planner-wp-marker--mini .planner-wp-card) {
+    display: none;
+  }
+
+  &:deep(.planner-seg-label) {
+    padding: 0 6px;
+    border-radius: 6px;
+    background: rgba(10, 18, 30, 0.75);
+    color: #cfe4ff;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  &:deep(.planner-home-marker) {
     display: flex;
     width: 24px;
     height: 24px;
     align-items: center;
     justify-content: center;
-    border: 2px solid #fff;
+    border: 2.5px solid #ffd02e;
     border-radius: 50%;
-    background: #00bcd4;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    color: #fff;
+    background: #0b1320;
+    color: #ffd02e;
     font-size: 12px;
     font-weight: 700;
-  }
-
-  &:deep(.wayline-planning-marker::after) {
-    content: '';
-    position: absolute;
-    left: 9px;
-    bottom: 2px;
-    width: 8px;
-    height: 8px;
-    transform: rotate(45deg);
-    border-right: 2px solid #fff;
-    border-bottom: 2px solid #fff;
-    background: #00bcd4;
-  }
-
-  &:deep(.wayline-planning-marker--start span),
-  &:deep(.wayline-planning-marker--start::after) {
-    background: #21c45d;
-  }
-
-  &:deep(.wayline-planning-marker--selected span) {
-    border-color: #ffd666;
-    background: #1677ff;
-    transform: scale(1.12);
-  }
-
-  &:deep(.wayline-planning-marker--selected::after) {
-    border-color: #ffd666;
-    background: #1677ff;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
   }
 
   // antd button 光晕

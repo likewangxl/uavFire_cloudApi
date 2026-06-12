@@ -34,19 +34,9 @@
 import { getPlanningStateRaw, moveWaypoint, removeWaypoint, selectWaypoint } from '/@/hooks/use-wayline-planning'
 import type { PlannedWaypoint } from '/@/hooks/use-wayline-planning'
 import { setParamDrawerOpen } from '/@/hooks/use-planner-ui'
-import { formatNumber } from './wayline-format'
+import { WAYPOINT_ACTION_LABELS as ACTION_LABELS, formatNumber } from './wayline-format'
 
 const planningState = getPlanningStateRaw()
-
-const ACTION_LABELS: Record<string, string> = {
-  takePhoto: '拍照',
-  startRecord: '录像',
-  stopRecord: '停录',
-  gimbalRotate: '云台',
-  hover: '悬停',
-  focus: '对焦',
-  rotateYaw: '转向',
-}
 
 function actionsSummary (wp: PlannedWaypoint) {
   if (!wp.actions || wp.actions.length === 0) return ''

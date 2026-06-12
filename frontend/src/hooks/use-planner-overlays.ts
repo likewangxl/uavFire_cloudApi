@@ -7,7 +7,14 @@ import {
   getPlanningStateRaw,
   selectWaypoint,
 } from '/@/hooks/use-wayline-planning'
+import type { PlannedWaypoint } from '/@/hooks/use-wayline-planning'
 import { getPlannerUiRaw } from '/@/hooks/use-planner-ui'
+import { WAYPOINT_ACTION_LABELS } from '/@/components/wayline-planner/wayline-format'
+// @ts-ignore .mjs 共用模块（node 测试可直跑）
+import { haversineMeters } from '/@/components/wayline-planner/planner-utils.mjs'
+
+/** 低于该缩放级别时收起信息牌/距离标签，防止覆盖物拥挤 */
+const LABEL_MIN_ZOOM = 15
 
 export function usePlannerOverlays (
   getMap: () => any,
@@ -26,6 +33,11 @@ export function usePlannerOverlays (
 
   const planningMarkers: any[] = []
   let planningPolyline: any = null
+  const distanceLabels: any[] = []
+  let homeMarker: any = null
+  let homeGuideLine: any = null
+  let labelsVisible = true
+  let zoomListenerBound = false
   let flightPositionMarker: any = null
   let flightTrackPolyline: any = null
   let flightTrackAircraftSn = ''
@@ -46,9 +58,19 @@ export function usePlannerOverlays (
     const map = getMap()
     planningMarkers.forEach(m => map?.remove(m))
     planningMarkers.length = 0
+    distanceLabels.forEach(m => map?.remove(m))
+    distanceLabels.length = 0
     if (planningPolyline) {
       map?.remove(planningPolyline)
       planningPolyline = null
+    }
+    if (homeMarker) {
+      map?.remove(homeMarker)
+      homeMarker = null
+    }
+    if (homeGuideLine) {
+      map?.remove(homeGuideLine)
+      homeGuideLine = null
     }
   }
 
@@ -66,28 +88,89 @@ export function usePlannerOverlays (
     flightTrackPath.length = 0
   }
 
-  function waypointMarkerContent (idx: number, id: string) {
-    const isStart = idx === 0
-    const isSelected = planningState.selectedWaypointId === id
+  // S2 信息常显风格：序号圆点 + 常驻信息牌（高度·速度·动作摘要），低缩放收起信息牌
+  function waypointMarkerContent (idx: number, wp: PlannedWaypoint) {
+    const isSelected = planningState.selectedWaypointId === wp.id
+    const speed = wp.speed || planningState.maxSpeed
+    const acts = (wp.actions || [])
+      .map(a => WAYPOINT_ACTION_LABELS[a.actuatorFunc] || a.actuatorFunc)
+      .join('·')
+    const info = `${wp.height}m · ${speed}m/s${acts ? ' · ' + acts : ''}`
     const classes = [
-      'wayline-planning-marker',
-      isStart ? 'wayline-planning-marker--start' : '',
-      isSelected ? 'wayline-planning-marker--selected' : '',
+      'planner-wp-marker',
+      isSelected ? 'planner-wp-marker--selected' : '',
+      labelsVisible ? '' : 'planner-wp-marker--mini',
     ].filter(Boolean).join(' ')
-    return `<div class="${classes}"><span>${idx + 1}</span></div>`
+    return `<div class="${classes}"><span class="planner-wp-dot">${idx + 1}</span><span class="planner-wp-card">${info}</span></div>`
+  }
+
+  function formatSegmentDistance (meters: number) {
+    return meters >= 1000 ? `${(meters / 1000).toFixed(2)}km` : `${Math.round(meters)}m`
+  }
+
+  function rebuildDistanceLabels (AMap: any, map: any, waypoints: PlannedWaypoint[]) {
+    if (!labelsVisible || waypoints.length < 2) return
+    for (let i = 1; i < waypoints.length; i++) {
+      const a = waypoints[i - 1]
+      const b = waypoints[i]
+      const d = haversineMeters(a.gcjLng, a.gcjLat, b.gcjLng, b.gcjLat)
+      const label = new AMap.Marker({
+        position: [(a.gcjLng + b.gcjLng) / 2, (a.gcjLat + b.gcjLat) / 2],
+        content: `<div class="planner-seg-label">${formatSegmentDistance(d)}</div>`,
+        anchor: 'center',
+        zIndex: 105,
+      })
+      map.add(label)
+      distanceLabels.push(label)
+    }
+  }
+
+  // 起飞点 H（设计 v2 分模式）：监测页签用飞机当前位置近似；无位置不画
+  function rebuildHomeMarker (AMap: any, map: any, waypoints: PlannedWaypoint[]) {
+    if (plannerUi.activeTab !== 'monitor') return
+    const pos = planningState.flightPosition
+    if (!pos || waypoints.length === 0) return
+    homeMarker = new AMap.Marker({
+      position: [pos.gcjLng, pos.gcjLat],
+      content: '<div class="planner-home-marker">H</div>',
+      anchor: 'center',
+      zIndex: 108,
+    })
+    homeGuideLine = new AMap.Polyline({
+      path: [[pos.gcjLng, pos.gcjLat], [waypoints[0].gcjLng, waypoints[0].gcjLat]],
+      strokeColor: '#8a93a3',
+      strokeWeight: 2,
+      strokeOpacity: 0.9,
+      strokeStyle: 'dashed',
+    })
+    map.add([homeMarker, homeGuideLine])
+  }
+
+  function bindZoomListener (map: any) {
+    if (zoomListenerBound) return
+    map.on('zoomend', () => {
+      const zoom = Number(map.getZoom?.())
+      const next = !Number.isFinite(zoom) || zoom >= LABEL_MIN_ZOOM
+      if (next !== labelsVisible) {
+        labelsVisible = next
+        rebuildPlanningOverlays()
+      }
+    })
+    zoomListenerBound = true
   }
 
   function rebuildPlanningOverlays () {
     const AMap = getAMap()
     const map = getMap()
     if (!AMap || !map) return
+    bindZoomListener(map)
     clearPlanningOverlays()
     const waypoints = renderPlanningWaypoints.value
     if (waypoints.length === 0) return
     waypoints.forEach((wp, idx) => {
       const marker = new AMap.Marker({
         position: [wp.gcjLng, wp.gcjLat],
-        content: waypointMarkerContent(idx, wp.id),
+        content: waypointMarkerContent(idx, wp),
         anchor: 'bottom-center',
         zIndex: planningState.selectedWaypointId === wp.id ? 130 : 110,
         extData: { waylinePlanningId: wp.id },
@@ -99,14 +182,16 @@ export function usePlannerOverlays (
     if (waypoints.length >= 2) {
       planningPolyline = new AMap.Polyline({
         path: waypoints.map(w => [w.gcjLng, w.gcjLat]),
-        strokeColor: '#00e5ff',
+        strokeColor: '#43d675',
         strokeOpacity: 0.92,
-        strokeWeight: 4,
+        strokeWeight: 6,
         strokeStyle: 'solid',
         showDir: true,
       })
       map.add(planningPolyline)
     }
+    rebuildDistanceLabels(AMap, map, waypoints)
+    rebuildHomeMarker(AMap, map, waypoints)
     fitPlanningPreviewToMap()
     updateFlightPositionOverlay()
   }
@@ -176,6 +261,17 @@ export function usePlannerOverlays (
       map.add(flightTrackPolyline)
     } else {
       flightTrackPolyline.setPath(flightTrackPath)
+    }
+    // H 标记随飞机当前位置移动（监测页签近似起飞点）
+    if (homeMarker) {
+      homeMarker.setPosition(lngLat)
+      const wps = renderPlanningWaypoints.value
+      if (homeGuideLine && wps.length > 0) {
+        homeGuideLine.setPath([lngLat, [wps[0].gcjLng, wps[0].gcjLat]])
+      }
+    } else if (plannerUi.activeTab === 'monitor' && renderPlanningWaypoints.value.length > 0) {
+      // 飞机位置首次到达且航线已存在：补画 H
+      rebuildHomeMarker(AMap, map, renderPlanningWaypoints.value as PlannedWaypoint[])
     }
     // 进入页面时请求过居中、但当时还没有飞机位置：现在位置到了，居中一次。
     if (pendingAircraftRecenter) {

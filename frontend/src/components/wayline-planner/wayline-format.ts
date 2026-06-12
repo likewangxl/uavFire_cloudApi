@@ -8,6 +8,17 @@ export interface FileItem extends File {
   url?: string;
 }
 
+/** 航点动作摘要标签（地图信息牌与航点列表共用） */
+export const WAYPOINT_ACTION_LABELS: Record<string, string> = {
+  takePhoto: '拍照',
+  startRecord: '录像',
+  stopRecord: '停录',
+  gimbalRotate: '云台',
+  hover: '悬停',
+  focus: '对焦',
+  rotateYaw: '转向',
+}
+
 export function formatNumber (value: unknown): string {
   const n = Number(value)
   return Number.isFinite(n) ? String(n) : '-'

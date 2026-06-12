@@ -124,8 +124,10 @@ test('wayline map exposes FlightHub-style layer tools and route stats', () => {
   assert.match(gmapSource, /AMap\.TileLayer\.Satellite/)
   assert.match(gmapSource, /AMap\.createDefaultLayer/)
   assert.match(overlaysSource, /selectWaypoint\(wp\.id\)/)
-  assert.match(overlaysSource, /wayline-planning-marker--start/)
-  assert.match(overlaysSource, /wayline-planning-marker--selected/)
+  assert.match(overlaysSource, /planner-wp-marker/)
+  assert.match(overlaysSource, /planner-wp-marker--selected/)
+  assert.match(overlaysSource, /planner-seg-label/)
+  assert.match(overlaysSource, /planner-home-marker/)
   assert.match(overlaysSource, /showDir:\s*true/)
 
   const statsBarSource = readSource('src/components/wayline-planner/MissionStatsBar.vue')
