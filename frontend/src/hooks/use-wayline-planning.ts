@@ -553,6 +553,53 @@ export function removeWaypoint (id: string) {
   }
 }
 
+/** 地图拖拽航点改位（GCJ02 输入，自动同步 WGS84） */
+export function updateWaypointPositionGcj (id: string, gcjLng: number, gcjLat: number) {
+  if (state.executing) {
+    message.warning('Cannot edit waypoints while executing.')
+    return
+  }
+  const wp = state.waypoints.find(w => w.id === id)
+  if (!wp || !Number.isFinite(gcjLng) || !Number.isFinite(gcjLat)) return
+  const [wgsLng, wgsLat] = gcj02towgs84(gcjLng, gcjLat) as [number, number]
+  wp.gcjLng = gcjLng
+  wp.gcjLat = gcjLat
+  wp.wgsLng = wgsLng
+  wp.wgsLat = wgsLat
+  persistDraft()
+}
+
+/** 在 afterId 航点之后插入新航点（中点插点）。与前后相邻点均需满足最小间距。 */
+export function insertWaypointAfterGcj (afterId: string, gcjLng: number, gcjLat: number): PlannedWaypoint | null {
+  if (state.executing) {
+    message.warning('Cannot edit waypoints while executing.')
+    return null
+  }
+  const idx = state.waypoints.findIndex(w => w.id === afterId)
+  if (idx < 0 || !Number.isFinite(gcjLng) || !Number.isFinite(gcjLat)) return null
+  const prev = state.waypoints[idx]
+  const next = state.waypoints[idx + 1]
+  const tooClose = distanceMeters(prev.gcjLng, prev.gcjLat, gcjLng, gcjLat) < MIN_WAYPOINT_SPACING_M ||
+    (next && distanceMeters(next.gcjLng, next.gcjLat, gcjLng, gcjLat) < MIN_WAYPOINT_SPACING_M)
+  if (tooClose) {
+    message.warning(`Waypoints must be at least ${MIN_WAYPOINT_SPACING_M} m apart (DJI firmware limit).`)
+    return null
+  }
+  const [wgsLng, wgsLat] = gcj02towgs84(gcjLng, gcjLat) as [number, number]
+  const wp: PlannedWaypoint = {
+    id: uuidv4(),
+    gcjLng,
+    gcjLat,
+    wgsLng,
+    wgsLat,
+    height: prev.height,
+  }
+  state.waypoints.splice(idx + 1, 0, wp)
+  state.selectedWaypointId = wp.id
+  persistDraft()
+  return wp
+}
+
 export function moveWaypoint (id: string, direction: 'up' | 'down') {
   if (state.executing) return
   const idx = state.waypoints.findIndex(w => w.id === id)

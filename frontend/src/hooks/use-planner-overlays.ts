@@ -5,7 +5,10 @@ import { computed, watch } from 'vue'
 import {
   addWaypointGcj,
   getPlanningStateRaw,
+  insertWaypointAfterGcj,
+  removeWaypoint,
   selectWaypoint,
+  updateWaypointPositionGcj,
 } from '/@/hooks/use-wayline-planning'
 import type { PlannedWaypoint } from '/@/hooks/use-wayline-planning'
 import { getPlannerUiRaw } from '/@/hooks/use-planner-ui'
@@ -30,6 +33,12 @@ export function usePlannerOverlays (
     }
     return planningState.previewWaypoints.length > 0 ? planningState.previewWaypoints : planningState.waypoints
   })
+
+  // 仅监测页签、非执行中、且显示的是编辑航点（非预览）时允许地图直接编辑
+  const canEditWaypoints = computed(() =>
+    plannerUi.activeTab === 'monitor' &&
+    !planningState.executing &&
+    planningState.previewWaypoints.length === 0)
 
   const planningMarkers: any[] = []
   let planningPolyline: any = null
@@ -108,6 +117,25 @@ export function usePlannerOverlays (
     return meters >= 1000 ? `${(meters / 1000).toFixed(2)}km` : `${Math.round(meters)}m`
   }
 
+  // 相邻航点中点的 "+" 幽灵插点
+  function rebuildInsertGhosts (AMap: any, map: any, waypoints: PlannedWaypoint[]) {
+    for (let i = 1; i < waypoints.length; i++) {
+      const a = waypoints[i - 1]
+      const b = waypoints[i]
+      const midLng = (a.gcjLng + b.gcjLng) / 2
+      const midLat = (a.gcjLat + b.gcjLat) / 2
+      const ghost = new AMap.Marker({
+        position: [midLng, midLat],
+        content: '<div class="planner-insert-ghost">+</div>',
+        anchor: 'center',
+        zIndex: 109,
+      })
+      ghost.on('click', () => insertWaypointAfterGcj(a.id, midLng, midLat))
+      map.add(ghost)
+      planningMarkers.push(ghost)
+    }
+  }
+
   function rebuildDistanceLabels (AMap: any, map: any, waypoints: PlannedWaypoint[]) {
     if (!labelsVisible || waypoints.length < 2) return
     for (let i = 1; i < waypoints.length; i++) {
@@ -167,18 +195,33 @@ export function usePlannerOverlays (
     clearPlanningOverlays()
     const waypoints = renderPlanningWaypoints.value
     if (waypoints.length === 0) return
+    const editable = canEditWaypoints.value
     waypoints.forEach((wp, idx) => {
       const marker = new AMap.Marker({
         position: [wp.gcjLng, wp.gcjLat],
         content: waypointMarkerContent(idx, wp),
         anchor: 'bottom-center',
         zIndex: planningState.selectedWaypointId === wp.id ? 130 : 110,
+        draggable: editable,
         extData: { waylinePlanningId: wp.id },
       })
       marker.on('click', () => selectWaypoint(wp.id))
+      if (editable) {
+        marker.on('dragend', (e: any) => {
+          const lng = e?.lnglat?.getLng?.()
+          const lat = e?.lnglat?.getLat?.()
+          if (Number.isFinite(lng) && Number.isFinite(lat)) {
+            updateWaypointPositionGcj(wp.id, lng, lat)
+          }
+        })
+        marker.on('rightclick', () => removeWaypoint(wp.id))
+      }
       map.add(marker)
       planningMarkers.push(marker)
     })
+    if (editable && labelsVisible) {
+      rebuildInsertGhosts(AMap, map, waypoints)
+    }
     if (waypoints.length >= 2) {
       planningPolyline = new AMap.Polyline({
         path: waypoints.map(w => [w.gcjLng, w.gcjLat]),
@@ -313,7 +356,7 @@ export function usePlannerOverlays (
   })
 
   watch(
-    () => `${plannerUi.activeTab}|${planningState.selectedWaypointId}|${renderPlanningWaypoints.value.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|')}`,
+    () => `${plannerUi.activeTab}|${canEditWaypoints.value}|${planningState.selectedWaypointId}|${renderPlanningWaypoints.value.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}:${w.speed ?? ''}:${w.actions?.length ?? 0}`).join('|')}`,
     () => rebuildPlanningOverlays()
   )
 

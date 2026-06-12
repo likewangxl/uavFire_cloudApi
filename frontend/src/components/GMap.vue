@@ -1177,6 +1177,21 @@ export default defineComponent({
     white-space: nowrap;
   }
 
+  &:deep(.planner-insert-ghost) {
+    display: flex;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px dashed #43d675;
+    border-radius: 50%;
+    background: rgba(67, 214, 117, 0.22);
+    color: #43d675;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
   &:deep(.planner-home-marker) {
     display: flex;
     width: 24px;
