@@ -159,10 +159,8 @@ const terrainPolygon = computed(() => {
 <style lang="scss" scoped>
 .elevation-profile {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 680px; // 固定宽度居中，不顶到两侧面板；航点多时横轴自动压缩
-  max-width: calc(100% - 24px);
+  left: 304px; // 左侧面板列(280px)右缘外
+  right: 344px; // 航点参数抽屉(320px)左缘外，永不被遮挡
   bottom: 64px; // 避开底部工具栏
   height: 140px;
   background: rgba(13, 17, 23, 0.93);

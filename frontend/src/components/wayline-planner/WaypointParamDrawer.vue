@@ -288,19 +288,24 @@ function onRemove () {
   }
 }
 
-/* select 弹层渲染在 body 上，深色风格全局类（任务参数面板与航点抽屉共用） */
-.planner-dark-dropdown {
-  background: #10161f;
+/* select 弹层渲染在 body 上，深色风格全局类（任务参数面板与航点抽屉共用）。
+   用 .ant-select-dropdown.planner-dark-dropdown 提高优先级压过 antd 默认白底。 */
+.ant-select-dropdown.planner-dark-dropdown {
+  background: rgba(13, 17, 23, 0.97); // 与面板同色
   border: 1px solid #2c3a4f;
   .ant-select-item {
-    color: #cfd8e3;
+    color: #fff;
   }
   .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
     background: #1d2a3c;
+    color: #fff;
   }
   .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
-    background: rgba(67, 214, 117, 0.15);
-    color: #d7ffe8;
+    background: rgba(67, 214, 117, 0.18);
+    color: #fff;
+  }
+  .ant-select-item-option-disabled {
+    color: #5c6c80;
   }
 }
 </style>
