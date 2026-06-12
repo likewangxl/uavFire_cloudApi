@@ -43,6 +43,18 @@ function assertPlannedWaypoint (waypoint: PlannedWaypoint, index: number): Plann
     wgsLng,
     wgsLat,
     height: positiveNumber(waypoint.height, DEFAULT_PLANNED_WAYLINE_HEIGHT),
+    // L1 航点级覆写与动作必须透传，否则保存即丢失（后端 PlannedWaypointDTO 全字段支持）
+    speed: waypoint.speed ?? undefined,
+    gimbalPitch: waypoint.gimbalPitch ?? undefined,
+    gimbalYaw: waypoint.gimbalYaw ?? undefined,
+    headingMode: waypoint.headingMode ?? undefined,
+    headingAngle: waypoint.headingAngle ?? undefined,
+    poiLng: waypoint.poiLng ?? undefined,
+    poiLat: waypoint.poiLat ?? undefined,
+    poiAlt: waypoint.poiAlt ?? undefined,
+    turnMode: waypoint.turnMode ?? undefined,
+    turnDamping: waypoint.turnDamping ?? undefined,
+    actions: Array.isArray(waypoint.actions) && waypoint.actions.length > 0 ? waypoint.actions : undefined,
   }
 }
 
@@ -68,6 +80,17 @@ function normalizePlannedWaypointResponse (record: any): PlannedWaypoint {
     wgsLng: record?.wgsLng ?? record?.wgs_lng,
     wgsLat: record?.wgsLat ?? record?.wgs_lat,
     height: record?.height,
+    speed: record?.speed ?? undefined,
+    gimbalPitch: record?.gimbalPitch ?? record?.gimbal_pitch ?? undefined,
+    gimbalYaw: record?.gimbalYaw ?? record?.gimbal_yaw ?? undefined,
+    headingMode: record?.headingMode ?? record?.heading_mode ?? undefined,
+    headingAngle: record?.headingAngle ?? record?.heading_angle ?? undefined,
+    poiLng: record?.poiLng ?? record?.poi_lng ?? undefined,
+    poiLat: record?.poiLat ?? record?.poi_lat ?? undefined,
+    poiAlt: record?.poiAlt ?? record?.poi_alt ?? undefined,
+    turnMode: record?.turnMode ?? record?.turn_mode ?? undefined,
+    turnDamping: record?.turnDamping ?? record?.turn_damping ?? undefined,
+    actions: Array.isArray(record?.actions) && record.actions.length > 0 ? record.actions : undefined,
   }
 }
 

@@ -462,3 +462,17 @@ test('wayline page exposes FC100 planning from saved generated KMZ records', () 
   assert.match(deliveryApi, /\/api\/fire\/delivery\/wayline-tasks\/import-planned-create/)
   assert.match(deliveryApi, /startWaylineTask:\s*\(taskId:\s*string,\s*deviceSn\?:\s*string/)
 })
+
+test('planned wayline api preserves per-waypoint overrides and actions on save and load', () => {
+  const source = readFileSync(waylineApiPath, 'utf8')
+  const assertFn = source.slice(source.indexOf('function assertPlannedWaypoint'), source.indexOf('function validatePlannedWaylineBody'))
+  // 保存路径：校验函数必须透传 L1 覆写字段与动作
+  for (const field of ['speed', 'gimbalPitch', 'gimbalYaw', 'headingMode', 'headingAngle', 'poiLng', 'poiLat', 'poiAlt', 'turnMode', 'turnDamping', 'actions']) {
+    assert.match(assertFn, new RegExp(`\\b${field}\\b`), `assertPlannedWaypoint drops ${field}`)
+  }
+  // 读回路径：响应归一化必须带回动作与覆写
+  const normFn = source.slice(source.indexOf('function normalizePlannedWaypointResponse'), source.indexOf('function normalizePlannedWaylineResponse'))
+  for (const field of ['speed', 'gimbalPitch', 'turnMode', 'actions']) {
+    assert.match(normFn, new RegExp(`\\b${field}\\b`), `normalizePlannedWaypointResponse drops ${field}`)
+  }
+})
