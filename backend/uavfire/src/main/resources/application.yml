@@ -262,3 +262,9 @@ fc100:
     default-payload-enum-value: 99
     take-off-security-height: 20
     global-transitional-speed: 15
+
+# DEM 地形高程（Copernicus GLO-30 转 .hgt，见 scripts/fetch-dem.sh）。
+# 配置 dem-dir 后 HgtTerrainElevationService 生效；不配置则回落 MissingTerrainElevationService。
+uavfire:
+  terrain:
+    dem-dir: ${UAVFIRE_DEM_DIR:data/dem}
