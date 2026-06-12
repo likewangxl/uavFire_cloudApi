@@ -13,13 +13,17 @@
       <circle v-for="p in routeDots" :key="p.idx" :cx="p.x" :cy="p.y" r="3" fill="#43d675" />
     </svg>
   </div>
-  <a-button
+  <button
     v-else-if="routeWaypoints.length >= 2"
+    type="button"
     class="ep-reopen"
-    size="small"
     @click="setProfileOpen(true)">
-    高度剖面
-  </a-button>
+    <svg viewBox="0 0 36 14" class="ep-reopen-icon">
+      <polyline points="1,11 8,6 15,8 22,3 29,5 35,9" fill="none" stroke="#43d675" stroke-width="2" stroke-linejoin="round" />
+    </svg>
+    <span>高度剖面</span>
+    <span class="ep-reopen-arrow">⌃</span>
+  </button>
 </template>
 
 <script lang="ts" setup>
@@ -196,9 +200,32 @@ const terrainPolygon = computed(() => {
 }
 .ep-reopen {
   position: absolute;
-  right: 12px;
-  bottom: 64px;
+  left: 304px; // 左下：紧贴左侧面板列右缘
+  bottom: 64px; // 与收起前的面板底边同高
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 14px;
+  background: rgba(13, 17, 23, 0.93);
+  border: 1px solid #2c3a4f;
+  border-radius: 6px;
+  color: #cfd8e3;
+  font-size: 12px;
+  cursor: pointer;
   pointer-events: auto;
   z-index: 25;
+  &:hover {
+    border-color: #43d675;
+    color: #d7ffe8;
+  }
+  .ep-reopen-icon {
+    width: 36px;
+    height: 14px;
+  }
+  .ep-reopen-arrow {
+    color: #7d8ca0;
+    font-size: 12px;
+    line-height: 1;
+  }
 }
 </style>
