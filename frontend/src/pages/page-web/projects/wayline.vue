@@ -1556,30 +1556,6 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   color: #d9d9d9;
   font-size: 12px;
 }
-.workflow-section-note {
-  width: 95%;
-  margin: 10px auto 0;
-  padding: 9px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  border-left: 3px solid #1677ff;
-  background: #262c33;
-  color: #d9d9d9;
-  font-size: 12px;
-  line-height: 1.4;
-}
-.workflow-section-note strong {
-  color: #fff;
-  font-size: 13px;
-}
-.workflow-section-note span {
-  color: hsla(0, 0%, 100%, 0.62);
-}
-.workflow-section-note--delivery {
-  border-left-color: #19be6b;
-  background: #22302b;
-}
 .planning-panel-title {
   font-size: 13px;
   font-weight: 700;

@@ -10,6 +10,14 @@ const waylineApiPath = join(frontendRoot, 'src/api/wayline.ts')
 const waylineTypesPath = join(frontendRoot, 'src/types/wayline.ts')
 const planningHookPath = join(frontendRoot, 'src/hooks/use-wayline-planning.ts')
 const waylinePagePath = join(frontendRoot, 'src/pages/page-web/projects/wayline.vue')
+const fc100ViewPath = join(frontendRoot, 'src/components/wayline-planner/Fc100DeliveryView.vue')
+const fc100HookPath = join(frontendRoot, 'src/hooks/use-fc100-delivery.ts')
+const waylineFormatPath = join(frontendRoot, 'src/components/wayline-planner/wayline-format.ts')
+const missionParamsPath = join(frontendRoot, 'src/components/wayline-planner/MissionParamsPanel.vue')
+const plannerOverlaysPath = join(frontendRoot, 'src/hooks/use-planner-overlays.ts')
+
+const fc100View = readFileSync(fc100ViewPath, 'utf8')
+const fc100Hook = readFileSync(fc100HookPath, 'utf8')
 const waylineMissionMonitorPath = join(frontendRoot, 'src/components/WaylineMissionMonitor.vue')
 const plannedControllerPath = join(repoRoot, 'backend/uavfire/src/main/java/com/yx/uavfire/wayline/controller/PlannedWaylineController.java')
 
@@ -169,8 +177,8 @@ test('wayline page renders saved planned-wayline management and calls planned AP
 
   for (const copy of [
     '航线任务',
-    '监测火情航线',
-    '投放执行航线',
+    '监测规划',
+    '投放任务',
     '已生成航线',
     '监测航线库',
     '保存',
@@ -197,18 +205,20 @@ test('wayline page renders saved planned-wayline management and calls planned AP
     'loadPlannedWayline',
     'buildPlannedWaylineBody',
   ]) {
-    assert.match(source, new RegExp(`\\b${symbol}\\b`))
+    // 符号现分布在视图组件与 use-fc100-delivery store 两处
+    assert.ok(new RegExp(`\\b${symbol}\\b`).test(source) || new RegExp(`\\b${symbol}\\b`).test(fc100Hook), symbol)
   }
 
   assert.match(source, /refreshPlannedWaylines/)
-  assert.match(source, /header="监测火情航线"[\s\S]*M4T 监测航线规划[\s\S]*监测航线库/)
-  assert.match(source, /header="投放执行航线"[\s\S]*投放执行面板[\s\S]*FC100 投放航线库/)
-  assert.doesNotMatch(source, /FC100 投放任务/)
+  assert.match(source, /tab="监测规划"[\s\S]*监测航线库/)
+  const fc100View = readFileSync(fc100ViewPath, 'utf8')
+  assert.match(source, /tab="投放任务"/)
+  assert.match(fc100View, /投放执行面板[\s\S]*FC100 投放航线库/)
+  assert.doesNotMatch(fc100View, /FC100 投放任务/)
   assert.doesNotMatch(source, /选择投放航线后，在执行面板创建任务、启动航线并完成到点后投放控制。/)
   assert.match(source, /class="wayline-mode-collapse generated-wayline-collapse"[\s\S]*header="已生成航线"[\s\S]*id="data"/)
   assert.match(source, /v-else-if="waylinesData\.data\.length !== 0"/)
-  assert.match(source, /class="workflow-section-note"/)
-  assert.match(source, /class="wayline-mode-collapse"/)
+  assert.match(source, /class="wayline-mode-collapse generated-wayline-collapse"/)
   assert.match(source, /:deep\(\.wayline-mode-collapse\.ant-collapse > \.ant-collapse-item > \.ant-collapse-header\)/)
   assert.match(source, /color:\s*#fff/)
   assert.match(source, /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/)
@@ -217,20 +227,20 @@ test('wayline page renders saved planned-wayline management and calls planned AP
   assert.match(source, /\.wayline-button-wrap\s*{[\s\S]*white-space:\s*normal/)
   assert.match(source, /white-space:\s*normal/)
   assert.match(source, /overflow-wrap:\s*anywhere/)
-  assert.match(source, /class="planned-wayline-actions planned-wayline-actions--minimal"/)
-  assert.match(source, /class="planned-wayline-actions planned-wayline-actions--minimal"[\s\S]*selectFc100GeneratedWayline\(record\)[\s\S]*onDeletePlannedWayline\(record\)/)
-  assert.match(source, /\.planned-wayline-actions--minimal\s*{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/)
+  assert.match(fc100View, /class="planned-wayline-actions planned-wayline-actions--minimal"/)
+  assert.match(fc100View, /class="planned-wayline-actions planned-wayline-actions--minimal"[\s\S]*selectFc100GeneratedWayline\(record\)[\s\S]*onDeletePlannedWayline\(record\)/)
+  assert.match(fc100View, /\.planned-wayline-actions--minimal\s*{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/)
   assert.match(source, /\.project-wayline-wrapper\s+:deep\(\.ant-btn\)\s*{[\s\S]*font-size:\s*14px/)
   assert.match(source, /\.project-wayline-wrapper\s+:deep\(\.ant-btn\)\s*{[\s\S]*font-family:\s*inherit/)
   assert.match(source, /\.project-wayline-wrapper\s+:deep\(\.ant-btn-sm\)\s*{[\s\S]*font-size:\s*14px/)
   assert.match(source, /label:\s*'下发准备'[\s\S]*wrap:\s*true/)
-  assert.match(source, /class="fc100-selected-wayline"[\s\S]*class="planning-row planning-actions fc100-task-actions"[\s\S]*创建FC100任务[\s\S]*开始执行[\s\S]*刷新任务/)
-  assert.doesNotMatch(source, />\s*开始FC100执行\s*</)
-  assert.doesNotMatch(source, />\s*刷新FC100状态\s*</)
-  assert.match(source, /\.fc100-task-actions\s*{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/)
+  assert.match(fc100View, /class="fc100-selected-wayline"[\s\S]*class="planning-row planning-actions fc100-task-actions"[\s\S]*创建FC100任务[\s\S]*开始执行[\s\S]*刷新任务/)
+  assert.doesNotMatch(fc100View, />\s*开始FC100执行\s*</)
+  assert.doesNotMatch(fc100View, />\s*刷新FC100状态\s*</)
+  assert.match(fc100View, /\.fc100-task-actions\s*{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/)
   assert.doesNotMatch(source, /font-size:\s*16px/)
-  assert.match(source, /function\s+selectFc100GeneratedWayline\b/)
-  assert.match(source, /@click\.stop="selectFc100GeneratedWayline\(record\)"/)
+  assert.match(fc100Hook, /function\s+selectFc100GeneratedWayline\b/)
+  assert.match(fc100View, /@click\.stop="selectFc100GeneratedWayline\(record\)"/)
   assert.match(source, /plannedWaylinesPagination/)
   assert.match(source, /plannedWaylinesCanRefresh/)
   assert.match(source, /onPlannedWaylinesScroll/)
@@ -275,7 +285,7 @@ test('wayline page renders saved planned-wayline management and calls planned AP
 test('wayline page clears editable waypoint list after save and previews saved cards on map', () => {
   const source = readFileSync(waylinePagePath, 'utf8')
   const hook = readFileSync(planningHookPath, 'utf8')
-  const map = readFileSync(join(frontendRoot, 'src/components/GMap.vue'), 'utf8')
+  const map = readFileSync(plannerOverlaysPath, 'utf8')
 
   assert.match(source, /@click\.stop="showPlannedWaylineDetail\(record\)"/)
   assert.match(source, /@click="onPreviewPlannedWayline\(record\)"/)
@@ -292,9 +302,10 @@ test('wayline page clears editable waypoint list after save and previews saved c
 test('wayline page hides stale planned-wayline task errors and refits map preview', () => {
   const source = readFileSync(waylinePagePath, 'utf8')
   const monitor = readFileSync(waylineMissionMonitorPath, 'utf8')
-  const map = readFileSync(join(frontendRoot, 'src/components/GMap.vue'), 'utf8')
+  const map = readFileSync(plannerOverlaysPath, 'utf8')
 
-  assert.match(source, /function\s+getPlannedWaylineTaskReason\b/)
+  const waylineFormat = readFileSync(waylineFormatPath, 'utf8')
+  assert.match(waylineFormat, /function\s+getPlannedWaylineTaskReason\b/)
   assert.match(source, /getPlannedWaylineTaskReason\(record\)/)
   assert.doesNotMatch(source, /v-if="record\.taskStatusReason"/)
   assert.match(monitor, /const\s+taskStatusReason\s*=\s*computed/)
@@ -317,7 +328,7 @@ test('wayline map renders live aircraft flight position and follow control', () 
   assert.match(source, /setFlightPositionFromRecord\(updated\)/)
   assert.match(source, /function syncSelectedAircraftFlightPosition\b/)
   assert.match(source, /watch\(\s*\(\)\s*=>\s*selectedAircraftSn\.value/)
-  assert.match(source, /syncFc100DeviceFlightPosition\(fc100PlanningState\.selectedDeviceProps\)/)
+  assert.match(fc100Hook, /syncFc100DeviceFlightPosition\(fc100PlanningState\.selectedDeviceProps\)/)
   assert.match(map, /flightPositionMarker/)
   assert.match(map, /updateFlightPositionOverlay/)
   assert.match(map, /<span>✈️<\/span>/)
@@ -340,8 +351,8 @@ test('wayline page clears planned route overlays when leaving the page', () => {
 test('wayline page uses DJI-safe default planned-wayline names', () => {
   const source = readFileSync(waylinePagePath, 'utf8')
 
-  assert.match(source, /function\s+formatSafePlannedWaylineTimestamp\b/)
-  assert.match(source, /function\s+sanitizeDjiWaylineName\b/)
+  assert.match(readFileSync(waylineFormatPath, 'utf8'), /function\s+formatSafePlannedWaylineTimestamp\b/)
+  assert.match(readFileSync(waylineFormatPath, 'utf8'), /function\s+sanitizeDjiWaylineName\b/)
   assert.match(source, /formatSafePlannedWaylineTimestamp\(new Date\(\)\)/)
   assert.match(source, /sanitizeDjiWaylineName\(editingName \|\| '规划航线'\)/)
   assert.match(source, /const name = sanitizeDjiWaylineName\(savePlannedWaylineModal\.name\)/)
@@ -363,10 +374,11 @@ test('wayline page rebuilds save payload from visible waypoint coordinates', () 
 test('wayline page applies route height changes to existing planned waypoints before saving', () => {
   const source = readFileSync(waylinePagePath, 'utf8')
 
-  assert.match(source, /function\s+onPlanningDefaultHeightChange\b/)
-  assert.match(source, /@change="onPlanningDefaultHeightChange"/)
-  assert.match(source, /planningState\.waypoints\.forEach\(wp\s*=>\s*{[\s\S]*wp\.height\s*=\s*n[\s\S]*}\)/)
-  assert.match(source, /const\s+previousDefaultHeight\s*=\s*Number\(planningState\.defaultHeight\)/)
+  const missionParams = readFileSync(missionParamsPath, 'utf8')
+  assert.match(missionParams, /function\s+onDefaultHeightChange\b/)
+  assert.match(missionParams, /@change="onDefaultHeightChange"/)
+  assert.match(missionParams, /planningState\.waypoints\.forEach\(wp\s*=>\s*{[\s\S]*wp\.height\s*=\s*n[\s\S]*}\)/)
+  assert.match(missionParams, /const\s+previousDefaultHeight\s*=\s*Number\(planningState\.defaultHeight\)/)
 })
 
 test('planning draft restore keeps advanced waypoint speed and action fields', () => {
@@ -377,7 +389,7 @@ test('planning draft restore keeps advanced waypoint speed and action fields', (
 })
 
 test('wayline page exposes FC100 planning from saved generated KMZ records', () => {
-  const source = readFileSync(waylinePagePath, 'utf8')
+  const source = readFileSync(fc100ViewPath, 'utf8')
   const deliveryApi = readFileSync(join(frontendRoot, 'src/api/fire/delivery.ts'), 'utf8')
 
   for (const copy of [
@@ -388,23 +400,25 @@ test('wayline page exposes FC100 planning from saved generated KMZ records', () 
     '开始执行',
     '刷新任务',
     'FC100任务ID',
-    'DJI FlyCart 100',
   ]) {
     assert.match(source, new RegExp(copy))
   }
-  assert.doesNotMatch(source, /FC100 投放执行面板/)
-  assert.doesNotMatch(source, /刷新FC100设备/)
+  assert.match(fc100Hook, /DJI FlyCart 100/)
+  for (const _ of []) {
+  }
+  assert.doesNotMatch(fc100View, /FC100 投放执行面板/)
+  assert.doesNotMatch(fc100View, /刷新FC100设备/)
   assert.match(source, /option-label-prop="label"/)
-  assert.match(source, /v-for="device in fc100AircraftDevices"/)
-  assert.match(source, /:label="formatFc100DeviceSelectLabel\(device\)"/)
-  assert.match(source, /function\s+isFc100AircraftDevice\s*\(device:\s*DeliveryDeviceDTO\)[\s\S]*bindStatus !== 'rc' && deviceType !== 'rc'/)
-  assert.match(source, /const\s+fc100AircraftDevices\s*=\s*computed\(\(\)\s*=>\s*fc100PlanningState\.devices\.filter\(isFc100AircraftDevice\)\)/)
-  assert.match(source, /function\s+formatFc100DeviceSelectLabel\s*\(device:\s*DeliveryDeviceDTO\)[\s\S]*formatFc100DeliveryAircraftModel\(\)[\s\S]*device\.deviceSn/)
-  assert.match(source, /class="fc100-device-option"[\s\S]*fc100-device-option-model[\s\S]*fc100-device-option-sn[\s\S]*fc100-device-option-status/)
-  assert.match(source, /\.fc100-device-option\s*{[\s\S]*flex-direction:\s*column/)
-  assert.match(source, /function\s+formatFc100DeliveryAircraftModel\s*\(\)\s*{[\s\S]*DJI FlyCart 100/)
-  assert.match(source, /FC100 投放航线库[\s\S]*机型 \{\{ formatFc100DeliveryAircraftModel\(\) \}\}/)
-  assert.doesNotMatch(source, /FC100 投放航线库[\s\S]*机型 \{\{ record\.aircraftModelKey/)
+  assert.match(fc100View, /v-for="device in fc100AircraftDevices"/)
+  assert.match(fc100View, /:label="formatFc100DeviceSelectLabel\(device\)"/)
+  assert.match(fc100Hook, /function\s+isFc100AircraftDevice\s*\(device:\s*DeliveryDeviceDTO\)[\s\S]*bindStatus !== 'rc' && deviceType !== 'rc'/)
+  assert.match(fc100Hook, /const\s+fc100AircraftDevices\s*=\s*computed\(\(\)\s*=>\s*fc100PlanningState\.devices\.filter\(isFc100AircraftDevice\)\)/)
+  assert.match(fc100Hook, /function\s+formatFc100DeviceSelectLabel\s*\(device:\s*DeliveryDeviceDTO\)[\s\S]*formatFc100DeliveryAircraftModel\(\)[\s\S]*device\.deviceSn/)
+  assert.match(fc100View, /class="fc100-device-option"[\s\S]*fc100-device-option-model[\s\S]*fc100-device-option-sn[\s\S]*fc100-device-option-status/)
+  assert.match(fc100View, /\.fc100-device-option\s*{[\s\S]*flex-direction:\s*column/)
+  assert.match(fc100Hook, /function\s+formatFc100DeliveryAircraftModel\s*\(\)\s*{[\s\S]*DJI FlyCart 100/)
+  assert.match(fc100View, /FC100 投放航线库[\s\S]*机型 \{\{ formatFc100DeliveryAircraftModel\(\) \}\}/)
+  assert.doesNotMatch(fc100View, /FC100 投放航线库[\s\S]*机型 \{\{ record\.aircraftModelKey/)
 
   for (const symbol of [
     'deliveryApi',
@@ -422,26 +436,26 @@ test('wayline page exposes FC100 planning from saved generated KMZ records', () 
     'handleFc100GeneratedWaylineTaskStatus',
     'buildFc100StartPreflightWarnings',
   ]) {
-    assert.match(source, new RegExp(`\\b${symbol}\\b`))
+    assert.ok(new RegExp(`\\b${symbol}\\b`).test(source) || new RegExp(`\\b${symbol}\\b`).test(fc100Hook), symbol)
   }
 
-  assert.match(source, /deliveryApi\.listDevices/)
-  assert.match(source, /deliveryApi\.deviceProps/)
-  assert.match(source, /deliveryApi\.importCreateWaylineTask/)
-  assert.match(source, /deliveryApi\.importGeneratedPlannedWaylineTask/)
-  assert.match(source, /deliveryApi\.startWaylineTask\(taskId,\s*deviceSn\)/)
-  assert.match(source, /deliveryApi\.waylineTaskStatus/)
+  assert.match(fc100Hook, /deliveryApi\.listDevices/)
+  assert.match(fc100Hook, /deliveryApi\.deviceProps/)
+  assert.match(fc100Hook, /deliveryApi\.importCreateWaylineTask/)
+  assert.match(fc100Hook, /deliveryApi\.importGeneratedPlannedWaylineTask/)
+  assert.match(fc100Hook, /deliveryApi\.startWaylineTask\(taskId,\s*deviceSn\)/)
+  assert.match(fc100Hook, /deliveryApi\.waylineTaskStatus/)
   assert.doesNotMatch(source, /fetch\(record\.kmzUrl\)/)
   assert.doesNotMatch(source, /form\.append\('file',\s*file,\s*file\.name\)/)
   assert.match(source, /record\.kmzUrl/)
-  assert.match(source, /record\.publishedWaylineId/)
-  assert.match(source, /@click="onFc100PreviewGeneratedWayline\(record\)"/)
-  assert.match(source, /function\s+onFc100PreviewGeneratedWayline\b/)
-  assert.match(source, /function\s+onFc100PreviewGeneratedWayline[\s\S]*previewPlannedWayline\(record\)/)
-  assert.doesNotMatch(source, /function\s+onFc100PreviewGeneratedWayline[\s\S]*handleFc100ImportGeneratedWaylineTask\(record\)/)
-  assert.match(source, /selectFc100GeneratedWayline\(record\)/)
-  assert.match(source, /onFc100UseGeneratedWayline\(record\)/)
-  assert.match(source, /FC100 开始执行航线前检查未通过/)
+  assert.match(readFileSync(waylinePagePath, 'utf8'), /record\.publishedWaylineId/)
+  assert.match(fc100View, /@click="onFc100PreviewGeneratedWayline\(record\)"/)
+  assert.match(fc100Hook, /function\s+onFc100PreviewGeneratedWayline\b/)
+  assert.match(fc100Hook, /function\s+onFc100PreviewGeneratedWayline[\s\S]*previewPlannedWayline\(record\)/)
+  assert.doesNotMatch(fc100Hook, /function\s+onFc100PreviewGeneratedWayline[\s\S]*handleFc100ImportGeneratedWaylineTask\(record\)/)
+  assert.match(fc100View, /selectFc100GeneratedWayline\(record\)/)
+  assert.match(fc100Hook, /onFc100UseGeneratedWayline\(record\)/)
+  assert.match(fc100Hook, /FC100 开始执行航线前检查未通过/)
 
   assert.match(deliveryApi, /importCreateWaylineTask:\s*\(body:\s*FormData/)
   assert.match(deliveryApi, /importGeneratedPlannedWaylineTask:\s*\(body:/)
