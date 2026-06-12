@@ -35,7 +35,7 @@
             <div class="fc100-device-main">
               <div class="fc100-device-sn">{{ formatFc100DeviceModel(selectedFc100DeliveryDevice) }}</div>
               <div class="fc100-device-meta">
-                {{ selectedFc100DeliveryDevice.deviceSn }} · {{ selectedFc100DeliveryDevice.bindStatus || '--' }}
+                {{ selectedFc100DeliveryDevice.deviceSn }} · {{ formatDeviceOnlineLabel(selectedFc100DeliveryDevice) }}
               </div>
             </div>
             <a-dropdown
@@ -1120,7 +1120,7 @@ function toOnlineDeviceFromMsdk (device: MsdkDeviceState): OnlineDevice {
   const model = normalizeMonitoringModelName(device.model)
   return {
     model,
-    callsign: model || device.aircraftSn,
+    callsign: device.deviceName || device.model || '',
     sn: device.aircraftSn,
     mode: device.online ? EModeCode.Manual : EModeCode.Disconnected,
     gateway: {
@@ -1134,26 +1134,25 @@ function toOnlineDeviceFromMsdk (device: MsdkDeviceState): OnlineDevice {
 }
 
 function toDeviceOsdFromMsdk (device: MsdkDeviceState): DeviceOsd {
-  const batteryPercent = device.batteryPercent ?? 0
   return {
     longitude: Number(device.longitude ?? 0),
     latitude: Number(device.latitude ?? 0),
     gear: -1,
     mode_code: device.online ? EModeCode.Manual : EModeCode.Disconnected,
-    height: String(device.height ?? 0),
-    home_distance: String(device.homeDistance ?? 0),
-    horizontal_speed: String(device.horizontalSpeed ?? 0),
-    vertical_speed: String(device.verticalSpeed ?? 0),
-    wind_speed: String(device.windSpeed ?? 0),
+    height: optionalMonitoringValue(device.height),
+    home_distance: optionalMonitoringValue(device.homeDistance),
+    horizontal_speed: optionalMonitoringValue(device.horizontalSpeed),
+    vertical_speed: optionalMonitoringValue(device.verticalSpeed),
+    wind_speed: optionalMonitoringValue(device.windSpeed),
     wind_direction: '--',
-    elevation: String(device.elevation ?? 0),
+    elevation: optionalMonitoringValue(device.elevation),
     position_state: {
-      gps_number: String(device.gpsCount ?? '--'),
+      gps_number: optionalMonitoringValue(device.gpsCount, '--'),
       is_fixed: device.positionFixed ? 1 : 0,
-      rtk_number: String(device.rtkCount ?? '--')
+      rtk_number: optionalMonitoringValue(device.rtkCount, '--')
     },
     battery: {
-      capacity_percent: String(batteryPercent),
+      capacity_percent: optionalMonitoringValue(device.batteryPercent),
       landing_power: '0',
       remain_flight_time: 0,
       return_home_power: '0'
@@ -1572,13 +1571,19 @@ function formatFc100DeviceModel (device: DeliveryDeviceDTO) {
 function normalizeMonitoringModelName (model?: string) {
   const value = String(model || '').trim()
   if (!value || /^msdk aircraft$/i.test(value)) return ''
-  if (/matrice[_\s-]*4t/i.test(value)) return 'Matrice 4T'
-  if (/m4t/i.test(value)) return 'Matrice 4T'
+  if (/matrice[_\s-]*4t/i.test(value)) return 'DJI Matrice 4T'
+  if (/m4t/i.test(value)) return 'DJI Matrice 4T'
+  if (/flycart[_\s-]*100/i.test(value)) return 'DJI FlyCart 100'
+  if (/fc100/i.test(value)) return 'DJI FlyCart 100'
   return value
 }
 
+function optionalMonitoringValue (value: number | null | undefined, empty = '') {
+  return value === null || value === undefined ? empty : String(value)
+}
+
 function formatMonitoringDeviceModel (device: OnlineDevice) {
-  return normalizeMonitoringModelName(device.model) || device.callsign || device.sn
+  return normalizeMonitoringModelName(device.callsign) || normalizeMonitoringModelName(device.model) || device.sn
 }
 
 function getMonitoringConnectionStatusClass (device: OnlineDevice) {

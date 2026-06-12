@@ -1724,7 +1724,7 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
-    void executeAgentWaylineStartsAiDetectionFromAgentStreamUrl() throws Exception {
+    void executeAgentWaylineDoesNotStartAiDetectionBeforeFirstWaypointProgress() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
@@ -1753,22 +1753,12 @@ class PlannedWaylineServiceTest {
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
-        when(aiServiceClient.fireTaskIdForDrone("M4T-SN-001")).thenReturn("fire-M4T-SN-001");
-        when(aiServiceClient.startDetection(any(), any(), any(), any())).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
-        setField(service, "aiServiceClient", aiServiceClient);
-        setField(service, "aiZlmRtspHost", "172.20.10.7");
-        setField(service, "aiZlmRtspPort", 8554);
-        setField(service, "aiAutoTriggerOnWayline", true);
 
         service.executeTask("workspace-001", "pw-agent-ai");
 
-        verify(aiServiceClient).startDetection(
-                eq("fire-M4T-SN-001"),
-                eq("M4T-SN-001"),
-                eq("rtsp://172.20.10.7:8554/live/M4T-SN-001-0"),
-                eq(""));
+        verify(aiServiceClient, never()).startDetection(any(), any(), any(), any());
     }
 
     @Test

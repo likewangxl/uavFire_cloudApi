@@ -46,6 +46,7 @@ public class MsdkDeviceStateService {
             "camera_stream_source",
             "camera_zoom",
             "night_scene",
+            "navigation_light",
             "laser_fill_light"
     );
 

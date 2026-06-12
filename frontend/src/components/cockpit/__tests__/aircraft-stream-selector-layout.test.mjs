@@ -25,3 +25,23 @@ test('aircraft stream menu opens into the cockpit panel instead of spilling left
   assert.match(menuStyles, /right:\s*auto;/, 'menu should not expand left from the trigger right edge')
   assert.match(menuStyles, /overflow:\s*hidden auto;/, 'menu should suppress horizontal spill while preserving vertical scroll')
 })
+
+test('aircraft stream selector exposes readable model and full SN in the trigger', () => {
+  const source = readSource('src/components/cockpit/CockpitAircraftStreamSelector.vue')
+
+  assert.match(source, /selectedPrimaryLabel/)
+  assert.match(source, /selectedSecondaryLabel/)
+  assert.match(source, /fullSnLabel\(target\.deviceSn\)/)
+  assert.match(source, /\.trigger-copy strong\s*\{[\s\S]*white-space:\s*normal/)
+  assert.match(source, /\.trigger-copy\s*\{[\s\S]*min-width:\s*0/)
+})
+
+test('aircraft stream selector orders online targets first and blocks offline selection', () => {
+  const source = readSource('src/components/cockpit/CockpitAircraftStreamSelector.vue')
+
+  assert.match(source, /sortStreamTargets/)
+  assert.match(source, /Number\(b\.online\)\s*-\s*Number\(a\.online\)/)
+  assert.match(source, /:disabled="!target\.online \|\| target\.streamStatus === 'offline'"/)
+  assert.match(source, /if \(!target\.online \|\| target\.streamStatus === 'offline'\) return/)
+  assert.match(source, /aria-disabled/)
+})

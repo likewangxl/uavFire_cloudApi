@@ -204,6 +204,14 @@ export const requestFireDetectionStop = async function (droneSn: string): Promis
   return result.data
 }
 
+// 查询某架飞机当前是否处于火情监测中（后端 activityTracker 真相源）。
+// 用于驾驶舱按钮同步航线自动启停的状态。
+export const getFireDetectionStatus = async function (droneSn: string): Promise<IWorkspaceResponse<any>> {
+  const url = `${HTTP_PREFIX}/fire-detection/status?drone_sn=${encodeURIComponent(droneSn)}`
+  const result = await request.get(url)
+  return result.data
+}
+
 export const getAllUsersInfo = async function (wid: string, body: IPage): Promise<CommonListResponse<any>> {
   const url = `${HTTP_PREFIX}/users/${wid}/users?&page=${body.page}&page_size=${body.page_size}`
   const result = await request.get(url)

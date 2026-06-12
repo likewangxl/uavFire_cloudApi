@@ -11,7 +11,6 @@
 
     <div v-show="panelExpanded" class="flight-console">
       <div class="console-toolbar">
-        <span class="console-title">飞行面板</span>
         <div class="mode-toggles">
           <button
             v-for="mode in viewModes"
@@ -71,19 +70,24 @@
             <button class="command-btn" type="button" :disabled="!canCameraStreamSource" @click="runCameraStreamSource('zoom')">变焦(2)</button>
             <button class="command-btn" type="button" :disabled="!canCameraStreamSource" @click="runCameraStreamSource('thermal')">红外(3)</button>
           </div>
-          <div class="payload-row">
+          <div class="payload-row cam-actions">
             <button class="command-btn" type="button" :disabled="!canCommand('cameraPhoto')" @click="runCommand('camera_start_photo', 'cameraPhoto')">拍照(F)</button>
             <button class="command-btn" type="button" :disabled="!canCommand('cameraRecord')" @click="runRecordToggle">{{ recording ? '停录(R)' : '录像(R)' }}</button>
-            <button class="command-btn" type="button" :disabled="!canCommand('cameraZoom')" @click="runCameraZoom(2)">变焦 2x</button>
+            <div class="zoom-stepper">
+              <button class="command-btn zoom-btn" type="button" title="缩小焦距倍率" :disabled="!canCommand('cameraZoom') || zoomRatio <= ZOOM_MIN_RATIO" @click="runZoomOut">－</button>
+              <span class="zoom-readout">{{ zoomRatio }}x</span>
+              <button class="command-btn zoom-btn" type="button" title="放大焦距倍率" :disabled="!canCommand('cameraZoom') || zoomRatio >= ZOOM_MAX_RATIO" @click="runZoomIn">＋</button>
+            </div>
           </div>
-          <div class="payload-row">
+          <div class="payload-row quality-row">
             <button
               v-for="quality in qualityModes"
               :key="quality.key"
               class="command-btn"
               :class="{ active: activeQuality === quality.key }"
               type="button"
-              @click="activeQuality = quality.key"
+              disabled
+              title="画质切换功能后续开放"
             >
               {{ quality.label }}
             </button>
@@ -126,7 +130,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { Modal, notification } from 'ant-design-vue'
-import { sendMsdkCommand, type MsdkDeviceState } from '/@/api/msdk-device'
+import { sendMsdkCommand, getMsdkCommand, type MsdkDeviceState } from '/@/api/msdk-device'
 import { EModeCode } from '/@/types/device'
 import type { CockpitStreamTarget } from './CockpitAircraftStreamSelector.vue'
 import {
@@ -146,6 +150,16 @@ type BackendViewModeCommand = {
 }
 
 const MIN_AIRBORNE_HEIGHT_M = 3
+const ZOOM_MIN_RATIO = 1
+const ZOOM_MAX_RATIO = 200
+const ZOOM_STEP = 1
+const COMMAND_RESULT_POLL_MS = 600
+const COMMAND_RESULT_TIMEOUT_MS = 12000
+const TERMINAL_COMMAND_STATUSES = new Set(['APPLIED', 'FAILED', 'IGNORED', 'EXPIRED', 'UNKNOWN'])
+// MSDK 不提供官方接口、需地面站自绘的功能：点击提示后续开放
+const COMING_SOON_MODES: ViewModeKey[] = ['tracking', 'arLabel', 'referenceLine', 'measureArea']
+// 纯前端装饰、暂无功能：直接置灰
+const DECORATIVE_MODES: ViewModeKey[] = ['stealth']
 
 const props = defineProps<{
   target?: CockpitStreamTarget | null
@@ -157,6 +171,7 @@ const actionLoading = ref('')
 const distanceMeters = ref(5)
 const panelExpanded = ref(false)
 const recording = ref(false)
+const zoomRatio = ref(ZOOM_MIN_RATIO)
 const activeQuality = ref('standard')
 const viewState = reactive<Record<ViewModeKey, boolean>>({
   tracking: false,
@@ -197,9 +212,9 @@ const backendViewModeCommands: Partial<Record<ViewModeKey, BackendViewModeComman
     capability: 'gimbalReset'
   },
   nightLight: {
-    command: 'night_scene',
-    action: 'nightScene',
-    capability: 'nightScene',
+    command: 'navigation_light',
+    action: 'navigationLight',
+    capability: 'navigationLight',
     buildParams: enabled => ({ enabled })
   },
   laserFillLight: {
@@ -240,7 +255,10 @@ const batteryText = computed(() => {
 const viewModes = computed(() => viewModeLabels.map(mode => ({
   ...mode,
   enabled: viewState[mode.key],
-  disabled: Boolean(backendViewModeCommands[mode.key] && !canCommand(backendViewModeCommands[mode.key]!.capability))
+  disabled: Boolean(
+    DECORATIVE_MODES.includes(mode.key) ||
+    (backendViewModeCommands[mode.key] && !canCommand(backendViewModeCommands[mode.key]!.capability))
+  )
 })))
 const canVirtualStick = computed(() => canCommand('virtualStick'))
 const canEmergencyStop = computed(() => canCommand('emergencyStop'))
@@ -256,6 +274,7 @@ watch(aircraftSn, () => {
   flyToPoint.height = numberOrNull(props.osd?.height)
   flyToPoint.speed = 5
   recording.value = false
+  zoomRatio.value = ZOOM_MIN_RATIO
 })
 
 function numberOrNull (value: unknown) {
@@ -278,19 +297,31 @@ function canCommand (capability: string) {
   return isControllable.value && hasCapability(capability)
 }
 
+// 元素全屏时，弹窗/通知必须挂到全屏元素内部，否则会被全屏画面盖住、看不到也点不到。
+function popupContainer (): HTMLElement {
+  return (document.fullscreenElement as HTMLElement) || document.body
+}
+
 function notifySuccess (message: string) {
-  notification.success({ message, duration: 2.5 })
+  notification.success({ message, duration: 2.5, getContainer: popupContainer })
 }
 
 function notifyWarning (message: string) {
-  notification.warning({ message, duration: 3 })
+  notification.warning({ message, duration: 3, getContainer: popupContainer })
 }
 
 function notifyError (message: string) {
-  notification.error({ message, duration: 4 })
+  notification.error({ message, duration: 4, getContainer: popupContainer })
 }
 
 async function toggleViewMode (key: ViewModeKey) {
+  if (DECORATIVE_MODES.includes(key)) {
+    return
+  }
+  if (COMING_SOON_MODES.includes(key)) {
+    notifyWarning('该功能后续开放，敬请期待。')
+    return
+  }
   const nextEnabled = !viewState[key]
   const backendCommand = backendViewModeCommands[key]
   if (!backendCommand) {
@@ -317,21 +348,59 @@ async function runBackendViewMode (key: ViewModeKey, enabled: boolean) {
   )
 }
 
+function delay (ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// 轮询后端指令记录，等待 agent 回执真实执行结果（APPLIED/FAILED/...），而不是只确认下发。
+async function awaitCommandResult (sn: string, commandId: string): Promise<{ status: string, message?: string } | null> {
+  const deadline = Date.now() + COMMAND_RESULT_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await delay(COMMAND_RESULT_POLL_MS)
+    try {
+      const res = await getMsdkCommand(sn, commandId)
+      const cmd = res?.data
+      const status = String(cmd?.status || '').toUpperCase()
+      if (cmd && TERMINAL_COMMAND_STATUSES.has(status)) {
+        return { status, message: cmd.message }
+      }
+    } catch {
+      // 单次查询失败时继续轮询，由整体超时兜底
+    }
+  }
+  return null
+}
+
 async function withAircraftAction (action: string, task: () => Promise<any>, successText: string): Promise<boolean> {
   if (!aircraftSn.value || !isControllable.value) {
     notifyWarning('飞机离线，或遥测数据尚未就绪。')
     return false
   }
+  const sn = aircraftSn.value
   actionLoading.value = action
   try {
     const response = await task()
-    if (response?.code === 0) {
-      notifySuccess(successText)
-      return true
-    } else {
-      notifyWarning(response?.message || '指令已返回非成功状态。')
+    if (response?.code !== 0) {
+      notifyWarning(response?.message || '指令下发失败。')
       return false
     }
+    const commandId = response?.data?.command_id || response?.data?.commandId
+    if (!commandId) {
+      // 后端未返回指令编号，退回到仅确认下发的旧行为
+      notifySuccess(successText)
+      return true
+    }
+    const result = await awaitCommandResult(sn, commandId)
+    if (!result) {
+      notifyWarning(`${successText.replace(/已发送。?$/, '')}已下发，但未在 ${Math.round(COMMAND_RESULT_TIMEOUT_MS / 1000)} 秒内收到飞机回执，请确认飞机状态。`)
+      return false
+    }
+    if (result.status === 'APPLIED') {
+      notifySuccess(successText)
+      return true
+    }
+    notifyError(result.message ? `飞机未执行该指令：${result.message}` : '飞机未执行该指令。')
+    return false
   } catch (error: any) {
     notifyError(error?.message || '指令执行失败。')
     return false
@@ -346,7 +415,7 @@ async function runCommand (command: string, action: string, params: Record<strin
     notifyWarning('当前设备/负载不支持该能力。')
     return false
   }
-  return await withAircraftAction(action, () => sendMsdkCommand(aircraftSn.value, command, params), `${command} 指令已发送。`)
+  return await withAircraftAction(action, () => sendMsdkCommand(aircraftSn.value, command, params), `${commandLabel(command)}指令已发送。`)
 }
 
 function runDangerCommand (command: string, action: string, title: string) {
@@ -355,6 +424,7 @@ function runDangerCommand (command: string, action: string, title: string) {
     content: props.target?.callsign || aircraftSn.value,
     okText: '确认发送',
     cancelText: '取消',
+    getContainer: popupContainer,
     onOk: () => runCommand(command, action)
   })
 }
@@ -413,8 +483,20 @@ function runCameraStreamSource (source: 'visible' | 'zoom' | 'thermal') {
   runCommand('camera_stream_source', 'cameraStreamSource', { source })
 }
 
-function runCameraZoom (ratio: number) {
-  runCommand('camera_zoom', 'cameraZoom', { ratio })
+async function runCameraZoom (ratio: number) {
+  const clamped = Math.min(ZOOM_MAX_RATIO, Math.max(ZOOM_MIN_RATIO, Math.round(ratio)))
+  const sent = await runCommand('camera_zoom', 'cameraZoom', { ratio: clamped })
+  if (sent) {
+    zoomRatio.value = clamped
+  }
+}
+
+function runZoomIn () {
+  runCameraZoom(zoomRatio.value + ZOOM_STEP)
+}
+
+function runZoomOut () {
+  runCameraZoom(zoomRatio.value - ZOOM_STEP)
 }
 
 async function runRecordToggle () {
@@ -444,9 +526,35 @@ function commandCapability (command: string) {
     camera_stream_source: 'cameraStreamSource',
     camera_zoom: 'cameraZoom',
     night_scene: 'nightScene',
+    navigation_light: 'navigationLight',
     laser_fill_light: 'laserFillLight'
   }
   return map[command]
+}
+
+function commandLabel (command: string) {
+  const map: Record<string, string> = {
+    takeoff: '起飞',
+    land: '降落',
+    hover: '悬停',
+    virtual_stick: '飞行控制',
+    emergency_stop: '急停',
+    return_home: '返航',
+    cancel_return_home: '取消返航',
+    stop_fly_to_point: '停止飞向目标点',
+    fly_to_point: '飞向目标点',
+    gimbal_reset: '云台回中',
+    gimbal_rotate: '云台旋转',
+    camera_start_photo: '拍照',
+    camera_start_record: '开始录像',
+    camera_stop_record: '停止录像',
+    camera_stream_source: '镜头切换',
+    camera_zoom: '变焦',
+    night_scene: '夜景模式',
+    navigation_light: '航行灯',
+    laser_fill_light: '补光灯'
+  }
+  return map[command] || '控制'
 }
 
 async function runFlyToPoint () {
@@ -595,19 +703,11 @@ async function runFlyToPoint () {
 .console-toolbar {
   display: grid;
   min-width: 0;
-  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   height: 28px;
   margin-bottom: 8px;
-}
-
-.console-title {
-  padding-left: 12px;
-  border-left: 3px solid #38bfff;
-  color: #eefbff;
-  font-size: 13px;
-  font-weight: 800;
 }
 
 .mode-toggles,
@@ -745,17 +845,57 @@ async function runFlyToPoint () {
 .axis,
 .gimbal-axis {
   position: absolute;
+  display: grid;
+  place-items: center;
   color: #d8f6ff;
   border: 0;
+  border-radius: 10px;
   background: transparent;
   font-weight: 800;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
 
-.axis.north { left: 38px; top: 8px; }
-.axis.south { left: 38px; bottom: 8px; }
-.axis.west { left: 15px; top: 43px; }
-.axis.east { right: 15px; top: 43px; }
+.axis.north,
+.axis.south,
+.axis.west,
+.axis.east,
+.gimbal-axis.up,
+.gimbal-axis.down,
+.gimbal-axis.left,
+.gimbal-axis.right {
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
+}
+
+.axis:not(:disabled):hover,
+.gimbal-axis:not(.center):not(:disabled):hover {
+  background: rgba(73, 198, 255, 0.16);
+}
+
+.axis:not(.center):not(:disabled):active,
+.gimbal-axis:not(.center):not(:disabled):active {
+  background: rgba(73, 198, 255, 0.34);
+  box-shadow: inset 0 0 0 1px rgba(125, 222, 255, 0.7), 0 0 12px rgba(73, 198, 255, 0.4);
+}
+
+.axis.center:not(:disabled):active,
+.gimbal-axis.center:not(:disabled):active {
+  filter: brightness(1.3);
+  box-shadow: 0 0 14px rgba(73, 198, 255, 0.55);
+}
+
+.axis.wing:not(:disabled):active {
+  filter: brightness(1.35);
+}
+
+.axis.north { top: 2px; left: 50%; transform: translateX(-50%); }
+.axis.south { bottom: 2px; left: 50%; transform: translateX(-50%); }
+.axis.west { left: 2px; top: 50%; transform: translateY(-50%); }
+.axis.east { right: 2px; top: 50%; transform: translateY(-50%); }
 
 .axis.center,
 .gimbal-axis.center {
@@ -789,10 +929,10 @@ async function runFlyToPoint () {
 .down-wing { left: 0; bottom: 0; }
 .up-wing { right: 0; bottom: 0; }
 
-.gimbal-axis.up { left: 42px; top: 8px; }
-.gimbal-axis.down { left: 42px; bottom: 8px; }
-.gimbal-axis.left { left: 18px; top: 42px; }
-.gimbal-axis.right { right: 18px; top: 42px; }
+.gimbal-axis.up { top: 2px; left: 50%; transform: translateX(-50%); }
+.gimbal-axis.down { bottom: 2px; left: 50%; transform: translateX(-50%); }
+.gimbal-axis.left { left: 2px; top: 50%; transform: translateY(-50%); }
+.gimbal-axis.right { right: 2px; top: 50%; transform: translateY(-50%); }
 
 .distance-control {
   display: grid;
@@ -820,6 +960,31 @@ async function runFlyToPoint () {
 
 .payload-row {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.payload-row.cam-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+}
+
+.zoom-stepper {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4px;
+}
+
+.zoom-btn {
+  min-width: 0;
+  font-size: 14px;
+}
+
+.zoom-readout {
+  min-width: 28px;
+  color: #eafaff;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
 }
 
 .payload-row:nth-of-type(3) {

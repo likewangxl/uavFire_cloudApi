@@ -86,18 +86,42 @@ export function buildLivePaneState ({
 export function resolveAppliedFocusPreference ({
   currentPreference,
   lastCommandAction,
-  lastCommandStatus
+  lastCommandStatus,
+  fireDetectionRunning = true
 }) {
   if ((lastCommandStatus || '').toLowerCase() !== 'applied') {
     return currentPreference
   }
   if (lastCommandAction === 'focus-thermal') {
+    if (!fireDetectionRunning) {
+      return currentPreference
+    }
     return 'thermal'
   }
   if (lastCommandAction === 'focus-visible') {
     return 'visible'
   }
   return currentPreference
+}
+
+export function shouldAutoRestoreVisibleFocus ({
+  fireDetectionRunning,
+  focusSwitching = false,
+  primaryPreference = 'visible',
+  lastCommandAction,
+  lastCommandStatus,
+  currentMode
+}) {
+  // 用户主动把主画面切成红外时（preference=thermal）尊重用户选择，不自动还原。
+  if (fireDetectionRunning || focusSwitching || primaryPreference === 'thermal') {
+    return false
+  }
+  // 可见光/红外是同一路共享流，画面取决于飞机相机当前在哪个源。
+  // 只要最后一条焦点命令是 focus-thermal（无论 applied/expired/pending），就说明相机被切到了红外源——
+  // 不能再要求 status==='applied'，因为命令会过期（expired）但相机仍停在红外。
+  const lastWasThermal = lastCommandAction === 'focus-thermal'
+  const thermalMode = (currentMode || '').toLowerCase().includes('thermal')
+  return lastWasThermal || thermalMode
 }
 
 export function buildLivePlaybackKey ({

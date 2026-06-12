@@ -64,6 +64,7 @@ class AgentRuntimeLoopTest {
         assertEquals("RC_PLUS_LOCAL", api.lastMsdkDeviceState?.gatewaySn)
         assertEquals(true, api.lastMsdkDeviceState?.online)
         assertEquals("CAPABILITY_READY", api.lastMsdkDeviceState?.connectionState)
+        assertEquals("Matrice 4T", api.lastMsdkDeviceState?.deviceName)
         assertEquals("Matrice 4T", api.lastMsdkDeviceState?.model)
         assertEquals(34.123456, api.lastMsdkDeviceState?.latitude)
         assertEquals(108.123456, api.lastMsdkDeviceState?.longitude)

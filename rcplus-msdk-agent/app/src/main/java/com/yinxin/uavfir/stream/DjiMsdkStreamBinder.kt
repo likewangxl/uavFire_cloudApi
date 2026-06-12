@@ -67,7 +67,24 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
             ),
             preferredVisibleSource(),
         )
+        resetVisibleZoomToWide()
         logCurrentStreamSelection("focusVisible")
+    }
+
+    // 切回可见光时把变焦倍率重置为 1x，保证驾驶舱"每次进去"看到的可见光画面是默认 1 倍焦距，
+    // 而不是上一次手动放大后的倍率。失败（个别镜头不支持）不阻断主流程。
+    private suspend fun resetVisibleZoomToWide() {
+        runCatching {
+            setValue(
+                KeyTools.createKey(
+                    CameraKey.KeyCameraZoomRatios,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                ),
+                DEFAULT_VISIBLE_ZOOM_RATIO,
+            )
+        }.onFailure {
+            Log.w(tag, "focusVisible failed to reset zoom ratio to 1x: ${it.message}", it)
+        }
     }
 
     override suspend fun focusThermal(droneSn: String) {
@@ -348,9 +365,17 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
             )
+            val zoomRatio = runCatching {
+                keyManager.getValue(
+                    KeyTools.createKey(
+                        CameraKey.KeyCameraZoomRatios,
+                        ComponentIndexType.LEFT_OR_MAIN,
+                    ),
+                )
+            }.getOrNull()
             Log.i(
                 tag,
-                "$action streamSource=$currentSource sourceRange=$sourceRange thermalDisplayMode=$displayMode thermalPipPosition=$pipPosition",
+                "$action streamSource=$currentSource sourceRange=$sourceRange zoomRatio=$zoomRatio thermalDisplayMode=$displayMode thermalPipPosition=$pipPosition",
             )
         }.onFailure {
             Log.w(tag, "$action failed to read stream selection: ${it.message}", it)
@@ -375,6 +400,7 @@ class DjiMsdkStreamBinder : MsdkStreamBinder {
     }
 
     companion object {
+        private const val DEFAULT_VISIBLE_ZOOM_RATIO: Double = 1.0
         private const val MSDK_CALLBACK_TIMEOUT_MS: Long = 8_000
         private const val THERMAL_MEASURE_SETTLE_MS: Long = 400
         private const val VISIBLE_SNAPSHOT_POLL_MS: Long = 100

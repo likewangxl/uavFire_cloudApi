@@ -48,6 +48,24 @@ test('GMap ignores non-selected aircraft OSD when no wayline tracking target exi
   assert.match(gmapSource, /if \(!trackingSn\) return/)
 })
 
+test('entering the wayline page recenters the map on the aircraft (one-shot, deferred until position arrives)', () => {
+  const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
+  const gmapSource = readSource('src/components/GMap.vue')
+  const planningSource = readSource('src/hooks/use-wayline-planning.ts')
+
+  // hook 暴露一次性居中信号
+  assert.match(planningSource, /recenterAircraftToken:\s*0/)
+  assert.match(planningSource, /export function requestAircraftRecenter \(\)/)
+  // wayline 进入页面时触发
+  assert.match(waylineSource, /requestAircraftRecenter\(\)/)
+  // GMap 监听 token：有位置立即居中，否则挂起等位置到达后居中一次
+  assert.match(gmapSource, /watch\(\(\) => planningState\.recenterAircraftToken/)
+  assert.match(gmapSource, /pendingAircraftRecenter = true/)
+  assert.match(gmapSource, /if \(pendingAircraftRecenter\) \{[\s\S]*pendingAircraftRecenter = false[\s\S]*setAircraftView\(position\)/)
+  // 不能退化成持续跟随
+  assert.doesNotMatch(gmapSource, /aircraftFollowEnabled/)
+})
+
 test('wayline planning controls open from the left panel entry', () => {
   const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
 

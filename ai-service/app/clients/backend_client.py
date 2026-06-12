@@ -17,8 +17,13 @@ class SupportsPost(Protocol):
 
 
 class UrllibTransport:
-    def __init__(self, base_url: str) -> None:
+    # 必须有超时：runner 每帧都会 POST 事件给后端，后端慢/重启时若无超时会无限阻塞，
+    # 卡死 runner tick → stop 的 join 超时 → 线程变孤儿继续跑（表现为停止后画面仍红外/可见光来回切）。
+    def __init__(self, base_url: str, timeout_s: float = 5.0) -> None:
         self._base_url = base_url.rstrip("/")
+        # 非正超时（urlopen 对 0 立即超时、对负值行为未定义）→ 回退默认 5s，避免误配置卡死/丢请求。
+        timeout = float(timeout_s)
+        self._timeout_s = timeout if timeout > 0 else 5.0
 
     def post(
         self,
@@ -36,7 +41,7 @@ class UrllibTransport:
             headers=request_headers,
             method="POST",
         )
-        with request.urlopen(req) as response:
+        with request.urlopen(req, timeout=self._timeout_s) as response:
             response_payload = response.read()
         if not response_payload:
             return None

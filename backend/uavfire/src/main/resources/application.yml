@@ -248,6 +248,9 @@ fc100:
     default-cruise-speed: 5
     max-route-length-m: 8000
     max-distance-from-takeoff-m: 5000
+    # 测试用：放大短航线阈值=最大距离，使航线恒为两航点(起飞→投放)，到点 finishAction=noAction
+    # 原地悬停后由投放命令脱钩。生产环境恢复完整剖面请改回 300。
+    short-route-max-distance-m: 5000
     drop-altitude-agl-m: 30
     drift-coefficient: 0.4
     max-drop-offset-m: 30

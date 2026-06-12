@@ -7,6 +7,7 @@ export interface MsdkDeviceState {
   aircraftSn: string
   online: boolean
   connectionState: string
+  deviceName?: string
   model?: string
   mode?: string
   latitude?: number
@@ -32,12 +33,26 @@ const pick = (source: any, camelKey: string, snakeKey: string) => {
   return source[camelKey] !== undefined ? source[camelKey] : source[snakeKey]
 }
 
+const pickText = (source: any, keys: string[]) => {
+  if (!source || typeof source !== 'object') {
+    return undefined
+  }
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim()
+    }
+  }
+  return undefined
+}
+
 export function normalizeMsdkDeviceState (device: any): MsdkDeviceState {
   return {
     gatewaySn: pick(device, 'gatewaySn', 'gateway_sn') || '',
     aircraftSn: pick(device, 'aircraftSn', 'aircraft_sn') || '',
     online: Boolean(pick(device, 'online', 'online')),
     connectionState: pick(device, 'connectionState', 'connection_state') || '',
+    deviceName: pickText(device, ['deviceName', 'device_name', 'productName', 'product_name', 'name']),
     model: pick(device, 'model', 'model'),
     mode: pick(device, 'mode', 'mode'),
     latitude: pick(device, 'latitude', 'latitude'),
@@ -77,5 +92,13 @@ export async function sendMsdkCommand (
     command,
     params
   })
+  return result.data
+}
+
+export async function getMsdkCommand (
+  aircraftSn: string,
+  commandId: string
+): Promise<IWorkspaceResponse<any>> {
+  const result = await request.get(`${HTTP_PREFIX}/msdk/devices/${aircraftSn}/commands/${commandId}`)
   return result.data
 }

@@ -17,6 +17,7 @@ import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
 import dji.sdk.keyvalue.value.flightcontroller.FlyToOperationType
 import dji.sdk.keyvalue.value.flightcontroller.FlyToPointInfo
 import dji.sdk.keyvalue.value.flightcontroller.FlyToResult
+import dji.sdk.keyvalue.value.flightcontroller.LEDsSettings
 import dji.sdk.keyvalue.value.flightcontroller.RollPitchControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VerticalControlMode
 import dji.sdk.keyvalue.value.flightcontroller.VirtualStickFlightControlParam
@@ -24,7 +25,6 @@ import dji.sdk.keyvalue.value.flightcontroller.YawControlMode
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotation
 import dji.sdk.keyvalue.value.gimbal.GimbalAngleRotationMode
 import dji.sdk.keyvalue.value.gimbal.CtrlInfo
-import dji.sdk.keyvalue.value.gimbal.GimbalResetType
 import dji.sdk.keyvalue.value.gimbal.GimbalSpeedRotation
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
@@ -78,6 +78,8 @@ interface FlightControlActionClient {
         height: Double,
         speed: Double,
     )
+
+    suspend fun setNavigationLight(enabled: Boolean)
 }
 
 interface GimbalActionClient {
@@ -177,10 +179,30 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         performFlyToAction(FlightControllerKey.KeyFlyToPointEx.create(), target)
     }
 
+    override suspend fun setNavigationLight(enabled: Boolean) {
+        // 只控制航行灯（夜航灯），其余 LED 字段保持 null = 不变
+        val settings = LEDsSettings().also { it.navigationLEDsOn = enabled }
+        setValue(FlightControllerKey.KeyLEDsSettings.create(), settings)
+    }
+
     override suspend fun resetGimbal() {
+        // 用绝对角度归零（pitch=0、yaw=0），保证无论当前姿态都强制回到正前方水平位、有可见动作；
+        // RECENTER 在 M4 上常出现“返回成功但云台不动”的情况。roll 不可控，忽略。
+        val rotation = GimbalAngleRotation(
+            GimbalAngleRotationMode.ABSOLUTE_ANGLE,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            true,
+            false,
+            GIMBAL_RECENTER_DURATION_SEC,
+            false,
+            GIMBAL_RECENTER_TIMEOUT_SEC,
+        )
         performAction(
-            KeyTools.createKey(DJIGimbalKey.KeyGimbalReset, ComponentIndexType.LEFT_OR_MAIN),
-            GimbalResetType.RECENTER,
+            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, ComponentIndexType.LEFT_OR_MAIN),
+            rotation,
         )
     }
 
@@ -413,6 +435,8 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         private const val MAX_FLY_TO_SPEED_MPS: Double = 15.0
         private const val GIMBAL_NADIR_ROTATION_DURATION_SEC: Double = 2.0
         private const val GIMBAL_NADIR_ROTATION_TIMEOUT_SEC: Int = 5
+        private const val GIMBAL_RECENTER_DURATION_SEC: Double = 1.5
+        private const val GIMBAL_RECENTER_TIMEOUT_SEC: Int = 5
         private val SUPPORTED_VIRTUAL_STICK_KEYS = setOf(
             "arrowup",
             "arrowdown",
@@ -453,6 +477,7 @@ class DualStreamMsdkCommandExecutor(
             "stop_fly_to_point" -> return executeFlightAction(flightAction) { stopFlyToPoint() }
             "virtual_stick" -> return executeVirtualStick(command)
             "fly_to_point" -> return executeFlyToPoint(command)
+            "navigation_light" -> return executeNavigationLight(command)
         }
 
         when (val payloadAction = normalizePayloadAction(command.command)) {
@@ -575,6 +600,19 @@ class DualStreamMsdkCommandExecutor(
         )
     }
 
+    private suspend fun executeNavigationLight(command: MsdkCommandResponse): MsdkCommandExecutionResult {
+        val client = flightControlClient ?: return MsdkCommandExecutionResult(
+            status = "FAILED",
+            message = "unsupported-msdk-command:navigation_light:flight-executor-not-wired",
+        )
+        val enabled = command.params?.get("enabled").asBooleanOrNull() ?: true
+        client.setNavigationLight(enabled)
+        return MsdkCommandExecutionResult(
+            status = "APPLIED",
+            message = "navigation_light applied",
+        )
+    }
+
     private suspend fun executeGimbalRotate(command: MsdkCommandResponse): MsdkCommandExecutionResult {
         val params = command.params.orEmpty()
         val pitch = params["pitch"].asDoubleOrNull() ?: 0.0
@@ -629,6 +667,7 @@ class DualStreamMsdkCommandExecutor(
             "stop_fly_to_point", "stop-fly-to-point" -> "stop_fly_to_point"
             "virtual_stick", "virtual-stick" -> "virtual_stick"
             "fly_to_point", "fly-to-point" -> "fly_to_point"
+            "navigation_light", "navigation-light", "aircraft_light", "aircraft-light" -> "navigation_light"
             else -> null
         }
     }

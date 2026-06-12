@@ -15,9 +15,11 @@ test('frontend exposes msdk device list and command api wrappers', () => {
   const apiSource = read('../src/api/msdk-device.ts')
 
   assert.match(apiSource, /export interface MsdkDeviceState/)
+  assert.match(apiSource, /deviceName\?:\s*string/)
   assert.match(apiSource, /export function normalizeMsdkDeviceState\b/)
   assert.match(apiSource, /pick\(device,\s*'aircraftSn',\s*'aircraft_sn'\)/)
   assert.match(apiSource, /pick\(device,\s*'gatewaySn',\s*'gateway_sn'\)/)
+  assert.match(apiSource, /pickText\(device,\s*\[\s*'deviceName',\s*'device_name',\s*'productName',\s*'product_name',\s*'name'\s*\]\)/)
   assert.match(apiSource, /response\.data\.map\(normalizeMsdkDeviceState\)/)
   assert.match(apiSource, /export async function listMsdkDevices\b/)
   assert.match(apiSource, /request\.get\(`?\$\{HTTP_PREFIX\}\/msdk\/devices`?\)/)
@@ -46,6 +48,22 @@ test('tsa lists online aircraft from msdk devices instead of cloud device topolo
   assert.doesNotMatch(tsaSource, /\bgetDeviceTopo\b/)
   assert.doesNotMatch(tsaSource, /from ['"]\/@\/api\/drc['"]/)
   assert.doesNotMatch(tsaSource, /from ['"]\/@\/api\/drone-control\/drone['"]/)
+})
+
+test('tsa monitoring cards prefer msdk reported device names over serial numbers', () => {
+  assert.match(tsaSource, /callsign:\s*device\.deviceName\s*\|\|\s*device\.model\s*\|\|\s*''/)
+  assert.doesNotMatch(tsaSource, /function defaultMonitoringDeviceName/)
+  assert.match(tsaSource, /function normalizeMonitoringModelName[\s\S]*DJI Matrice 4T/)
+  assert.match(tsaSource, /function formatMonitoringDeviceModel[\s\S]*normalizeMonitoringModelName\(device\.callsign\)[\s\S]*normalizeMonitoringModelName\(device\.model\)[\s\S]*device\.sn/)
+  assert.doesNotMatch(tsaSource, /function formatMonitoringDeviceModel[\s\S]*device\.callsign \|\| device\.sn/)
+})
+
+test('tsa monitoring telemetry does not fabricate zero values for missing msdk fields', () => {
+  assert.match(tsaSource, /function optionalMonitoringValue/)
+  assert.match(tsaSource, /home_distance:\s*optionalMonitoringValue\(device\.homeDistance\)/)
+  assert.match(tsaSource, /wind_speed:\s*optionalMonitoringValue\(device\.windSpeed\)/)
+  assert.doesNotMatch(tsaSource, /home_distance:\s*String\(device\.homeDistance \?\? 0\)/)
+  assert.doesNotMatch(tsaSource, /wind_speed:\s*String\(device\.windSpeed \?\? 0\)/)
 })
 
 test('tsa presents msdk control semantics to operators', () => {

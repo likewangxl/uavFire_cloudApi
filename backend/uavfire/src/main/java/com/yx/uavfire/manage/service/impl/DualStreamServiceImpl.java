@@ -111,6 +111,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
     @Autowired(required = false)
     private FireEventService fireEventService;
 
+    @Autowired(required = false)
+    private com.yx.uavfire.firedetection.FireDetectionActivityTracker fireDetectionActivityTracker;
+
     @Override
     public void acceptHeartbeat(String droneSn, DualStreamAgentHeartbeatDTO heartbeat) {
         String resolvedDroneSn = resolveDroneSn(droneSn, heartbeat == null ? null : heartbeat.getDroneSn());
@@ -743,14 +746,14 @@ public class DualStreamServiceImpl implements IDualStreamService {
         if ("visible".equals(channel)) {
             reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_SKIPPED_THERMAL_FIRST);
             rememberVisibleTrigger(reviewed, droneSn);
-            if (shouldIssueFocus(droneSn, "focus-thermal")) {
+            if (isFireDetectionActiveForAutoFocus(droneSn) && shouldIssueFocus(droneSn, "focus-thermal")) {
                 issueCommand(droneSn, "focus-thermal");
             }
             return reviewed;
         }
 
         if ("thermal".equals(channel)) {
-            if (shouldMeasureThermalRegion(reviewed)) {
+            if (shouldMeasureThermalRegion(reviewed) && isFireDetectionActiveForAutoFocus(droneSn)) {
                 if (isInThermalMeasurementCooldown(droneSn)) {
                     reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_REJECTED);
                     log.info(
@@ -1339,6 +1342,11 @@ public class DualStreamServiceImpl implements IDualStreamService {
         return "";
     }
 
+    private boolean isFireDetectionActiveForAutoFocus(String droneSn) {
+        // tracker 缺席（单测直接 new 实例）时保持旧行为；生产环境必须监测中才允许自动切红外。
+        return fireDetectionActivityTracker == null || fireDetectionActivityTracker.isActive(droneSn);
+    }
+
     private boolean shouldIssueFocus(String droneSn, String action) {
         DualStreamCommandDTO existing = commandByDrone.get(droneSn);
         if (existing == null) {
@@ -1355,7 +1363,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
     }
 
     private void requestThermalFocusAfterVisibleReview(String droneSn) {
-        if (!StringUtils.hasText(droneSn)) {
+        if (!StringUtils.hasText(droneSn) || !isFireDetectionActiveForAutoFocus(droneSn)) {
             return;
         }
         DualStreamCommandDTO existing = commandByDrone.get(droneSn);

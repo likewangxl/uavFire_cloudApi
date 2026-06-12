@@ -753,6 +753,10 @@ class CommandPollingCoordinatorTest {
         ) {
             actions += "fly_to_point:$latitude:$longitude:$height:$speed"
         }
+
+        override suspend fun setNavigationLight(enabled: Boolean) {
+            actions += "navigation_light:$enabled"
+        }
     }
 
     private class RecordingPayloadActionClient : GimbalActionClient, CameraActionClient {

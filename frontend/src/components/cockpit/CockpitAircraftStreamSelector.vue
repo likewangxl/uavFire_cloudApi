@@ -17,11 +17,11 @@
         <span class="status-dot" :class="selectedStatusClass"></span>
         <span class="trigger-copy">
           <span class="role-label">{{ activeRoleLabel }}</span>
-          <strong>{{ selectedTarget?.callsign || '选择飞行器' }}</strong>
+          <strong>{{ selectedPrimaryLabel }}</strong>
+          <span v-if="selectedTarget" class="trigger-subtitle">{{ selectedSecondaryLabel }}</span>
         </span>
       </span>
       <span class="trigger-meta">
-        <span v-if="selectedTarget" class="sn-suffix">{{ snSuffix(selectedTarget.deviceSn) }}</span>
         <span class="chevron" :class="{ up: menuOpen }"></span>
       </span>
     </button>
@@ -47,14 +47,16 @@
             ]"
             type="button"
             role="option"
+            :disabled="!target.online || target.streamStatus === 'offline'"
             :aria-selected="target.key === props.value"
+            :aria-disabled="!target.online || target.streamStatus === 'offline'"
             @click="selectTarget(target)"
           >
             <span class="option-status-dot"></span>
             <span class="option-copy">
               <span class="option-title">
                 <strong>{{ target.callsign }}</strong>
-                <span class="option-sn">{{ snSuffix(target.deviceSn) }}</span>
+                <span class="option-sn">{{ fullSnLabel(target.deviceSn) }}</span>
               </span>
               <span v-if="!target.compactLabel" class="option-subtitle">
                 {{ streamStatusLabel(target) }}
@@ -65,6 +67,9 @@
             <span class="option-side">
               <span v-if="hasProgress(target)" class="progress-text">{{ target.progressPercent }}%</span>
               <span class="stream-badges">
+                <span class="stream-badge" :class="target.online ? 'online' : 'offline'">
+                  {{ target.online ? '在线' : '离线' }}
+                </span>
                 <span v-if="target.primaryPlayUrl" class="stream-badge">可见光</span>
                 <span v-if="target.thermalPlayUrl" class="stream-badge thermal">热成像</span>
               </span>
@@ -124,6 +129,17 @@ const selectedTarget = computed(() => {
   return props.targets.find(target => target.key === props.value)
 })
 
+const selectedPrimaryLabel = computed(() => {
+  return selectedTarget.value?.callsign || '选择飞行器'
+})
+
+const selectedSecondaryLabel = computed(() => {
+  const target = selectedTarget.value
+  if (!target) return ''
+  const status = streamStatusLabel(target)
+  return `${fullSnLabel(target.deviceSn)} · ${status}`
+})
+
 const activeRoleLabel = computed(() => {
   return selectedTarget.value ? roleLabel(selectedTarget.value.role) : roleLabel(props.role)
 })
@@ -143,7 +159,7 @@ const groupedTargets = computed(() => {
   return roles
     .map(role => ({
       role,
-      targets: props.targets.filter(target => target.role === role)
+      targets: sortStreamTargets(props.targets.filter(target => target.role === role))
     }))
     .filter(group => group.targets.length > 0)
 })
@@ -154,9 +170,25 @@ function roleLabel (role: CockpitStreamRole) {
   return roleLabels[role]
 }
 
-function snSuffix (deviceSn: string) {
+function fullSnLabel (deviceSn: string) {
   if (!deviceSn) return 'SN --'
-  return `SN ${deviceSn.slice(-6)}`
+  return `SN ${deviceSn}`
+}
+
+function sortStreamTargets (targets: CockpitStreamTarget[]) {
+  return [...targets].sort((a, b) => {
+    const onlineDelta = Number(b.online) - Number(a.online)
+    if (onlineDelta !== 0) return onlineDelta
+    const statusWeight: Record<CockpitStreamTarget['streamStatus'], number> = {
+      running: 0,
+      idle: 1,
+      error: 2,
+      offline: 3
+    }
+    const statusDelta = statusWeight[a.streamStatus] - statusWeight[b.streamStatus]
+    if (statusDelta !== 0) return statusDelta
+    return a.callsign.localeCompare(b.callsign, 'zh-Hans-CN')
+  })
 }
 
 function hasProgress (target: CockpitStreamTarget) {
@@ -184,6 +216,7 @@ function closeMenu () {
 }
 
 function selectTarget (target: CockpitStreamTarget) {
+  if (!target.online || target.streamStatus === 'offline') return
   emit('update:value', target.key)
   emit('change', target)
   closeMenu()
@@ -270,7 +303,7 @@ onBeforeUnmount(() => {
 .role-label,
 .group-label,
 .option-subtitle,
-.sn-suffix,
+.trigger-subtitle,
 .option-sn {
   color: rgba(192, 218, 241, 0.68);
 }
@@ -281,11 +314,27 @@ onBeforeUnmount(() => {
   letter-spacing: 0;
 }
 
-.trigger-copy strong,
+.trigger-copy strong {
+  overflow: hidden;
+  color: #f5fbff;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: normal;
+}
+
 .option-title strong {
   overflow: hidden;
   color: #f5fbff;
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trigger-subtitle {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -399,6 +448,12 @@ onBeforeUnmount(() => {
 
 .stream-target-option.offline {
   opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.stream-target-option:disabled:hover {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: transparent;
 }
 
 .option-copy {
@@ -454,6 +509,16 @@ onBeforeUnmount(() => {
   color: #ffd9b8;
   background: rgba(255, 171, 74, 0.12);
   border-color: rgba(255, 171, 74, 0.22);
+}
+.stream-badge.online {
+  color: #8df0c4;
+  background: rgba(64, 224, 160, 0.14);
+  border-color: rgba(64, 224, 160, 0.32);
+}
+.stream-badge.offline {
+  color: #ff9ba6;
+  background: rgba(255, 96, 112, 0.12);
+  border-color: rgba(255, 96, 112, 0.3);
 }
 
 .stream-target-empty {

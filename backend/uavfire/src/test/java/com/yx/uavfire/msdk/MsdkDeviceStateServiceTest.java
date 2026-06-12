@@ -17,6 +17,8 @@ class MsdkDeviceStateServiceTest {
         state.setAircraftSn("1581F7K3D249E00AM3Q3");
         state.setOnline(true);
         state.setConnectionState("CONNECTED");
+        state.setDeviceName("DJI Matrice 4T");
+        state.setModel("Matrice 4T");
         state.setLatitude(34.123456);
         state.setLongitude(108.123456);
         state.setBatteryPercent(82);
@@ -27,6 +29,8 @@ class MsdkDeviceStateServiceTest {
         assertEquals(1, service.listOnline().size());
         MsdkDeviceStateDTO restored = service.get("1581F7K3D249E00AM3Q3").orElseThrow();
         assertEquals("RC_PLUS_LOCAL", restored.getGatewaySn());
+        assertEquals("DJI Matrice 4T", restored.getDeviceName());
+        assertEquals("Matrice 4T", restored.getModel());
         assertEquals(34.123456, restored.getLatitude());
         assertEquals(108.123456, restored.getLongitude());
         assertEquals(82, restored.getBatteryPercent());

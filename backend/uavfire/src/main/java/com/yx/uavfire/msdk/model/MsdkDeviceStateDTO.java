@@ -19,6 +19,8 @@ public class MsdkDeviceStateDTO {
 
     private String connectionState;
 
+    private String deviceName;
+
     private String model;
 
     private String mode;

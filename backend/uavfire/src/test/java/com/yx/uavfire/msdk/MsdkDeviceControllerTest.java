@@ -34,7 +34,7 @@ class MsdkDeviceControllerTest {
     void stateEndpointStoresAndListsOnlineMsdkAircraft() throws Exception {
         mockMvc.perform(post("/manage/api/v1/msdk/devices/state")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"gatewaySn\":\"RC_PLUS_LOCAL\",\"aircraftSn\":\"AIR-1\",\"online\":true,\"connectionState\":\"CONNECTED\",\"latitude\":34.1,\"longitude\":108.2,\"batteryPercent\":88}"))
+                        .content("{\"gatewaySn\":\"RC_PLUS_LOCAL\",\"aircraftSn\":\"AIR-1\",\"online\":true,\"connectionState\":\"CONNECTED\",\"deviceName\":\"DJI Matrice 4T\",\"model\":\"Matrice 4T\",\"latitude\":34.1,\"longitude\":108.2,\"batteryPercent\":88}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
@@ -43,6 +43,8 @@ class MsdkDeviceControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data[0].aircraftSn").value("AIR-1"))
                 .andExpect(jsonPath("$.data[0].gatewaySn").value("RC_PLUS_LOCAL"))
+                .andExpect(jsonPath("$.data[0].deviceName").value("DJI Matrice 4T"))
+                .andExpect(jsonPath("$.data[0].model").value("Matrice 4T"))
                 .andExpect(jsonPath("$.data[0].latitude").value(34.1))
                 .andExpect(jsonPath("$.data[0].longitude").value(108.2))
                 .andExpect(jsonPath("$.data[0].batteryPercent").value(88));
@@ -76,5 +78,44 @@ class MsdkDeviceControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.status").value("APPLIED"))
                 .andExpect(jsonPath("$.data.message").value("ok"));
+    }
+
+    @Test
+    void getCommandEndpointExposesTerminalResultToOperator() throws Exception {
+        String enqueue = mockMvc.perform(post("/manage/api/v1/msdk/devices/AIR-1/commands")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"command\":\"gimbal_reset\",\"params\":{}}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String commandId = new ObjectMapper().readTree(enqueue).at("/data/commandId").asText();
+
+        // Before the agent acks, the operator can read the pending status.
+        mockMvc.perform(get("/manage/api/v1/msdk/devices/AIR-1/commands/" + commandId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value("PENDING"));
+
+        mockMvc.perform(post("/manage/api/v1/msdk/devices/AIR-1/commands/ack")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"commandId\":\"" + commandId + "\",\"status\":\"FAILED\",\"message\":\"gimbal-busy\"}"))
+                .andExpect(status().isOk());
+
+        // The real agent execution result is now visible to the operator.
+        mockMvc.perform(get("/manage/api/v1/msdk/devices/AIR-1/commands/" + commandId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value("FAILED"))
+                .andExpect(jsonPath("$.data.message").value("gimbal-busy"));
+    }
+
+    @Test
+    void navigationLightCommandIsAcceptedByTheWhitelist() throws Exception {
+        mockMvc.perform(post("/manage/api/v1/msdk/devices/AIR-1/commands")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"command\":\"navigation_light\",\"params\":{\"enabled\":true}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.command").value("navigation_light"))
+                .andExpect(jsonPath("$.data.status").value("PENDING"));
     }
 }

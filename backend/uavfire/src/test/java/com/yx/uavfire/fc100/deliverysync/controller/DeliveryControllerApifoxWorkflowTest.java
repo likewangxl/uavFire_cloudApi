@@ -372,9 +372,12 @@ class DeliveryControllerApifoxWorkflowTest {
         FireMissionMapper missionMapper = mock(FireMissionMapper.class);
         RouteExportService routeService = mock(RouteExportService.class);
         MissionStateMachine stateMachine = mock(MissionStateMachine.class);
-        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, planner, null);
 
         FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(1L);
         mission.setMissionNo("M-AUTO-RELEASE-001");
         mission.setStatus("IN_PROGRESS");
         mission.setAircraftSn("FC100-SN-001");
@@ -386,6 +389,21 @@ class DeliveryControllerApifoxWorkflowTest {
         completed.setPhase("completed");
         completed.setAccepted(true);
         when(adapter.queryTaskStatus("TASK-AUTO-RELEASE-001")).thenReturn(completed);
+
+        // 新行为：脱钩要求飞机到投放点并悬停稳定，不再因 phase=completed 提前脱钩
+        MissionWaypointDTO dropWp = new MissionWaypointDTO();
+        dropWp.setWaypointIndex(1);
+        dropWp.setWaypointType("DROP");
+        dropWp.setLat(34.667795);
+        dropWp.setLng(109.326400);
+        when(planner.listLatest(1L)).thenReturn(List.of(dropWp));
+        DeliveryDeviceProperties hovering = new DeliveryDeviceProperties();
+        hovering.setDeviceSn("FC100-SN-001");
+        hovering.setLatitude(34.667795);
+        hovering.setLongitude(109.326400);
+        hovering.setHorizontalSpeed(0.0);
+        hovering.setVerticalSpeed(0.0);
+        when(adapter.getDeviceProperties("FC100-SN-001")).thenReturn(hovering);
 
         DeliveryCommandRef releaseRef = new DeliveryCommandRef();
         releaseRef.setBid("BID-AUTO-HOOK");
@@ -413,9 +431,12 @@ class DeliveryControllerApifoxWorkflowTest {
         FireMissionMapper missionMapper = mock(FireMissionMapper.class);
         RouteExportService routeService = mock(RouteExportService.class);
         MissionStateMachine stateMachine = mock(MissionStateMachine.class);
-        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, planner, null);
 
         FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(2L);
         mission.setMissionNo("M-SCHEDULED-RELEASE-001");
         mission.setStatus("IN_PROGRESS");
         mission.setAircraftSn("FC100-SN-001");
@@ -428,6 +449,21 @@ class DeliveryControllerApifoxWorkflowTest {
         completed.setPhase("completed");
         completed.setAccepted(true);
         when(adapter.queryTaskStatus("TASK-SCHEDULED-RELEASE-001")).thenReturn(completed);
+
+        // 新行为：脱钩要求飞机到投放点并悬停稳定，不再因 phase=completed 提前脱钩
+        MissionWaypointDTO dropWp = new MissionWaypointDTO();
+        dropWp.setWaypointIndex(1);
+        dropWp.setWaypointType("DROP");
+        dropWp.setLat(34.667795);
+        dropWp.setLng(109.326400);
+        when(planner.listLatest(2L)).thenReturn(List.of(dropWp));
+        DeliveryDeviceProperties hovering = new DeliveryDeviceProperties();
+        hovering.setDeviceSn("FC100-SN-001");
+        hovering.setLatitude(34.667795);
+        hovering.setLongitude(109.326400);
+        hovering.setHorizontalSpeed(0.0);
+        hovering.setVerticalSpeed(0.0);
+        when(adapter.getDeviceProperties("FC100-SN-001")).thenReturn(hovering);
 
         DeliveryCommandRef releaseRef = new DeliveryCommandRef();
         releaseRef.setBid("BID-SCHEDULED-HOOK");

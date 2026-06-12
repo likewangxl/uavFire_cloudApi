@@ -768,6 +768,8 @@ export default defineComponent({
     let flightTrackAircraftSn = ''
     const flightTrackPath: any[] = []
     let planningClickBound = false
+    // 进入页面请求居中飞机时，如果此刻还没有飞机位置，先挂起，等位置到达后居中一次。
+    let pendingAircraftRecenter = false
 
     function onPlanningMapClick (e: any) {
       if (!planningState.active) return
@@ -990,6 +992,11 @@ export default defineComponent({
       } else {
         flightTrackPolyline.setPath(flightTrackPath)
       }
+      // 进入页面时请求过居中、但当时还没有飞机位置：现在位置到了，居中一次。
+      if (pendingAircraftRecenter) {
+        pendingAircraftRecenter = false
+        setAircraftView(position)
+      }
     }
 
     function fitPlanningPreviewToMap () {
@@ -1036,6 +1043,16 @@ export default defineComponent({
         : '',
       () => updateFlightPositionOverlay()
     )
+
+    // 进入航线页面时 wayline.vue 会自增 recenterAircraftToken：
+    // 若此刻已有飞机位置则立即居中，否则挂起，等位置到达后由 updateFlightPositionOverlay 居中一次。
+    watch(() => planningState.recenterAircraftToken, () => {
+      if (planningState.flightPosition) {
+        setAircraftView(planningState.flightPosition)
+      } else {
+        pendingAircraftRecenter = true
+      }
+    })
 
     function getDrawCallback ({ obj }: { obj : any }) {
       if (state.isFlightArea) {

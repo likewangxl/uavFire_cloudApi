@@ -44,6 +44,7 @@ class WaylineEventForwarder(
     }
 
     override fun onProgress(missionId: String?, info: WaylineExecutingInfo) {
+        Log.i(TAG, "progress mission=$missionId wayline=${info.waylineID} wp=${info.currentWaypointIndex}")
         scope.launch(dispatcher) {
             publisher.publishEvent(
                 method = "wayline_progress",

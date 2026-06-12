@@ -9,6 +9,7 @@ import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
 import com.yx.uavfire.manage.service.impl.DualStreamServiceImpl;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
+import com.yx.uavfire.firedetection.FireDetectionActivityTracker;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -798,6 +799,75 @@ class DualStreamServiceImplTest {
         assertEquals("VISIBLE_SKIPPED_THERMAL_FIRST", events.get(0).getReviewStatus());
         assertNotNull(command);
         assertEquals("focus-thermal", command.getAction());
+    }
+
+    @Test
+    void acceptEvent_skipsAutoThermalFocusWhenFireDetectionInactive() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        ReflectionTestUtils.setField(service, "fireDetectionActivityTracker", new FireDetectionActivityTracker());
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0)
+                .setVisibleImageUrl("http://snapshots/visible.jpg"));
+
+        List<DualStreamEventDTO> events = service.listEvents("task-001");
+        assertEquals("VISIBLE_SKIPPED_THERMAL_FIRST", events.get(0).getReviewStatus());
+        assertNull(service.pollCommand("DRONE-001"));
+    }
+
+    @Test
+    void acceptEvent_issuesAutoThermalFocusWhenFireDetectionActive() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireDetectionActivityTracker tracker = new FireDetectionActivityTracker();
+        tracker.markActive("DRONE-001");
+        ReflectionTestUtils.setField(service, "fireDetectionActivityTracker", tracker);
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0)
+                .setVisibleImageUrl("http://snapshots/visible.jpg"));
+
+        DualStreamCommandDTO command = service.pollCommand("DRONE-001");
+        assertNotNull(command);
+        assertEquals("focus-thermal", command.getAction());
+    }
+
+    @Test
+    void acceptEvent_skipsThermalRegionMeasurementWhenFireDetectionInactive() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        ReflectionTestUtils.setField(service, "fireDetectionActivityTracker", new FireDetectionActivityTracker());
+        Map<String, Double> roi = Map.of(
+                "x", 0.32,
+                "y", 0.44,
+                "width", 0.26,
+                "height", 0.07);
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("LOW")
+                .setThermalScore(0.007)
+                .setFusionScore(0.007)
+                .setThermalImageUrl("http://snapshots/task-001-1779163200000-annotated.jpg")
+                .setThermalMeasureRoi(roi));
+
+        List<DualStreamEventDTO> events = service.listEvents("task-001");
+        assertNotEquals("THERMAL_MEASURING", events.get(0).getReviewStatus());
+        DualStreamCommandDTO command = service.pollCommand("DRONE-001");
+        assertTrue(command == null || !"measure-thermal-region".equals(command.getAction()));
     }
 
     @Test

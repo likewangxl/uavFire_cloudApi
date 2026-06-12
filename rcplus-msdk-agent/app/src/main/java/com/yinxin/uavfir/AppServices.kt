@@ -174,6 +174,9 @@ class AppServices(
             Log.i(TAG, "starting OSD+HMS reporters aircraftSn=${identity.aircraftSn} gatewaySn=${identity.gatewaySn}")
             osdReporter.start(identity.aircraftSn, identity.gatewaySn)
             hmsReporter.start(identity.aircraftSn, identity.gatewaySn)
+            // Listeners attached at app boot (before MSDK product link) never fire;
+            // re-register now that the aircraft identity is active and connected.
+            waypointExecutor.reattach()
             activeReporterIdentity = identity
         }
         if (autoStartedStreamAircraft.add(identity.aircraftSn)) {

@@ -91,18 +91,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     @org.springframework.beans.factory.annotation.Value("${wayline-agent.server-url:http://localhost:6789}")
     private String waylineAgentServerUrl;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.yx.uavfire.firedetection.AiServiceClient aiServiceClient;
-
-    @org.springframework.beans.factory.annotation.Value("${ai-service.zlm-rtsp-host:127.0.0.1}")
-    private String aiZlmRtspHost;
-
-    @org.springframework.beans.factory.annotation.Value("${ai-service.zlm-rtsp-port:8554}")
-    private int aiZlmRtspPort;
-
-    @org.springframework.beans.factory.annotation.Value("${ai-service.auto-trigger-on-wayline:true}")
-    private boolean aiAutoTriggerOnWayline;
-
     @Override
     public PaginationData<PlannedWaylineDTO> getByWorkspace(String workspaceId, long page, long pageSize) {
         Page<PlannedWaylineEntity> pageData = mapper.selectPage(
@@ -584,9 +572,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             invokeAgentDispatch(existing);
         }
 
-        // 自动触发火情识别 (trigger #3): 航线开始执行时拉起 ai-service 监测。
-        triggerFireDetectionForWayline(existing);
-
         updateTaskFields(existing);
         return entity2Dto(existing);
     }
@@ -630,21 +615,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return aircraftSn;
     }
 
-    private void triggerFireDetectionForWayline(PlannedWaylineEntity existing) {
-        if (!aiAutoTriggerOnWayline || aiServiceClient == null) return;
-        String droneSn = waylineDroneSn(existing);
-        if (!StringUtils.hasText(droneSn)) return;
-        String rtspUrl = "rtsp://" + aiZlmRtspHost + ":" + aiZlmRtspPort + "/live/" + droneSn + "-0";
-        aiServiceClient.startDetection(aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, rtspUrl, "");
-    }
-
-    private void stopFireDetectionForWayline(PlannedWaylineEntity existing) {
-        if (!aiAutoTriggerOnWayline || aiServiceClient == null) return;
-        String droneSn = waylineDroneSn(existing);
-        if (!StringUtils.hasText(droneSn)) return;
-        aiServiceClient.stopDetection(aiServiceClient.fireTaskIdForDrone(droneSn));
-    }
-
     @Override
     public PlannedWaylineDTO cancelTask(String workspaceId, String id) {
         PlannedWaylineEntity existing = getExisting(workspaceId, id);
@@ -672,8 +642,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setTaskStatus(STATUS_CANCELED);
         existing.setTaskStatusReason(null);
         existing.setUpdateTime(now);
-
-        stopFireDetectionForWayline(existing);
 
         updateTaskFields(existing);
         return entity2Dto(existing);

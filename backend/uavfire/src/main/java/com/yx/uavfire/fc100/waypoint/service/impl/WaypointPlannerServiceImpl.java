@@ -39,10 +39,13 @@ public class WaypointPlannerServiceImpl implements WaypointPlannerService {
     @Override
     public List<MissionWaypointDTO> plan(WaypointGenerateParam param) {
         double speed = param.getSpeed() != null ? param.getSpeed() : props.getDefaultCruiseSpeed();
-        double cruiseAlt = param.getCruiseAlt() != null ? param.getCruiseAlt()
-            : Math.max(param.getFireAlt() + 40, param.getTakeoffAlt() + 50);
         double dropAltAgl = param.getDropAltAgl() != null ? param.getDropAltAgl()
             : props.getDropAltitudeAglM();
+        // 高度统一为“相对起飞点 AGL”，WPML 用 relativeToStartPoint 执行（飞机以自身起飞点为基准，
+        // 不依赖火点/起飞点的绝对椭球高，避免 fireAlt 缺失/相对高被当绝对高导致起飞后下降）。
+        // 巡航 = 投放高 + 20m。
+        double cruiseAlt = param.getCruiseAlt() != null ? param.getCruiseAlt()
+            : dropAltAgl + 20.0;
         double approachDist = param.getApproachDistance() != null ? param.getApproachDistance() : 200.0;
         double exitDist = param.getExitDistance() != null ? param.getExitDistance() : 60.0;
         double offset = dropPolicy.dropOffset(dropAltAgl, param.getWindSpeed());
@@ -61,20 +64,22 @@ public class WaypointPlannerServiceImpl implements WaypointPlannerService {
         if (straight <= props.getShortRouteMaxDistanceM()) {
             var dropPoint = GeoUtils.offset(param.getFireLat(), param.getFireLng(), offset, theta);
             List<MissionWaypointDTO> shortest = new ArrayList<>(2);
+            // 相对起飞点高度：起飞航点先爬到投放高（避免起飞后下降），投放航点同高。
             shortest.add(wp(0, WaypointType.TAKEOFF,
                 param.getTakeoffLat(), param.getTakeoffLng(),
-                param.getTakeoffAlt(), speed, "takeoff"));
+                dropAltAgl, speed, "takeoff"));
             shortest.add(wp(1, WaypointType.DROP,
                 dropPoint.lat(), dropPoint.lng(),
-                param.getFireAlt() + dropAltAgl, speed, "drop-ready"));
+                dropAltAgl, speed, "drop-ready"));
             return shortest;
         }
 
         List<MissionWaypointDTO> wps = new ArrayList<>(7);
 
+        // 相对起飞点高度：起飞航点直接爬到巡航高（≥安全高度，避免起飞后下降）。
         wps.add(wp(0, WaypointType.TAKEOFF,
             param.getTakeoffLat(), param.getTakeoffLng(),
-            param.getTakeoffAlt(), speed, "takeoff"));
+            cruiseAlt, speed, "takeoff"));
         wps.add(wp(1, WaypointType.CLIMB,
             param.getTakeoffLat(), param.getTakeoffLng(),
             cruiseAlt, speed, "climb"));
@@ -87,14 +92,14 @@ public class WaypointPlannerServiceImpl implements WaypointPlannerService {
 
         var p4 = GeoUtils.offset(param.getFireLat(), param.getFireLng(), offset, theta);
         wps.add(wp(4, WaypointType.DROP, p4.lat(), p4.lng(),
-            param.getFireAlt() + dropAltAgl, speed, "drop-ready"));
+            dropAltAgl, speed, "drop-ready"));
 
         var p5 = GeoUtils.offset(param.getFireLat(), param.getFireLng(), exitDist, theta + 180);
         wps.add(wp(5, WaypointType.EXIT, p5.lat(), p5.lng(), cruiseAlt, speed, "exit"));
 
         wps.add(wp(6, WaypointType.RETURN,
             param.getTakeoffLat(), param.getTakeoffLng(),
-            param.getTakeoffAlt() + 5, speed, "return"));
+            cruiseAlt, speed, "return"));
 
         // 航线总长度上限
         double total = 0;

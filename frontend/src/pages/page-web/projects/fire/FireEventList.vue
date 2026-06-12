@@ -66,10 +66,21 @@
         </div>
         <span v-else>-</span>
       </template>
+      <template #missionStatusCell="{ record }">
+        <StatusTag v-if="missionForEvent(record)" :status="missionForEvent(record)!.status" />
+        <span v-else>-</span>
+      </template>
       <template #actionCell="{ record }">
         <a-space direction="vertical" size="small">
           <a-button type="primary" size="small" @click="openHistory(record)">
             查看历史
+          </a-button>
+          <a-button
+            v-if="missionForEvent(record)?.status === 'WAITING_REVIEW'"
+            size="small"
+            @click="openApprove(record)"
+          >
+            审批
           </a-button>
         </a-space>
       </template>
@@ -152,6 +163,60 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal
+      v-model:visible="approveOpen"
+      :title="`审批任务 ${approveMissionNo}`"
+      :confirm-loading="approveSubmitting"
+      ok-text="提交审批"
+      cancel-text="取消"
+      @ok="submitApprove"
+    >
+      <a-form :model="approveForm" layout="vertical" style="margin-top: 12px">
+        <a-form-item label="操作员 ID">
+          <a-input v-model:value="approveForm.operatorId" />
+        </a-form-item>
+        <a-form-item label="飞机 SN">
+          <a-select
+            v-model:value="approveForm.aircraftSn"
+            placeholder="选择 FC100 飞机（起飞点取该机实时位置）"
+            allow-clear
+            show-search
+            style="width: 100%"
+            @change="onAircraftChange"
+          >
+            <a-select-option
+              v-for="d in aircraftOptions"
+              :key="d.deviceSn"
+              :value="d.deviceSn"
+            >
+              DJI FlyCart 100 · {{ d.deviceSn }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="载水量 (L)">
+          <a-input-number v-model:value="approveForm.waterLoadLiters" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="起飞纬度">
+          <a-input-number v-model:value="approveForm.takeoffLat" :precision="6" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="起飞经度">
+          <a-input-number v-model:value="approveForm.takeoffLng" :precision="6" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="起飞高度 (m)">
+          <a-input-number v-model:value="approveForm.takeoffAlt" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="风速 (m/s)">
+          <a-input-number v-model:value="approveForm.windSpeed" :min="0" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="风向 (°)">
+          <a-input-number v-model:value="approveForm.windDirectionDeg" :min="0" :max="360" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="备注">
+          <a-input v-model:value="approveForm.remark" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -159,11 +224,106 @@
 import { ref, computed, onMounted, h } from 'vue'
 import { message } from 'ant-design-vue'
 import { eventApi } from '/@/api/fire/event'
+import { missionApi, type MissionApproveBody } from '/@/api/fire/mission'
+import { deliveryApi, type DeliveryDeviceDTO } from '/@/api/fire/delivery'
 import type { FireEventDTO, FireEventHistoryDTO } from '/@/types/fire/event'
 import type { FireEventCreateRequest } from '/@/api/fire/event'
+import type { FireMissionDTO } from '/@/types/fire/mission'
+import { ELocalStorageKey } from '/@/types'
+import StatusTag from '/@/components/fire/StatusTag.vue'
 
 const events = ref<FireEventDTO[]>([])
+// 火情事件 id -> 其关联的灭火任务（最新一次）。用于在事件列表展示审核状态并就地审批。
+const missionsByEventId = ref<Record<number, FireMissionDTO>>({})
 const loading = ref(false)
+
+function missionForEvent (record: FireEventDTO): FireMissionDTO | undefined {
+  return missionsByEventId.value[record.id]
+}
+
+// ---- 就地审批弹窗 ----
+const approveOpen = ref(false)
+const approveSubmitting = ref(false)
+const approveMissionNo = ref('')
+const defaultApproveForm = (): MissionApproveBody => ({
+  operatorId: 'test-operator',
+  aircraftSn: '',
+  waterLoadLiters: undefined,
+  takeoffLat: 0,
+  takeoffLng: 0,
+  takeoffAlt: undefined,
+  windSpeed: 0,
+  windDirectionDeg: 0,
+  remark: '',
+})
+const approveForm = ref<MissionApproveBody>(defaultApproveForm())
+
+// 审批弹窗里「飞机 SN」下拉用的可选 FC100 飞机（排除遥控器 RC）
+const aircraftOptions = ref<DeliveryDeviceDTO[]>([])
+async function loadAircraftOptions () {
+  try {
+    const ws = localStorage.getItem(ELocalStorageKey.WorkspaceId) || undefined
+    const res = await deliveryApi.listDevices(ws)
+    const devices = res.data?.data ?? []
+    aircraftOptions.value = devices.filter((d) => {
+      const bind = String(d.bindStatus || '').toLowerCase()
+      const type = String(d.deviceType || '').toLowerCase()
+      return bind !== 'rc' && type !== 'rc'
+    })
+  } catch (e) {
+    // 取不到设备不阻塞审批，飞机 SN 仍可手填/留空
+  }
+}
+
+function openApprove (record: FireEventDTO) {
+  const mission = missionForEvent(record)
+  if (!mission) return
+  approveMissionNo.value = mission.missionNo
+  approveForm.value = defaultApproveForm()
+  // 起飞点不预填火点坐标：那样会让起飞点≈火点、距离≤300m，航线退化成 TAKEOFF→DROP
+  // 短航线（无接近/驻留剖面）。改为用真实起飞点——所选 FC100 飞机的实时位置。
+  if (aircraftOptions.value.length === 1) {
+    approveForm.value.aircraftSn = aircraftOptions.value[0].deviceSn
+    applyAircraftTakeoff(approveForm.value.aircraftSn)
+  }
+  approveOpen.value = true
+}
+
+// 用所选 FC100 飞机的实时位置回填起飞点（真实起飞点 → 生成完整 接近→驻留→投放 剖面）
+async function applyAircraftTakeoff (deviceSn: string) {
+  if (!deviceSn) return
+  try {
+    const res = await deliveryApi.deviceProps(deviceSn)
+    const p = res.data?.data
+    if (p && p.latitude != null && p.longitude != null) {
+      approveForm.value.takeoffLat = p.latitude
+      approveForm.value.takeoffLng = p.longitude
+      if (p.altitude != null) approveForm.value.takeoffAlt = p.altitude
+      if (p.windSpeed != null) approveForm.value.windSpeed = p.windSpeed
+    }
+  } catch (e) {
+    // 取不到飞机位置不阻塞，起飞点留手填
+  }
+}
+
+function onAircraftChange (deviceSn: string) {
+  applyAircraftTakeoff(deviceSn)
+}
+
+async function submitApprove () {
+  if (!approveMissionNo.value) return
+  approveSubmitting.value = true
+  try {
+    await missionApi.approve(approveMissionNo.value, approveForm.value)
+    message.success('审批成功，任务已进入灭火任务列表')
+    approveOpen.value = false
+    await loadEvents()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message ?? '审批失败')
+  } finally {
+    approveSubmitting.value = false
+  }
+}
 const showCreateModal = ref(false)
 const creating = ref(false)
 const historyOpen = ref(false)
@@ -241,8 +401,19 @@ function resetForm () {
 async function loadEvents () {
   loading.value = true
   try {
-    const res = await eventApi.list()
-    events.value = res.data.data ?? []
+    const [eventRes, missionRes] = await Promise.all([
+      eventApi.list(),
+      missionApi.list({ size: 500 }),
+    ])
+    events.value = eventRes.data.data ?? []
+    // 后端任务列表按 create_time 倒序，同一事件多次尝试时保留首个(=最新)
+    const map: Record<number, FireMissionDTO> = {}
+    for (const m of missionRes.data.data ?? []) {
+      if (m.fireEventId != null && !(m.fireEventId in map)) {
+        map[m.fireEventId] = m
+      }
+    }
+    missionsByEventId.value = map
   } catch (e) {
     message.error('加载火情列表失败')
   } finally {
@@ -436,7 +607,7 @@ async function handleCreate () {
 }
 
 const ACTION_COLUMN_WIDTH = 110
-const tableScrollX = 2060
+const tableScrollX = 2180
 
 const columns = [
   { title: '事件编号', key: 'eventId', width: 230, slots: { customRender: 'eventIdCell' } },
@@ -492,6 +663,12 @@ const columns = [
     key: 'status',
     width: 110,
     customRender: ({ record }: { record: FireEventDTO }) => displayEventStatus(record.status),
+  },
+  {
+    title: '审核状态',
+    key: 'missionReview',
+    width: 120,
+    slots: { customRender: 'missionStatusCell' },
   },
   {
     title: '事件时间',
@@ -589,6 +766,7 @@ const historyColumns = [
 
 onMounted(() => {
   loadEvents()
+  loadAircraftOptions()
 })
 </script>
 

@@ -92,9 +92,24 @@ test('fire event history shows visible confirmations as explicit evidence on the
   assert.match(source, /!isVisibleHistoryAction\(item\.action\)/)
 })
 
-test('fire mission operations live in mission list instead of fire event list', () => {
-  assert.doesNotMatch(source, /missionApi/)
-  assert.doesNotMatch(source, /deliveryApi/)
+test('fire event list adds inline approve entry; heavier delivery/route ops stay in mission list', () => {
+  // 火情事件列表新增：展示任务审核状态 + 待审核任务就地审批（审批后进入灭火任务列表）
+  // 自建审批弹窗用 v-model:visible（antd-vue 2.x），不复用 ActionButtons（其弹窗用 4.x 的 open）
+  assert.match(source, /import \{ missionApi, type MissionApproveBody \}/)
+  assert.match(source, /missionApi\.list\(\{ size: 500 \}\)/)
+  assert.match(source, /missionApi\.approve\(/)
+  assert.match(source, /#missionStatusCell/)
+  assert.match(source, /missionForEvent\(record\)\?\.status === 'WAITING_REVIEW'/)
+  assert.match(source, /function openApprove/)
+  assert.match(source, /function submitApprove/)
+  assert.match(source, /v-model:visible="approveOpen"/)
+  // 飞机 SN 用下拉选可用 FC100 飞机（只读列设备，非投放操作）
+  assert.match(source, /deliveryApi\.listDevices/)
+  // 起飞点取所选飞机实时位置（不用火点坐标，避免航线退化成短航线）
+  assert.match(source, /deliveryApi\.deviceProps/)
+  assert.doesNotMatch(source, /approveForm\.value\.takeoffLat = record\.lat/)
+  // 更重的投放操作仍只在任务列表/详情，不进事件列表
+  assert.doesNotMatch(source, /deliveryApi\.(createTask|startTask|prepareFireMissionDeliveryTask|sendDeviceCommand)/)
   assert.doesNotMatch(source, /openApproveDeliveryModal/)
   assert.doesNotMatch(source, /submitApproveDelivery/)
   assert.doesNotMatch(source, /审批并生成航线/)

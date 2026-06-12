@@ -26,6 +26,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -54,6 +55,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -80,6 +82,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -108,6 +111,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -138,6 +142,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -165,6 +170,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -204,6 +210,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -240,6 +247,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -274,6 +282,7 @@ class ThermalHotspotMonitorTest {
         )
         val sessionManager = DualStreamSessionManager(provider)
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -306,6 +315,7 @@ class ThermalHotspotMonitorTest {
             ),
         )
         sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
@@ -315,6 +325,46 @@ class ThermalHotspotMonitorTest {
         monitor.pollOnce("DRONE-001")
 
         assertNull(api.lastTaskEventBody)
+    }
+
+    @Test
+    fun pollOnce_skipsThermalProbeWhenMonitoringDisabled() = runTest {
+        val api = RecordingDualStreamApi()
+        val provider = HotspotStreamProvider(
+            temperatureC = 153.0,
+            region = ThermalMeasureRegion(x = 0.42, y = 0.46, width = 0.08, height = 0.08),
+            snapshotPath = "/tmp/thermal.jpg",
+        )
+        val sessionManager = DualStreamSessionManager(provider)
+        sessionManager.start("DRONE-001")
+        // 未启用火情监测：不应探测、不应切红外、不应上报。
+        val monitor = ThermalHotspotMonitor(
+            client = AgentBackendClient(api),
+            sessionManager = sessionManager,
+            visibleConfirmationScope = backgroundScope,
+            clockMs = { 1780059017562L },
+        )
+
+        monitor.pollOnce("DRONE-001")
+
+        assertEquals(0, provider.measureHotspotCalls)
+        assertNull(api.lastTaskEventBody)
+    }
+
+    @Test
+    fun executeCommand_togglesThermalMonitoringEnabled() = runTest {
+        val provider = HotspotStreamProvider(
+            temperatureC = 153.0,
+            region = ThermalMeasureRegion.CENTER,
+        )
+        val sessionManager = DualStreamSessionManager(provider)
+        sessionManager.start("DRONE-001")
+
+        assertEquals(false, sessionManager.thermalMonitoringEnabled)
+        sessionManager.executeCommand("DRONE-001", "thermal-monitor-on")
+        assertEquals(true, sessionManager.thermalMonitoringEnabled)
+        sessionManager.executeCommand("DRONE-001", "thermal-monitor-off")
+        assertEquals(false, sessionManager.thermalMonitoringEnabled)
     }
 
     private class HotspotStreamProvider(

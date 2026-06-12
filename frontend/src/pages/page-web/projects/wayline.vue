@@ -1002,6 +1002,8 @@ import {
   resetPlanningDraft,
   setFlightPositionFromRecord,
   setFlightPositionFromWgs,
+  requestAircraftRecenter,
+  setTrackedAircraft,
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
 import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
@@ -1197,7 +1199,11 @@ const DEFAULT_PLANNED_WAYLINE_MODEL = 'M4T'
 
 watch(
   () => selectedAircraftSn.value,
-  sn => syncSelectedAircraftFlightPosition(sn),
+  sn => {
+    // 用户选择 MSDK 飞机即设为跟踪目标（执行中的航线会在轮询里持续覆盖）。
+    if (sn) setTrackedAircraft(sn)
+    syncSelectedAircraftFlightPosition(sn)
+  },
 )
 
 watch(
@@ -1384,9 +1390,19 @@ function resolvePlanningExecutionTarget (): AircraftSummary | null {
   return onlineAircraftMap[candidateSn] || getMsdkAircraftSummary(candidateSn)
 }
 
+function isPlannedWaylineLive (record: PlannedWaylineRecord | null | undefined): boolean {
+  if (!record) return false
+  const status = normalizePlannedWaylineStatus(record)
+  return status === PlannedWaylineStatus.EXECUTING || status === PlannedWaylineStatus.PUBLISHING
+}
+
 function applyPlannedWaylineFlightPosition (record: PlannedWaylineRecord | null | undefined) {
   const recordAircraftSn = getRecordAircraftSn(record)
   if (!recordAircraftSn) return
+  // 执行中的航线 → 该飞机认领地图跟踪，挡掉其它(停地)飞机的位置写入。
+  if (isPlannedWaylineLive(record)) {
+    setTrackedAircraft(recordAircraftSn)
+  }
   const onlineMsdkSnList = Object.keys(msdkAircraftMap)
   const msdkDevice = msdkAircraftMap[recordAircraftSn]
   if (msdkDevice?.longitude && msdkDevice?.latitude) {
@@ -1408,6 +1424,10 @@ function syncFc100DeviceFlightPosition (props: DeliveryDeviceProperties | null) 
   if (!props) return
   const deviceSn = props.deviceSn || fc100PlanningState.selectedDeviceSn
   if (!deviceSn) return
+  // FC100 有进行中的投放任务 → 该机认领地图跟踪，挡掉其它(停地)飞机的位置写入。
+  if (fc100PlanningState.taskId && !isFc100TaskTerminal(fc100PlanningState.taskStatus)) {
+    setTrackedAircraft(deviceSn)
+  }
   setFlightPositionFromWgs(deviceSn, props.longitude, props.latitude, {
     height: props.altitude,
     updatedAt: props.osdTimestamp || Date.now(),
@@ -2319,6 +2339,8 @@ async function handleFc100SelectDevice (deviceSn: string) {
     fc100PlanningState.selectedDeviceProps = null
     return
   }
+  // 用户选择 FC100 设备即设为跟踪目标（进行中的任务会在轮询里持续覆盖）。
+  setTrackedAircraft(deviceSn)
   await refreshFc100SelectedDeviceProps(deviceSn)
 }
 
@@ -2564,6 +2586,8 @@ onMounted(() => {
     startFc100RealtimeRefresh()
     topoTimer = window.setInterval(refreshOnlineAircrafts, 5000)
   }
+  // 每次进入航线页面：请求地图以飞机当前位置为中心（飞机位置就绪后由 GMap 居中一次）。
+  requestAircraftRecenter()
 })
 
 onUnmounted(() => {

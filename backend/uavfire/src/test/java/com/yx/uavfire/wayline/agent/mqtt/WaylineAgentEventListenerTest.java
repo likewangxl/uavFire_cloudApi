@@ -10,6 +10,7 @@ import com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchResultDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineProgressDTO;
 import com.yx.uavfire.wayline.agent.model.dto.WaylineStateChangeDTO;
 import com.yx.uavfire.wayline.agent.service.WaylineEventStore;
+import com.yx.uavfire.firedetection.FireDetectionService;
 import com.yx.uavfire.wayline.dao.IPlannedWaylineMapper;
 import com.yx.uavfire.wayline.model.entity.PlannedWaylineEntity;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -27,11 +28,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -135,6 +139,89 @@ class WaylineAgentEventListenerTest {
     }
 
     @Test
+    void onEvent_autoStartsFireDetectionWhenWaylineReachesFirstWaypoint() throws Exception {
+        FireDetectionService fireDetectionService = mock(FireDetectionService.class);
+        setField(listener, "fireDetectionService", fireDetectionService);
+        String payload = "{\"method\":\"wayline_progress\",\"timestamp\":2000,"
+                + "\"data\":{\"mission_id\":\"m-first\",\"mission_file_name\":\"f.kmz\",\"wayline_id\":0,"
+                + "\"current_waypoint_index\":0,\"total_waypoints\":5}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
+
+        verify(fireDetectionService).startForDrone(eq("SN-A"));
+    }
+
+    @Test
+    void onEvent_autoStartsFireDetectionOnlyOnceForSameMissionAndDrone() throws Exception {
+        FireDetectionService fireDetectionService = mock(FireDetectionService.class);
+        setField(listener, "fireDetectionService", fireDetectionService);
+        String payload = "{\"method\":\"wayline_progress\",\"timestamp\":2000,"
+                + "\"data\":{\"mission_id\":\"m-repeat\",\"mission_file_name\":\"f.kmz\",\"wayline_id\":0,"
+                + "\"current_waypoint_index\":0,\"total_waypoints\":5}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
+
+        verify(fireDetectionService).startForDrone(eq("SN-A"));
+    }
+
+    @Test
+    void onEvent_doesNotAutoStartFireDetectionForNonFirstWaypoint() throws Exception {
+        FireDetectionService fireDetectionService = mock(FireDetectionService.class);
+        setField(listener, "fireDetectionService", fireDetectionService);
+        String payload = "{\"method\":\"wayline_progress\",\"timestamp\":2000,"
+                + "\"data\":{\"mission_id\":\"m-second\",\"mission_file_name\":\"f.kmz\",\"wayline_id\":0,"
+                + "\"current_waypoint_index\":1,\"total_waypoints\":5}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
+
+        verify(fireDetectionService, never()).startForDrone(any());
+    }
+
+    @Test
+    void onEvent_autoStopsFireDetectionWhenWaylineFinished() throws Exception {
+        FireDetectionService fireDetectionService = mock(FireDetectionService.class);
+        org.mockito.Mockito.when(fireDetectionService.isActiveForDrone(eq("SN-A"))).thenReturn(true);
+        setField(listener, "fireDetectionService", fireDetectionService);
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":3000,"
+                + "\"data\":{\"mission_id\":\"m-done\",\"msdk_state\":\"FINISHED\","
+                + "\"previous_msdk_state\":\"EXECUTING\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        verify(fireDetectionService).stopForDrone(eq("SN-A"));
+    }
+
+    @Test
+    void onEvent_autoStopsFireDetectionOnlyOnceForSameMission() throws Exception {
+        FireDetectionService fireDetectionService = mock(FireDetectionService.class);
+        org.mockito.Mockito.when(fireDetectionService.isActiveForDrone(eq("SN-A"))).thenReturn(true);
+        setField(listener, "fireDetectionService", fireDetectionService);
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":3000,"
+                + "\"data\":{\"mission_id\":\"m-done-once\",\"msdk_state\":\"FINISHED\","
+                + "\"previous_msdk_state\":\"EXECUTING\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        verify(fireDetectionService).stopForDrone(eq("SN-A"));
+    }
+
+    @Test
+    void onEvent_doesNotAutoStopFireDetectionWhenNotActive() throws Exception {
+        FireDetectionService fireDetectionService = mock(FireDetectionService.class);
+        org.mockito.Mockito.when(fireDetectionService.isActiveForDrone(eq("SN-A"))).thenReturn(false);
+        setField(listener, "fireDetectionService", fireDetectionService);
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":3000,"
+                + "\"data\":{\"mission_id\":\"m-done-inactive\",\"msdk_state\":\"FINISHED\","
+                + "\"previous_msdk_state\":\"EXECUTING\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        verify(fireDetectionService, never()).stopForDrone(any());
+    }
+
+    @Test
     void onEvent_persistsReadyAfterExecutingAsFinishedWithFullProgress() throws Exception {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         setField(listener, "plannedWaylineMapper", mapper);
@@ -150,6 +237,67 @@ class WaylineAgentEventListenerTest {
         Map<String, Object> params = captor.getValue().getParamNameValuePairs();
         assertTrue(params.containsValue("finished"));
         assertTrue(params.containsValue(100));
+    }
+
+    @Test
+    void onEvent_persistsFinishedWithoutExecutingAsFailedWithReason() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        // 进入航线后直接 FINISHED（从未经历 EXECUTING）→ 飞机实际没飞起来（如电量不足）。
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":1000,"
+                + "\"data\":{\"mission_id\":\"m-noexec\",\"msdk_state\":\"FINISHED\","
+                + "\"previous_msdk_state\":\"ENTER_WAYLINE\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue("failed"));
+        assertTrue(params.containsValue(WaylineAgentEventListener.NO_EXECUTE_FINISH_REASON));
+        assertFalse(params.containsValue("finished"));
+    }
+
+    @Test
+    void onEvent_trustsBusinessCompletedDespiteEnterWaylineFinished() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        // MQTT 乱序：state_change(FINISHED) 早于 EXECUTING 到达，但 agent 已明确报 completed → 信任，不误判 failed。
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":1000,"
+                + "\"data\":{\"mission_id\":\"m-ooo\",\"business_state\":\"completed\","
+                + "\"msdk_state\":\"FINISHED\",\"previous_msdk_state\":\"ENTER_WAYLINE\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue("finished"));
+        assertFalse(params.containsValue("failed"));
+        assertFalse(params.containsValue(WaylineAgentEventListener.NO_EXECUTE_FINISH_REASON));
+    }
+
+    @Test
+    void onEvent_doesNotFlagFinishedAsFailedWhenProgressAlreadyRecorded() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        // 该任务此前已落过执行进度 → 确实飞过；即便 FINISHED 的 previous 看似未执行也不误判 failed。
+        when(mapper.selectOne(any())).thenReturn(PlannedWaylineEntity.builder()
+                .flightId("m-flew").taskProgress(50).currentWaypointIndex(1).build());
+        String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":1000,"
+                + "\"data\":{\"mission_id\":\"m-flew\",\"msdk_state\":\"FINISHED\","
+                + "\"previous_msdk_state\":\"ENTER_WAYLINE\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", payload));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(isNull(), captor.capture());
+        Map<String, Object> params = captor.getValue().getParamNameValuePairs();
+        assertFalse(params.containsValue("failed"));
+        assertFalse(params.containsValue(WaylineAgentEventListener.NO_EXECUTE_FINISH_REASON));
     }
 
     @Test

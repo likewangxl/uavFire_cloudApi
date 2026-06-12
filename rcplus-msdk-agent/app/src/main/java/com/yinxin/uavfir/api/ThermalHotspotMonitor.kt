@@ -28,6 +28,11 @@ class ThermalHotspotMonitor(
         if (sessionManager.sessionState != DualStreamSessionState.RUNNING) {
             return
         }
+        // 仅在火情监测开启时才探测热区。否则探测会周期性 focusThermal 把共享流切到红外，
+        // 即便用户没开监测——见 DualStreamSessionManager.thermalMonitoringEnabled。
+        if (!sessionManager.thermalMonitoringEnabled) {
+            return
+        }
         val now = clockMs()
         if (lastProbeAtMs > 0L && now - lastProbeAtMs < probeIntervalMs) {
             return

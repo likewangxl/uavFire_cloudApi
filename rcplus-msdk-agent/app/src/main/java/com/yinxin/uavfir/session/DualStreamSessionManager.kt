@@ -37,6 +37,13 @@ class DualStreamSessionManager(
     private var lastPlaybackStatus: String? = null
     private var lastThermalCenterTemperatureC: Double? = null
 
+    // 火情监测（红外热区探测）开关：仅当后端 FireDetectionService 启动监测时由命令置为 true。
+    // 默认 false —— 否则 ThermalHotspotMonitor 会在 session RUNNING 期间每 10s 自发 focusThermal 测温，
+    // 把单路共享流不断切到红外，即便用户没开火情监测。M4T 单云台要取红外帧测温必须切红外源，
+    // 因此唯一正确的做法是“未开监测就别探测”。
+    @Volatile
+    var thermalMonitoringEnabled: Boolean = false
+
     suspend fun start(droneSn: String) {
         _state.value = DualStreamSessionState.STARTING
         lastFailureMessage = null
@@ -201,6 +208,16 @@ class DualStreamSessionManager(
                     message = lastFailureMessage ?: "session-state=${state.value.name}",
                 )
             }
+        }
+
+        "thermal-monitor-on" -> {
+            thermalMonitoringEnabled = true
+            CommandExecutionResult(status = "applied", message = "thermal-monitoring-enabled")
+        }
+
+        "thermal-monitor-off" -> {
+            thermalMonitoringEnabled = false
+            CommandExecutionResult(status = "applied", message = "thermal-monitoring-disabled")
         }
 
         "focus-visible" -> runCatching {

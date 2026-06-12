@@ -833,7 +833,10 @@ public class DeliveryController {
         if (mission == null || status == null) return;
         if (!FireMissionStatus.IN_PROGRESS.name().equals(mission.getStatus())) return;
         if (Boolean.FALSE.equals(status.getAccepted())) return;
-        if (!"completed".equalsIgnoreCase(status.getPhase()) && !isAtDropPointAndHovering(mission)) return;
+        // 必须飞到投放点并悬停稳定后才脱钩；不再因任务 phase=completed 在下降/未稳时提前脱钩
+        // （否则会出现"下降中直接脱钩"）。两航点航线末端 finishAction=noAction 会在投放点悬停，
+        // 轮询到速度≤阈值且距 DROP≤5m 时触发。
+        if (!isAtDropPointAndHovering(mission)) return;
 
         DeviceCommandParam command = new DeviceCommandParam();
         command.setOperatorId("system-auto-release");

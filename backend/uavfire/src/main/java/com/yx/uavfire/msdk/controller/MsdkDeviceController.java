@@ -53,6 +53,14 @@ public class MsdkDeviceController {
         return HttpResultResponse.success(stateService.pollCommand(aircraftSn).orElse(null));
     }
 
+    @GetMapping("/{aircraftSn}/commands/{commandId}")
+    public HttpResultResponse<MsdkCommandDTO> getCommand(@PathVariable String aircraftSn,
+                                                         @PathVariable String commandId) {
+        return stateService.getCommand(commandId)
+                .map(HttpResultResponse::success)
+                .orElseGet(() -> HttpResultResponse.error("command not found"));
+    }
+
     @PostMapping("/{aircraftSn}/commands/ack")
     public HttpResultResponse<MsdkCommandDTO> acknowledgeCommand(@PathVariable String aircraftSn,
                                                                 @RequestBody MsdkCommandAckParam param) {

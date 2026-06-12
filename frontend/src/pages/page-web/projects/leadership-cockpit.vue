@@ -192,7 +192,7 @@
                 :disabled="fireDetectionState.loading"
                 @click="onToggleFireDetection"
               >
-                {{ fireDetectionState.running ? '停止火情监测' : '开始火情监测' }}
+                {{ fireDetectionButtonText }}
               </button>
             </div>
 
@@ -221,25 +221,7 @@
               </div>
 
               <div class="live-badge" :class="{ idle: !primaryPlayerState.playing }">
-                <span class="live-dot"></span>{{ primaryPaneMeta.badge }}
-              </div>
-
-              <button
-                class="dual-stream-fullscreen-btn"
-                type="button"
-                @click="toggleFireMonitorFullscreen"
-              >
-                {{ fireMonitorFullscreen ? '退出全屏' : '全屏' }}
-              </button>
-
-              <div class="dual-stream-hud">
-                <span
-                  v-for="item in liveHudItems"
-                  :key="item"
-                  class="dual-stream-hud-chip"
-                >
-                  {{ item }}
-                </span>
+                <span class="live-dot"></span>{{ fireDetectionLiveFeedbackText }}
               </div>
 
               <div class="flight-hud-overlay">
@@ -302,6 +284,14 @@
                   <span>{{ previewPaneMeta.title }}</span>
                   <small>{{ previewPaneMeta.helper }}</small>
                 </div>
+              </button>
+
+              <button
+                class="dual-stream-fullscreen-btn"
+                type="button"
+                @click="toggleFireMonitorFullscreen"
+              >
+                {{ fireMonitorFullscreen ? '退出全屏' : '全屏' }}
               </button>
 
               <CockpitFlightControlPanel
@@ -427,6 +417,7 @@ import {
   requestDualStreamFocus,
   requestFireDetectionStart,
   requestFireDetectionStop,
+  getFireDetectionStatus,
   type DualStreamEvent,
   type DualStreamGroup
 } from '/@/api/manage'
@@ -444,6 +435,7 @@ import {
   buildLivePaneState,
   buildLivePlaybackKey,
   resolveAppliedFocusPreference,
+  shouldAutoRestoreVisibleFocus,
   swapPrimaryPreference
 } from './leadership-cockpit-live-layout.mjs'
 import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
@@ -642,14 +634,16 @@ const cockpitLastRefreshText = computed(() => (
 
 const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
   const targets = new Map<string, CockpitStreamTarget>()
-  for (const device of msdkDeviceSnapshots.value) {
+  for (const device of msdkDeviceSnapshots.value.filter(isFireMonitorAircraftDevice)) {
     if (!device.aircraftSn) continue
     const groupForDevice = dualStreamState.group?.droneSn === device.aircraftSn ? dualStreamState.group : null
+    const deviceName = device.deviceName || device.model || `火情监测 ${device.aircraftSn.slice(-4)}`
+    const modelSuffix = device.model && device.model !== deviceName ? ` ${device.model}` : ''
     targets.set(device.aircraftSn, {
       key: `fire-monitor:${device.aircraftSn}`,
       role: 'fire-monitor',
       deviceSn: device.aircraftSn,
-      callsign: device.model || `火情监测 ${device.aircraftSn.slice(-4)}`,
+      callsign: `${deviceName}${modelSuffix}`,
       online: device.online,
       taskStatus: groupForDevice?.sessionState || device.connectionState || device.mode,
       primaryPlayUrl: groupForDevice?.visiblePlayUrl || '',
@@ -677,7 +671,9 @@ const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
     })
   }
 
-  if (!targets.has(FIELD_AGENT_AIRCRAFT_SN)) {
+  // 仅当没有任何真实设备上报时，才回退到默认占位飞机用于引导 UI。
+  // 有真机连接（如 AF7PE）时不再展示这个占位机——否则它会一直显示成"在线"的幽灵设备。
+  if (targets.size === 0) {
     targets.set(FIELD_AGENT_AIRCRAFT_SN, {
       key: `fire-monitor:${FIELD_AGENT_AIRCRAFT_SN}`,
       role: 'fire-monitor',
@@ -692,6 +688,18 @@ const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
 
   return Array.from(targets.values())
 })
+
+function isFireMonitorAircraftDevice (device: MsdkDeviceState) {
+  const identity = [
+    device.gatewaySn,
+    device.aircraftSn,
+    device.deviceName,
+    device.model
+  ].filter(Boolean).join(' ').toUpperCase()
+  if (!device.aircraftSn) return false
+  if (device.aircraftSn === 'RC_PLUS_LOCAL') return false
+  return !/(^|[_\s-])RC\s*PLUS|RC_PLUS|REMOTE\s*CONTROL|遥控器/.test(identity)
+}
 
 const selectedFireMonitorTarget = computed(() => {
   return fireMonitorTargets.value.find(target => target.key === selectedFireMonitorTargetKey.value) ||
@@ -798,6 +806,7 @@ type PlayerRuntimeState = typeof primaryPlayerState
 let dualStreamTimer: number | undefined
 let msdkHudTimer: number | undefined
 let aiRiskEventTimer: number | undefined
+let fireDetectionStatusTimer: number | undefined
 let livePlayerRetryTimer: number | undefined
 let primaryPlayer: any = null
 let previewPlayer: any = null
@@ -1037,8 +1046,15 @@ const syncLivePlayers = async () => {
   )
 }
 
+type FireDetectionPhase = 'idle' | 'starting' | 'switching' | 'running' | 'stopping' | 'switch_failed'
+
 // 火情识别手动开关 (#4)
-const fireDetectionState = reactive({ running: false, loading: false, droneSn: '' })
+const fireDetectionState = reactive({
+  running: false,
+  loading: false,
+  droneSn: '',
+  phase: 'idle' as FireDetectionPhase
+})
 
 const resolveFireDetectionDroneSn = async () => {
   const candidateSns = [
@@ -1075,26 +1091,54 @@ const onToggleFireDetection = async () => {
       return
     }
     if (fireDetectionState.running) {
+      fireDetectionState.phase = 'stopping'
       const res = await requestFireDetectionStop(fireDetectionState.droneSn)
       if (res.code !== 0) {
         throw new Error(res.message || 'ai-service stop failed')
       }
       fireDetectionState.running = false
+      fireDetectionState.phase = 'idle'
+      primaryPreference.value = 'visible'
+      await switchFireMonitorFocus('focus-visible', { bestEffort: true })
     } else {
+      fireDetectionState.phase = 'starting'
       const res = await requestFireDetectionStart(fireDetectionState.droneSn)
       if (res.code !== 0) {
         throw new Error(res.message || 'ai-service start failed')
       }
       fireDetectionState.running = true
+      fireDetectionState.phase = 'switching'
+      const switched = await switchFireMonitorFocus('focus-thermal')
+      fireDetectionState.phase = switched ? 'running' : 'switch_failed'
     }
   } catch (e) {
     console.warn('[cockpit] fire-detection toggle failed', e)
+    fireDetectionState.phase = fireDetectionState.running ? 'switch_failed' : 'idle'
     notification.error({
       message: fireDetectionState.running ? '停止火情监测失败' : '启动火情监测失败',
       description: (e as any)?.message || '请检查后端和 ai-service 是否正常运行。'
     })
   } finally {
     fireDetectionState.loading = false
+  }
+}
+
+// 轮询后端真实监测状态，让按钮同步航线自动启停（第一航点自动开、返航完成自动关）。
+// 手动启停过程中（loading）跳过，避免覆盖中间态。
+const syncFireDetectionStatus = async () => {
+  if (fireDetectionState.loading) return
+  const sn = fireDetectionState.droneSn || selectedFireMonitorTarget.value?.deviceSn
+  if (!sn) return
+  try {
+    const res = await getFireDetectionStatus(sn)
+    if (res?.code !== 0) return
+    const running = Boolean(res.data?.running)
+    if (running === fireDetectionState.running) return
+    fireDetectionState.droneSn = sn
+    fireDetectionState.running = running
+    fireDetectionState.phase = running ? 'running' : 'idle'
+  } catch (e) {
+    // 轮询失败忽略，下次再试
   }
 }
 
@@ -1124,6 +1168,7 @@ const loadDualStreamState = async () => {
     }
     dualStreamState.group = selectedGroup
     mirrorAppliedFocusCommand(selectedGroup)
+    maybeRestoreDefaultVisibleFocus(selectedGroup)
     if (!selectedGroup && lastError) throw lastError
     dualStreamState.error = ''
   } catch (error: any) {
@@ -1135,6 +1180,8 @@ const loadDualStreamState = async () => {
 
 function handleFireMonitorTargetChange (target: CockpitStreamTarget) {
   fireDetectionState.droneSn = target.deviceSn
+  fireDetectionState.running = false
+  fireDetectionState.phase = 'idle'
   primaryPreference.value = 'visible'
   loadDualStreamState()
 }
@@ -1218,12 +1265,66 @@ const mirrorAppliedFocusCommand = (group: DualStreamGroup | null) => {
   const nextPreference = resolveAppliedFocusPreference({
     currentPreference: primaryPreference.value,
     lastCommandAction: group.lastCommandAction,
-    lastCommandStatus: group.lastCommandStatus
+    lastCommandStatus: group.lastCommandStatus,
+    fireDetectionRunning: fireDetectionState.running
   })
   lastMirroredFocusCommand = commandKey
   if (nextPreference !== primaryPreference.value) {
     primaryPreference.value = nextPreference
   }
+}
+
+// 未运行火情监测时驾驶舱默认保持可见光：发现遗留的红外焦点状态就 best-effort 下发 focus-visible。
+// 用冷却时间去抖（轮询 5s，冷却 4s 允许每个轮询周期最多补发一次）；一旦相机切回可见光，
+// 后端 lastCommandAction 变成 focus-visible，shouldAutoRestoreVisibleFocus 返回 false 自动停止。
+const visibleFocusRestoreAtByDrone = new Map<string, number>()
+const VISIBLE_FOCUS_RESTORE_COOLDOWN_MS = 4000
+
+const maybeRestoreDefaultVisibleFocus = (group: DualStreamGroup | null) => {
+  const droneSn = group?.droneSn
+  if (!droneSn) {
+    return
+  }
+  if (!shouldAutoRestoreVisibleFocus({
+    fireDetectionRunning: fireDetectionState.running,
+    focusSwitching: focusSwitching.value,
+    primaryPreference: primaryPreference.value,
+    lastCommandAction: group?.lastCommandAction,
+    lastCommandStatus: group?.lastCommandStatus,
+    currentMode: group?.currentMode
+  })) {
+    return
+  }
+  const now = Date.now()
+  const lastAttempt = visibleFocusRestoreAtByDrone.get(droneSn) || 0
+  if (now - lastAttempt < VISIBLE_FOCUS_RESTORE_COOLDOWN_MS) {
+    return
+  }
+  visibleFocusRestoreAtByDrone.set(droneSn, now)
+  requestDualStreamFocus(droneSn, 'focus-visible').catch(() => {
+    visibleFocusRestoreAtByDrone.delete(droneSn)
+  })
+}
+
+// 进入可见光视图（切换监测飞机 / 进入火情监测 tab）时，主动下发 focus-visible：
+// agent 会把镜头切到可见光并把变焦重置为 1x，保证"每次进去默认 1 倍焦距"。
+// 仅在未运行火情监测时生效（监测中由复核流程接管画面），复用同一冷却避免重复下发。
+const ensureVisibleDefaultZoom = (droneSn?: string) => {
+  if (fireDetectionState.running || focusSwitching.value) {
+    return
+  }
+  if (!droneSn || droneSn === FIELD_AGENT_AIRCRAFT_SN) {
+    return
+  }
+  const now = Date.now()
+  const lastAttempt = visibleFocusRestoreAtByDrone.get(droneSn) || 0
+  if (now - lastAttempt < VISIBLE_FOCUS_RESTORE_COOLDOWN_MS) {
+    return
+  }
+  visibleFocusRestoreAtByDrone.set(droneSn, now)
+  requestDualStreamFocus(droneSn, 'focus-visible').catch(() => {
+    visibleFocusRestoreAtByDrone.delete(droneSn)
+  })
 }
 
 const loadAiRiskEvents = async () => {
@@ -1449,6 +1550,8 @@ onMounted(async () => {
   dualStreamTimer = window.setInterval(loadDualStreamState, 5000)
   aiRiskEventTimer = window.setInterval(loadAiRiskEvents, 2000)
   fireEventNotifyTimer = window.setInterval(loadNewFireEvents, 3000)
+  syncFireDetectionStatus()
+  fireDetectionStatusTimer = window.setInterval(syncFireDetectionStatus, 4000)
 })
 
 onBeforeUnmount(() => {
@@ -1464,6 +1567,9 @@ onBeforeUnmount(() => {
   }
   if (fireEventNotifyTimer != null) {
     window.clearInterval(fireEventNotifyTimer)
+  }
+  if (fireDetectionStatusTimer != null) {
+    window.clearInterval(fireDetectionStatusTimer)
   }
   destroyAllPlayers()
 })
@@ -1560,22 +1666,24 @@ const previewPaneMeta = computed(() => {
   }
 })
 
-const liveHudItems = computed(() => [
-  dualStreamSummary.value.droneSn,
-  `模式 ${dualStreamSummary.value.mode}`,
-  `主通道 ${primaryPaneMeta.value.status}`,
-  `画面温度 ${formatThermalTemperature(dualStreamSummary.value.thermalCenterTemperatureC)}`,
-  `播放 ${dualStreamSummary.value.playbackStatus}`
-])
-
-const formatThermalTemperature = (value?: number) => {
-  const n = Number(value)
-  return Number.isFinite(n) ? `${n.toFixed(1)} °C` : '--'
-}
-
 const focusSwitchLabel = computed(() => (
   focusSwitchAction.value === 'focus-thermal' ? '红外画面加载中' : '可见光画面加载中'
 ))
+
+const fireDetectionButtonText = computed(() => {
+  if (fireDetectionState.phase === 'starting') return '正在启动...'
+  if (fireDetectionState.phase === 'stopping') return '正在停止...'
+  if (fireDetectionState.running) return '火情监测中'
+  return '开始火情监测'
+})
+
+const fireDetectionLiveFeedbackText = computed(() => {
+  if (fireDetectionState.phase === 'starting') return '正在启动火情监测'
+  if (fireDetectionState.phase === 'switching') return '火情监测已启动，正在切换红外画面'
+  if (fireDetectionState.phase === 'switch_failed') return '火情监测已启动 · 红外切换失败，当前显示可见光'
+  if (fireDetectionState.running && primaryPreference.value === 'thermal') return 'AI 火情监测中 · 红外识别'
+  return primaryPaneMeta.value.badge
+})
 
 const recentAiRiskEvents = computed(() => aiRiskState.events.slice(-10).reverse())
 
@@ -1676,6 +1784,30 @@ const aiRiskCardClass = (event: DualStreamEvent) => {
   return ''
 }
 
+const switchFireMonitorFocus = async (
+  action: 'focus-visible' | 'focus-thermal',
+  options: { bestEffort?: boolean } = {}
+) => {
+  focusSwitching.value = true
+  focusSwitchAction.value = action
+  try {
+    await requestDualStreamFocus(dualStreamSummary.value.droneSn, action)
+    const focusApplied = await waitForFocusCommandApplied(action)
+    if (!focusApplied) {
+      return false
+    }
+    primaryPreference.value = action === 'focus-thermal' ? 'thermal' : 'visible'
+    await loadDualStreamState()
+    return true
+  } catch (error: any) {
+    dualStreamState.error = error?.message || `${action}-request-failed`
+    return Boolean(options.bestEffort)
+  } finally {
+    focusSwitching.value = false
+    focusSwitchAction.value = null
+  }
+}
+
 const handlePreviewSwap = async () => {
   if (!livePaneState.value.preview.clickable || focusSwitching.value) {
     return
@@ -1683,30 +1815,22 @@ const handlePreviewSwap = async () => {
   const action = livePaneState.value.preview.focusAction || (
     swapPrimaryPreference(primaryPreference.value) === 'thermal' ? 'focus-thermal' : 'focus-visible'
   )
-  focusSwitching.value = true
-  focusSwitchAction.value = action
-  try {
-    await requestDualStreamFocus(dualStreamSummary.value.droneSn, action)
-    const focusApplied = await waitForFocusCommandApplied(action)
-    if (!focusApplied) {
-      return
-    }
-    primaryPreference.value = action === 'focus-thermal' ? 'thermal' : 'visible'
-    await loadDualStreamState()
-  } catch (error: any) {
-    dualStreamState.error = error?.message || `${action}-request-failed`
-  } finally {
-    focusSwitching.value = false
-    focusSwitchAction.value = null
-  }
+  await switchFireMonitorFocus(action)
 }
 
 watch(
   fireMonitorTargets,
   (targets) => {
-    if (!targets.some(target => target.key === selectedFireMonitorTargetKey.value)) {
-      selectedFireMonitorTargetKey.value = targets[0]?.key || ''
+    const current = targets.find(target => target.key === selectedFireMonitorTargetKey.value)
+    // 当前选中仍可用（在线且非离线流）时保留——离线项在下拉框里被禁用，无法被手动选中，
+    // 因此一旦当前选中是离线，必然是自动默认产生的，可安全改选为最佳在线设备。
+    if (current && current.online && current.streamStatus !== 'offline') {
+      return
     }
+    const best = targets.find(target => target.online && target.streamStatus === 'running') ||
+      targets.find(target => target.online && target.streamStatus !== 'offline') ||
+      targets[0]
+    selectedFireMonitorTargetKey.value = best?.key || ''
   },
   { immediate: true }
 )
@@ -1716,7 +1840,11 @@ watch(
   (target, previous) => {
     if (!target || target.deviceSn === previous?.deviceSn) return
     fireDetectionState.droneSn = target.deviceSn
+    fireDetectionState.running = false
+    fireDetectionState.phase = 'idle'
+    primaryPreference.value = 'visible'
     loadDualStreamState()
+    ensureVisibleDefaultZoom(target.deviceSn)
   }
 )
 
@@ -1725,6 +1853,9 @@ watch(
   (tab) => {
     if (tab === 'delivery-execution' && deliveryExecutionTargets.value.length === 0) {
       loadDeliveryExecutionTargets()
+    }
+    if (tab === 'fire-monitor') {
+      ensureVisibleDefaultZoom(selectedFireMonitorTarget.value?.deviceSn)
     }
   }
 )
@@ -2228,7 +2359,8 @@ watch(
   position: absolute;
   top: 10px;
   left: 14px;
-  right: 14px;
+  right: 104px;
+  max-width: calc(100% - 132px);
   z-index: 10;
   pointer-events: none;
 }
@@ -2252,6 +2384,13 @@ watch(
   transform: translateX(-50%);
 }
 
+.dual-stream-shell.fullscreen .dual-stream-preview {
+  top: auto;
+  right: 18px;
+  bottom: 18px;
+  z-index: 8;
+}
+
 .dual-stream-stage-head {
   display: flex;
   min-width: 0;
@@ -2268,6 +2407,7 @@ watch(
   padding: 4px 12px;
   border-radius: 999px;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s ease;
 }
@@ -2337,7 +2477,7 @@ watch(
 
 .dual-stream-status-card {
   position: absolute;
-  inset: auto 24px 24px auto;
+  inset: auto 24px 64px auto;
   z-index: 5;
   width: min(420px, calc(100% - 48px));
   min-height: 0;
@@ -2406,10 +2546,11 @@ watch(
 .dual-stream-fullscreen-btn {
   position: absolute;
   top: 18px;
-  right: 236px;
+  right: 18px;
   z-index: 6;
   height: 34px;
-  padding: 0 14px;
+  min-width: 46px;
+  padding: 0 12px;
   border: 1px solid rgba(95, 165, 255, 0.42);
   border-radius: 999px;
   background: rgba(8, 22, 38, 0.82);
@@ -2426,7 +2567,7 @@ watch(
 }
 
 .dual-stream-shell.fullscreen .dual-stream-fullscreen-btn {
-  right: 238px;
+  right: 18px;
 }
 
 .live-dot {
@@ -2458,40 +2599,17 @@ watch(
   line-height: 1.7;
 }
 
-.dual-stream-hud {
-  position: absolute;
-  left: 18px;
-  top: 72px;
-  right: 240px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  z-index: 3;
-}
-
-.dual-stream-hud-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(8, 22, 38, 0.9);
-  border: 1px solid rgba(95, 165, 255, 0.22);
-  color: #f3f8ff;
-  font-size: 12px;
-  line-height: 1.4;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
-}
-
 /* 左下角飞行 HUD（与 WorkspaceLivestreamPanel 同款），不拦截点击 */
 .flight-hud-overlay {
   position: absolute;
   left: 18px;
-  bottom: 18px;
+  bottom: 40px;
   z-index: 5;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 14px;
+  min-height: 118px;
+  padding: 14px 16px;
   background: rgba(0, 0, 0, 0.32);
   border-radius: 6px;
   color: #e6e9ef;
@@ -2547,7 +2665,7 @@ watch(
 .dual-stream-preview {
   position: absolute;
   top: 18px;
-  right: 18px;
+  right: 82px;
   width: 210px;
   height: 132px;
   padding: 0;
@@ -2907,11 +3025,6 @@ watch(
   .dual-stream-preview {
     width: 172px;
     height: 108px;
-  }
-
-  .dual-stream-hud {
-    top: 68px;
-    right: 188px;
   }
 }
 </style>

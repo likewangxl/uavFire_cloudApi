@@ -226,6 +226,10 @@ onBeforeUnmount(stopPolling)
   font-size: 11px;
   color: #ff7875;
 }
+/* a-progress 默认百分比文字是深色，在深色卡片上看不见，改白色 */
+.wayline-mission-monitor :deep(.ant-progress-text) {
+  color: #fff;
+}
 .mm-meta-row {
   font-size: 11px;
   color: #aaa;

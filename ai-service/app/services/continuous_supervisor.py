@@ -49,15 +49,25 @@ class ContinuousTaskSupervisor:
             existing = self._workers.get(task_id)
             if existing is not None and existing.thread.is_alive():
                 return
+            # 丢弃已死的旧 worker 记录，避免陈旧条目干扰后续 stop/start。
+            if existing is not None:
+                self._workers.pop(task_id, None)
             stop_event = threading.Event()
 
             def _target():
-                self._runner.run(
-                    task_id=task_id,
-                    visible_source=visible_source,
-                    thermal_source=thermal_source,
-                    stop_predicate=stop_event.is_set,
-                )
+                try:
+                    self._runner.run(
+                        task_id=task_id,
+                        visible_source=visible_source,
+                        thermal_source=thermal_source,
+                        stop_predicate=stop_event.is_set,
+                    )
+                finally:
+                    # 线程自行退出（流失效/失败/被停）时摘除自身记录，保证字典只含存活 worker。
+                    with self._lock:
+                        current = self._workers.get(task_id)
+                        if current is not None and current.stop_event is stop_event:
+                            self._workers.pop(task_id, None)
 
             thread = self._thread_factory(
                 target=_target,

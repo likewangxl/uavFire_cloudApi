@@ -173,6 +173,8 @@ class AgentBackendClientTest {
             gatewaySn = "RC-001",
             online = true,
             connectionState = "CAPABILITY_READY",
+            deviceName = "DJI Matrice 4T",
+            model = "Matrice 4T",
             latitude = 34.123456,
             longitude = 108.123456,
             height = 120.5,
@@ -188,6 +190,8 @@ class AgentBackendClientTest {
         assertEquals("RC-001", payload.gatewaySn)
         assertEquals(true, payload.online)
         assertEquals("CAPABILITY_READY", payload.connectionState)
+        assertEquals("DJI Matrice 4T", payload.deviceName)
+        assertEquals("Matrice 4T", payload.model)
         assertEquals(34.123456, payload.latitude)
         assertEquals(108.123456, payload.longitude)
         assertEquals(120.5, payload.height)
@@ -218,6 +222,7 @@ class AgentBackendClientTest {
             gatewaySn = "RC-002",
             online = true,
             connectionState = "SDK_READY",
+            deviceName = "DJI Matrice 4T",
             batteryPercent = 76,
         )
 
@@ -225,6 +230,7 @@ class AgentBackendClientTest {
 
         assertEquals("AIRCRAFT-002", api.lastMsdkDeviceState?.aircraftSn)
         assertEquals("RC-002", api.lastMsdkDeviceState?.gatewaySn)
+        assertEquals("DJI Matrice 4T", api.lastMsdkDeviceState?.deviceName)
         assertEquals(76, api.lastMsdkDeviceState?.batteryPercent)
     }
 

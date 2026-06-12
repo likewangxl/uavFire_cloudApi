@@ -29,8 +29,6 @@ test('leadership cockpit renders the fire monitor flight panel inside the player
     'the old lower KPI grid should stay on the map tab only'
   )
   assert.doesNotMatch(cockpitSource, /当前约束/, 'fire monitor live view should not render the lower current constraint block')
-  assert.match(cockpitSource, /画面温度 \$\{formatThermalTemperature/, 'temperature HUD chip should use the operator-facing label')
-  assert.doesNotMatch(cockpitSource, /中心温度/, 'temperature HUD chip should not use the old center-temperature label')
 })
 
 test('cockpit flight control panel reuses MSDK commands from TSA monitor controls', () => {
@@ -54,7 +52,7 @@ test('cockpit flight control panel reuses MSDK commands from TSA monitor control
     'camera_stop_record',
     'camera_stream_source',
     'camera_zoom',
-    'night_scene',
+    'navigation_light',
     'laser_fill_light'
   ]) {
     assert.match(source, new RegExp(`['"]${command}['"]`), `panel should expose ${command}`)
@@ -64,6 +62,10 @@ test('cockpit flight control panel reuses MSDK commands from TSA monitor control
     /AXIS_DISTANCE_MIN_METERS[\s\S]*AXIS_DISTANCE_MAX_METERS[\s\S]*getVerticalCommandDurationMs/,
     'distance controls should reuse the same displacement policy as TSA'
   )
+  assert.match(source, /function commandLabel/, 'command success toasts should use operator-facing Chinese labels')
+  assert.match(source, /gimbal_rotate:\s*'云台旋转'/, 'gimbal rotate toast should be translated')
+  assert.match(source, /\$\{commandLabel\(command\)\}指令已发送。/, 'generic command toast should render translated command labels')
+  assert.doesNotMatch(source, /\$\{command\} 指令已发送。/, 'generic command toast should not expose backend command codes')
 })
 
 test('cockpit flight control panel uses a collapsible console drawer layout', () => {
@@ -105,4 +107,80 @@ test('cockpit flight control panel only flips recording state after backend acce
   assert.match(source, /async function runCommand[\s\S]*Promise<boolean>/, 'command helper should report enqueue success to callers')
   assert.match(source, /const sent = await runCommand\(nextCommand, 'cameraRecord'\)/, 'record toggle should wait for the backend command result')
   assert.match(source, /if \(sent\) \{\s*recording\.value = !recording\.value/, 'recording UI should not flip after a failed backend enqueue')
+})
+
+test('cockpit flight control panel exposes a zoom-out control bound to the implemented camera_zoom command', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.match(source, /@click="runZoomOut"/, 'a zoom-out button should be wired in the camera action row')
+  assert.match(source, /function runZoomOut[\s\S]*?zoomRatio\.value - ZOOM_STEP/, 'zoom-out should step the tracked ratio down')
+  assert.match(source, /Math\.max\(ZOOM_MIN_RATIO[\s\S]*?camera_zoom[\s\S]*?if \(sent\) \{\s*zoomRatio\.value = clamped/, 'zoom ratio should clamp to the agent KeyCameraZoomRatios floor and update only after backend accepts')
+  assert.match(source, /zoomRatio <= ZOOM_MIN_RATIO/, 'zoom-out button should disable once the minimum ratio is reached')
+})
+
+test('cockpit flight control panel enlarges disc touch targets and adds press feedback', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.match(
+    source,
+    /\.axis\.north,\s*\.axis\.south,\s*\.axis\.west,\s*\.axis\.east,[\s\S]*?width:\s*36px;\s*height:\s*36px;/,
+    'flight and gimbal disc directions should use enlarged hit areas'
+  )
+  assert.match(source, /touch-action:\s*manipulation;/, 'disc buttons should opt into immediate touch handling')
+  assert.match(source, /\.axis:not\(\.center\):not\(:disabled\):active/, 'disc buttons should provide an active-press visual feedback')
+})
+
+test('cockpit flight control panel toolbar drops the redundant inline title', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.doesNotMatch(source, /class="console-title"/, 'the inline 飞行面板 toolbar title and its accent bar should be removed')
+})
+
+test('cockpit flight control panel zoom is a repeatable +/- stepper, not a fixed jump', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.match(source, /class="zoom-stepper"/, 'zoom controls should be a stepper group')
+  assert.match(source, /@click="runZoomIn"/, 'stepper should expose a zoom-in step')
+  assert.match(source, /@click="runZoomOut"/, 'stepper should expose a zoom-out step')
+  assert.match(source, /function runZoomIn[\s\S]*?zoomRatio\.value \+ ZOOM_STEP/, 'zoom-in should increment by one step')
+  assert.match(source, /function runZoomOut[\s\S]*?zoomRatio\.value - ZOOM_STEP/, 'zoom-out should decrement by one step')
+  assert.doesNotMatch(source, /@click="runCameraZoom\(2\)"/, 'the old fixed 2x jump button should be gone')
+  assert.match(source, /<span class="zoom-readout">\{\{ zoomRatio \}\}x<\/span>/, 'current ratio should be shown between the step buttons')
+})
+
+test('cockpit flight control panel reports the real agent execution result, not just enqueue', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.match(source, /import \{ sendMsdkCommand, getMsdkCommand/, 'panel should import the command result reader')
+  assert.match(source, /async function awaitCommandResult/, 'panel should poll the backend for the terminal command result')
+  assert.match(source, /TERMINAL_COMMAND_STATUSES/, 'terminal statuses should gate the result poll')
+  assert.match(source, /if \(result\.status === 'APPLIED'\)/, 'success toast should require the agent to actually apply the command')
+  assert.match(source, /飞机未执行该指令/, 'a real failure should surface the agent error to the operator')
+})
+
+test('cockpit flight control panel night light drives aircraft navigation LEDs', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.match(source, /command: 'navigation_light'[\s\S]*?capability: 'navigationLight'/, '夜航灯 should map to the aircraft navigation light command')
+  assert.match(source, /navigation_light: '航行灯'/, 'navigation light should have an operator-facing label')
+  assert.doesNotMatch(source, /command: 'night_scene'/, '夜航灯 should no longer trigger the camera night-scene command')
+})
+
+test('cockpit flight control panel renders dialogs and toasts inside the fullscreen element', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.match(source, /function popupContainer[\s\S]*?document\.fullscreenElement[\s\S]*?\|\| document\.body/, 'popups should target the active fullscreen element, falling back to body')
+  assert.match(source, /Modal\.confirm\(\{[\s\S]*?getContainer: popupContainer/, 'danger confirm dialog must mount into the fullscreen container')
+  assert.match(source, /notification\.success\(\{[^}]*getContainer: popupContainer/, 'success toast must mount into the fullscreen container')
+  assert.match(source, /notification\.error\(\{[^}]*getContainer: popupContainer/, 'error toast must mount into the fullscreen container')
+})
+
+test('cockpit flight control panel gates decorative controls and surfaces coming-soon features', () => {
+  const source = readSource('src/components/cockpit/CockpitFlightControlPanel.vue')
+
+  assert.match(source, /const COMING_SOON_MODES: ViewModeKey\[\] = \['tracking', 'arLabel', 'referenceLine', 'measureArea'\]/, 'AR/参考线/测面/视频跟踪 should be flagged coming-soon')
+  assert.match(source, /该功能后续开放/, 'coming-soon controls should notify the operator instead of silently toggling')
+  assert.match(source, /const DECORATIVE_MODES: ViewModeKey\[\] = \['stealth'\]/, '隐藏模式 should be a disabled decorative control')
+  assert.match(source, /DECORATIVE_MODES\.includes\(mode\.key\)/, 'decorative modes should be disabled in the toolbar')
+  assert.match(source, /class="payload-row quality-row"[\s\S]*?disabled\n\s*title="画质切换功能后续开放"/, 'the quality row should be greyed out')
 })

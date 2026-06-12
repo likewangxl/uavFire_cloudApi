@@ -61,6 +61,19 @@ class WaypointMissionExecutor(
         manager.init()
         manager.addWaypointMissionExecuteStateListener(stateListener)
         manager.addWaylineExecutingInfoListener(progressListener)
+        Log.i(TAG, "attach: wayline listeners registered")
+    }
+
+    /**
+     * Re-register listeners after the aircraft (and MSDK product) is connected.
+     * Listeners added at app start — before SDK registration / aircraft link —
+     * never receive state/progress callbacks, so we detach and re-init/add once
+     * the device identity is activated. Idempotent.
+     */
+    fun reattach() {
+        detach()
+        attach()
+        Log.i(TAG, "reattach: wayline listeners re-registered after aircraft connect")
     }
 
     fun detach() {
@@ -69,6 +82,10 @@ class WaypointMissionExecutor(
     }
 
     fun pushKmz(missionId: String, kmzPath: String, onComplete: (Boolean, IDJIError?) -> Unit) {
+        // 每次下发前强制重注册监听器：身份激活时的 reattach 只在 SN 变化时触发，若中途
+        // 飞机重连/换电/重启，监听器会失效却不再注册 → MSDK 不回调 → 后端永远卡“执行中”。
+        // 在上机推送 KMZ 前 reattach，保证当次任务的 state/progress 回调一定是活的。
+        reattach()
         Log.i(TAG, "pushKmz missionId=$missionId path=$kmzPath")
         Log.i(
             TAG,

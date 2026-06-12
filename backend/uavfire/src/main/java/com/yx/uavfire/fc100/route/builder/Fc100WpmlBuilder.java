@@ -97,8 +97,9 @@ public class Fc100WpmlBuilder {
 
             w.writeStartElement(wpmlNs(), "waylineCoordinateSysParam");
             elem(w, wpmlNs(), "coordinateMode", "WGS84");
-            elem(w, wpmlNs(), "heightMode", "EGM96");
-            elem(w, wpmlNs(), "positioningType", "Custom");
+            // 高度相对起飞点（AGL above takeoff），飞机以自身起飞点为基准，不依赖绝对椭球高
+            elem(w, wpmlNs(), "heightMode", "relativeToStartPoint");
+            elem(w, wpmlNs(), "positioningType", "GPS");
             w.writeEndElement();
 
             elem(w, wpmlNs(), "autoFlightSpeed", String.valueOf(gSpeed));
@@ -169,7 +170,7 @@ public class Fc100WpmlBuilder {
             // Folder
             w.writeStartElement("Folder");
             elem(w, wpmlNs(), "templateId", "0");
-            elem(w, wpmlNs(), "executeHeightMode", "WGS84");
+            elem(w, wpmlNs(), "executeHeightMode", "relativeToStartPoint");
             elem(w, wpmlNs(), "waylineId", "0");
 
             double distance = totalDistance(ctx.getWaypoints());
@@ -191,15 +192,16 @@ public class Fc100WpmlBuilder {
     // ============= Placemark builders =============
 
     private void writeTemplatePlacemark(XMLStreamWriter w, MissionWaypointDTO wp) throws Exception {
-        double ellipsoid = wp.getAlt();
-        double height = ellipsoid + props.getEgm96OffsetMeters();
+        // relativeToStartPoint：height 与 ellipsoidHeight 都填“相对起飞点 AGL”，不加 EGM96 偏移
+        // （ellipsoidHeight 仅供地面站显示参考，固件以实际起飞点为基准）。
+        double relativeHeight = wp.getAlt();
         w.writeStartElement("Placemark");
         w.writeStartElement("Point");
         elem(w, NS_KML, "coordinates", wp.getLng() + "," + wp.getLat());
         w.writeEndElement();
         elem(w, wpmlNs(), "index", wp.getWaypointIndex().toString());
-        elem(w, wpmlNs(), "ellipsoidHeight", String.valueOf(ellipsoid));
-        elem(w, wpmlNs(), "height", String.valueOf(height));
+        elem(w, wpmlNs(), "ellipsoidHeight", String.valueOf(relativeHeight));
+        elem(w, wpmlNs(), "height", String.valueOf(relativeHeight));
         w.writeStartElement(wpmlNs(), "waypointTurnParam");
         elem(w, wpmlNs(), "waypointTurnMode", "toPointAndPassWithContinuityCurvature");
         elem(w, wpmlNs(), "waypointTurnDampingDist", "0");

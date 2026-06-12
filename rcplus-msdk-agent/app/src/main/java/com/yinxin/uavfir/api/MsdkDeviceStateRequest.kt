@@ -5,6 +5,7 @@ data class MsdkDeviceStateRequest(
     val aircraftSn: String,
     val online: Boolean,
     val connectionState: String,
+    val deviceName: String? = null,
     val model: String? = null,
     val mode: String? = null,
     val latitude: Double? = null,

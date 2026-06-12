@@ -108,6 +108,13 @@ const state = reactive({
   statusText: '',
   lastError: '',
   flightPosition: null as FlightPosition | null,
+  // 当前地图应跟踪的飞机 SN。页面上 MSDK 监测轮询与 FC100 轮询会同时把各自飞机的
+  // 位置写进单一 flightPosition 槽，导致飞机在两架之间来回跳。以此为唯一闸门：
+  // 只接受跟踪目标那架的位置写入。由“正在执行任务的飞机”/“用户显式选择”设定。
+  trackedAircraftSn: '',
+  // 自增令牌：每次需要把地图居中到飞机时 +1。GMap 监听它并执行一次性居中
+  // （进入航线页面时由 wayline.vue 触发），不做持续跟随。
+  recenterAircraftToken: 0,
 })
 
 let wsSubscribed = false
@@ -313,7 +320,29 @@ function normalizePlannedWaypoint (wp: PlannedWaypoint): PlannedWaypoint {
 }
 
 export function updateAircraftFlightPosition (position: FlightPosition | null) {
+  // 单一跟踪闸门：已设定跟踪目标时，丢弃其它飞机的位置写入，避免地图在两架飞机
+  // （如在飞的 M4T 与停在地面的 FC100）之间来回跳。null（清空）始终放行。
+  if (position && state.trackedAircraftSn && position.aircraftSn !== state.trackedAircraftSn) {
+    return
+  }
   state.flightPosition = position
+}
+
+// 设定地图跟踪的飞机（在飞的飞机或用户显式选择的飞机）。切换目标时清掉旧飞机的
+// 残留位置，避免短暂显示上一架的点。
+export function setTrackedAircraft (aircraftSn: string) {
+  const sn = aircraftSn || ''
+  if (state.trackedAircraftSn === sn) return
+  state.trackedAircraftSn = sn
+  if (sn && state.flightPosition && state.flightPosition.aircraftSn !== sn) {
+    state.flightPosition = null
+  }
+}
+
+// 请求把地图视图居中到当前飞机位置（一次性）。GMap 监听 recenterAircraftToken，
+// 若此刻已有飞机位置则立即居中，否则等下一次飞机位置到达后居中一次。
+export function requestAircraftRecenter () {
+  state.recenterAircraftToken = (state.recenterAircraftToken || 0) + 1
 }
 
 export function setFlightPositionFromWgs (
