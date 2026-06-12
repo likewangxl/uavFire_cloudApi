@@ -200,7 +200,7 @@ const terrainPolygon = computed(() => {
 }
 .ep-reopen {
   position: absolute;
-  left: 304px; // 左下：紧贴左侧面板列右缘
+  left: 18px; // 与右侧"返回飞机位置"按钮(right:18px)对称
   bottom: 64px; // 与收起前的面板底边同高
   display: flex;
   align-items: center;
