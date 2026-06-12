@@ -306,7 +306,7 @@ class TerrainElevationWiringTest {
 Run: `cd backend && JAVA_HOME=/usr/local/opt/openjdk@11 mvn -pl uavfire test -Dtest=TerrainElevationWiringTest`
 Expected: PASS（Task 1 的注解已满足条件装配；若 `assertj`/`spring-boot-test` 缺依赖则按报错补——项目已有 Spring Boot 测试，正常应直接绿）
 
-- [ ] **Step 3: application.yml 加注释化配置（默认不启用，保持现有行为）**
+- [ ] **Step 3: application.yml 加配置（默认指向 data/dem；目录缺失时所有查询返回 empty，行为与 Missing 实现等价，放入瓦片即生效）**
 
 在 `backend/uavfire/src/main/resources/application.yml` 末尾追加：
 
