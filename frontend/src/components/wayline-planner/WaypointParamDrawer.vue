@@ -74,6 +74,7 @@
           <span class="planning-label">朝向模式</span>
           <a-select
             size="small"
+            dropdown-class-name="planner-dark-dropdown"
             style="width: 100%;"
             :value="selectedWaypoint.headingMode"
             placeholder="followWayline"
@@ -105,6 +106,7 @@
           <span class="planning-label">转弯模式</span>
           <a-select
             size="small"
+            dropdown-class-name="planner-dark-dropdown"
             style="width: 100%;"
             :value="selectedWaypoint.turnMode"
             placeholder="默认平滑过弯"
@@ -223,6 +225,82 @@ function onRemove () {
     border-radius: 3px;
     color: #bcd;
     font-size: 12px;
+  }
+
+  // 深色输入控件（antd2 覆盖）
+  .ant-input-number,
+  .ant-select:not(.ant-select-customize-input) .ant-select-selector,
+  .ant-input {
+    background: #182230;
+    border-color: #2c3a4f;
+    color: #cfd8e3;
+    border-radius: 4px;
+  }
+  .ant-input-number-input {
+    color: #cfd8e3;
+  }
+  .ant-input-number-handler-wrap {
+    background: #1d2a3c;
+    border-color: #2c3a4f;
+  }
+  .ant-input-number-handler .anticon,
+  .ant-select-arrow,
+  .ant-select-clear {
+    color: #7d8ca0;
+  }
+  .ant-select-clear {
+    background: #182230;
+  }
+  .ant-input-number:hover,
+  .ant-select:hover .ant-select-selector {
+    border-color: #43d675;
+  }
+  input::placeholder,
+  .ant-select-selection-placeholder {
+    color: #5c6c80;
+  }
+
+  // 按钮统一深色风格
+  .ant-btn:not(.ant-btn-dangerous):not(.ant-btn-primary) {
+    background: #182230;
+    border-color: #2c3a4f;
+    color: #cfd8e3;
+    border-radius: 4px;
+    &:hover {
+      border-color: #43d675;
+      color: #d7ffe8;
+    }
+  }
+  .ant-btn-dashed {
+    border-style: dashed;
+    border-color: #3a4d68;
+    color: #8ca0b8;
+  }
+  .ant-btn-dangerous {
+    background: rgba(255, 77, 79, 0.1);
+    border-color: rgba(255, 77, 79, 0.55);
+    color: #ff7875;
+    border-radius: 4px;
+    &:hover {
+      background: rgba(255, 77, 79, 0.2);
+      border-color: #ff4d4f;
+    }
+  }
+}
+
+/* select 弹层渲染在 body 上，深色风格全局类（任务参数面板与航点抽屉共用） */
+.planner-dark-dropdown {
+  background: #10161f;
+  border: 1px solid #2c3a4f;
+  .ant-select-item {
+    color: #cfd8e3;
+  }
+  .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+    background: #1d2a3c;
+  }
+  .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+    background: rgba(67, 214, 117, 0.15);
+    color: #d7ffe8;
   }
 }
 </style>

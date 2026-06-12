@@ -36,15 +36,16 @@
           <span class="planning-label">完成动作</span>
           <a-select
             size="small"
+            dropdown-class-name="planner-dark-dropdown"
             style="width: 100%;"
             :value="planningState.finishAction"
-            placeholder="goHome (默认)"
+            placeholder="返航 (默认)"
             allow-clear
             :disabled="planningState.executing"
             @change="(v: any) => setMissionConfig({ finishAction: v })">
-            <a-select-option value="goHome">goHome 返航</a-select-option>
-            <a-select-option value="autoLand">autoLand 原地降落</a-select-option>
-            <a-select-option value="noAction">noAction 不动作</a-select-option>
+            <a-select-option value="goHome">返航</a-select-option>
+            <a-select-option value="autoLand">原地降落</a-select-option>
+            <a-select-option value="noAction">不动作</a-select-option>
             <a-select-option value="gotoFirstWaypoint">回到首点</a-select-option>
           </a-select>
         </div>
@@ -52,14 +53,15 @@
           <span class="planning-label">RC 失联</span>
           <a-select
             size="small"
+            dropdown-class-name="planner-dark-dropdown"
             style="width: 100%;"
             :value="planningState.exitOnRcLost"
-            placeholder="goContinue (默认)"
+            placeholder="继续飞 (默认)"
             allow-clear
             :disabled="planningState.executing"
             @change="(v: any) => setMissionConfig({ exitOnRcLost: v })">
-            <a-select-option value="goContinue">goContinue 继续飞</a-select-option>
-            <a-select-option value="executeLostAction">executeLostAction 执行失联动作</a-select-option>
+            <a-select-option value="goContinue">继续飞</a-select-option>
+            <a-select-option value="executeLostAction">执行失联动作</a-select-option>
           </a-select>
         </div>
       </div>
@@ -68,15 +70,16 @@
           <span class="planning-label">失联动作</span>
           <a-select
             size="small"
+            dropdown-class-name="planner-dark-dropdown"
             style="width: 100%;"
             :value="planningState.rcLostAction"
-            placeholder="goBack (默认)"
+            placeholder="返航 (默认)"
             allow-clear
             :disabled="planningState.executing"
             @change="(v: any) => setMissionConfig({ rcLostAction: v })">
-            <a-select-option value="hover">hover 悬停</a-select-option>
-            <a-select-option value="goBack">goBack 返航</a-select-option>
-            <a-select-option value="landing">landing 降落</a-select-option>
+            <a-select-option value="hover">悬停</a-select-option>
+            <a-select-option value="goBack">返航</a-select-option>
+            <a-select-option value="landing">降落</a-select-option>
           </a-select>
         </div>
         <div>
@@ -208,5 +211,37 @@ function onMaxSpeedChange (value: number | string | null) {
   display: block;
   color: #7d8ca0;
   margin-bottom: 4px;
+}
+// 深色输入控件（antd2 覆盖）
+:deep(.ant-input-number),
+:deep(.ant-select:not(.ant-select-customize-input) .ant-select-selector),
+:deep(.ant-input) {
+  background: #182230;
+  border-color: #2c3a4f;
+  color: #cfd8e3;
+  border-radius: 4px;
+}
+:deep(.ant-input-number-input) {
+  color: #cfd8e3;
+}
+:deep(.ant-input-number-handler-wrap) {
+  background: #1d2a3c;
+  border-color: #2c3a4f;
+}
+:deep(.ant-input-number-handler .anticon),
+:deep(.ant-select-arrow),
+:deep(.ant-select-clear) {
+  color: #7d8ca0;
+}
+:deep(.ant-select-clear) {
+  background: #182230;
+}
+:deep(.ant-input-number:hover),
+:deep(.ant-select:hover .ant-select-selector) {
+  border-color: #43d675;
+}
+:deep(input::placeholder),
+:deep(.ant-select-selection-placeholder) {
+  color: #5c6c80;
 }
 </style>
