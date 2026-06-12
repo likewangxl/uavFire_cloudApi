@@ -742,6 +742,10 @@ export default defineComponent({
         satelliteLayer.setMap(null)
         satelliteLayer = null
       }
+      if (roadNetLayer) {
+        roadNetLayer.setMap(null)
+        roadNetLayer = null
+      }
     })
 
     const { getDrawFlightAreaCallback, onFlightAreaDroneLocationWs } = useFlightArea()
@@ -764,6 +768,8 @@ export default defineComponent({
     let flightTrackPolyline: any = null
     let standardLayer: any = null
     let satelliteLayer: any = null
+    let roadNetLayer: any = null
+    let waylineLayerDefaulted = false
     let rangingTool: any = null
     let flightTrackAircraftSn = ''
     const flightTrackPath: any[] = []
@@ -881,27 +887,52 @@ export default defineComponent({
       return satelliteLayer
     }
 
+    function ensureRoadNetLayer () {
+      const AMap = root?.$aMap
+      if (!AMap || roadNetLayer) return roadNetLayer
+      roadNetLayer = new AMap.TileLayer.RoadNet()
+      return roadNetLayer
+    }
+
     function setWaylineMapLayer (layer: 'standard' | 'satellite') {
       const map = root?.$map
       if (!map) return
       const standard = ensureStandardLayer()
       const satellite = ensureSatelliteLayer()
       if (!satellite) return
+      const roadNet = ensureRoadNetLayer()
       waylineMapLayer.value = layer
       if (typeof map.setLayers === 'function' && standard) {
         if (layer === 'standard') {
           map.setLayers([standard])
         } else {
-          map.setLayers([standard, satellite])
+          // 卫星影像叠加路网标注（司空2 风格）
+          map.setLayers([standard, satellite, roadNet].filter(Boolean))
         }
         return
       }
       if (layer === 'satellite') {
         satellite.setMap(map)
+        if (roadNet) roadNet.setMap(map)
       } else {
         satellite.setMap(null)
+        if (roadNet) roadNet.setMap(null)
       }
     }
+
+    // 航线页进入时默认卫星图（每个会话首次进入应用一次；其他页面不受影响）
+    function applyWaylineDefaultLayer () {
+      if (!isWaylineRoute.value || waylineLayerDefaulted) return
+      if (!root?.$map) {
+        window.setTimeout(applyWaylineDefaultLayer, 500)
+        return
+      }
+      waylineLayerDefaulted = true
+      if (waylineMapLayer.value !== 'satellite') {
+        setWaylineMapLayer('satellite')
+      }
+    }
+    watch(isWaylineRoute, () => applyWaylineDefaultLayer(), { immediate: true })
 
     function stopRangingTool () {
       if (rangingTool) {
