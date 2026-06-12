@@ -13,6 +13,7 @@
       :on-stop-execution="onStopExecution"
       :on-save="onSave" />
     <WaypointParamDrawer />
+    <ElevationProfile />
     <slot />
   </div>
 </template>
@@ -23,6 +24,7 @@ import WaypointListPanel from './WaypointListPanel.vue'
 import MissionParamsPanel from './MissionParamsPanel.vue'
 import PlannerToolbar from './PlannerToolbar.vue'
 import WaypointParamDrawer from './WaypointParamDrawer.vue'
+import ElevationProfile from './ElevationProfile.vue'
 
 defineProps<{
   canExecute: boolean
