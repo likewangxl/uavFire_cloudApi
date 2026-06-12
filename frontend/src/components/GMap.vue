@@ -483,7 +483,8 @@ import FlightAreaActionIcon from './flight-area/FlightAreaActionIcon.vue'
 import { EFlightAreaType } from '../types/flight-area'
 import { useFlightArea } from './flight-area/use-flight-area'
 import { useFlightAreaDroneLocationEvent } from './flight-area/use-flight-area-drone-location-event'
-import { addWaypointGcj, getPlanningStateRaw, selectWaypoint, setFlightPositionFromWgs } from '/@/hooks/use-wayline-planning'
+import { getPlanningStateRaw, setFlightPositionFromWgs } from '/@/hooks/use-wayline-planning'
+import { usePlannerOverlays } from '/@/hooks/use-planner-overlays'
 
 export default defineComponent({
   components: {
@@ -520,6 +521,11 @@ export default defineComponent({
     const deviceTsaUpdateHook = deviceTsaUpdate()
     const root = getRoot()
     const planningState = getPlanningStateRaw()
+    const { locateAircraftPosition, initPlannerOverlays, disposePlannerOverlays } = usePlannerOverlays(
+      () => root?.$map,
+      () => root?.$aMap,
+      () => { if (mouseMode.value) draw('off', false) },
+    )
 
     const mouseMode = ref(false)
     const waylineMapLayer = ref<'standard' | 'satellite'>('standard')
@@ -726,16 +732,11 @@ export default defineComponent({
     onMounted(() => {
       const app = getApp()
       useGMapManageHook.globalPropertiesConfig(app)
-      rebuildPlanningOverlays()
-      if (planningState.active) {
-        bindPlanningClick()
-      }
+      initPlannerOverlays()
     })
 
     onUnmounted(() => {
-      unbindPlanningClick()
-      clearPlanningOverlays()
-      clearFlightPositionOverlay()
+      disposePlannerOverlays()
       stopRangingTool()
       rangingTool = null
       if (satelliteLayer) {
@@ -755,122 +756,11 @@ export default defineComponent({
       draw(isCircle ? MapDoodleEnum.CIRCLE : MapDoodleEnum.POLYGON, true, type)
     }
 
-    // ---------- Wayline planning (click-to-fly) wiring ----------
-    // When planning mode is active we register a map click handler that records
-    // the clicked point as a waypoint; we also maintain AMap markers + a
-    // polyline visualising the current waypoint list.
-    const renderPlanningWaypoints = computed(() => {
-      return planningState.previewWaypoints.length > 0 ? planningState.previewWaypoints : planningState.waypoints
-    })
-    const planningMarkers: any[] = []
-    let planningPolyline: any = null
-    let flightPositionMarker: any = null
-    let flightTrackPolyline: any = null
     let standardLayer: any = null
     let satelliteLayer: any = null
     let roadNetLayer: any = null
     let waylineLayerDefaulted = false
     let rangingTool: any = null
-    let flightTrackAircraftSn = ''
-    const flightTrackPath: any[] = []
-    let planningClickBound = false
-    // 进入页面请求居中飞机时，如果此刻还没有飞机位置，先挂起，等位置到达后居中一次。
-    let pendingAircraftRecenter = false
-
-    function onPlanningMapClick (e: any) {
-      if (!planningState.active) return
-      const lng = e?.lnglat?.getLng?.()
-      const lat = e?.lnglat?.getLat?.()
-      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
-      addWaypointGcj(lng, lat)
-    }
-
-    function clearPlanningOverlays () {
-      const map = root?.$map
-      planningMarkers.forEach(m => map?.remove(m))
-      planningMarkers.length = 0
-      if (planningPolyline) {
-        map?.remove(planningPolyline)
-        planningPolyline = null
-      }
-    }
-
-    function clearFlightPositionOverlay () {
-      const map = root?.$map
-      if (flightPositionMarker) {
-        map?.remove(flightPositionMarker)
-        flightPositionMarker = null
-      }
-      if (flightTrackPolyline) {
-        map?.remove(flightTrackPolyline)
-        flightTrackPolyline = null
-      }
-      flightTrackAircraftSn = ''
-      flightTrackPath.length = 0
-    }
-
-    function waypointMarkerContent (idx: number, id: string) {
-      const isStart = idx === 0
-      const isSelected = planningState.selectedWaypointId === id
-      const classes = [
-        'wayline-planning-marker',
-        isStart ? 'wayline-planning-marker--start' : '',
-        isSelected ? 'wayline-planning-marker--selected' : '',
-      ].filter(Boolean).join(' ')
-      return `<div class="${classes}"><span>${idx + 1}</span></div>`
-    }
-
-    function rebuildPlanningOverlays () {
-      const AMap = root?.$aMap
-      const map = root?.$map
-      if (!AMap || !map) return
-      clearPlanningOverlays()
-      const waypoints = renderPlanningWaypoints.value
-      if (waypoints.length === 0) return
-      waypoints.forEach((wp, idx) => {
-        const marker = new AMap.Marker({
-          position: [wp.gcjLng, wp.gcjLat],
-          content: waypointMarkerContent(idx, wp.id),
-          anchor: 'bottom-center',
-          zIndex: planningState.selectedWaypointId === wp.id ? 130 : 110,
-          extData: { waylinePlanningId: wp.id },
-        })
-        marker.on('click', () => selectWaypoint(wp.id))
-        map.add(marker)
-        planningMarkers.push(marker)
-      })
-      if (waypoints.length >= 2) {
-        planningPolyline = new AMap.Polyline({
-          path: waypoints.map(w => [w.gcjLng, w.gcjLat]),
-          strokeColor: '#00e5ff',
-          strokeOpacity: 0.92,
-          strokeWeight: 4,
-          strokeStyle: 'solid',
-          showDir: true,
-        })
-        map.add(planningPolyline)
-      }
-      fitPlanningPreviewToMap()
-      updateFlightPositionOverlay()
-    }
-
-    function flightPositionContent (label: string) {
-      const progress = label ? `<em>${label}</em>` : ''
-      return `<div class="flight-position-marker"><span>✈️</span>${progress}</div>`
-    }
-
-    function setAircraftView (position = planningState.flightPosition) {
-      const map = root?.$map
-      if (!map || !position) return
-      const currentZoom = typeof map.getZoom === 'function' ? Number(map.getZoom()) : 17
-      const zoom = Number.isFinite(currentZoom) ? Math.max(currentZoom, 17) : 17
-      map.setZoomAndCenter(zoom, [position.gcjLng, position.gcjLat])
-    }
-
-    function locateAircraftPosition () {
-      setAircraftView()
-    }
-
     function ensureStandardLayer () {
       const AMap = root?.$aMap
       if (!AMap || standardLayer) return standardLayer
@@ -973,117 +863,6 @@ export default defineComponent({
         totalWaypoints: planningState.flightPosition?.totalWaypoints,
       })
     }
-
-    function updateFlightPositionOverlay () {
-      const AMap = root?.$aMap
-      const map = root?.$map
-      const position = planningState.flightPosition
-      if (!position) {
-        clearFlightPositionOverlay()
-        return
-      }
-      if (!AMap || !map) return
-      const lngLat = [position.gcjLng, position.gcjLat]
-      const lastTrackPoint = flightTrackPath[flightTrackPath.length - 1]
-      const jumpLng = lastTrackPoint ? Math.abs(Number(lastTrackPoint[0]) - position.gcjLng) : 0
-      const jumpLat = lastTrackPoint ? Math.abs(Number(lastTrackPoint[1]) - position.gcjLat) : 0
-      if (flightTrackAircraftSn !== position.aircraftSn || jumpLng > 0.003 || jumpLat > 0.003) {
-        flightTrackPath.length = 0
-        flightTrackAircraftSn = position.aircraftSn
-        if (flightTrackPolyline) {
-          map.remove(flightTrackPolyline)
-          flightTrackPolyline = null
-        }
-      }
-      const label = position.currentWaypointIndex != null && position.totalWaypoints != null
-        ? `${position.currentWaypointIndex + 1}/${position.totalWaypoints}`
-        : ''
-      if (!flightPositionMarker) {
-        flightPositionMarker = new AMap.Marker({
-          position: lngLat,
-          content: flightPositionContent(label),
-          anchor: 'center',
-          zIndex: 120,
-        })
-        map.add(flightPositionMarker)
-      } else {
-        flightPositionMarker.setPosition(lngLat)
-        flightPositionMarker.setContent(flightPositionContent(label))
-      }
-      flightTrackPath.push(lngLat)
-      if (flightTrackPath.length > 600) flightTrackPath.shift()
-      if (!flightTrackPolyline) {
-        flightTrackPolyline = new AMap.Polyline({
-          path: flightTrackPath,
-          strokeColor: '#13c2c2',
-          strokeWeight: 4,
-          strokeOpacity: 0.85,
-        })
-        map.add(flightTrackPolyline)
-      } else {
-        flightTrackPolyline.setPath(flightTrackPath)
-      }
-      // 进入页面时请求过居中、但当时还没有飞机位置：现在位置到了，居中一次。
-      if (pendingAircraftRecenter) {
-        pendingAircraftRecenter = false
-        setAircraftView(position)
-      }
-    }
-
-    function fitPlanningPreviewToMap () {
-      const map = root?.$map
-      if (!map || planningState.waypoints.length > 0 || planningState.previewWaypoints.length === 0) return
-      const overlays = planningPolyline ? [...planningMarkers, planningPolyline] : [...planningMarkers]
-      if (overlays.length === 0 || typeof map.setFitView !== 'function') return
-      map.setFitView(overlays, false, [80, 80, 80, 80], 17)
-    }
-
-    function bindPlanningClick () {
-      const map = root?.$map
-      if (!map || planningClickBound) return
-      map.on('click', onPlanningMapClick)
-      planningClickBound = true
-    }
-
-    function unbindPlanningClick () {
-      const map = root?.$map
-      if (!map || !planningClickBound) return
-      map.off('click', onPlanningMapClick)
-      planningClickBound = false
-    }
-
-    watch(() => planningState.active, (active) => {
-      if (active) {
-        // The native draw tool also claims map clicks; disable it so the two
-        // modes don't compete for the same input.
-        if (mouseMode.value) draw('off', false)
-        bindPlanningClick()
-      } else {
-        unbindPlanningClick()
-      }
-    })
-
-    watch(
-      () => `${planningState.selectedWaypointId}|${renderPlanningWaypoints.value.map(w => `${w.id}:${w.gcjLng}:${w.gcjLat}:${w.height}`).join('|')}`,
-      () => rebuildPlanningOverlays()
-    )
-
-    watch(
-      () => planningState.flightPosition
-        ? `${planningState.flightPosition.aircraftSn}:${planningState.flightPosition.gcjLng}:${planningState.flightPosition.gcjLat}:${planningState.flightPosition.currentWaypointIndex}:${planningState.flightPosition.updatedAt}`
-        : '',
-      () => updateFlightPositionOverlay()
-    )
-
-    // 进入航线页面时 wayline.vue 会自增 recenterAircraftToken：
-    // 若此刻已有飞机位置则立即居中，否则挂起，等位置到达后由 updateFlightPositionOverlay 居中一次。
-    watch(() => planningState.recenterAircraftToken, () => {
-      if (planningState.flightPosition) {
-        setAircraftView(planningState.flightPosition)
-      } else {
-        pendingAircraftRecenter = true
-      }
-    })
 
     function getDrawCallback ({ obj }: { obj : any }) {
       if (state.isFlightArea) {

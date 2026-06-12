@@ -12,16 +12,18 @@ function readSource (path) {
 
 test('wayline aircraft locate button is one-shot instead of continuous follow', () => {
   const source = readSource('src/components/GMap.vue')
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
 
-  assert.match(source, /function locateAircraftPosition \(\)/)
+  assert.match(overlaysSource, /function locateAircraftPosition \(\)/)
   assert.doesNotMatch(source, /aircraftFollowEnabled\.value = !aircraftFollowEnabled\.value/)
-  assert.doesNotMatch(source, /if \(aircraftFollowEnabled\.value\) \{\s*setAircraftView\(position\)\s*\}/)
+  assert.doesNotMatch(overlaysSource, /if \(aircraftFollowEnabled\.value\) \{\s*setAircraftView\(position\)\s*\}/)
 })
 
 test('wayline treats MSDK aircraft coordinates as WGS before rendering on AMap', () => {
   const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
   const tsaSource = readSource('src/pages/page-web/projects/tsa.vue')
   const gmapSource = readSource('src/components/GMap.vue')
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
 
   assert.doesNotMatch(tsaSource, /__coordinateSource:\s*'gcj'/)
   assert.doesNotMatch(waylineSource, /__coordinateSource:\s*'gcj'/)
@@ -43,6 +45,7 @@ test('wayline keeps MSDK device refresh from rewriting global current aircraft O
 
 test('GMap ignores non-selected aircraft OSD when no wayline tracking target exists', () => {
   const gmapSource = readSource('src/components/GMap.vue')
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
 
   assert.match(gmapSource, /const trackingSn = planningState\.flightPosition\?\.aircraftSn \|\| planningState\.aircraftSn/)
   assert.match(gmapSource, /if \(!trackingSn\) return/)
@@ -51,6 +54,7 @@ test('GMap ignores non-selected aircraft OSD when no wayline tracking target exi
 test('entering the wayline page recenters the map on the aircraft (one-shot, deferred until position arrives)', () => {
   const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
   const gmapSource = readSource('src/components/GMap.vue')
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
   const planningSource = readSource('src/hooks/use-wayline-planning.ts')
 
   // hook 暴露一次性居中信号
@@ -59,9 +63,9 @@ test('entering the wayline page recenters the map on the aircraft (one-shot, def
   // wayline 进入页面时触发
   assert.match(waylineSource, /requestAircraftRecenter\(\)/)
   // GMap 监听 token：有位置立即居中，否则挂起等位置到达后居中一次
-  assert.match(gmapSource, /watch\(\(\) => planningState\.recenterAircraftToken/)
-  assert.match(gmapSource, /pendingAircraftRecenter = true/)
-  assert.match(gmapSource, /if \(pendingAircraftRecenter\) \{[\s\S]*pendingAircraftRecenter = false[\s\S]*setAircraftView\(position\)/)
+  assert.match(overlaysSource, /watch\(\(\) => planningState\.recenterAircraftToken/)
+  assert.match(overlaysSource, /pendingAircraftRecenter = true/)
+  assert.match(overlaysSource, /if \(pendingAircraftRecenter\) \{[\s\S]*pendingAircraftRecenter = false[\s\S]*setAircraftView\(position\)/)
   // 不能退化成持续跟随
   assert.doesNotMatch(gmapSource, /aircraftFollowEnabled/)
 })
@@ -96,6 +100,7 @@ test('wayline planning controls open from the planner toolbar (FlightHub layout)
 test('wayline map exposes FlightHub-style layer tools and route stats', () => {
   const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
   const gmapSource = readSource('src/components/GMap.vue')
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
   const planningSource = readSource('src/hooks/use-wayline-planning.ts')
 
   assert.match(planningSource, /selectedWaypointId:\s*''/)
@@ -118,10 +123,10 @@ test('wayline map exposes FlightHub-style layer tools and route stats', () => {
   assert.match(gmapSource, /AMap\.RangingTool/)
   assert.match(gmapSource, /AMap\.TileLayer\.Satellite/)
   assert.match(gmapSource, /AMap\.createDefaultLayer/)
-  assert.match(gmapSource, /selectWaypoint\(wp\.id\)/)
-  assert.match(gmapSource, /wayline-planning-marker--start/)
-  assert.match(gmapSource, /wayline-planning-marker--selected/)
-  assert.match(gmapSource, /showDir:\s*true/)
+  assert.match(overlaysSource, /selectWaypoint\(wp\.id\)/)
+  assert.match(overlaysSource, /wayline-planning-marker--start/)
+  assert.match(overlaysSource, /wayline-planning-marker--selected/)
+  assert.match(overlaysSource, /showDir:\s*true/)
 
   const statsBarSource = readSource('src/components/wayline-planner/MissionStatsBar.vue')
   assert.match(statsBarSource, /computeRouteStats/)
