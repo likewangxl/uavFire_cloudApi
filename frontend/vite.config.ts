@@ -26,8 +26,9 @@ function manualChunks (id: string) {
   }
 
   if (id.includes('ant-design-vue')) {
-    const componentMatch = id.match(/ant-design-vue\/(?:es|lib)\/([^/]+)/)
-    return componentMatch ? `vendor-ant-${componentMatch[1]}` : 'vendor-ant-design'
+    // 整库放进单一 chunk：按子目录拆会让 vc-pagination 等在其依赖的 _util(PropTypes)
+    // chunk 初始化前就执行顶层 props，导致生产构建里 PropTypes 为 undefined 崩溃（循环依赖）。
+    return 'vendor-antd'
   }
 
   if (id.includes('mqtt') || id.includes('reconnecting-websocket') || id.includes('eventemitter3')) {
