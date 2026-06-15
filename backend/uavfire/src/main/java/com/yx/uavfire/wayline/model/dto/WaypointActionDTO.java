@@ -1,5 +1,6 @@
 package com.yx.uavfire.wayline.model.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -18,15 +19,19 @@ import java.util.Map;
 public class WaypointActionDTO {
 
     /** 在该航点 actionGroup 内的局部 id,从 0 起。 */
+    @JsonAlias("actionId")
     private Integer actionId;
 
     /** reachPoint | betweenAdjacentPoints | multipleTiming。默认 reachPoint。 */
+    @JsonAlias("actionTrigger")
     private String actionTrigger;
 
     /** multipleTiming 时间间隔(秒);其他 trigger 类型忽略。 */
+    @JsonAlias("actionTriggerParam")
     private Double actionTriggerParam;
 
     /** takePhoto | startRecord | stopRecord | gimbalRotate | hover | focus | rotateYaw。 */
+    @JsonAlias("actuatorFunc")
     private String actuatorFunc;
 
     /** actuatorFunc-specific 参数。详见 contract 2.2 表。 */

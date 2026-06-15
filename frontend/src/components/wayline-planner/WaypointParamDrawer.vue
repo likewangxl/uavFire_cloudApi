@@ -5,6 +5,7 @@
     :width="320"
     :mask="false"
     :closable="true"
+    :get-container="false"
     class="wp-param-drawer"
     @close="setParamDrawerOpen(false)">
     <template #title>
@@ -186,8 +187,10 @@ function onRemove () {
 </script>
 
 <style lang="scss">
-/* drawer teleport 到 body，样式不能 scoped */
+/* get-container=false：就地渲染在 .planner-overlay 内（随页面卸载销毁，避免切换路由后残留在 body）；
+   overlay 是 pointer-events:none，需为抽屉恢复交互。样式不能 scoped。 */
 .wp-param-drawer {
+  pointer-events: auto;
   .ant-drawer-content {
     background: rgba(13, 17, 23, 0.96);
     color: #cfd8e3;
@@ -215,7 +218,7 @@ function onRemove () {
   }
   .planning-label {
     display: block;
-    color: #7d8ca0;
+    color: #cfd8e3;
     margin-bottom: 4px;
     font-size: 12px;
   }

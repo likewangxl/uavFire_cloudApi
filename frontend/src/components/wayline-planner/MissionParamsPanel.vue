@@ -209,7 +209,7 @@ function onMaxSpeedChange (value: number | string | null) {
 }
 .planning-label {
   display: block;
-  color: #7d8ca0;
+  color: #cfd8e3;
   margin-bottom: 4px;
 }
 // 深色输入控件（antd2 覆盖）

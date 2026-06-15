@@ -90,7 +90,19 @@ function normalizePlannedWaypointResponse (record: any): PlannedWaypoint {
     poiAlt: record?.poiAlt ?? record?.poi_alt ?? undefined,
     turnMode: record?.turnMode ?? record?.turn_mode ?? undefined,
     turnDamping: record?.turnDamping ?? record?.turn_damping ?? undefined,
-    actions: Array.isArray(record?.actions) && record.actions.length > 0 ? record.actions : undefined,
+    actions: Array.isArray(record?.actions) && record.actions.length > 0
+      ? record.actions.map(normalizeWaypointActionResponse)
+      : undefined,
+  }
+}
+
+function normalizeWaypointActionResponse (action: any): any {
+  return {
+    actionId: action?.actionId ?? action?.action_id ?? undefined,
+    actionTrigger: action?.actionTrigger ?? action?.action_trigger ?? undefined,
+    actionTriggerParam: action?.actionTriggerParam ?? action?.action_trigger_param ?? undefined,
+    actuatorFunc: action?.actuatorFunc ?? action?.actuator_func ?? undefined,
+    params: action?.params ?? undefined,
   }
 }
 

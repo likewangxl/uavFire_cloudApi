@@ -722,6 +722,8 @@ export function previewPlannedWayline (record: PlannedWaylineRecord) {
     wgsLng: Number(wp.wgsLng),
     wgsLat: Number(wp.wgsLat),
     height: Number(wp.height),
+    speed: Number.isFinite(Number(wp.speed)) ? Number(wp.speed) : undefined,
+    actions: Array.isArray(wp.actions) ? wp.actions.map(a => ({ ...a, params: a.params ? { ...a.params } : undefined })) : undefined,
   }))
   state.previewTitle = record.name || ''
   state.statusText = record.name ? `预览规划航线“${record.name}”。` : '预览规划航线。'

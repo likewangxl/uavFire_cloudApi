@@ -9,7 +9,7 @@
         </div>
         <div class="wp-action-params" v-if="expandedIdx === idx">
           <div v-for="key in editableParamKeys(action.actuatorFunc)" :key="key" class="wp-action-param-row">
-            <span class="wp-action-param-label">{{ key }}</span>
+            <span class="wp-action-param-label">{{ paramLabel(key) }}</span>
             <a-input
               v-if="isStringParam(key)"
               size="small"
@@ -20,16 +20,16 @@
               size="small"
               :value="action.params?.[key] ?? 'absoluteAngle'"
               @change="(v: any) => $emit('updateParam', idx, key, v)">
-              <a-select-option value="absoluteAngle">absoluteAngle</a-select-option>
-              <a-select-option value="relativeAngle">relativeAngle</a-select-option>
+              <a-select-option value="absoluteAngle">绝对角度</a-select-option>
+              <a-select-option value="relativeAngle">相对角度</a-select-option>
             </a-select>
             <a-select
               v-else-if="key === 'aircraftPathMode'"
               size="small"
               :value="action.params?.[key] ?? 'clockwise'"
               @change="(v: any) => $emit('updateParam', idx, key, v)">
-              <a-select-option value="clockwise">clockwise</a-select-option>
-              <a-select-option value="counterClockwise">counterClockwise</a-select-option>
+              <a-select-option value="clockwise">顺时针</a-select-option>
+              <a-select-option value="counterClockwise">逆时针</a-select-option>
             </a-select>
             <a-input-number
               v-else
@@ -93,6 +93,28 @@ const FUNC_LABEL: Record<string, string> = {
 
 function funcLabel (fn?: string): string {
   return FUNC_LABEL[fn || ''] || fn || '?'
+}
+
+const PARAM_LABEL: Record<string, string> = {
+  fileSuffix: '文件后缀',
+  payloadPositionIndex: '负载序号',
+  gimbalRotateMode: '云台旋转模式',
+  gimbalPitchRotateEnable: '启用俯仰',
+  gimbalPitchRotateAngle: '俯仰角度(°)',
+  gimbalYawRotateEnable: '启用偏航',
+  gimbalYawRotateAngle: '偏航角度(°)',
+  gimbalRotateTimeEnable: '启用旋转时长',
+  gimbalRotateTime: '旋转时长(s)',
+  hoverTime: '悬停时长(s)',
+  isPointFocus: '点对焦',
+  focusX: '对焦点 X',
+  focusY: '对焦点 Y',
+  aircraftHeading: '机头朝向(°)',
+  aircraftPathMode: '旋转方向',
+}
+
+function paramLabel (key: string): string {
+  return PARAM_LABEL[key] || key
 }
 
 const PARAM_KEYS: Record<string, string[]> = {
@@ -194,7 +216,7 @@ function summarizeParams (action: WaypointAction): string {
 }
 .wp-action-param-label {
   font-size: 11px;
-  color: #888;
+  color: #cfd8e3;
   text-align: right;
 }
 .wp-action-empty {

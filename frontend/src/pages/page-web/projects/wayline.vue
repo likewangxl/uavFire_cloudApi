@@ -419,7 +419,7 @@ import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
 import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 import Fc100DeliveryView from '/@/components/wayline-planner/Fc100DeliveryView.vue'
 import PlannerWorkspace from '/@/components/wayline-planner/PlannerWorkspace.vue'
-import { setPlannerTab, usePlannerUi } from '/@/hooks/use-planner-ui'
+import { setParamDrawerOpen, setPlannerTab, usePlannerUi } from '/@/hooks/use-planner-ui'
 import { getFc100GeneratedWaylineActions } from '/@/hooks/use-fc100-delivery'
 import type { FileItem } from '/@/components/wayline-planner/wayline-format'
 import { canOverwritePlannedWayline, formatNumber, formatPlannedWaylineStatus, formatSafePlannedWaylineTimestamp, formatTimestamp, getPlannedWaylineTaskReason, normalizePlannedWaylineStatus, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
@@ -1365,6 +1365,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  setParamDrawerOpen(false)
   if (topoTimer !== null) {
     window.clearInterval(topoTimer)
     topoTimer = null
