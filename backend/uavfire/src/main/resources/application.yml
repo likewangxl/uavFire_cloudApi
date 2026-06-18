@@ -56,7 +56,7 @@ mqtt:
   # BASIC parameters are required.
   BASIC:
     protocol: MQTT # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.0.204
+    host: 127.0.0.1
     port: 1883
     username: JavaServer
     password: 123456
@@ -65,7 +65,7 @@ mqtt:
     path:
   DRC:
     protocol: WS # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.0.204
+    host: 127.0.0.1
     port: 8083
     path: /mqtt
     username: JavaServer
@@ -99,7 +99,7 @@ url:
 wayline-agent:
   shared-secret: change-me-in-production
   token-ttl-seconds: 86400
-  server-url: http://192.168.0.204:6789
+  server-url: http://127.0.0.1:6789
   mqtt:
     event-topic: uavfire/agent/+/events/#
   storage:
@@ -159,7 +159,7 @@ logging:
 pilot2:
   # Pilot 2 设备通过此 URL 跳转到 frontend pilot 入口。
   # 注意:Pilot 上的 localhost 指向 Pilot 自己,必须用 server 实际可达 IP。
-  web-entry: http://192.168.0.204:8080/pilot-login
+  web-entry: http://127.0.0.1:8080/pilot-login
 
 ntp:
   server:
@@ -220,7 +220,7 @@ minio:
 
 ai-service:
   base-url: ${AI_SERVICE_BASE_URL:http://127.0.0.1:9000}
-  zlm-rtsp-host: ${AI_SERVICE_ZLM_RTSP_HOST:192.168.0.204}
+  zlm-rtsp-host: ${AI_SERVICE_ZLM_RTSP_HOST:127.0.0.1}
   zlm-rtsp-port: ${AI_SERVICE_ZLM_RTSP_PORT:8554}
   auto-trigger-on-livestream: ${AI_SERVICE_AUTO_TRIGGER_ON_LIVESTREAM:true}
   auto-trigger-on-wayline: ${AI_SERVICE_AUTO_TRIGGER_ON_WAYLINE:true}

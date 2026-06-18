@@ -9,7 +9,7 @@
           <a-tooltip title="导入航线">
             <a-upload
               name="file"
-              accept=".kmz"
+              :accept="plannerTab === 'delivery' ? '.kmz,.kml' : '.kmz'"
               :multiple="false"
               :before-upload="beforeUpload"
               :show-upload-list="false"
@@ -19,6 +19,11 @@
                 <ImportOutlined />
               </a-button>
             </a-upload>
+          </a-tooltip>
+          <a-tooltip title="新建航线">
+            <a-button class="wayline-header-icon-button" type="text" @click="openCreateRouteModal">
+              <PlusOutlined />
+            </a-button>
           </a-tooltip>
         </a-col>
       </a-row>
@@ -356,13 +361,83 @@
     </a-spin>
     <Teleport v-if="showPlanningTools && planningOverlayReady" to="#wayline-planning-overlay-host">
       <PlannerWorkspace
-        v-show="plannerTab === 'monitor'"
+        v-show="plannerTab === 'monitor' || planningActive"
         :can-execute="!!selectedAircraftSn"
         :on-start-placing="onStartPlacing"
         :on-stop-placing="onStopPlacing"
         :on-start-execution="onStartExecution"
         :on-stop-execution="onStopExecution"
         :on-save="onSavePlannedWayline" />
+    </Teleport>
+    <Teleport v-if="showPlanningTools && planningOverlayReady" to="#wayline-planning-overlay-host">
+      <div v-if="createRouteModal.visible" class="create-route-popover">
+        <div class="create-route-popover-head">
+          <span>创建新航线</span>
+          <CloseOutlined class="create-route-popover-close" @click="createRouteModal.visible = false" />
+        </div>
+        <div class="create-route-popover-body">
+          <div class="create-route-section">
+            <div class="create-route-section-title">任务类型</div>
+            <div class="create-route-cards">
+              <div
+                class="create-route-card"
+                :class="{ active: createRouteModal.missionType === 'monitor' }"
+                @click="selectMissionType('monitor')">
+                <RadarChartOutlined class="create-route-card-icon" />
+                <span>监测任务</span>
+              </div>
+              <div
+                class="create-route-card"
+                :class="{ active: createRouteModal.missionType === 'delivery' }"
+                @click="selectMissionType('delivery')">
+                <RocketOutlined class="create-route-card-icon" />
+                <span>投放任务</span>
+              </div>
+            </div>
+          </div>
+          <div class="create-route-section">
+            <div class="create-route-section-title">航线类型</div>
+            <div class="create-route-cards">
+              <div
+                class="create-route-card"
+                :class="{ active: createRouteModal.routeType === 'waypoint' }"
+                @click="createRouteModal.routeType = 'waypoint'">
+                <EnvironmentOutlined class="create-route-card-icon" />
+                <span>航点航线</span>
+              </div>
+              <template v-if="createRouteModal.missionType === 'monitor'">
+                <div
+                  class="create-route-card"
+                  :class="{ active: createRouteModal.routeType === 'patrol' }"
+                  @click="createRouteModal.routeType = 'patrol'">
+                  <RetweetOutlined class="create-route-card-icon" />
+                  <span>巡逻航线</span>
+                </div>
+                <div
+                  class="create-route-card"
+                  :class="{ active: createRouteModal.routeType === 'area' }"
+                  @click="createRouteModal.routeType = 'area'">
+                  <BorderOutlined class="create-route-card-icon" />
+                  <span>面状航线</span>
+                </div>
+              </template>
+            </div>
+            <div class="create-route-hint" v-if="createRouteModal.missionType === 'delivery'">
+              投放任务仅支持航点航线。
+            </div>
+            <div class="create-route-hint" v-else-if="createRouteModal.routeType === 'patrol'">
+              巡逻航线：沿布点顺序飞行并自动闭合回到起点。
+            </div>
+            <div class="create-route-hint" v-else-if="createRouteModal.routeType === 'area'">
+              面状航线：先点出测区多边形，再按相机重叠率生成弓字形覆盖航点。
+            </div>
+          </div>
+        </div>
+        <div class="create-route-popover-foot">
+          <a-button size="small" @click="createRouteModal.visible = false">取消</a-button>
+          <a-button size="small" type="primary" @click="confirmCreateRoute">确定</a-button>
+        </div>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -388,7 +463,7 @@ import {
   updatePlannedWayline,
 } from '/@/api/wayline'
 import { ELocalStorageKey, ERouterName, EDeviceTypeName } from '/@/types'
-import { EllipsisOutlined, CameraFilled, UserOutlined, ImportOutlined } from '@ant-design/icons-vue'
+import { EllipsisOutlined, CameraFilled, UserOutlined, ImportOutlined, PlusOutlined, RadarChartOutlined, RocketOutlined, EnvironmentOutlined, RetweetOutlined, BorderOutlined, CloseOutlined } from '@ant-design/icons-vue'
 import { DEVICE_MODEL_KEY, DEVICE_NAME, EModeCode } from '/@/types/device'
 import { useMyStore } from '/@/store'
 import { CreatePlannedWaylineBody, PlannedWaypoint, PlannedWaylineRecord, PlannedWaylineStatus, WaylineFile } from '/@/types/wayline'
@@ -409,6 +484,7 @@ import {
   loadPlannedWayline,
   previewPlannedWayline,
   resetPlanningDraft,
+  setRouteKind,
   setFlightPositionFromRecord,
   setFlightPositionFromWgs,
   requestAircraftRecenter,
@@ -420,7 +496,7 @@ import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 import Fc100DeliveryView from '/@/components/wayline-planner/Fc100DeliveryView.vue'
 import PlannerWorkspace from '/@/components/wayline-planner/PlannerWorkspace.vue'
 import { setParamDrawerOpen, setPlannerTab, usePlannerUi } from '/@/hooks/use-planner-ui'
-import { getFc100GeneratedWaylineActions } from '/@/hooks/use-fc100-delivery'
+import { getFc100GeneratedWaylineActions, beforeFc100WaylineUpload, uploadFc100WaylineFile } from '/@/hooks/use-fc100-delivery'
 import type { FileItem } from '/@/components/wayline-planner/wayline-format'
 import { canOverwritePlannedWayline, formatNumber, formatPlannedWaylineStatus, formatSafePlannedWaylineTimestamp, formatTimestamp, getPlannedWaylineTaskReason, normalizePlannedWaylineStatus, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
 
@@ -432,6 +508,8 @@ const showPlanningTools = computed(() => !isTaskRouteSelector.value)
 
 // ---------- Planned wayline (click-to-fly) ----------
 const planningState = getPlanningStateRaw()
+// 正在规划（布点中或已有航点编辑）：用于让规划浮层在投放页签下也能出现
+const planningActive = computed(() => planningState.active || planningState.waypoints.length > 0)
 const plannerUi = usePlannerUi()
 const plannerTab = computed({
   get: () => plannerUi.activeTab,
@@ -439,6 +517,32 @@ const plannerTab = computed({
 })
 const selectedAircraftSn = ref('')
 const planningOverlayReady = ref(false)
+
+// 新建航线弹窗（任务类型 + 航线类型；目前仅航点航线可用，巡逻/面状即将推出）
+const createRouteModal = reactive({
+  visible: false,
+  missionType: 'monitor' as 'monitor' | 'delivery',
+  routeType: 'waypoint' as 'waypoint' | 'patrol' | 'area',
+})
+function openCreateRouteModal () {
+  createRouteModal.missionType = 'monitor'
+  createRouteModal.routeType = 'waypoint'
+  createRouteModal.visible = true
+}
+function selectMissionType (type: 'monitor' | 'delivery') {
+  createRouteModal.missionType = type
+  createRouteModal.routeType = 'waypoint'
+}
+function confirmCreateRoute () {
+  createRouteModal.visible = false
+  // 投放任务只支持航点航线；监测任务可选 航点/巡逻/面状
+  const kind = createRouteModal.missionType === 'delivery' ? 'waypoint' : createRouteModal.routeType
+  setPlannerTab(createRouteModal.missionType === 'delivery' ? 'delivery' : 'monitor')
+  resetPlanningDraft()
+  setRouteKind(kind)
+  // 面状航线先画测区多边形再生成航点；航点/巡逻直接进入布点
+  nextTick(() => onStartPlacing())
+}
 const monitorWorkspaceId = computed(() => localStorage.getItem(ELocalStorageKey.WorkspaceId) || '')
 function onMissionMonitorChange (updated: PlannedWaylineRecord) {
   const idx = plannedWaylinesData.data.findIndex(r => r.plannedWaylineId === updated.plannedWaylineId)
@@ -1452,6 +1556,10 @@ function onScroll (e: any) {
 }
 
 function beforeUpload (file: FileItem) {
+  // 投放任务页签下，顶部导入按钮直接当作 FC100 航线导入
+  if (plannerTab.value === 'delivery') {
+    return beforeFc100WaylineUpload(file)
+  }
   if (!file.name || !file.name.toLowerCase().endsWith('.kmz')) {
     message.error('文件格式错误，请选择 KMZ 文件。')
     return false
@@ -1460,6 +1568,10 @@ function beforeUpload (file: FileItem) {
 }
 
 const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) => void; onError?: (err: any) => void }) => {
+  // 投放任务页签下，顶部导入即 FC100 航线导入并创建任务
+  if (plannerTab.value === 'delivery') {
+    return uploadFc100WaylineFile(options)
+  }
   const file = options?.file
   if (!file) {
     message.error('请选择 KMZ 文件。')
@@ -1546,6 +1658,113 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
 .wayline-header-icon-button:focus {
   color: #fff;
   background: rgba(255, 255, 255, 0.08);
+}
+
+.create-route-popover {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 348px;
+  background: #1f2329;
+  border: 1px solid #2c3a4f;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  z-index: 40;
+}
+.create-route-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #2c3a4f;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+}
+.create-route-popover-close {
+  color: #7d8ca0;
+  cursor: pointer;
+  font-size: 14px;
+}
+.create-route-popover-close:hover {
+  color: #fff;
+}
+.create-route-popover-body {
+  padding: 16px;
+}
+.create-route-popover-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid #2c3a4f;
+}
+.create-route-section {
+  margin-bottom: 18px;
+}
+.create-route-section:last-child {
+  margin-bottom: 0;
+}
+.create-route-section-title {
+  margin-bottom: 10px;
+  color: #cfd8e3;
+  font-size: 13px;
+}
+.create-route-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.create-route-card {
+  position: relative;
+  width: 98px;
+  height: 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #3a4658;
+  border-radius: 6px;
+  background: #262b33;
+  color: #cfd8e3;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.create-route-card:hover {
+  border-color: #4a82ff;
+}
+.create-route-card.active {
+  border-color: #1668dc;
+  background: rgba(22, 104, 220, 0.22);
+  color: #fff;
+}
+.create-route-card.disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.create-route-card.disabled:hover {
+  border-color: #3a4658;
+}
+.create-route-card-icon {
+  font-size: 24px;
+}
+.create-route-card-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  padding: 0 5px;
+  font-size: 10px;
+  color: #faad14;
+  border: 1px solid rgba(250, 173, 20, 0.5);
+  border-radius: 8px;
+}
+.create-route-hint {
+  margin-top: 10px;
+  color: #7d8ca0;
+  font-size: 12px;
 }
 
 .planning-panel {

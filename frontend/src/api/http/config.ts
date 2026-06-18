@@ -31,5 +31,10 @@ export const CURRENT_CONFIG = {
   // map
   // You can apply on the AMap website.
   amapKey: '6c7bd344426ae654e5345c0e5473a441',
+  // 该 key（Web端）配了安全密钥，AMap JS API 2.0 必须在加载前设置 window._AMapSecurityConfig，
+  // 否则请求未签名会被限流/部分服务失败（表现为地图慢、注记加载不出）。
+  amapSecurityCode: '261851d21eb26fef9ed36869d32bc4d1',
+  // 天地图（MapLibre 底图）服务密钥，tianditu.gov.cn 免费申请。卫星 img+cia / 标准 vec+cva。
+  tiandituKey: '9ebd7a776ff13137feec1d61cce79193',
 
 }

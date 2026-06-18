@@ -28,6 +28,9 @@
       <button type="button" :class="{'active': waylineMapLayer === 'satellite'}" @click="setWaylineMapLayer('satellite')">
         卫星
       </button>
+      <button type="button" :class="{'active': waylineMapLayer === 'hybrid'}" @click="setWaylineMapLayer('hybrid')">
+        混合
+      </button>
       <button type="button" :class="{'active': rangingToolActive}" @click="toggleRangingTool">
         {{ rangingToolActive ? '停止测距' : '测距' }}
       </button>
@@ -451,6 +454,8 @@ import {
 import { postElementsReq } from '/@/api/layer'
 import { MapDoodleType, MapElementEnum } from '/@/constants/map'
 import { useGMapManage } from '/@/hooks/use-g-map'
+import { applyTiandituLayer } from '/@/hooks/tianditu'
+import { useMapMeasure } from '/@/hooks/use-map-measure'
 import { useGMapCover } from '/@/hooks/use-g-map-cover'
 import { useMouseTool } from '/@/hooks/use-mouse-tool'
 import { getApp, getRoot } from '/@/root'
@@ -528,7 +533,7 @@ export default defineComponent({
     )
 
     const mouseMode = ref(false)
-    const waylineMapLayer = ref<'standard' | 'satellite'>('standard')
+    const waylineMapLayer = ref<'standard' | 'satellite' | 'hybrid'>('standard')
     const rangingToolActive = ref(false)
     const isWaylineRoute = computed(() => root.$route.name === ERouterName.WAYLINE)
     const hasFlightPosition = computed(() => !!planningState.flightPosition)
@@ -619,7 +624,8 @@ export default defineComponent({
 
     watch(() => store.state.deviceState, data => {
       if (data.currentType === EDeviceTypeName.Gateway && data.gatewayInfo[data.currentSn]) {
-        const coordinate = wgs84togcj02(data.gatewayInfo[data.currentSn].longitude, data.gatewayInfo[data.currentSn].latitude)
+        // MapLibre+天地图 用 WGS84，直接用原始经纬度（不再转 GCJ）
+        const coordinate = [data.gatewayInfo[data.currentSn].longitude, data.gatewayInfo[data.currentSn].latitude]
         deviceTsaUpdateHook.moveTo(data.currentSn, coordinate[0], coordinate[1])
         if (osdVisible.value.visible && osdVisible.value.gateway_sn !== '') {
           deviceInfo.gateway = data.gatewayInfo[osdVisible.value.gateway_sn]
@@ -627,7 +633,7 @@ export default defineComponent({
       }
       if (data.currentType === EDeviceTypeName.Aircraft && data.deviceInfo[data.currentSn]) {
         const osd = data.deviceInfo[data.currentSn]
-        const coordinate = wgs84togcj02(osd.longitude, osd.latitude)
+        const coordinate = [osd.longitude, osd.latitude]
         deviceTsaUpdateHook.moveTo(data.currentSn, coordinate[0], coordinate[1])
         updateFlightPositionFromOsd(data.currentSn, osd, coordinate[0], coordinate[1])
         if (osdVisible.value.visible && osdVisible.value.sn !== '') {
@@ -635,7 +641,7 @@ export default defineComponent({
         }
       }
       if (data.currentType === EDeviceTypeName.Dock && data.dockInfo[data.currentSn]) {
-        const coordinate = wgs84togcj02(data.dockInfo[data.currentSn].basic_osd?.longitude, data.dockInfo[data.currentSn].basic_osd?.latitude)
+        const coordinate = [data.dockInfo[data.currentSn].basic_osd?.longitude, data.dockInfo[data.currentSn].basic_osd?.latitude]
         deviceTsaUpdateHook.initMarker(EDeviceTypeName.Dock, EDeviceTypeName[EDeviceTypeName.Dock], data.currentSn, coordinate[0], coordinate[1])
         if (osdVisible.value.visible && osdVisible.value.is_dock && osdVisible.value.gateway_sn !== '') {
           deviceInfo.dock = data.dockInfo[osdVisible.value.gateway_sn]
@@ -732,21 +738,19 @@ export default defineComponent({
     onMounted(() => {
       const app = getApp()
       useGMapManageHook.globalPropertiesConfig(app)
-      initPlannerOverlays()
+      // MapLibre 样式加载完成后再首绘覆盖物（否则 source/layer 还没就绪）
+      const map = root?.$map
+      if (map && typeof map.once === 'function') {
+        if (typeof map.isStyleLoaded === 'function' && map.isStyleLoaded()) initPlannerOverlays()
+        else map.once('load', () => initPlannerOverlays())
+      } else {
+        initPlannerOverlays()
+      }
     })
 
     onUnmounted(() => {
       disposePlannerOverlays()
       stopRangingTool()
-      rangingTool = null
-      if (satelliteLayer) {
-        satelliteLayer.setMap(null)
-        satelliteLayer = null
-      }
-      if (roadNetLayer) {
-        roadNetLayer.setMap(null)
-        roadNetLayer = null
-      }
     })
 
     const { getDrawFlightAreaCallback, onFlightAreaDroneLocationWs } = useFlightArea()
@@ -756,69 +760,19 @@ export default defineComponent({
       draw(isCircle ? MapDoodleEnum.CIRCLE : MapDoodleEnum.POLYGON, true, type)
     }
 
-    let standardLayer: any = null
-    let satelliteLayer: any = null
-    let roadNetLayer: any = null
     let waylineLayerDefaulted = false
-    let rangingTool: any = null
-    function ensureStandardLayer () {
-      const AMap = root?.$aMap
-      if (!AMap || standardLayer) return standardLayer
-      if (typeof AMap.createDefaultLayer === 'function') {
-        standardLayer = AMap.createDefaultLayer()
-      }
-      return standardLayer
-    }
-
-    function ensureSatelliteLayer () {
-      const AMap = root?.$aMap
-      if (!AMap || satelliteLayer) return satelliteLayer
-      satelliteLayer = new AMap.TileLayer.Satellite()
-      return satelliteLayer
-    }
-
-    function ensureRoadNetLayer () {
-      const AMap = root?.$aMap
-      if (!AMap || roadNetLayer) return roadNetLayer
-      roadNetLayer = new AMap.TileLayer.RoadNet()
-      return roadNetLayer
-    }
-
-    function setWaylineMapLayer (layer: 'standard' | 'satellite') {
+    // 底图档位切换（MapLibre + 天地图，只切四档图层可见性）。样式未加载完则等 load。
+    function setWaylineMapLayer (layer: 'standard' | 'satellite' | 'hybrid') {
       const map = root?.$map
       if (!map) return
-      const standard = ensureStandardLayer()
-      const satellite = ensureSatelliteLayer()
-      if (!satellite) return
-      const roadNet = ensureRoadNetLayer()
       waylineMapLayer.value = layer
-      if (typeof map.setLayers === 'function' && standard) {
-        if (layer === 'standard') {
-          map.setLayers([standard])
-          // 恢复矢量图全要素
-          if (typeof map.setFeatures === 'function') {
-            map.setFeatures(['bg', 'point', 'road', 'building'])
-          }
-        } else {
-          // 卫星影像 + 路网/路名 + 矢量层只留 POI 点注记（司空2 混合注记风格）：
-          // 矢量默认层置顶且只渲染 point 要素，背景/楼块透明，商铺/楼栋/地名标注浮在影像上
-          map.setLayers([satellite, roadNet, standard].filter(Boolean))
-          if (typeof map.setFeatures === 'function') {
-            map.setFeatures(['point'])
-          }
-        }
-        return
-      }
-      if (layer === 'satellite') {
-        satellite.setMap(map)
-        if (roadNet) roadNet.setMap(map)
-      } else {
-        satellite.setMap(null)
-        if (roadNet) roadNet.setMap(null)
-      }
+      const apply = () => applyTiandituLayer(map, layer)
+      if (typeof map.isStyleLoaded === 'function' && map.isStyleLoaded()) apply()
+      else if (typeof map.once === 'function') map.once('load', apply)
+      else apply()
     }
 
-    // 航线页进入时默认卫星图（每个会话首次进入应用一次；其他页面不受影响）
+    // 航线页进入时默认卫星图（每个会话首次进入应用一次）
     function applyWaylineDefaultLayer () {
       if (!isWaylineRoute.value || waylineLayerDefaulted) return
       if (!root?.$map) {
@@ -832,26 +786,19 @@ export default defineComponent({
     }
     watch(isWaylineRoute, () => applyWaylineDefaultLayer(), { immediate: true })
 
+    // MapLibre 测距工具（点击落点、双击结束）
+    const measure = useMapMeasure(() => root?.$map)
     function stopRangingTool () {
-      if (rangingTool) {
-        rangingTool.turnOff()
-      }
+      measure.stop()
       rangingToolActive.value = false
     }
-
     function toggleRangingTool () {
-      const AMap = root?.$aMap
-      const map = root?.$map
-      if (!AMap || !map) return
-      if (!rangingTool) {
-        rangingTool = new AMap.RangingTool(map)
-      }
       if (rangingToolActive.value) {
         stopRangingTool()
         return
       }
       if (mouseMode.value) draw('off', false)
-      rangingTool.turnOn()
+      measure.start()
       rangingToolActive.value = true
     }
 
@@ -969,65 +916,9 @@ export default defineComponent({
       store.commit('SET_LIVESTREAM_OTHERS_VISIBLE', false)
     }
     function updateCoordinates (transformType: string, element: any) {
-      const geoType = element.resource?.content.geometry.type
-      const type = element.resource?.type as number
-      if (element.resource) {
-        if (MapElementEnum.PIN === type) {
-          const coordinates = element.resource?.content.geometry
-            .coordinates as GeojsonCoordinate
-          if (transformType === 'wgs84-gcj02') {
-            const transResult = wgs84togcj02(
-              coordinates[0],
-              coordinates[1]
-            ) as GeojsonCoordinate
-            element.resource.content.geometry.coordinates = transResult
-          } else if (transformType === 'gcj02-wgs84') {
-            const transResult = gcj02towgs84(
-              coordinates[0],
-              coordinates[1]
-            ) as GeojsonCoordinate
-            element.resource.content.geometry.coordinates = transResult
-          }
-        } else if (MapElementEnum.LINE === type) {
-          const coordinates = element.resource?.content.geometry
-            .coordinates as GeojsonCoordinate[]
-          if (transformType === 'wgs84-gcj02') {
-            coordinates.forEach((coordinate, i, arr) => {
-              arr[i] = wgs84togcj02(
-                coordinate[0],
-                coordinate[1]
-              ) as GeojsonCoordinate
-            })
-          } else if (transformType === 'gcj02-wgs84') {
-            coordinates.forEach((coordinate, i, arr) => {
-              arr[i] = gcj02towgs84(
-                coordinate[0],
-                coordinate[1]
-              ) as GeojsonCoordinate
-            })
-          }
-          element.resource.content.geometry.coordinates = coordinates
-        } else if (MapElementEnum.POLY === type) {
-          const coordinates = element.resource?.content.geometry
-            .coordinates[0] as GeojsonCoordinate[]
-          if (transformType === 'wgs84-gcj02') {
-            coordinates.forEach((coordinate, i, arr) => {
-              arr[i] = wgs84togcj02(
-                coordinate[0],
-                coordinate[1]
-              ) as GeojsonCoordinate
-            })
-          } else if (transformType === 'gcj02-wgs84') {
-            coordinates.forEach((coordinate, i, arr) => {
-              arr[i] = gcj02towgs84(
-                coordinate[0],
-                coordinate[1]
-              ) as GeojsonCoordinate
-            })
-          }
-          element.resource.content.geometry.coordinates = [coordinates]
-        }
-      }
+      // 地图引擎已迁 MapLibre+天地图(WGS84)：地图与后端两侧坐标都是 WGS84，无需再做 GCJ 互转。
+      // 保留函数与调用点（draw 上传/元素入站），留空避免重新引入坐标偏移。
+      return { transformType, element }
     }
     return {
       draw,
@@ -1230,6 +1121,31 @@ export default defineComponent({
     font-size: 12px;
     font-weight: 700;
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  }
+
+  // 面状航线方向箭头（沿每段中点，朝飞行方向）
+  &:deep(.planner-dir-arrow) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+    filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.6));
+  }
+
+  // 面状测区顶点（右键删除）
+  &:deep(.planner-area-vertex) {
+    display: flex;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #1668dc;
+    border-radius: 50%;
+    background: #0b1320;
+    color: #4d9bff;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
   }
 
   // antd button 光晕

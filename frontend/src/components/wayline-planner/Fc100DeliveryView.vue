@@ -40,25 +40,6 @@
           <span>{{ fc100PlanningState.selectedDeviceProps.onlineStatus === false ? '离线' : '在线' }}</span>
         </div>
         <div class="planning-row">
-          <a-upload
-            class="fc100-direct-wayline-upload"
-            name="file"
-            accept=".kmz,.kml"
-            :multiple="false"
-            :before-upload="beforeFc100WaylineUpload"
-            :show-upload-list="false"
-            :custom-request="uploadFc100WaylineFile"
-          >
-          <a-button
-              class="wayline-button-wrap"
-              size="small"
-              :loading="fc100PlanningState.loadingAction === 'directImport'">
-              <SelectOutlined />
-              导入FC100任务
-            </a-button>
-          </a-upload>
-        </div>
-        <div class="planning-row">
           <span class="planning-label">当前规划航线</span>
           <div class="fc100-selected-wayline">
             {{ fc100SelectedRecordName }}
@@ -207,10 +188,8 @@
 
 <script lang="ts" setup>
 import { onMounted, onUnmounted } from 'vue'
-import { SelectOutlined } from '@ant-design/icons-vue'
 import { PlannedWaylineRecord, PlannedWaylineStatus } from '/@/types/wayline'
 import {
-  beforeFc100WaylineUpload,
   canUseFc100TerminalControls,
   fc100AircraftDevices,
   fc100PlanningState,
@@ -235,7 +214,6 @@ import {
   selectFc100GeneratedWayline,
   startFc100RealtimeRefresh,
   stopFc100RealtimeRefresh,
-  uploadFc100WaylineFile,
 } from '/@/hooks/use-fc100-delivery'
 import {
   formatNumber,
@@ -345,13 +323,6 @@ onUnmounted(() => {
 }
 .fc100-planning-title .ant-btn {
   flex: 0 0 auto;
-}
-.fc100-direct-wayline-upload {
-  display: block;
-}
-.fc100-direct-wayline-upload .ant-btn {
-  width: 100%;
-  justify-content: center;
 }
 .fc100-device-option {
   display: flex;

@@ -1,11 +1,15 @@
-import AMapLoader from '@amap/amap-jsapi-loader'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import { App, reactive } from 'vue'
-import { AMapConfig } from '/@/constants/index'
+import { buildTiandituStyle } from '/@/hooks/tianditu'
+import { gcj02towgs84 } from '/@/vendors/coordtransform'
 
-const LAST_MAP_CENTER_KEY = 'g_map_last_center'
-// 最终兜底：西安
-const DEFAULT_CENTER: [number, number] = [108.92854, 34.231804]
-const DEFAULT_ZOOM = 12
+// 地图引擎已从高德(GCJ-02)迁移到 MapLibre + 天地图(WGS84)。坐标全程 WGS84。
+// 旧缓存是 GCJ-02，换新 key 不复用，避免几百米偏移。
+const LAST_MAP_CENTER_KEY = 'g_map_last_center_wgs'
+// 兜底：西安（把原 GCJ-02 默认中心转成 WGS84）
+const DEFAULT_CENTER: [number, number] = gcj02towgs84(108.92854, 34.231804) as [number, number]
+const DEFAULT_ZOOM = 15
 
 function readCachedCenter (): { center: [number, number], zoom: number } | null {
   try {
@@ -38,64 +42,59 @@ export function saveMapCenter (center: [number, number], zoom: number) {
 
 export function useGMapManage () {
   const state = reactive({
-    aMap: null, // Map类
-    map: null, // 地图对象
-    mouseTool: null,
+    aMap: null as any, // maplibregl 命名空间（兼容旧 $aMap 取用方式）
+    map: null as any, // MapLibre Map 实例
+    mouseTool: null as any, // MapLibre 无原生 MouseTool，绘制在 use-mouse-tool 自实现
   })
 
-  async function initMap (container: string, app: App) {
-    AMapLoader.load({
-      ...AMapConfig
-    }).then((AMap) => {
-      state.aMap = AMap
+  function initMap (container: string, app: App) {
+    const cached = readCachedCenter()
+    const initCenter = cached?.center ?? DEFAULT_CENTER
+    const initZoom = cached?.zoom ?? DEFAULT_ZOOM
 
-      // 1) 优先使用上次的位置
-      const cached = readCachedCenter()
-      const initCenter = cached?.center ?? DEFAULT_CENTER
-      const initZoom = cached?.zoom ?? DEFAULT_ZOOM
-
-      state.map = new AMap.Map(container, {
-        center: initCenter,
-        zoom: initZoom
-      })
-      state.mouseTool = new AMap.MouseTool(state.map)
-
-      // 地图拖动/缩放后把当前视野缓存下来
-      const persist = () => {
-        const c = (state.map as any).getCenter()
-        const z = (state.map as any).getZoom()
-        if (c) saveMapCenter([c.lng, c.lat], z)
-      }
-      ;(state.map as any).on('moveend', persist)
-      ;(state.map as any).on('zoomend', persist)
-
-      // 2) 没有缓存就用浏览器 HTML5 定位尝试一次
-      if (!cached) {
-        AMap.plugin('AMap.Geolocation', () => {
-          const geo = new (AMap as any).Geolocation({
-            enableHighAccuracy: true,
-            timeout: 6000,
-            showButton: false,
-            showMarker: false,
-            showCircle: false
-          })
-          geo.getCurrentPosition((status: string, result: any) => {
-            if (status === 'complete' && result?.position) {
-              const pos: [number, number] = [result.position.lng, result.position.lat]
-              ;(state.map as any).setZoomAndCenter(14, pos)
-              saveMapCenter(pos, 14)
-            }
-          })
-        })
-      }
-
-      // 挂在到全局
-      app.config.globalProperties.$aMap = state.aMap
-      app.config.globalProperties.$map = state.map
-      app.config.globalProperties.$mouseTool = state.mouseTool
-    }).catch(e => {
-      console.log(e)
+    const map = new maplibregl.Map({
+      container,
+      style: buildTiandituStyle('standard'),
+      center: initCenter,
+      zoom: initZoom,
+      attributionControl: false,
+      // 航线规划用 2D 正视，关闭旋转/倾斜避免航点错位误操作
+      pitchWithRotate: false,
+      dragRotate: false,
     })
+    map.touchZoomRotate?.disableRotation?.()
+
+    state.aMap = maplibregl
+    state.map = map
+    state.mouseTool = null
+
+    // 比例尺（司空2 风格，左下角）
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-left')
+
+    // 拖动/缩放后缓存当前视野（WGS84）
+    const persist = () => {
+      const c = map.getCenter()
+      if (c) saveMapCenter([c.lng, c.lat], map.getZoom())
+    }
+    map.on('moveend', persist)
+
+    // 没有缓存则用浏览器 HTML5 定位一次（navigator 给的就是 WGS84，正好对齐天地图）
+    if (!cached && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const p: [number, number] = [pos.coords.longitude, pos.coords.latitude]
+          map.jumpTo({ center: p, zoom: 14 })
+          saveMapCenter(p, 14)
+        },
+        () => { /* 拒绝/失败忽略 */ },
+        { enableHighAccuracy: true, timeout: 6000 }
+      )
+    }
+
+    // 挂到全局（$aMap=maplibregl 命名空间，$map=Map 实例）
+    app.config.globalProperties.$aMap = maplibregl
+    app.config.globalProperties.$map = map
+    app.config.globalProperties.$mouseTool = null
   }
 
   function globalPropertiesConfig (app: App) {

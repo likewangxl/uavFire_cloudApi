@@ -26,9 +26,9 @@ const COLOR: Record<string, string> = {
 }
 
 onMounted(async () => {
-  // M4T 没配 security code,AMap 2.0 浏览器只用 key 即可
+  // key（Web端）配了安全密钥，AMap 2.0 必须在加载前设置 securityJsCode（否则未签名被限流）
   // @ts-ignore
-  window._AMapSecurityConfig = { securityJsCode: '' }
+  window._AMapSecurityConfig = { securityJsCode: (CURRENT_CONFIG as any).amapSecurityCode || '' }
   const AMap = await AMapLoader.load({
     key: (CURRENT_CONFIG as any).amapKey as string,
     version: '2.0',

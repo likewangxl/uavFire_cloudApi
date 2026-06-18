@@ -28,6 +28,8 @@ import type {
 import { gcj02towgs84, wgs84togcj02 } from '/@/vendors/coordtransform'
 import rootStore from '/@/store'
 import { uuidv4 } from '/@/utils/uuid'
+// @ts-ignore .mjs 纯计算模块（node 测试可直跑）
+import { generateAreaCoverage, getCameraPreset, lineSpacingFromOverlap } from '/@/components/wayline-planner/area-utils.mjs'
 
 export interface PlannedWaypoint {
   id: string
@@ -90,6 +92,16 @@ const state = reactive({
   waypoints: [] as PlannedWaypoint[],
   previewWaypoints: [] as PlannedWaypoint[],
   previewTitle: '',
+  // 航线类型：waypoint=逐点布点；patrol=闭合回路（保存时末点接回首点）；
+  // area=面状（先画多边形 areaPolygon，再按相机重叠率生成弓字形航点）。
+  routeKind: 'waypoint' as 'waypoint' | 'patrol' | 'area',
+  areaPolygon: [] as Array<{ gcjLng: number; gcjLat: number }>,
+  areaParams: {
+    cameraKey: 'M30T',
+    frontOverlap: 80,
+    sideOverlap: 70,
+    headingDeg: 0,
+  },
   selectedWaypointId: '',
   currentIndex: -1,
   gatewaySn: '',
@@ -508,6 +520,89 @@ export function clearPlannedWaylinePreview () {
   state.previewTitle = ''
 }
 
+export function setRouteKind (kind: 'waypoint' | 'patrol' | 'area') {
+  state.routeKind = kind
+  if (kind !== 'area') state.areaPolygon = []
+}
+
+/** 面状航线：地图点击落多边形顶点（与航点布点同一个点击入口，按 routeKind 分流）。 */
+export function addAreaVertexGcj (gcjLng: number, gcjLat: number) {
+  if (state.executing) return
+  state.areaPolygon.push({ gcjLng, gcjLat })
+  state.statusText = `面状测区：已落 ${state.areaPolygon.length} 个顶点（≥3 个后可生成航点）。`
+  persistDraft()
+}
+
+export function removeLastAreaVertex () {
+  state.areaPolygon.pop()
+  persistDraft()
+}
+
+export function removeAreaVertex (index: number) {
+  if (index >= 0 && index < state.areaPolygon.length) {
+    state.areaPolygon.splice(index, 1)
+    persistDraft()
+  }
+}
+
+export function updateAreaVertex (index: number, gcjLng: number, gcjLat: number) {
+  const v = state.areaPolygon[index]
+  if (!v || !Number.isFinite(gcjLng) || !Number.isFinite(gcjLat)) return
+  v.gcjLng = gcjLng
+  v.gcjLat = gcjLat
+  // 已生成过航点则跟随新形状重算，保持扫描线与测区一致
+  if (state.waypoints.length > 0) generateAreaWaypoints()
+  persistDraft()
+}
+
+export function clearAreaPolygon () {
+  state.areaPolygon = []
+  persistDraft()
+}
+
+/**
+ * 由当前 areaPolygon + areaParams 生成弓字形覆盖航点，写入 state.waypoints。
+ * 行间距由相机足迹 × 旁向重叠率反算。返回生成的航点数（0=失败）。
+ */
+export function generateAreaWaypoints (): number {
+  if (state.executing) {
+    message.warning('执行中不能重新生成航线。')
+    return 0
+  }
+  if (state.areaPolygon.length < 3) {
+    message.warning('请先在地图上点出至少 3 个顶点圈定测区。')
+    return 0
+  }
+  const camera = getCameraPreset(state.areaParams.cameraKey)
+  const height = normalizePositiveNumber(state.defaultHeight, DEFAULT_HEIGHT_M)
+  const spacing = lineSpacingFromOverlap(camera, height, state.areaParams.sideOverlap)
+  if (!(spacing > 0)) {
+    message.warning('行间距为 0，请降低旁向重叠率或检查飞行高度。')
+    return 0
+  }
+  const coords = generateAreaCoverage(state.areaPolygon, { lineSpacingM: spacing, headingDeg: state.areaParams.headingDeg })
+  if (coords.length < 2) {
+    message.warning('测区过小或参数不当，未生成有效航线。')
+    return 0
+  }
+  state.waypoints = coords.map((c: { gcjLng: number; gcjLat: number }) => {
+    const [wgsLng, wgsLat] = gcj02towgs84(c.gcjLng, c.gcjLat) as [number, number]
+    return {
+      id: uuidv4(),
+      gcjLng: c.gcjLng,
+      gcjLat: c.gcjLat,
+      wgsLng,
+      wgsLat,
+      height,
+    } as PlannedWaypoint
+  })
+  state.selectedWaypointId = ''
+  state.currentIndex = -1
+  state.statusText = `面状航线已生成 ${state.waypoints.length} 个航点（行间距 ${spacing.toFixed(0)}m）。`
+  persistDraft()
+  return state.waypoints.length
+}
+
 export function selectWaypoint (id: string) {
   state.selectedWaypointId = id
 }
@@ -650,6 +745,12 @@ export function buildPlannedWaylineBody (name: string, aircraftModelKey?: string
   state.maxSpeed = normalizePositiveNumber(state.maxSpeed, DEFAULT_MAX_SPEED)
   state.waypoints = state.waypoints.map(wp => normalizePlannedWaypoint(wp))
   persistDraft()
+  // 巡逻航线=闭合回路：末尾补一个回到首航点的点（仅写入下发体，不污染编辑中的 waypoints）
+  const bodyWaypoints = state.waypoints.slice()
+  if (state.routeKind === 'patrol' && bodyWaypoints.length >= 2) {
+    const first = bodyWaypoints[0]
+    bodyWaypoints.push({ ...first, id: uuidv4() })
+  }
   return {
     name,
     aircraftModelKey: modelKey,
@@ -663,7 +764,7 @@ export function buildPlannedWaylineBody (name: string, aircraftModelKey?: string
     takeoffSecurityHeight: state.takeoffSecurityHeight,
     globalTransitionalSpeed: state.globalTransitionalSpeed,
     rthAltitude: state.rthAltitude,
-    waypoints: state.waypoints.map((wp, idx) => buildPlannedWaypointBody(normalizePlannedWaypoint(wp), idx)),
+    waypoints: bodyWaypoints.map((wp, idx) => buildPlannedWaypointBody(normalizePlannedWaypoint(wp), idx)),
   }
 }
 
@@ -674,6 +775,9 @@ export function loadPlannedWayline (record: PlannedWaylineRecord) {
   state.executing = false
   state.execState = PlanningExecState.IDLE
   state.currentIndex = -1
+  // 后端不存航线类型，读回的航线统一按航点航线编辑
+  state.routeKind = 'waypoint'
+  state.areaPolygon = []
   state.editingPlannedWaylineId = record.plannedWaylineId
   state.aircraftModelKey = record.aircraftModelKey
   state.gatewaySn = record.gatewaySn
@@ -740,6 +844,8 @@ export function resetPlanningDraft () {
   state.gatewaySn = ''
   state.aircraftSn = ''
   state.waypoints = []
+  state.routeKind = 'waypoint'
+  state.areaPolygon = []
   clearPlannedWaylinePreview()
   state.defaultHeight = DEFAULT_HEIGHT_M
   state.maxSpeed = DEFAULT_MAX_SPEED

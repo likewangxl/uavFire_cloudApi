@@ -3,9 +3,11 @@
     <MissionStatsBar />
     <div class="planner-overlay-left">
       <WaypointListPanel />
-      <MissionParamsPanel />
+      <AreaParamsPanel v-if="planningVisible && planningState.routeKind === 'area'" />
+      <MissionParamsPanel v-if="planningVisible" />
     </div>
     <PlannerToolbar
+      v-if="planningVisible"
       :can-execute="canExecute"
       :on-start-placing="onStartPlacing"
       :on-stop-placing="onStopPlacing"
@@ -20,13 +22,20 @@
 </template>
 
 <script lang="ts" setup>
+import { computed } from 'vue'
 import MissionStatsBar from './MissionStatsBar.vue'
 import WaypointListPanel from './WaypointListPanel.vue'
 import MissionParamsPanel from './MissionParamsPanel.vue'
+import AreaParamsPanel from './AreaParamsPanel.vue'
 import PlannerToolbar from './PlannerToolbar.vue'
 import WaypointParamDrawer from './WaypointParamDrawer.vue'
 import ElevationProfile from './ElevationProfile.vue'
 import SimulationBar from './SimulationBar.vue'
+import { getPlanningStateRaw } from '/@/hooks/use-wayline-planning'
+
+// 任务参数面板 + 底部工具条只在开始规划（布点中或已有航点编辑）时显示，平时不常驻
+const planningState = getPlanningStateRaw()
+const planningVisible = computed(() => planningState.active || planningState.waypoints.length > 0)
 
 defineProps<{
   canExecute: boolean

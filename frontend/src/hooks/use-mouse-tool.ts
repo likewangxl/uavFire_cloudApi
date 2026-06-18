@@ -91,6 +91,14 @@ export function useMouseTool () {
   }
 
   function mouseTool (type: MapDoodleType, getDrawCallback: Function, flightAreaType?: EFlightAreaType) {
+    // 地图引擎已迁 MapLibre：高德 MouseTool($mouseTool) 不存在。绘制类工具(画点/线/面/飞行区)
+    // 后端耦合，迁移期先安全守护：关闭操作放行，其余给提示不崩。后续按需实现 MapLibre 绘制。
+    if (!root?.$mouseTool) {
+      if (type !== MapDoodleEnum.Close) {
+        message.info('绘制工具正在迁移到新地图引擎，暂不可用')
+      }
+      return
+    }
     state.currentType = type
     if (flightAreaType) {
       switch (type) {

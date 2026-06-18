@@ -1,3 +1,5 @@
+// 实时设备(飞机/遥控器/机场)地图标记(MapLibre 版，自高德迁移)。坐标 WGS84。
+import maplibregl from 'maplibre-gl'
 import store from '/@/store'
 import { getRoot } from '/@/root'
 import { EDeviceTypeName } from '/@/types'
@@ -7,76 +9,44 @@ import droneIcon from '/@/assets/icons/drone.png'
 
 export function deviceTsaUpdate () {
   const root = getRoot()
-  let AMap = root.$aMap
 
-  const icons = new Map([
+  const icons = new Map<number, string>([
     [EDeviceTypeName.Aircraft, droneIcon],
     [EDeviceTypeName.Gateway, rcIcon],
-    [EDeviceTypeName.Dock, dockIcon]
+    [EDeviceTypeName.Dock, dockIcon],
   ])
-  const markers = store.state.markerInfo.coverMap
-  const paths = store.state.markerInfo.pathMap
+  const markers = store.state.markerInfo.coverMap as Record<string, maplibregl.Marker>
 
-  let trackLine = null as any
-  function getTrackLineInstance () {
-    if (!trackLine) {
-      trackLine = new AMap.Polyline({
-        map: root.$map,
-        strokeColor: '#939393' // 线颜色
-      })
-    }
-    return trackLine
-  }
-
-  function initIcon (type: number) {
-    return new AMap.Icon({
-      image: icons.get(type),
-      imageSize: new AMap.Size(40, 40),
-      size: new AMap.Size(40, 40)
-    })
+  function iconEl (type: number) {
+    const img = document.createElement('img')
+    img.src = icons.get(type) || droneIcon
+    img.style.width = '40px'
+    img.style.height = '40px'
+    img.style.display = 'block'
+    return img
   }
 
   function initMarker (type: number, name: string, sn: string, lng?: number, lat?: number) {
-    if (markers[sn]) {
-      return
+    if (markers[sn]) return
+    const map = root?.$map
+    if (!map) return
+    const hasValid = !!lng && !!lat && Number.isFinite(lng) && Number.isFinite(lat) && lng !== 0 && lat !== 0
+    const el = iconEl(type)
+    el.title = name
+    const m = new maplibregl.Marker({ element: el, anchor: 'center' })
+    m.setLngLat([lng || 113.943225499, lat || 22.577673716])
+    m.addTo(map)
+    markers[sn] = m
+    // 第一次出现时自动把视野跟过去
+    if (hasValid && typeof map.easeTo === 'function') {
+      map.easeTo({ center: [lng as number, lat as number], zoom: 17, duration: 500 })
     }
-    if (root.$aMap === undefined) {
-      return
-    }
-    AMap = root.$aMap
-    const hasValidLngLat = !!lng && !!lat && Number.isFinite(lng) && Number.isFinite(lat) && lng !== 0 && lat !== 0
-    markers[sn] = new AMap.Marker({
-      position: new AMap.LngLat(lng || 113.943225499, lat || 22.577673716),
-      icon: initIcon(type),
-      title: name,
-      anchor: 'top-center',
-      offset: [0, -20],
-    })
-    root.$map.add(markers[sn])
-    // 第一次出现飞机/遥控器/机场时自动把视野跟过去
-    if (hasValidLngLat) {
-      root.$map.setZoomAndCenter(17, [lng, lat])
-    }
-    // markers[sn].on('moving', function (e: any) {
-    //   let path = paths[sn]
-    //   if (!path) {
-    //     paths[sn] = e.passedPath
-    //     return
-    //   }
-    //   path.push(e.passedPath[0])
-    //   path.push(e.passedPath[1])
-    //   getTrackLineInstance().setPath(path)
-    // })
   }
 
   function removeMarker (sn: string) {
-    if (!markers[sn]) {
-      return
-    }
-    root.$map.remove(markers[sn])
-    getTrackLineInstance().setPath([])
+    if (!markers[sn]) return
+    markers[sn].remove()
     delete markers[sn]
-    delete paths[sn]
   }
 
   function addMarker (sn: string, lng?: number, lat?: number, type = EDeviceTypeName.Aircraft, name = sn) {
@@ -84,22 +54,18 @@ export function deviceTsaUpdate () {
   }
 
   function moveTo (sn: string, lng: number, lat: number, type?: number, name?: string) {
-    let marker = markers[sn]
+    const marker = markers[sn]
     if (!marker) {
       addMarker(sn, lng, lat, type, name)
-      marker = markers[sn]
       return
     }
-    marker.moveTo([lng, lat], {
-      duration: 1800,
-      autoRotation: true
-    })
+    if (Number.isFinite(lng) && Number.isFinite(lat)) marker.setLngLat([lng, lat])
   }
 
   return {
     marker: markers,
     initMarker,
     removeMarker,
-    moveTo
+    moveTo,
   }
 }

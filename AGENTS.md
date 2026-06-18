@@ -1,66 +1,65 @@
 <claude-mem-context>
 # Memory Context
 
-# [uavfire] recent context, 2026-06-12 10:06am GMT+8
+# [uavfire] recent context, 2026-06-17 5:11pm GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (18,705t read) | 250,493t work | 93% savings
+Stats: 50 obs (19,595t read) | 250,929t work | 92% savings
 
-### Jun 11, 2026
-3329 4:24a 🟣 008+009 Concatenation Transcoding Started Using nv12 Format and h264_videotoolbox, Bypassing colorspace Filter
-3330 4:25a ⚖️ Aborted nv12-Based Concatenation Transcode Mid-Run and Deleted Partial Output
-3331 " 🟣 008+009 Video Concatenation Completed via Two-Pass Transcode+StreamCopy Pipeline
-3332 4:26a 🔵 merged_008_009.mp4 Verified: Format Matches 008.mp4, First/Last Frames Decode, Temp Files Cleaned
-3333 4:27a 🔵 uavfire Local Service Startup Procedures Documented in MEMORY.md
-3334 " 🔵 uavfire Pre-Startup Port Scan: MySQL and MQTT Up, Redis/Backend/Frontend Down
-3335 " 🔵 Previous Backend Crash: Port 6789 Already In Use at Last Shutdown
-3336 " 🟣 Redis Started Successfully via Daemonize Workaround
-3337 4:28a 🟣 Backend and Frontend Launched in Dedicated tmux Sessions
-3338 " 🟣 Backend and Frontend Confirmed Running After ~26s Startup Wait
-3339 4:29a 🟣 Full Stack Verified Healthy: Backend 302, Frontend 200, MQTT Connected
-3340 4:31a 🟣 New Concatenation Task Started: 009+010 in 009's Format (4K HDR HEVC)
-3341 4:32a 🔵 009.mp4 and 010.mp4 Share Identical Codec/Color Format, Enabling Potential Stream-Copy Concat
-3342 " 🟣 009+010 Stream-Copy Concat Completed in 1.6s with Non-Monotonic DTS Warnings and Dolby Vision Box Dropped
-3343 " 🔵 merged_009_010.mp4 Verified: HEVC BT.2020 HLG Format Preserved, Duration 71.3s, First/Last Frames Clean
-3344 4:33a 🔵 Full Decode of merged_009_010.mp4 Reveals Persistent Non-Monotonic DTS Errors Around Splice Point
-3345 " 🔵 merged_009_010.mp4 Full Decode Completes Successfully Despite Non-Monotonic DTS Warnings
-3346 " 🔵 hevc_videotoolbox Encoder Supports Main10/p010le and Has frames_before/frames_after Concat Smoothing Options
-3347 4:34a 🟣 Stable 009+010 Re-encode Started via concat Filter + hevc_videotoolbox Main10 to Fix DTS Issues
-3348 4:43a 🟣 merged_009_010_stable.mp4 Completed: 9m12s Re-encode Produces Clean HEVC 4K HDR Output at 38.6 Mbps
-3349 4:44a 🔴 merged_009_010_stable.mp4 Full Decode Completes with Zero Errors, Confirming DTS Fix
-3350 4:47a 🟣 Video Concatenation Task: 010 + 011 with Format Preservation
-3351 " 🔵 Video Files Confirmed: 010.mp4 and 011.mp4 in /videos
-3352 " ⚖️ Three-Step Concat Strategy: Probe → Stream-Copy → Re-encode Fallback
-3353 " 🔵 010 and 011 Are Fundamentally Incompatible: Stream-Copy Concat Impossible
-3354 4:48a 🔵 h264_videotoolbox Cannot Set BT.709 Color Metadata — Errors -12902 and -12915
-3355 4:50a 🟣 Video Concatenation Completed: merged_010_011.mp4 Created Successfully
-3356 " 🔵 ffprobe Does Not Accept Multiple Input Files — Unlike ffmpeg
-3357 4:51a 🟣 merged_010_011.mp4 Fully Verified: Color Metadata Clean, First/Last Frames Decode OK
-3358 " 🟣 Full End-to-End Decode of merged_010_011.mp4 Passed — Zero Errors
-3359 " ✅ Cleanup Complete: Only merged_010_011.mp4 Remains in videos/
-3360 10:50a 🔵 Disk Space Exhaustion Overnight During Video Splicing and PPT Creation
-3361 " 🔵 Mac Data Volume Confirmed at 100% Capacity — 444 GiB Used of 466 GiB
-3362 10:51a 🔵 Root Cause Identified: 34 GB Git Object Store Bloat from Abandoned tmp_pack Files + Large Video Files Committed to Repo
-3363 " 🔵 Exactly 249 Orphaned tmp_pack Files Quantified at 30.32 GiB — Primary Disk Exhauster Confirmed
-3364 10:52a 🔵 Git count-objects Confirms 30.32 GiB Garbage; Codex Agent Identified as Overnight Executor
-3365 10:53a 🔵 Full Home Directory Disk Map: Library at 213 GiB and uavfire at 56 GiB Are Top Two Consumers
-3366 10:54a 🔵 Video Files Are Untracked in Git; Three PPT Files Created by Claude Confirmed; Promo Pipeline Identified
-3367 " 🔵 tmp_pack Accumulation Window Precisely Timed: 02:43–04:17 AM, 249 Files in 94 Minutes
-3368 " 🔵 Complete Overnight Timeline: Git GC Storm Triggered 6 Minutes After 734 MB Video Was Written
-3369 10:55a 🔵 Large Loose Git Object Blobs Confirmed as Video Content — 9 Directories Hold ~2.87 GiB of Orphaned Video Blobs
-3370 10:56a 🔵 Library Containers Breakdown: WeChat (88 GiB), Telegram (41 GiB), WPS Office (41 GiB) Are Pre-Existing Long-Term Disk Consumers
-3371 11:13a ✅ Git Garbage Collection Requested
-3372 " 🔵 30 GiB of Git Garbage Files Found in uavfire Repository
-3373 11:14a ✅ Git Garbage File Deletion Running — 30 GiB Cleanup In Progress
-3374 " ✅ Git Garbage Files Successfully Deleted — 30.32 GiB Freed
-3375 " 🔵 Disk State Post-Cleanup: 93% Full, 34 GiB Free on 466 GiB Volume
-3376 " 🔵 uavfire Git Repository State After Garbage Cleanup
-### Jun 12, 2026
-3399 9:57a 🔵 uavfire 项目中被折中或暂缓的技术决策汇总
-3413 10:06a 🔵 YOLO 再训练数据集缺失已通过代码库扫描确认
+### Jun 15, 2026
+3995 1:22p 🔵 Parallel Export Stall Broke — Segment 5 Completed First; All Remaining Segments Resumed Writing
+3996 1:24p 🔵 Parallel Export Resumed at ~1.5 GiB/min After Stall — 2.7 GiB Total at 05:23:35
+3997 1:27p 🔵 All Segments Surpassed Prior 342 MB Stall Point — Export Progressing Without Second Stall
+3998 1:30p 🔵 Segments Converging at 60% Complete — Lead Gap Between Segment Groups Narrowing to ~21 MB
+3999 " 🔵 All 5 Active Export Segments Fully Converged — Near-Identical 700 MB Each at 70% Complete
+4000 1:31p 🔵 Second Synchronized Stall at ~700 MB per Segment — Export Frozen Again at 70% Complete
+4001 1:33p 🔵 Second Stall Broke Quickly — 5.6 GiB After Rapid Progress; Multiple Segments Crossing 1 GiB Chunk Boundary
+4002 1:36p ✅ Parallel Export Complete — All 5 Segments Sealed at ~1,049 MB Each, gzip Compression Underway
+4003 1:41p 🔵 Export Processes Still Running Post-Completion — Waiting for Concurrent gzip Compression to Finish
+4004 1:49p 🔵 Third Oracle XE Slowdown Pattern — Export Progressing at ~64 MB/min Across 8 Minutes (05:41–05:49)
+4005 1:50p 🔵 Four Segments Sealed with gzip Compression Running — Segment 3 (ID 3001–4000) Still Writing at 799 MB
+4006 1:51p ✅ Segment 3 (ID 3001–4000) Completed — part-003.csv: 1000 Rows / 880 MB / 1 Part
+4007 1:52p ✅ All 6 Parallel Export Segments Completed Successfully — 5120 Total Rows Exported Across 6 Part Files
+4008 1:53p 🔵 All gzip Files Stable — Parallel Export Fully Complete; Final On-Disk State 7.0 GiB
+4009 1:54p 🔵 All Parallel Export Sessions Exited Successfully — gzip Compression Durations Varied 2–5 Minutes Per Part
+4010 1:55p 🔵 Final Export State Verified at 7.0 GiB — part-001.csv Listed Twice in find Output (Tool Artifact)
+4011 1:56p ✅ ExportOracleTableCsvArchive.java Final Diff — 27 Lines Added for LobPrefetch + whereClause + partOffset
+4013 2:00p 🔵 T11 Parallel Export Throughput: ~228 KB/s Per Active Segment at 06:00 UTC
+4014 2:01p 🔵 T11 Export Segment 3 (Session 93730) Completed — 1000 Rows, 1.049 GiB
+4015 2:08p 🔵 T11 Export Crossed 4.0 GiB at 06:06 UTC — 4 Segments Still Active, Steady ~350 MB/min Aggregate Rate
+4016 2:09p 🔵 part-004 Reached 1,049,191,345 Bytes — Nearly Identical to part-003 Final Size (1,049,191,393)
+4017 2:10p 🔵 T11 Export Segment 4 (Session 60438) Completed — 1000 Rows, 1,049,191,345 Bytes
+4018 2:17p 🔵 Part-001 and Part-002 Diverged by 21 MB at 06:17 UTC — Symmetry Broken, Part-000 Approaching 1 GiB Final Size
+4019 2:18p 🔵 Part-000 at 1,049,183,187 Bytes — 8,206 Bytes from Expected Final, Completion Imminent; Parts 001/002 Symmetry Restored
+4020 2:19p 🔵 T11 Export Segment 0 (Session 85985) Completed — 1000 Rows, 1,049,183,187 Bytes
+4021 2:24p 🔵 T11 Export Segment 2 (Session 4568) Completed — 1000 Rows, 1,049,191,365 Bytes; Only Part-001 Remains
+4022 2:25p 🟣 T11_ORACLE_ALL_TYPES_5G Parallel Export 100% Complete — All 6 Segments Exited Code 0, 5,120 Rows, 5.0 GiB
+4023 " ✅ T11 Export Archive Created: T11_ORACLE_ALL_TYPES_5G.tar.gz in dist/linux/data
+4024 " 🔵 T11 Export Row Count Validated: Exactly 5,120 Data Rows Across 6 Part Files (5,126 Lines Including Headers)
+4025 " 🟣 MySQL Target Table T11_ORACLE_ALL_TYPES_5G Created in cloud_sample Database for Import Phase
+4026 2:26p 🔵 T11 tar.gz Archive Only 7.3 MB for 5.0 GiB Uncompressed — ~700:1 Compression Ratio on Repetitive CLOB Data
+4027 " 🟣 Import Config dist/linux/conf/import-t11-generated.properties Created for T11 External CSV Import into MySQL
+4028 " 🟣 T11 MySQL Import Started — ExternalCsvTaskScanner Registered 6 Shards, LOAD DATA LOCAL INFILE Running for Shard 0
+4029 2:27p 🔵 TIMESTAMP_LTZ_COL Import Generates 2 Warnings Per Row — Oracle TIMESTAMP WITH LOCAL TIME ZONE Exports Named TZ Not Offset
+4030 " 🔵 Migration Pipeline State: Shard 0 Already VERIFIED, Shard 1 IMPORTING, Shards 2–5 EXPORTED — 1000 Rows in MySQL
+4031 2:28p 🔵 T11 Import Throughput Confirmed: ~26 Seconds Per 1000-Row/1GiB Shard — Shards 0–2 VERIFIED, 3000 Rows in MySQL
+4032 2:29p 🟣 T11 MySQL Import 100% Complete — All 5,120 Rows Imported in 2m43s, Migration Program Exited Normally
+4033 " 🔵 Final Migration Verification: All 6 Shards VERIFIED, 5,120 Rows in MySQL — Perfect Row Count Match
+4034 2:30p 🔵 Oracle Source Confirmed: 5120 Rows, Exactly 5 GiB CLOB — End-to-End Migration Fully Validated
+4035 " 🔵 Local Disk at 98% Capacity (436 GiB / 466 GiB Used, 11 GiB Free) — Critical Disk Pressure After 5 GiB CSV Export
+4036 " 🔵 MySQL T11 Final Verification: 5120 Rows, IDs 1–5120, 5.00 GiB CLOB, All Shards VERIFIED With File Sizes
+4037 6:23p ✅ System Promotional Documentation Requested for Video Script
+4038 " 🔵 uavFire System Identity and Architecture Discovered from README
+4039 " 🔵 Formal System Requirements Extracted from PDF: Smart Cluster UAV Fire Suppression System
+4040 " 🔵 Current System Runtime Model and Subsystem Implementation Status Mapped
+4041 6:25p 🔵 Existing Promotional Assets Found in docs/promo/ Including Two PPT Files
+4042 " 🔵 Sub-Meter Fire Geolocation Design Completed: Multi-Observation Triangulation System
+4043 6:26p ✅ System Promotional Documentation Requested for Video Script
+4044 " 🟣 智能集群大载重无人机灭火系统宣传文案母稿创建
+4045 " 🔵 docs/promo/ Directory Is Gitignored in uavfire Project
 
-Access 250k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 251k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
