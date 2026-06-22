@@ -54,7 +54,9 @@ export function useGMapManage () {
 
     const map = new maplibregl.Map({
       container,
-      style: buildTiandituStyle('standard'),
+      // 默认天地图影像档（卫星）。航线规划页对标司空2以影像为底；图层状态跨页签共享，
+      // 历史上访问过航线页后全局即为影像，故初始即用影像，避免刷新时「标准→卫星」闪一下。
+      style: buildTiandituStyle('satellite'),
       center: initCenter,
       zoom: initZoom,
       attributionControl: false,

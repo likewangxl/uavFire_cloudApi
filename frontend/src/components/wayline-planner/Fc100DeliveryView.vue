@@ -1,138 +1,5 @@
 <template>
   <div class="fc100-delivery-view">
-      <div class="fc100-planning-panel">
-        <div class="fc100-planning-title">
-          <span>投放执行面板</span>
-          <a-button size="small" type="link" :loading="fc100PlanningState.loadingAction === 'devices'" @click="handleFc100RefreshDevices">
-            刷新设备
-          </a-button>
-        </div>
-        <div class="planning-row">
-          <span class="planning-label">FC100云端设备</span>
-          <a-select
-            size="small"
-            style="width: 100%;"
-            :value="fc100PlanningState.selectedDeviceSn"
-            placeholder="请选择FC100飞机设备"
-            option-label-prop="label"
-            :loading="fc100PlanningState.loadingAction === 'devices'"
-            @change="handleFc100SelectDevice">
-            <a-select-option
-              v-for="device in fc100AircraftDevices"
-              :key="device.deviceSn"
-              :value="device.deviceSn"
-              :label="formatFc100DeviceSelectLabel(device)">
-              <div class="fc100-device-option">
-                <div class="fc100-device-option-main">
-                  <span class="fc100-device-option-model">{{ formatFc100DeliveryAircraftModel() }}</span>
-                  <span class="fc100-device-option-status" :class="{ online: isFc100DeviceOnline(device) }">
-                    {{ isFc100DeviceOnline(device) ? '在线' : '离线' }}
-                  </span>
-                </div>
-                <div class="fc100-device-option-sn">{{ device.deviceSn }}</div>
-              </div>
-            </a-select-option>
-          </a-select>
-        </div>
-        <div class="fc100-device-props" v-if="fc100PlanningState.selectedDeviceProps">
-          <span>电量 {{ fc100PlanningState.selectedDeviceProps.batteryPercent ?? '-' }}%</span>
-          <span>RTK {{ fc100PlanningState.selectedDeviceProps.rtkStatus || '-' }}</span>
-          <span>{{ fc100PlanningState.selectedDeviceProps.onlineStatus === false ? '离线' : '在线' }}</span>
-        </div>
-        <div class="planning-row">
-          <span class="planning-label">当前规划航线</span>
-          <div class="fc100-selected-wayline">
-            {{ fc100SelectedRecordName }}
-          </div>
-        </div>
-        <div class="planning-row planning-actions fc100-task-actions">
-          <a-button
-            class="wayline-button-wrap"
-            size="small"
-            type="primary"
-            :loading="fc100PlanningState.loadingAction === 'import'"
-            :disabled="!fc100PlanningState.selectedRecord || !fc100PlanningState.selectedRecord.kmzUrl"
-            @click="handleFc100ImportGeneratedWaylineTask()">
-            创建FC100任务
-          </a-button>
-          <a-button
-            size="small"
-            :loading="fc100PlanningState.loadingAction === 'start'"
-            :disabled="!fc100PlanningState.taskId"
-            @click="handleFc100StartGeneratedWaylineTask">
-            开始执行
-          </a-button>
-          <a-button
-            size="small"
-            :loading="fc100PlanningState.loadingAction === 'status'"
-            :disabled="!fc100PlanningState.taskId"
-            @click="handleFc100GeneratedWaylineTaskStatus">
-            刷新任务
-          </a-button>
-        </div>
-        <div class="fc100-task-summary" v-if="fc100PlanningState.taskId || fc100PlanningState.taskStatus">
-          <span>FC100任务ID {{ fc100PlanningState.taskId || '-' }}</span>
-          <span>状态 {{ fc100PlanningState.taskStatus?.status || fc100PlanningState.taskStatus?.phase || '-' }}</span>
-          <span v-if="fc100PlanningState.taskStatus?.progressPercent !== null && fc100PlanningState.taskStatus?.progressPercent !== undefined">
-            进度 {{ fc100PlanningState.taskStatus.progressPercent }}%
-          </span>
-        </div>
-        <div class="fc100-terminal-panel" v-if="fc100PlanningState.taskId">
-          <div class="fc100-terminal-head">
-            <span>到点后投放控制</span>
-            <small>{{ fc100TerminalControlHint }}</small>
-          </div>
-          <div class="fc100-terminal-note">
-            确认航线到达终点并悬停后再操作。
-          </div>
-          <div class="fc100-terminal-actions">
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__primary"
-              :loading="fc100PlanningState.loadingAction === 'ropeDown'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100RopeDown">
-              放绳
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__neutral"
-              :loading="fc100PlanningState.loadingAction === 'ropeStop'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100RopeStop">
-              停止
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__primary"
-              :loading="fc100PlanningState.loadingAction === 'ropeUp'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100RopeUp">
-              收绳
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__danger"
-              :loading="fc100PlanningState.loadingAction === 'releaseHook'"
-              :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading"
-              @click="handleFc100ReleaseHook">
-              脱钩
-            </a-button>
-            <a-button
-              size="small"
-              class="fc100-terminal-actions__return"
-              :loading="fc100PlanningState.loadingAction === 'returnHome'"
-              :disabled="!getSelectedFc100DeviceSn() || isFc100TerminalCommandLoading"
-              @click="handleFc100ReturnHome">
-              返航
-            </a-button>
-          </div>
-        </div>
-        <div class="fc100-result" v-if="fc100PlanningState.lastResult">
-          {{ fc100PlanningState.lastResult }}
-        </div>
-      </div>
-      <div class="planning-section-gap"></div>
       <div class="planned-wayline-panel planned-wayline-panel--delivery">
         <div class="planned-wayline-title">
           <span>FC100 投放航线库</span>
@@ -173,8 +40,8 @@
                 size="small"
                 type="primary"
                 :disabled="!record.kmzUrl"
-                @click.stop="selectFc100GeneratedWayline(record)">
-                选择
+                @click.stop="onOpenDeliveryTask(record, $event)">
+                下发
               </a-button>
               <a-button size="small" danger @click.stop="onDeletePlannedWayline(record)">删除</a-button>
             </div>
@@ -190,28 +57,10 @@
 import { onMounted, onUnmounted } from 'vue'
 import { PlannedWaylineRecord, PlannedWaylineStatus } from '/@/types/wayline'
 import {
-  canUseFc100TerminalControls,
-  fc100AircraftDevices,
   fc100PlanningState,
-  fc100SelectedRecordName,
-  fc100TerminalControlHint,
   formatFc100DeliveryAircraftModel,
-  formatFc100DeviceSelectLabel,
-  getSelectedFc100DeviceSn,
-  handleFc100GeneratedWaylineTaskStatus,
-  handleFc100ImportGeneratedWaylineTask,
   handleFc100RefreshDevices,
-  handleFc100ReleaseHook,
-  handleFc100ReturnHome,
-  handleFc100RopeDown,
-  handleFc100RopeStop,
-  handleFc100RopeUp,
-  handleFc100SelectDevice,
-  handleFc100StartGeneratedWaylineTask,
-  isFc100DeviceOnline,
-  isFc100TerminalCommandLoading,
   onFc100PreviewGeneratedWayline,
-  selectFc100GeneratedWayline,
   startFc100RealtimeRefresh,
   stopFc100RealtimeRefresh,
 } from '/@/hooks/use-fc100-delivery'
@@ -229,6 +78,7 @@ defineProps<{
   refreshPlannedWaylines:(reset?: boolean) => void
   onPlannedWaylinesScroll: (e: any) => void
   showPlannedWaylineDetail: (record: PlannedWaylineRecord) => void
+  onOpenDeliveryTask: (record: PlannedWaylineRecord, ev?: Event) => void
   onDeletePlannedWayline: (record: PlannedWaylineRecord) => void
 }>()
 
@@ -267,6 +117,14 @@ onUnmounted(() => {
 }
 .fc100-task-actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.fc100-task-hint {
+  margin: 2px 0 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #9aa4b0;
+  background: #2f2f2f;
 }
 .fc100-task-actions .ant-btn:not(.wayline-button-wrap) {
   padding-left: 8px;

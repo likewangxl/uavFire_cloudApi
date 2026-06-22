@@ -306,6 +306,14 @@ export function usePlannerOverlays (
         el.addEventListener('click', (ev) => { ev.stopPropagation(); selectWaypoint(wp.id) })
         if (editable) {
           el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); removeWaypoint(wp.id) })
+          // 拖动过程：实时改航线连线（不走 state，避免重建打断拖拽）。距离/箭头/H 在落点后整体刷新。
+          m.on('drag', () => {
+            const ll = m.getLngLat()
+            const live = waypoints.map((p, i) => (i === idx ? [ll.lng, ll.lat] as LngLat : wpLngLat(p)))
+            if (planningState.routeKind === 'patrol' && live.length >= 2) live.push(live[0])
+            if (live.length >= 2) setData(map, SRC.route, lineFeature(live))
+          })
+          // 落点：WGS→GCJ 提交，触发 state 变更后整体重绘
           m.on('dragend', () => {
             const ll = m.getLngLat()
             const [g0, g1] = wgs84togcj02(ll.lng, ll.lat) as LngLat

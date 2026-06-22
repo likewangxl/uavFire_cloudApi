@@ -87,7 +87,7 @@
                 :type="action.primary ? 'primary' : 'default'"
                 :danger="action.danger"
                 :class="{ 'wayline-button-wrap': action.wrap }"
-                @click.stop="action.handler(record)">
+                @click.stop="action.handler(record, $event)">
                 {{ action.label }}
               </a-button>
               <a-button size="small" danger @click.stop="onDeletePlannedWayline(record)">删除</a-button>
@@ -107,6 +107,7 @@
         :refresh-planned-waylines="refreshPlannedWaylines"
         :on-planned-waylines-scroll="onPlannedWaylinesScroll"
         :show-planned-wayline-detail="showPlannedWaylineDetail"
+        :on-open-delivery-task="openDeliveryTaskModal"
         :on-delete-planned-wayline="onDeletePlannedWayline" />
       <a-collapse
         v-if="showPlanningTools"
@@ -296,7 +297,7 @@
               :type="action.primary ? 'primary' : 'default'"
               :danger="action.danger"
               :class="{ 'wayline-button-wrap': action.wrap }"
-              @click="action.handler(selectedPlannedWayline)">
+              @click="action.handler(selectedPlannedWayline, $event)">
               {{ action.label }}
             </a-button>
             <a-button
@@ -438,6 +439,143 @@
           <a-button size="small" type="primary" @click="confirmCreateRoute">确定</a-button>
         </div>
       </div>
+      <div
+        v-if="prepareTargetModal.visible"
+        class="create-route-popover prepare-target-popover"
+        :style="{ top: prepareTargetModal.anchorTop + 'px' }">
+        <div class="create-route-popover-head">
+          <span><RocketOutlined class="prepare-target-head-icon" />选择下发飞行器</span>
+          <CloseOutlined class="create-route-popover-close" @click="prepareTargetModal.visible = false" />
+        </div>
+        <div class="create-route-popover-body">
+          <div class="prepare-target-summary">
+            <span class="prepare-target-summary-label">航线</span>
+            <strong>{{ prepareTargetModal.record?.name || '-' }}</strong>
+          </div>
+          <span class="planning-label">
+            目标飞行器<em v-if="executeTargetOptions.length" class="prepare-target-count">（{{ executeTargetOptions.length }} 台在线）</em>
+          </span>
+          <a-select
+            class="prepare-target-select"
+            style="width: 100%;"
+            size="large"
+            :value="prepareTargetModal.targetSn"
+            placeholder="请选择在线飞行器"
+            dropdown-class-name="prepare-target-dropdown"
+            :get-popup-container="(node: any) => node.parentElement"
+            @change="(sn: string) => prepareTargetModal.targetSn = sn">
+            <a-select-option
+              v-for="aircraft in executeTargetOptions"
+              :key="aircraft.sn"
+              :value="aircraft.sn">
+              <span class="prepare-target-option">
+                <RocketOutlined class="prepare-target-option-icon" />
+                <span class="prepare-target-option-name">{{ aircraft.callsign || aircraft.sn }}</span>
+                <span v-if="aircraft.aircraftModelKey" class="prepare-target-option-model">{{ aircraft.aircraftModelKey }}</span>
+              </span>
+            </a-select-option>
+          </a-select>
+          <div class="planning-empty" v-if="executeTargetOptions.length === 0">
+            当前没有检测到在线飞行器，请确认 MSDK 程序在线后点击左侧刷新。
+          </div>
+        </div>
+        <div class="create-route-popover-foot">
+          <a-button size="small" @click="prepareTargetModal.visible = false">取消</a-button>
+          <a-button
+            size="small"
+            type="primary"
+            :loading="prepareTargetModal.loading"
+            :disabled="!prepareTargetModal.targetSn"
+            @click="confirmPrepareTarget">确认下发准备</a-button>
+        </div>
+      </div>
+      <div
+        v-if="deliveryTaskModal.visible"
+        class="create-route-popover prepare-target-popover"
+        :style="{ top: deliveryTaskModal.anchorTop + 'px' }">
+        <div class="create-route-popover-head">
+          <span><RocketOutlined class="prepare-target-head-icon" />投放任务</span>
+          <CloseOutlined class="create-route-popover-close" @click="deliveryTaskModal.visible = false" />
+        </div>
+        <div class="create-route-popover-body">
+          <div class="prepare-target-summary">
+            <span class="prepare-target-summary-label">航线</span>
+            <strong>{{ deliveryTaskModal.record?.name || '-' }}</strong>
+          </div>
+          <div class="delivery-task-badge" v-if="deliveryExistingTask">
+            <span>已创建任务 <b>{{ deliveryExistingTask.taskId }}</b>
+              <template v-if="fc100PlanningState.taskStatus?.status"> · {{ fc100PlanningState.taskStatus.status }}</template>
+              <template v-if="fc100PlanningState.taskStatus?.progressPercent != null"> · {{ fc100PlanningState.taskStatus.progressPercent }}%</template>
+            </span>
+            <a
+              class="delivery-task-refresh"
+              :class="{ loading: fc100PlanningState.loadingAction === 'status' }"
+              @click="handleFc100GeneratedWaylineTaskStatus">刷新</a>
+          </div>
+          <span class="planning-label">
+            投放飞行器<em v-if="fc100AircraftDevices.length" class="prepare-target-count">（{{ fc100AircraftDevices.length }} 台）</em>
+          </span>
+          <a-select
+            class="prepare-target-select delivery-device-select"
+            style="width: 100%;"
+            size="large"
+            option-label-prop="label"
+            :value="deliveryTaskModal.deviceSn"
+            placeholder="请选择 FC100 投放飞行器"
+            dropdown-class-name="prepare-target-dropdown"
+            :get-popup-container="(node: any) => node.parentElement"
+            @change="(sn: string) => deliveryTaskModal.deviceSn = sn">
+            <a-select-option
+              v-for="device in fc100AircraftDevices"
+              :key="device.deviceSn"
+              :value="device.deviceSn"
+              :label="formatFc100DeliveryAircraftModel() + ' · ' + device.deviceSn">
+              <div class="delivery-device-option">
+                <div class="delivery-device-option-top">
+                  <RocketOutlined class="prepare-target-option-icon" />
+                  <span class="prepare-target-option-name">{{ formatFc100DeliveryAircraftModel() }}</span>
+                  <span class="prepare-target-option-model" :class="{ offline: !isFc100DeviceOnline(device) }">
+                    {{ isFc100DeviceOnline(device) ? '在线' : '离线' }}
+                  </span>
+                </div>
+                <div class="delivery-device-option-sn">{{ device.deviceSn }}</div>
+              </div>
+            </a-select-option>
+          </a-select>
+          <div class="planning-empty" v-if="fc100AircraftDevices.length === 0">
+            未检测到 FC100 设备，请确认设备在线后重试（设备需在云端在线）。
+          </div>
+          <!-- 任务执行后到点投放控制（原投放执行面板已并入此处） -->
+          <div class="delivery-terminal" v-if="deliveryExistingTask">
+            <div class="delivery-terminal-head">
+              <span>到点后投放控制</span>
+              <small>{{ fc100TerminalControlHint }}</small>
+            </div>
+            <div class="delivery-terminal-actions">
+              <a-button size="small" :loading="fc100PlanningState.loadingAction === 'ropeDown'" :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading" @click="handleFc100RopeDown">放绳</a-button>
+              <a-button size="small" :loading="fc100PlanningState.loadingAction === 'ropeStop'" :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading" @click="handleFc100RopeStop">停止</a-button>
+              <a-button size="small" :loading="fc100PlanningState.loadingAction === 'ropeUp'" :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading" @click="handleFc100RopeUp">收绳</a-button>
+              <a-button size="small" danger :loading="fc100PlanningState.loadingAction === 'releaseHook'" :disabled="!canUseFc100TerminalControls() || isFc100TerminalCommandLoading" @click="handleFc100ReleaseHook">脱钩</a-button>
+              <a-button size="small" :loading="fc100PlanningState.loadingAction === 'returnHome'" :disabled="!getSelectedFc100DeviceSn() || isFc100TerminalCommandLoading" @click="handleFc100ReturnHome">返航</a-button>
+            </div>
+          </div>
+        </div>
+        <div class="create-route-popover-foot">
+          <a-button size="small" @click="deliveryTaskModal.visible = false">取消</a-button>
+          <a-button
+            size="small"
+            :loading="deliveryTaskModal.loading && fc100PlanningState.loadingAction === 'import'"
+            :disabled="!deliveryTaskModal.deviceSn || !deliveryTaskModal.record?.kmzUrl"
+            @click="confirmCreateDeliveryTask">
+            {{ deliveryExistingTask ? '重新创建' : '创建飞行任务' }}
+          </a-button>
+          <a-button
+            size="small"
+            type="primary"
+            :loading="deliveryTaskModal.loading && fc100PlanningState.loadingAction === 'start'"
+            @click="confirmStartDeliveryTask">开始执行</a-button>
+        </div>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -496,7 +634,7 @@ import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 import Fc100DeliveryView from '/@/components/wayline-planner/Fc100DeliveryView.vue'
 import PlannerWorkspace from '/@/components/wayline-planner/PlannerWorkspace.vue'
 import { setParamDrawerOpen, setPlannerTab, usePlannerUi } from '/@/hooks/use-planner-ui'
-import { getFc100GeneratedWaylineActions, beforeFc100WaylineUpload, uploadFc100WaylineFile } from '/@/hooks/use-fc100-delivery'
+import { getFc100GeneratedWaylineActions, beforeFc100WaylineUpload, uploadFc100WaylineFile, fc100PlanningState, fc100AircraftDevices, isFc100DeviceOnline, formatFc100DeliveryAircraftModel, getSelectedFc100DeviceSn, onFc100PreviewGeneratedWayline, handleFc100ImportGeneratedWaylineTask, handleFc100StartGeneratedWaylineTask, getFc100RouteTask, setFc100RouteTask, handleFc100GeneratedWaylineTaskStatus, handleFc100RopeDown, handleFc100RopeStop, handleFc100RopeUp, handleFc100ReleaseHook, handleFc100ReturnHome, canUseFc100TerminalControls, isFc100TerminalCommandLoading, fc100TerminalControlHint } from '/@/hooks/use-fc100-delivery'
 import type { FileItem } from '/@/components/wayline-planner/wayline-format'
 import { canOverwritePlannedWayline, formatNumber, formatPlannedWaylineStatus, formatSafePlannedWaylineTimestamp, formatTimestamp, getPlannedWaylineTaskReason, normalizePlannedWaylineStatus, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
 
@@ -568,6 +706,32 @@ const executeTargetModal = reactive({
   record: null as PlannedWaylineRecord | null,
   targetSn: '',
 })
+// 下发准备的飞行器选择（多台/未选时紧贴面板弹出，司空2 式）
+const prepareTargetModal = reactive({
+  visible: false,
+  loading: false,
+  record: null as PlannedWaylineRecord | null,
+  targetSn: '',
+  anchorTop: 12, // 弹窗顶部偏移(px),对齐触发它的那张航线卡片
+})
+// 投放任务弹窗：选 FC100 设备 + 创建/执行任务，紧贴航线卡片，样式与监测页一致
+const deliveryTaskModal = reactive({
+  visible: false,
+  loading: false,
+  record: null as PlannedWaylineRecord | null,
+  deviceSn: '',
+  anchorTop: 12,
+})
+// 反显：当前航线已创建的投放任务（fc100RouteTasks 是 reactive，map 变化会自动更新）
+const deliveryExistingTask = computed(() =>
+  deliveryTaskModal.record ? getFc100RouteTask(deliveryTaskModal.record.plannedWaylineId) : null)
+// 任务类弹窗互斥/随页签关闭：同一时刻只留一个；切监测/投放页签时全部收起
+function closeWaylineTaskPopovers () {
+  prepareTargetModal.visible = false
+  executeTargetModal.visible = false
+  deliveryTaskModal.visible = false
+}
+watch(plannerTab, () => closeWaylineTaskPopovers())
 const executeTargetOptions = computed<AircraftSummary[]>(() => {
   const targetMap = new Map<string, AircraftSummary>()
   onlineAircrafts.value.forEach(aircraft => {
@@ -1069,9 +1233,12 @@ function openSavePlannedWaylineModal (saveAs: boolean) {
     return
   }
   const editingName = editingRecord?.name || ''
+  // 新建航线默认名按航线类型区分：巡逻-航点航线/巡逻-巡逻航线/巡逻-面状航线 + 时间戳（监测规划页均属“巡逻”类）
+  const routeKindLabels: Record<string, string> = { waypoint: '航点航线', patrol: '巡逻航线', area: '面状航线' }
+  const newRouteName = `巡逻-${routeKindLabels[planningState.routeKind] || '航点航线'}-${formatSafePlannedWaylineTimestamp(new Date())}`
   const defaultName = saveAs
     ? `${sanitizeDjiWaylineName(editingName || '规划航线')} 副本`
-    : sanitizeDjiWaylineName(editingName || `规划航线 ${formatSafePlannedWaylineTimestamp(new Date())}`)
+    : sanitizeDjiWaylineName(editingName || newRouteName)
   savePlannedWaylineModal.visible = true
   savePlannedWaylineModal.saveAs = saveAs
   savePlannedWaylineModal.name = defaultName
@@ -1231,35 +1398,7 @@ async function onGeneratePlannedWaylineFile (record: PlannedWaylineRecord) {
   })
 }
 
-function resolvePrepareTargetDroneSn (record: PlannedWaylineRecord) {
-  const selectedSummary = selectedAircraftSn.value ? onlineAircraftMap[selectedAircraftSn.value] : null
-  if (selectedSummary?.sn) return selectedSummary.sn
-  const recordAircraftSn = getRecordAircraftSn(record)
-  if (recordAircraftSn && onlineAircraftMap[recordAircraftSn]) {
-    applyPrepareTargetSelection(recordAircraftSn)
-    return recordAircraftSn
-  }
-  const onlyMsdkAircraftSn = getSingleOnlineMsdkAircraft()
-  if (onlyMsdkAircraftSn) {
-    applyPrepareTargetSelection(onlyMsdkAircraftSn)
-    return onlyMsdkAircraftSn
-  }
-  if (onlineAircrafts.value.length === 1) {
-    const onlyAircraft = onlineAircrafts.value[0]
-    applyPrepareTargetSelection(onlyAircraft.sn)
-    return onlyAircraft.sn
-  }
-  return ''
-}
-
-async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
-  clearPlannedWaylineTaskReason(record)
-  await refreshOnlineAircrafts()
-  const targetDroneSn = resolvePrepareTargetDroneSn(record)
-  if (!targetDroneSn) {
-    message.warning('检测到多台或未检测到在线飞行器，请先在上方飞行器下拉框选择目标后再下发准备。')
-    return
-  }
+async function dispatchPreparePlannedWayline (record: PlannedWaylineRecord, targetDroneSn: string) {
   // Agent 路径 (M4T + RC,无机场) 不需要 dockSn,后端按 dockSn 是否非空自动路由。
   // 如果用户绑定了机场就走 dock 路径;否则走 agent 把 KMZ 推到 RC + MSDK。
   const body: any = {
@@ -1277,7 +1416,130 @@ async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord) {
     '航线任务已下发准备')
 }
 
+function openPrepareTargetModal (record: PlannedWaylineRecord) {
+  closeWaylineTaskPopovers()
+  // 默认选中：航线记录里的飞机(若在线) → 唯一在线飞机 → 空(让用户选)
+  const recordAircraftSn = getRecordAircraftSn(record)
+  const preset = (recordAircraftSn && onlineAircraftMap[recordAircraftSn])
+    ? recordAircraftSn
+    : (executeTargetOptions.value.length === 1 ? executeTargetOptions.value[0].sn : '')
+  prepareTargetModal.record = record
+  prepareTargetModal.targetSn = preset
+  prepareTargetModal.visible = true
+}
+
+async function confirmPrepareTarget () {
+  const record = prepareTargetModal.record
+  if (!record) return
+  const targetDroneSn = prepareTargetModal.targetSn
+  if (!targetDroneSn) {
+    message.warning('请选择在线飞行器后再下发准备。')
+    return
+  }
+  applyPrepareTargetSelection(targetDroneSn)
+  prepareTargetModal.loading = true
+  try {
+    await dispatchPreparePlannedWayline(record, targetDroneSn)
+    prepareTargetModal.visible = false
+    prepareTargetModal.record = null
+    prepareTargetModal.targetSn = ''
+  } finally {
+    prepareTargetModal.loading = false
+  }
+}
+
+// 把弹窗顶部对齐到触发它的那张航线卡片(覆盖层 host 的左边缘=面板右边缘,故弹窗就贴在该航线右侧)
+function computePrepareAnchorTop (ev?: Event): number {
+  try {
+    const host = document.getElementById('wayline-planning-overlay-host')
+    const trigger = (ev?.currentTarget as HTMLElement)?.closest('.planned-wayline-card') as HTMLElement ||
+      (ev?.currentTarget as HTMLElement)
+    if (!host || !trigger) return 12
+    const hostRect = host.getBoundingClientRect()
+    const triggerRect = trigger.getBoundingClientRect()
+    const POPOVER_H = 248
+    const raw = triggerRect.top - hostRect.top
+    const max = Math.max(12, hostRect.height - POPOVER_H - 12)
+    return Math.min(Math.max(12, raw), max)
+  } catch (e) {
+    return 12
+  }
+}
+
+async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord, ev?: Event) {
+  clearPlannedWaylineTaskReason(record)
+  // 同步先算好位置(此刻卡片还在原位),再 await 刷新在线飞机
+  prepareTargetModal.anchorTop = computePrepareAnchorTop(ev)
+  await refreshOnlineAircrafts()
+  // 每次下发都强制选机(司空2 式):无论单台还是多台,一律弹窗确认
+  openPrepareTargetModal(record)
+}
+
+// ---- 投放任务弹窗（FC100）：点航线卡片"下发"→弹窗选设备+创建/执行 ----
+function openDeliveryTaskModal (record: PlannedWaylineRecord, ev?: Event) {
+  closeWaylineTaskPopovers()
+  deliveryTaskModal.anchorTop = computePrepareAnchorTop(ev)
+  onFc100PreviewGeneratedWayline(record) // 设 selectedRecord + 地图预览
+  const existing = getFc100RouteTask(record.plannedWaylineId)
+  const presetDevice = existing?.deviceSn || getSelectedFc100DeviceSn() || ''
+  deliveryTaskModal.record = record
+  deliveryTaskModal.deviceSn = presetDevice
+  // 把该航线已建任务载入全局态，供"开始执行"与面板终端控制复用
+  fc100PlanningState.selectedRecord = record
+  fc100PlanningState.selectedDeviceSn = presetDevice
+  fc100PlanningState.taskId = existing?.taskId || ''
+  fc100PlanningState.taskStatus = null
+  deliveryTaskModal.visible = true
+}
+
+async function confirmCreateDeliveryTask () {
+  const record = deliveryTaskModal.record
+  if (!record) return
+  if (!deliveryTaskModal.deviceSn) {
+    message.warning('请选择投放飞行器后再创建任务。')
+    return
+  }
+  fc100PlanningState.selectedRecord = record
+  fc100PlanningState.selectedDeviceSn = deliveryTaskModal.deviceSn
+  deliveryTaskModal.loading = true
+  try {
+    await handleFc100ImportGeneratedWaylineTask(record)
+    // 成功后任务 ID 落到 fc100PlanningState.taskId → 按航线持久化以便反显
+    if (fc100PlanningState.taskId) {
+      setFc100RouteTask(record.plannedWaylineId, {
+        taskId: fc100PlanningState.taskId,
+        deviceSn: deliveryTaskModal.deviceSn,
+        taskName: record.name,
+        updatedAt: Date.now(),
+      })
+    }
+  } finally {
+    deliveryTaskModal.loading = false
+  }
+}
+
+async function confirmStartDeliveryTask () {
+  const record = deliveryTaskModal.record
+  if (!record) return
+  const existing = getFc100RouteTask(record.plannedWaylineId)
+  if (!existing?.taskId) {
+    message.warning('该航线尚未创建飞行任务，请先点击"创建飞行任务"。')
+    return
+  }
+  // 载入已建任务，复用现有执行处理（含起飞前校验）
+  fc100PlanningState.selectedRecord = record
+  fc100PlanningState.selectedDeviceSn = existing.deviceSn || deliveryTaskModal.deviceSn
+  fc100PlanningState.taskId = existing.taskId
+  deliveryTaskModal.loading = true
+  try {
+    await handleFc100StartGeneratedWaylineTask()
+  } finally {
+    deliveryTaskModal.loading = false
+  }
+}
+
 async function openExecuteTargetModal (record: PlannedWaylineRecord) {
+  closeWaylineTaskPopovers()
   clearPlannedWaylineTaskReason(record)
   await refreshOnlineAircrafts()
   const targetDroneSn = selectedAircraftSn.value ||
@@ -1699,6 +1961,175 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   gap: 8px;
   padding: 10px 16px;
   border-top: 1px solid #2c3a4f;
+}
+.prepare-target-popover {
+  width: 300px;
+}
+.prepare-target-head-icon {
+  margin-right: 6px;
+  color: #4f9bff;
+}
+.prepare-target-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #161a20;
+  border: 1px solid #2c3a4f;
+}
+.prepare-target-summary-label {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: #7d8ca0;
+}
+.prepare-target-summary strong {
+  color: #fff;
+  font-weight: 500;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prepare-target-count {
+  font-style: normal;
+  color: #4f9bff;
+  font-size: 12px;
+}
+.prepare-target-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prepare-target-option-icon {
+  color: #4f9bff;
+  font-size: 13px;
+}
+.prepare-target-option-name {
+  font-weight: 500;
+}
+.prepare-target-option-model {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  color: #9fb0c3;
+  background: rgba(79, 155, 255, 0.14);
+  border-radius: 4px;
+}
+.prepare-target-option-model.offline {
+  color: #9aa4b0;
+  background: rgba(140, 140, 140, 0.18);
+}
+.delivery-task-badge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #9fe0b6;
+  background: rgba(67, 214, 117, 0.12);
+  border: 1px solid rgba(67, 214, 117, 0.32);
+}
+.delivery-task-badge b {
+  color: #d6ffe6;
+  font-weight: 600;
+}
+.delivery-task-refresh {
+  flex: 0 0 auto;
+  color: #6fd69a;
+  cursor: pointer;
+}
+.delivery-task-refresh:hover {
+  color: #b7ffd4;
+}
+.delivery-task-refresh.loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* 两行设备项：第一行 机型+在线状态，第二行 SN */
+.delivery-device-option {
+  padding: 2px 0;
+  line-height: 1.4;
+}
+.delivery-device-option-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.delivery-device-option-sn {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #8b97a6;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+/* 让两行下拉项有足够高度 */
+.prepare-target-popover :deep(.delivery-device-select.ant-select .ant-select-item-option-content),
+.prepare-target-popover :deep(.ant-select-item-option-content) {
+  white-space: normal;
+}
+.delivery-terminal {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #2c3a4f;
+}
+.delivery-terminal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #c7d2e0;
+  font-size: 12px;
+}
+.delivery-terminal-head small {
+  color: #7d8ca0;
+  font-size: 11px;
+}
+.delivery-terminal-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.delivery-terminal-actions .ant-btn {
+  padding-left: 0;
+  padding-right: 0;
+}
+/* 下拉框暗色化：dropdown 经 getPopupContainer 渲染在 popover 内，:deep 在本组件作用域内命中 */
+.prepare-target-popover :deep(.ant-select-selector) {
+  background: #161a20 !important;
+  border: 1px solid #2c3a4f !important;
+  border-radius: 6px !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.prepare-target-popover :deep(.ant-select-selection-placeholder) {
+  color: #6b7889 !important;
+}
+.prepare-target-popover :deep(.ant-select-arrow) {
+  color: #7d8ca0 !important;
+}
+.prepare-target-popover :deep(.ant-select-focused .ant-select-selector) {
+  border-color: #4f9bff !important;
+}
+.prepare-target-popover :deep(.ant-select-dropdown) {
+  background: #1f2329 !important;
+  border: 1px solid #2c3a4f !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+}
+.prepare-target-popover :deep(.ant-select-item-option) {
+  color: #c7d2e0 !important;
+  border-radius: 4px !important;
+}
+.prepare-target-popover :deep(.ant-select-item-option-active) {
+  background: #232b36 !important;
+}
+.prepare-target-popover :deep(.ant-select-item-option-selected) {
+  background: rgba(79, 155, 255, 0.18) !important;
+  color: #fff !important;
 }
 .create-route-section {
   margin-bottom: 18px;

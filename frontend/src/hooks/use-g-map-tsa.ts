@@ -62,10 +62,19 @@ export function deviceTsaUpdate () {
     if (Number.isFinite(lng) && Number.isFinite(lat)) marker.setLngLat([lng, lat])
   }
 
+  // 航线页规划层会用自己的青色徽标渲染被追踪的飞机，此时隐藏该飞机的 TSA 设备标记，避免双图标重叠。
+  // 直接操作本 hook 自己的 markers（与 moveTo 同一 coverMap 实例），不跨模块取 store，避免实例错位。
+  function setMarkerHidden (sn: string, hidden: boolean) {
+    const m = markers[sn]
+    if (!m || typeof m.getElement !== 'function') return
+    m.getElement().style.display = hidden ? 'none' : 'block'
+  }
+
   return {
     marker: markers,
     initMarker,
     removeMarker,
     moveTo,
+    setMarkerHidden,
   }
 }

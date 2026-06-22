@@ -21,6 +21,47 @@ export const fc100PlanningState = reactive({
   loadingAction: '',
 })
 
+// 航线 → 已创建的投放任务 的本地映射（后端无"按航线查任务"接口，故前端持久化以便"反显"）。
+// 持久化到 localStorage，刷新后仍能反显;状态以再次「刷新任务」为准。
+export interface Fc100RouteTask {
+  taskId: string
+  deviceSn: string
+  taskName?: string
+  updatedAt: number
+}
+const FC100_ROUTE_TASKS_KEY = 'fc100_route_tasks'
+function loadFc100RouteTasks (): Record<string, Fc100RouteTask> {
+  try {
+    const raw = localStorage.getItem(FC100_ROUTE_TASKS_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch (e) {
+    return {}
+  }
+}
+export const fc100RouteTasks = reactive<Record<string, Fc100RouteTask>>(loadFc100RouteTasks())
+function persistFc100RouteTasks () {
+  try {
+    localStorage.setItem(FC100_ROUTE_TASKS_KEY, JSON.stringify(fc100RouteTasks))
+  } catch (e) {
+    // ignore quota / serialization errors
+  }
+}
+export function getFc100RouteTask (plannedWaylineId: string): Fc100RouteTask | null {
+  return (plannedWaylineId && fc100RouteTasks[plannedWaylineId]) || null
+}
+export function setFc100RouteTask (plannedWaylineId: string, task: Fc100RouteTask) {
+  if (!plannedWaylineId) return
+  fc100RouteTasks[plannedWaylineId] = task
+  persistFc100RouteTasks()
+}
+export function clearFc100RouteTask (plannedWaylineId: string) {
+  if (fc100RouteTasks[plannedWaylineId]) {
+    delete fc100RouteTasks[plannedWaylineId]
+    persistFc100RouteTasks()
+  }
+}
+
 function isFc100AircraftDevice (device: DeliveryDeviceDTO) {
   const bindStatus = String(device.bindStatus || '').toLowerCase()
   const deviceType = String(device.deviceType || '').toLowerCase()
@@ -342,15 +383,21 @@ export async function handleFc100SelectDevice (deviceSn: string) {
 
 async function refreshFc100SelectedDeviceProps (deviceSn = fc100PlanningState.selectedDeviceSn) {
   if (!deviceSn) return null
-  const res = await deliveryApi.deviceProps(deviceSn)
-  const body = getFc100ApiBody(res)
-  if (body.code !== 0) {
-    fc100PlanningState.lastResult = `FC100设备物模型获取失败：${body.message || '接口返回异常'}`
+  try {
+    const res = await deliveryApi.deviceProps(deviceSn)
+    const body = getFc100ApiBody(res)
+    if (!body || body.code !== 0) {
+      fc100PlanningState.lastResult = `FC100设备物模型获取失败：${body?.message || '接口返回异常'}`
+      return null
+    }
+    fc100PlanningState.selectedDeviceProps = body.data || null
+    syncFc100DeviceFlightPosition(fc100PlanningState.selectedDeviceProps)
+    return fc100PlanningState.selectedDeviceProps
+  } catch (error) {
+    // 反显的持久化设备可能已失效/离线，轮询取物模型失败不应抛断轮询
+    fc100PlanningState.lastResult = `FC100设备物模型获取失败：${getFc100ErrorText(error, '接口调用失败')}`
     return null
   }
-  fc100PlanningState.selectedDeviceProps = body.data || null
-  syncFc100DeviceFlightPosition(fc100PlanningState.selectedDeviceProps)
-  return fc100PlanningState.selectedDeviceProps
 }
 
 async function refreshFc100TaskStatus (showLoading = true) {

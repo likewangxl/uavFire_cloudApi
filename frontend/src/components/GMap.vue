@@ -533,7 +533,7 @@ export default defineComponent({
     )
 
     const mouseMode = ref(false)
-    const waylineMapLayer = ref<'standard' | 'satellite' | 'hybrid'>('standard')
+    const waylineMapLayer = ref<'standard' | 'satellite' | 'hybrid'>('satellite')
     const rangingToolActive = ref(false)
     const isWaylineRoute = computed(() => root.$route.name === ERouterName.WAYLINE)
     const hasFlightPosition = computed(() => !!planningState.flightPosition)
@@ -636,6 +636,10 @@ export default defineComponent({
         const coordinate = [osd.longitude, osd.latitude]
         deviceTsaUpdateHook.moveTo(data.currentSn, coordinate[0], coordinate[1])
         updateFlightPositionFromOsd(data.currentSn, osd, coordinate[0], coordinate[1])
+        // 航线页:规划层用自己的青色徽标渲染飞机(带航点进度+轨迹),此处隐藏 TSA 蓝箭头避免双图标重叠。
+        // 不按 SN 精确匹配(云端OSD的SN与MSDK上报SN可能不同),只要规划层在显示飞行位置就隐藏设备箭头;
+        // 离开航线页时下一帧 OSD 以 false 再调用,自动恢复显示。
+        deviceTsaUpdateHook.setMarkerHidden(data.currentSn, isWaylineRoute.value && !!planningState.flightPosition)
         if (osdVisible.value.visible && osdVisible.value.sn !== '') {
           deviceInfo.device = data.deviceInfo[osdVisible.value.sn]
         }
@@ -761,15 +765,24 @@ export default defineComponent({
     }
 
     let waylineLayerDefaulted = false
-    // 底图档位切换（MapLibre + 天地图，只切四档图层可见性）。样式未加载完则等 load。
+    // 底图档位切换（MapLibre + 天地图，只切四档图层可见性）。
     function setWaylineMapLayer (layer: 'standard' | 'satellite' | 'hybrid') {
       const map = root?.$map
       if (!map) return
       waylineMapLayer.value = layer
       const apply = () => applyTiandituLayer(map, layer)
-      if (typeof map.isStyleLoaded === 'function' && map.isStyleLoaded()) apply()
-      else if (typeof map.once === 'function') map.once('load', apply)
-      else apply()
+      // 不能用 once('load')：若 load 已触发(地图早加载完)则回调永不执行；而 isStyleLoaded()
+      // 在栅格瓦片仍在拉取时会反复返回 false → 默认档应用不上(只切了按钮态，地图仍显示旧档)。
+      // 改判图层是否就绪：td-* 图层在样式解析后即存在，styledata 会重复触发直到就绪。
+      const ready = () => !!(map.getLayer && map.getLayer('td-img'))
+      if (ready()) {
+        apply()
+      } else if (typeof map.on === 'function') {
+        const onData = () => { if (ready()) { map.off('styledata', onData); apply() } }
+        map.on('styledata', onData)
+      } else {
+        apply()
+      }
     }
 
     // 航线页进入时默认卫星图（每个会话首次进入应用一次）
