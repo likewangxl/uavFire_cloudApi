@@ -8,6 +8,7 @@ import type { DeliveryCommandBody, DeliveryCommandRef, DeliveryDeviceDTO, Delive
 import { ELocalStorageKey } from '/@/types'
 import { PlannedWaylineRecord } from '/@/types/wayline'
 import { previewPlannedWayline, setFlightPositionFromWgs, setTrackedAircraft } from '/@/hooks/use-wayline-planning'
+import { setFc100PositionDevice, setFc100PositionProps } from '/@/hooks/use-fc100-position'
 import { FileItem, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
 
 export const fc100PlanningState = reactive({
@@ -372,8 +373,10 @@ export async function handleFc100RefreshDevices () {
 
 export async function handleFc100SelectDevice (deviceSn: string) {
   fc100PlanningState.selectedDeviceSn = deviceSn
+  setFc100PositionDevice(deviceSn)
   if (!deviceSn) {
     fc100PlanningState.selectedDeviceProps = null
+    setFc100PositionProps(null)
     return
   }
   // 用户选择 FC100 设备即设为跟踪目标（进行中的任务会在轮询里持续覆盖）。
@@ -391,6 +394,7 @@ async function refreshFc100SelectedDeviceProps (deviceSn = fc100PlanningState.se
       return null
     }
     fc100PlanningState.selectedDeviceProps = body.data || null
+    setFc100PositionProps(fc100PlanningState.selectedDeviceProps)
     syncFc100DeviceFlightPosition(fc100PlanningState.selectedDeviceProps)
     return fc100PlanningState.selectedDeviceProps
   } catch (error) {

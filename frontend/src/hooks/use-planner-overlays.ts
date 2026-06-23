@@ -1,7 +1,7 @@
 // 规划/飞行覆盖物渲染（MapLibre 版，自高德迁移）。
 // 渲染坐标统一 WGS84（天地图原生）：航点用 wgsLng/wgsLat，测区顶点 gcj→wgs，飞机用 wgs。
 // 状态层内部仍是 GCJ-02，点击/拖拽输入的 WGS84 在边界处转回 GCJ 回灌（addWaypointGcj 等不变）。
-// 页签规则（设计 v2）：监测页签渲染 预览∥编辑航点；投放页签预览/手动布点；飞机位置/轨迹跨页签常显。
+// 页签规则（设计 v2）：监测页签渲染 预览∥编辑航点与飞机位置；投放页签预览/手动布点。
 import { computed, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import {
@@ -18,6 +18,8 @@ import {
 import type { PlannedWaypoint } from '/@/hooks/use-wayline-planning'
 import { getPlannerUiRaw } from '/@/hooks/use-planner-ui'
 import { WAYPOINT_ACTION_LABELS } from '/@/components/wayline-planner/wayline-format'
+import { fc100PositionState } from '/@/hooks/use-fc100-position'
+import { getFlightAreaComplianceRaw, flightAreaCompliance } from '/@/hooks/use-flight-area-compliance'
 // @ts-ignore .mjs 共用模块（node 测试可直跑）
 import { buildSimulationTimeline, haversineMeters, positionAtTime } from '/@/components/wayline-planner/planner-utils.mjs'
 // @ts-ignore .mjs 纯计算模块
@@ -37,6 +39,14 @@ function polygonFeature (ring: LngLat[]) {
   const closed = [...ring, ring[0]]
   return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [closed] } }] }
 }
+function multiLineFeature (segs: LngLat[][]) {
+  return { type: 'FeatureCollection', features: segs.map(coords => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } })) }
+}
+function closeRing (ring: LngLat[]): LngLat[] {
+  if (ring.length < 3) return ring
+  const a = ring[0]; const b = ring[ring.length - 1]
+  return (a[0] === b[0] && a[1] === b[1]) ? ring : [...ring, a]
+}
 
 export function usePlannerOverlays (
   getMap: () => any,
@@ -45,6 +55,7 @@ export function usePlannerOverlays (
 ) {
   const planningState = getPlanningStateRaw()
   const plannerUi = getPlannerUiRaw()
+  const faState = getFlightAreaComplianceRaw()
 
   const renderPlanningWaypoints = computed(() =>
     planningState.previewWaypoints.length > 0 ? planningState.previewWaypoints : planningState.waypoints)
@@ -65,6 +76,13 @@ export function usePlannerOverlays (
     if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat]
     return gcj02towgs84(p.gcjLng, p.gcjLat) as LngLat
   }
+  const fc100LngLat = (): LngLat | null => {
+    const props = fc100PositionState.selectedDeviceProps
+    const lng = Number(props?.longitude)
+    const lat = Number(props?.latitude)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || lng === 0 || lat === 0) return null
+    return [lng, lat]
+  }
 
   // ---- HTML marker 管理 ----
   const planningMarkers: maplibregl.Marker[] = []
@@ -73,6 +91,7 @@ export function usePlannerOverlays (
   const arrowMarkers: maplibregl.Marker[] = []
   let homeMarker: maplibregl.Marker | null = null
   let flightMarker: maplibregl.Marker | null = null
+  let fc100Marker: maplibregl.Marker | null = null
   let simGhostMarker: maplibregl.Marker | null = null
 
   let labelsVisible = true
@@ -103,11 +122,16 @@ export function usePlannerOverlays (
   }
 
   // ---- GeoJSON 源/层（连线、多边形、轨迹）懒创建一次，之后 setData ----
-  const SRC = { route: 'plan-route', home: 'plan-home', area: 'plan-area', track: 'plan-track' }
+  const SRC = { route: 'plan-route', home: 'plan-home', area: 'plan-area', track: 'plan-track', fa: 'plan-fa', faBad: 'plan-fa-bad' }
+  const FA_COLOR = ['match', ['get', 'type'], 'nfz', '#ff4d4f', 'dfence', '#52c41a', '#8a93a3'] as any
   function ensureLayers (map: any) {
     if (layersReady) return true
     if (!map || typeof map.isStyleLoaded !== 'function' || !map.isStyleLoaded()) return false
     try {
+      // 飞行区放最底层：NFZ 红 / DFENCE 绿，盖在底图上、压在航线下。
+      map.addSource(SRC.fa, { type: 'geojson', data: EMPTY_FC })
+      map.addLayer({ id: 'plan-fa-fill', type: 'fill', source: SRC.fa, paint: { 'fill-color': FA_COLOR, 'fill-opacity': 0.14 } })
+      map.addLayer({ id: 'plan-fa-line', type: 'line', source: SRC.fa, paint: { 'line-color': FA_COLOR, 'line-width': 1.5, 'line-opacity': 0.85, 'line-dasharray': [2, 1] } })
       map.addSource(SRC.area, { type: 'geojson', data: EMPTY_FC })
       map.addLayer({ id: 'plan-area-fill', type: 'fill', source: SRC.area, paint: { 'fill-color': '#1668dc', 'fill-opacity': 0.12 } })
       map.addLayer({ id: 'plan-area-line', type: 'line', source: SRC.area, paint: { 'line-color': '#1668dc', 'line-width': 2, 'line-opacity': 0.9 } })
@@ -117,6 +141,9 @@ export function usePlannerOverlays (
       map.addLayer({ id: 'plan-track-line', type: 'line', source: SRC.track, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#13c2c2', 'line-width': 4, 'line-opacity': 0.85 } })
       map.addSource(SRC.route, { type: 'geojson', data: EMPTY_FC })
       map.addLayer({ id: 'plan-route-line', type: 'line', source: SRC.route, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#43d675', 'line-width': 6, 'line-opacity': 0.92 } })
+      // 违规航段高亮（橙）：压在航线之上，最显眼。
+      map.addSource(SRC.faBad, { type: 'geojson', data: EMPTY_FC })
+      map.addLayer({ id: 'plan-fa-bad-line', type: 'line', source: SRC.faBad, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 8, 'line-opacity': 0.95 } })
       layersReady = true
     } catch (e) {
       return false
@@ -155,6 +182,17 @@ export function usePlannerOverlays (
     setData(map, SRC.route, EMPTY_FC)
     setData(map, SRC.home, EMPTY_FC)
     setData(map, SRC.area, EMPTY_FC)
+    setData(map, SRC.faBad, EMPTY_FC)
+  }
+
+  // 飞行区（NFZ/DFENCE）多边形：圆已在归一化时转环。常驻渲染，不随航点清除。
+  function rebuildFlightAreaOverlay (map: any) {
+    const features = faState.zones.map(z => ({
+      type: 'Feature',
+      properties: { type: z.type, name: z.name },
+      geometry: { type: 'Polygon', coordinates: [closeRing(z.ring as LngLat[])] },
+    }))
+    setData(map, SRC.fa, { type: 'FeatureCollection', features })
   }
 
   function clearFlightPositionOverlay () {
@@ -165,14 +203,20 @@ export function usePlannerOverlays (
     flightTrackPath.length = 0
   }
 
+  function clearFc100PositionOverlay () {
+    if (fc100Marker) { fc100Marker.remove(); fc100Marker = null }
+  }
+
   // S2 信息常显风格：序号圆点 + 信息牌
-  function waypointMarkerContent (idx: number, wp: PlannedWaypoint) {
+  function waypointMarkerContent (idx: number, wp: PlannedWaypoint, bad = false) {
     const isSelected = planningState.selectedWaypointId === wp.id
     const speed = wp.speed || planningState.maxSpeed
     const acts = (wp.actions || []).map(a => WAYPOINT_ACTION_LABELS[a.actuatorFunc] || a.actuatorFunc).join('·')
     const info = `${wp.height}m · ${speed}m/s${acts ? ' · ' + acts : ''}`
     const classes = ['planner-wp-marker', isSelected ? 'planner-wp-marker--selected' : '', labelsVisible ? '' : 'planner-wp-marker--mini'].filter(Boolean).join(' ')
-    return `<div class="${classes}"><span class="planner-wp-dot">${idx + 1}</span><span class="planner-wp-card">${info}</span></div>`
+    // 违规航点：圆点染红 + 橙环，不依赖外部 CSS，确保醒目。
+    const dotStyle = bad ? ' style="background:#ff4d4f;box-shadow:0 0 0 2px #ff7a00"' : ''
+    return `<div class="${classes}"><span class="planner-wp-dot"${dotStyle}>${idx + 1}</span><span class="planner-wp-card">${info}</span></div>`
   }
 
   function formatSegmentDistance (meters: number) {
@@ -282,12 +326,15 @@ export function usePlannerOverlays (
     bindZoomListener(map)
     clearMarkerOverlays()
     clearVectorOverlays(map)
+    rebuildFlightAreaOverlay(map)
     rebuildAreaOverlay(map)
     const waypoints = renderPlanningWaypoints.value
     if (waypoints.length === 0) { updateFlightPositionOverlay(); return }
     const editable = canEditWaypoints.value
     const renderingPreview = planningState.previewWaypoints.length > 0
     const isArea = renderingPreview ? looksLikeAreaSweep(waypoints) : planningState.routeKind === 'area'
+    const compliance = flightAreaCompliance.value
+    const badWp: number[] = compliance.badWaypoints
 
     // 面状预览：测区多边形未保存，用扫描端点凸包重建边界
     if (isArea && renderingPreview) {
@@ -297,7 +344,7 @@ export function usePlannerOverlays (
 
     if (!isArea) {
       waypoints.forEach((wp, idx) => {
-        const m = makeMarker(waypointMarkerContent(idx, wp), wpLngLat(wp), {
+        const m = makeMarker(waypointMarkerContent(idx, wp, badWp.includes(idx)), wpLngLat(wp), {
           anchor: 'bottom',
           zIndex: planningState.selectedWaypointId === wp.id ? 130 : 110,
           draggable: editable,
@@ -333,15 +380,96 @@ export function usePlannerOverlays (
       map.setPaintProperty('plan-route-line', 'line-width', isArea ? 2 : 6)
       rebuildDirectionArrows(coords)
     }
+    // 违规航段橙线高亮（穿越禁飞区的段）
+    setData(map, SRC.faBad, compliance.badSegmentCoords.length ? multiLineFeature(compliance.badSegmentCoords as LngLat[][]) : EMPTY_FC)
     if (!isArea) rebuildDistanceLabels(waypoints)
     rebuildHomeMarker(map, waypoints)
     fitPlanningPreviewToMap()
     updateFlightPositionOverlay()
+    updateFc100PositionOverlay()
   }
 
   function flightPositionContent (label: string) {
     const progress = label ? `<em>${label}</em>` : ''
-    return `<div class="flight-position-marker"><span>✈️</span>${progress}</div>`
+    return `<div class="flight-position-marker" title="DJI Matrice 4T">${matrice4tPositionContent()}${progress}</div>`
+  }
+
+  function matrice4tPositionContent () {
+    return `<svg class="m4t-airframe" width="34" height="34" viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+      <g class="m4t-props">
+        <ellipse cx="7.4" cy="7.2" rx="5.7" ry="1.55" transform="rotate(-32 7.4 7.2)" />
+        <ellipse cx="28.6" cy="7.2" rx="5.7" ry="1.55" transform="rotate(32 28.6 7.2)" />
+        <ellipse cx="7.4" cy="28.8" rx="5.7" ry="1.55" transform="rotate(32 7.4 28.8)" />
+        <ellipse cx="28.6" cy="28.8" rx="5.7" ry="1.55" transform="rotate(-32 28.6 28.8)" />
+      </g>
+      <g class="m4t-arms" stroke-linecap="round">
+        <path d="M15.5 15.8 L8.9 9.2 M20.5 15.8 L27.1 9.2 M15.5 20.2 L8.9 26.8 M20.5 20.2 L27.1 26.8" />
+        <path d="M14.6 18 H8.7 M21.4 18 H27.3" />
+      </g>
+      <g class="m4t-motors">
+        <circle cx="7.4" cy="7.2" r="2.15" />
+        <circle cx="28.6" cy="7.2" r="2.15" />
+        <circle cx="7.4" cy="28.8" r="2.15" />
+        <circle cx="28.6" cy="28.8" r="2.15" />
+      </g>
+      <g class="m4t-body">
+        <path d="M18 8.5 L22.9 13.5 L23.8 21.2 L20.6 27.2 L15.4 27.2 L12.2 21.2 L13.1 13.5 Z" />
+        <path d="M15.6 11.8 L20.4 11.8 L21.8 15.6 L14.2 15.6 Z" />
+        <rect x="15.2" y="16.2" width="5.6" height="8.4" rx="1.8" />
+        <circle cx="18" cy="25.3" r="1.35" />
+      </g>
+      <g class="m4t-accents">
+        <path d="M4.2 6.2 L6.3 5.1 L5.2 7.3 Z" />
+        <path d="M31.8 6.2 L29.7 5.1 L30.8 7.3 Z" />
+        <path d="M4.2 29.8 L6.3 30.9 L5.2 28.7 Z" />
+        <path d="M31.8 29.8 L29.7 30.9 L30.8 28.7 Z" />
+      </g>
+    </svg>`
+  }
+
+  function shouldRenderFlightPositionOverlay () {
+    return plannerUi.activeTab === 'monitor'
+  }
+
+  function shouldRenderFc100PositionOverlay () {
+    return plannerUi.activeTab === 'delivery' &&
+      Boolean(fc100PositionState.selectedDeviceSn) &&
+      Boolean(fc100LngLat())
+  }
+
+  function fc100PositionContent () {
+    return `<div class="fc100-position-marker" title="DJI FlyCart 100">
+      <svg class="fc100-airframe" width="30" height="30" viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+        <g class="fc100-arms" stroke-linecap="round">
+          <path d="M17 17 L8.5 8.5 M19 17 L27.5 8.5 M17 19 L8.5 27.5 M19 19 L27.5 27.5" />
+          <path d="M14 18 H8 M22 18 H28" />
+        </g>
+        <g class="fc100-props">
+          <ellipse cx="7" cy="7" rx="5.8" ry="1.7" transform="rotate(-35 7 7)" />
+          <ellipse cx="29" cy="7" rx="5.8" ry="1.7" transform="rotate(35 29 7)" />
+          <ellipse cx="7" cy="29" rx="5.8" ry="1.7" transform="rotate(35 7 29)" />
+          <ellipse cx="29" cy="29" rx="5.8" ry="1.7" transform="rotate(-35 29 29)" />
+        </g>
+        <g class="fc100-motors">
+          <circle cx="7" cy="7" r="2.4" />
+          <circle cx="29" cy="7" r="2.4" />
+          <circle cx="7" cy="29" r="2.4" />
+          <circle cx="29" cy="29" r="2.4" />
+        </g>
+        <g class="fc100-body">
+          <rect x="11.8" y="14" width="4.2" height="8" rx="1" />
+          <rect x="20" y="14" width="4.2" height="8" rx="1" />
+          <path d="M18 10.8 L23.6 14.6 L23 22.1 L18 25.2 L13 22.1 L12.4 14.6 Z" />
+          <circle cx="18" cy="21.3" r="2.1" />
+        </g>
+        <g class="fc100-accents">
+          <circle cx="12" cy="12" r="0.9" />
+          <circle cx="24" cy="12" r="0.9" />
+          <circle cx="12" cy="24" r="0.9" />
+          <circle cx="24" cy="24" r="0.9" />
+        </g>
+      </svg>
+    </div>`
   }
 
   function setAircraftView (position = planningState.flightPosition) {
@@ -355,6 +483,7 @@ export function usePlannerOverlays (
   function locateAircraftPosition () { setAircraftView() }
 
   function updateFlightPositionOverlay () {
+    if (!shouldRenderFlightPositionOverlay()) { clearFlightPositionOverlay(); return }
     const map = getMap()
     const position = planningState.flightPosition
     if (!position) { clearFlightPositionOverlay(); return }
@@ -391,6 +520,19 @@ export function usePlannerOverlays (
     if (pendingAircraftRecenter) { pendingAircraftRecenter = false; setAircraftView(position) }
   }
 
+  function updateFc100PositionOverlay () {
+    if (!shouldRenderFc100PositionOverlay()) { clearFc100PositionOverlay(); return }
+    const map = getMap()
+    const lngLat = fc100LngLat()
+    if (!lngLat || !map || !ensureLayers(map)) return
+    if (!fc100Marker) {
+      fc100Marker = makeMarker(fc100PositionContent(), lngLat, { anchor: 'center', zIndex: 121 })
+    } else {
+      fc100Marker.setLngLat(lngLat)
+      fc100Marker.getElement().innerHTML = fc100PositionContent()
+    }
+  }
+
   function fitPlanningPreviewToMap () {
     const map = getMap()
     if (!map || planningState.waypoints.length > 0 || planningState.previewWaypoints.length === 0) return
@@ -423,11 +565,19 @@ export function usePlannerOverlays (
     () => rebuildPlanningOverlays()
   )
 
+  // 飞行区数据到位（异步加载晚于航点）后重绘飞行区图层与违规高亮。
+  watch(() => `${faState.loaded}:${faState.zones.length}`, () => rebuildPlanningOverlays())
+
   watch(
     () => planningState.flightPosition
       ? `${planningState.flightPosition.aircraftSn}:${planningState.flightPosition.gcjLng}:${planningState.flightPosition.gcjLat}:${planningState.flightPosition.currentWaypointIndex}:${planningState.flightPosition.updatedAt}`
       : '',
-    () => updateFlightPositionOverlay()
+    () => { updateFlightPositionOverlay(); updateFc100PositionOverlay() }
+  )
+
+  watch(
+    () => `${fc100PositionState.selectedDeviceSn}:${fc100PositionState.selectedDeviceProps?.longitude}:${fc100PositionState.selectedDeviceProps?.latitude}:${fc100PositionState.selectedDeviceProps?.osdTimestamp}`,
+    () => updateFc100PositionOverlay()
   )
 
   // ---------- 模拟预演幻影飞机 ----------
@@ -466,8 +616,9 @@ export function usePlannerOverlays (
     unbindPlanningClick()
     clearMarkerOverlays()
     const map = getMap()
-    if (map) clearVectorOverlays(map)
+    if (map) { clearVectorOverlays(map); if (layersReady) setData(map, SRC.fa, EMPTY_FC) }
     clearFlightPositionOverlay()
+    clearFc100PositionOverlay()
     clearSimGhost()
   }
 

@@ -1,5 +1,8 @@
 <template>
   <div class="planner-toolbar-wrap">
+    <div class="planning-compliance-chip" v-if="compliance.hasViolation">
+      ⚠ 合规告警：{{ compliance.messages.join('，') }}
+    </div>
     <div class="planning-status-chip" v-if="planningState.statusText">{{ planningState.statusText }}</div>
     <div class="planner-toolbar">
       <a-button
@@ -59,8 +62,10 @@
 <script lang="ts" setup>
 import { clearWaypoints, getPlanningStateRaw, removeWaypoint } from '/@/hooks/use-wayline-planning'
 import { startSimulation } from '/@/hooks/use-planner-ui'
+import { flightAreaCompliance } from '/@/hooks/use-flight-area-compliance'
 
 const planningState = getPlanningStateRaw()
+const compliance = flightAreaCompliance
 
 defineProps<{
   canExecute: boolean
@@ -98,6 +103,19 @@ function onUndo () {
   border-radius: 12px;
   color: #faad14;
   font-size: 11px;
+  max-width: 60vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.planning-compliance-chip {
+  padding: 3px 12px;
+  background: rgba(74, 14, 14, 0.92);
+  border: 1px solid #cf1322;
+  border-radius: 12px;
+  color: #ff7875;
+  font-size: 11px;
+  font-weight: 600;
   max-width: 60vw;
   white-space: nowrap;
   overflow: hidden;

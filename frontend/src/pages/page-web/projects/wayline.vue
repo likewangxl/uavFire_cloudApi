@@ -634,6 +634,7 @@ import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 import Fc100DeliveryView from '/@/components/wayline-planner/Fc100DeliveryView.vue'
 import PlannerWorkspace from '/@/components/wayline-planner/PlannerWorkspace.vue'
 import { setParamDrawerOpen, setPlannerTab, usePlannerUi } from '/@/hooks/use-planner-ui'
+import { loadFlightAreas, confirmComplianceBeforeAction } from '/@/hooks/use-flight-area-compliance'
 import { getFc100GeneratedWaylineActions, beforeFc100WaylineUpload, uploadFc100WaylineFile, fc100PlanningState, fc100AircraftDevices, isFc100DeviceOnline, formatFc100DeliveryAircraftModel, getSelectedFc100DeviceSn, onFc100PreviewGeneratedWayline, handleFc100ImportGeneratedWaylineTask, handleFc100StartGeneratedWaylineTask, getFc100RouteTask, setFc100RouteTask, handleFc100GeneratedWaylineTaskStatus, handleFc100RopeDown, handleFc100RopeStop, handleFc100RopeUp, handleFc100ReleaseHook, handleFc100ReturnHome, canUseFc100TerminalControls, isFc100TerminalCommandLoading, fc100TerminalControlHint } from '/@/hooks/use-fc100-delivery'
 import type { FileItem } from '/@/components/wayline-planner/wayline-format'
 import { canOverwritePlannedWayline, formatNumber, formatPlannedWaylineStatus, formatSafePlannedWaylineTimestamp, formatTimestamp, getPlannedWaylineTaskReason, normalizePlannedWaylineStatus, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
@@ -1169,6 +1170,7 @@ async function onStartExecution () {
     message.warning('执行航线前需要选择在线飞行器。')
     return
   }
+  if (!(await confirmComplianceBeforeAction('下发执行'))) return
   selectedAircraftSn.value = summary.sn
   planningSetTarget(summary.gatewaySn, summary.sn)
   syncSelectedAircraftFlightPosition(summary.sn)
@@ -1260,6 +1262,7 @@ async function confirmSavePlannedWayline () {
     message.warning('请输入规划航线名称。')
     return
   }
+  if (!(await confirmComplianceBeforeAction('保存'))) return
 
   const editingId = (planningState as any).editingPlannedWaylineId
   planningState.defaultHeight = Number(savePlannedWaylineModal.defaultHeight)
@@ -1708,6 +1711,7 @@ onMounted(() => {
   getWaylines()
   if (showPlanningTools.value) {
     refreshPlannedWaylines(true)
+    loadFlightAreas()
   }
 
   const key = setInterval(() => {

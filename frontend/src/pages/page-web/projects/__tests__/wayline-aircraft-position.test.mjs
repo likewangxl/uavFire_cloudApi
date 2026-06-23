@@ -51,6 +51,32 @@ test('GMap ignores non-selected aircraft OSD when no wayline tracking target exi
   assert.match(gmapSource, /if \(!trackingSn\) return/)
 })
 
+test('delivery tab hides monitor aircraft position marker and track', () => {
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
+  const gmapSource = readSource('src/components/GMap.vue')
+
+  assert.match(overlaysSource, /function shouldRenderFlightPositionOverlay \(\)/)
+  assert.match(overlaysSource, /return plannerUi\.activeTab === 'monitor'/)
+  assert.match(overlaysSource, /if \(!shouldRenderFlightPositionOverlay\(\)\) \{ clearFlightPositionOverlay\(\); return \}/)
+  assert.match(overlaysSource, /function matrice4tPositionContent \(/)
+  assert.match(overlaysSource, /class="m4t-airframe"/)
+  assert.doesNotMatch(overlaysSource, /class="flight-position-marker"><span>✈️<\/span>/)
+  assert.match(gmapSource, /:deep\(\.m4t-airframe\)/)
+  assert.match(overlaysSource, /function shouldRenderFc100PositionOverlay \(\)/)
+  assert.match(overlaysSource, /function fc100PositionContent \(\)/)
+  assert.match(overlaysSource, /class="fc100-position-marker"/)
+  assert.match(overlaysSource, /class="fc100-airframe"/)
+  assert.match(overlaysSource, /use-fc100-position/)
+  assert.doesNotMatch(overlaysSource, /use-fc100-delivery/)
+  assert.match(overlaysSource, /updateFc100PositionOverlay\(\)/)
+  assert.match(gmapSource, /:deep\(\.fc100-position-marker\)/)
+  assert.match(gmapSource, /:deep\(\.fc100-airframe\)/)
+  assert.match(gmapSource, /:deep\(\.fc100-position-marker\)\s*\{[\s\S]*?background:\s*transparent/)
+  assert.doesNotMatch(gmapSource, /:deep\(\.fc100-position-marker\)\s*\{[\s\S]*?border:\s*3px solid #fff/)
+  assert.doesNotMatch(gmapSource, /:deep\(\.fc100-position-marker\)\s*\{[\s\S]*?background:\s*#f59f00/)
+  assert.doesNotMatch(overlaysSource, /飞机位置\/轨迹跨页签常显/)
+})
+
 test('entering the wayline page recenters the map on the aircraft (one-shot, deferred until position arrives)', () => {
   const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
   const gmapSource = readSource('src/components/GMap.vue')

@@ -1,39 +1,15 @@
 <claude-mem-context>
 # Memory Context
 
-# [uavfire] recent context, 2026-06-17 5:11pm GMT+8
+# [uavfire] recent context, 2026-06-23 10:38am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (19,595t read) | 250,929t work | 92% savings
+Stats: 50 obs (20,721t read) | 572,068t work | 96% savings
 
 ### Jun 15, 2026
-3995 1:22p 🔵 Parallel Export Stall Broke — Segment 5 Completed First; All Remaining Segments Resumed Writing
-3996 1:24p 🔵 Parallel Export Resumed at ~1.5 GiB/min After Stall — 2.7 GiB Total at 05:23:35
-3997 1:27p 🔵 All Segments Surpassed Prior 342 MB Stall Point — Export Progressing Without Second Stall
-3998 1:30p 🔵 Segments Converging at 60% Complete — Lead Gap Between Segment Groups Narrowing to ~21 MB
-3999 " 🔵 All 5 Active Export Segments Fully Converged — Near-Identical 700 MB Each at 70% Complete
-4000 1:31p 🔵 Second Synchronized Stall at ~700 MB per Segment — Export Frozen Again at 70% Complete
-4001 1:33p 🔵 Second Stall Broke Quickly — 5.6 GiB After Rapid Progress; Multiple Segments Crossing 1 GiB Chunk Boundary
-4002 1:36p ✅ Parallel Export Complete — All 5 Segments Sealed at ~1,049 MB Each, gzip Compression Underway
-4003 1:41p 🔵 Export Processes Still Running Post-Completion — Waiting for Concurrent gzip Compression to Finish
-4004 1:49p 🔵 Third Oracle XE Slowdown Pattern — Export Progressing at ~64 MB/min Across 8 Minutes (05:41–05:49)
-4005 1:50p 🔵 Four Segments Sealed with gzip Compression Running — Segment 3 (ID 3001–4000) Still Writing at 799 MB
-4006 1:51p ✅ Segment 3 (ID 3001–4000) Completed — part-003.csv: 1000 Rows / 880 MB / 1 Part
-4007 1:52p ✅ All 6 Parallel Export Segments Completed Successfully — 5120 Total Rows Exported Across 6 Part Files
-4008 1:53p 🔵 All gzip Files Stable — Parallel Export Fully Complete; Final On-Disk State 7.0 GiB
-4009 1:54p 🔵 All Parallel Export Sessions Exited Successfully — gzip Compression Durations Varied 2–5 Minutes Per Part
-4010 1:55p 🔵 Final Export State Verified at 7.0 GiB — part-001.csv Listed Twice in find Output (Tool Artifact)
-4011 1:56p ✅ ExportOracleTableCsvArchive.java Final Diff — 27 Lines Added for LobPrefetch + whereClause + partOffset
-4013 2:00p 🔵 T11 Parallel Export Throughput: ~228 KB/s Per Active Segment at 06:00 UTC
-4014 2:01p 🔵 T11 Export Segment 3 (Session 93730) Completed — 1000 Rows, 1.049 GiB
-4015 2:08p 🔵 T11 Export Crossed 4.0 GiB at 06:06 UTC — 4 Segments Still Active, Steady ~350 MB/min Aggregate Rate
-4016 2:09p 🔵 part-004 Reached 1,049,191,345 Bytes — Nearly Identical to part-003 Final Size (1,049,191,393)
-4017 2:10p 🔵 T11 Export Segment 4 (Session 60438) Completed — 1000 Rows, 1,049,191,345 Bytes
-4018 2:17p 🔵 Part-001 and Part-002 Diverged by 21 MB at 06:17 UTC — Symmetry Broken, Part-000 Approaching 1 GiB Final Size
-4019 2:18p 🔵 Part-000 at 1,049,183,187 Bytes — 8,206 Bytes from Expected Final, Completion Imminent; Parts 001/002 Symmetry Restored
 4020 2:19p 🔵 T11 Export Segment 0 (Session 85985) Completed — 1000 Rows, 1,049,183,187 Bytes
 4021 2:24p 🔵 T11 Export Segment 2 (Session 4568) Completed — 1000 Rows, 1,049,191,365 Bytes; Only Part-001 Remains
 4022 2:25p 🟣 T11_ORACLE_ALL_TYPES_5G Parallel Export 100% Complete — All 6 Segments Exited Code 0, 5,120 Rows, 5.0 GiB
@@ -60,6 +36,31 @@ Stats: 50 obs (19,595t read) | 250,929t work | 92% savings
 4043 6:26p ✅ System Promotional Documentation Requested for Video Script
 4044 " 🟣 智能集群大载重无人机灭火系统宣传文案母稿创建
 4045 " 🔵 docs/promo/ Directory Is Gitignored in uavfire Project
+### Jun 23, 2026
+4415 9:07a 🔵 Duplicate Flight Position Marker Bug on Wayline Task Deploy
+4416 9:15a 🔵 OpenAI Codex Desktop 403 Forbidden Error on Reconnect
+4417 9:16a 🔵 Codex Manual Fetched and Cached for 403 Troubleshooting
+4418 " 🔵 Codex Desktop 403 Root Cause: Enterprise Toggle or Expired Auth Token
+4419 " 🔵 Codex Version Mismatch: System CLI 0.140.0 vs App-Bundled 0.142.0-alpha.6
+4420 9:17a 🔵 Root Cause Confirmed: chatgpt.com Returns 403 for ALL Requests Via Local Proxy
+4421 " 🔵 Dual Proxy Configuration with Port Mismatch on Codex Desktop Host
+4422 " 🔵 Codex Desktop App Version and Config State at Time of 403 Error
+4423 9:18a 🔵 Two Proxy Ports Route Through Different Cloudflare Regions With Different Block Types
+4424 9:46a 🟣 FC100 Map Position Marker Added for Delivery Tab
+4425 " 🟣 Tab-Scoped Aircraft Overlay Visibility: Monitor vs Delivery
+4426 9:47a 🔵 Playwright evaluate() Context Lacks fetch and XMLHttpRequest
+4427 9:48a 🔵 Dev Server at Port 8080 Returns SPA Shell for /api Routes (No Backend Proxy)
+4429 " 🔵 FC100 Marker Correctly Absent When No Device Selected or No GPS Coordinates
+4431 9:49a 🔴 Added Dedicated Watcher for FC100 Device Props to Drive Marker Updates
+4432 9:50a 🔵 Runtime Error in GMap.vue Watcher After HMR: Cannot Read 'state' of Undefined
+4433 " 🔵 GMap.vue 'state' TypeError Caused by Vue inject() Failure During HMR, Not FC100 Code
+4434 9:51a 🔄 Extracted fc100PositionState into Separate Module to Break Circular HMR Dependency
+4435 " ✅ use-planner-overlays.ts Switched Import from use-fc100-delivery to use-fc100-position
+4437 9:52a 🟣 FC100 Map Marker Feature Complete: Tests Pass, Production Build Clean
+4439 9:53a 🔵 TypeError 'state' Also Occurs in wayline.vue Line 138 ComputedRef — Pre-existing HMR Fragility Across Multiple Components
+4440 " 🔵 GMap/Wayline HMR 'state' TypeError Root Cause: useMyStore() Returns Undefined During HMR
+4452 9:57a 🔵 Test Assertions Added to Enforce Transparent FC100 Marker Design — CSS Update Required
+4453 " ✅ FC100 Map Marker Redesigned: Transparent Container, SVG-Only Rendering
 
-Access 251k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 572k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>

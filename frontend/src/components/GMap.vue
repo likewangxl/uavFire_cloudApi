@@ -1264,16 +1264,51 @@ export default defineComponent({
 }
 :deep(.flight-position-marker) {
   position: relative;
+  display: flex;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
-  background: #13c2c2;
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 3px rgba(19, 194, 194, 0.28), 0 2px 8px rgba(0, 0, 0, 0.35);
-  color: #fff;
-  font-size: 18px;
-  line-height: 28px;
-  text-align: center;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  pointer-events: none;
+}
+:deep(.m4t-airframe) {
+  width: 34px;
+  height: 34px;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.55));
+}
+:deep(.m4t-airframe .m4t-arms) {
+  fill: none;
+  stroke: #2d343a;
+  stroke-width: 1.9;
+}
+:deep(.m4t-airframe .m4t-props) {
+  fill: #101316;
+}
+:deep(.m4t-airframe .m4t-motors) {
+  fill: #d4d9dd;
+  stroke: #23292e;
+  stroke-width: 0.7;
+}
+:deep(.m4t-airframe .m4t-body path:first-child) {
+  fill: #dfe5e9;
+  stroke: #23292e;
+  stroke-width: 0.9;
+}
+:deep(.m4t-airframe .m4t-body path:nth-child(2)) {
+  fill: #aeb6bd;
+}
+:deep(.m4t-airframe .m4t-body rect) {
+  fill: #59636b;
+  stroke: #252b30;
+  stroke-width: 0.6;
+}
+:deep(.m4t-airframe .m4t-body circle) {
+  fill: #20262c;
+}
+:deep(.m4t-airframe .m4t-accents) {
+  fill: #ff8a1f;
 }
 :deep(.flight-position-marker em) {
   position: absolute;
@@ -1290,5 +1325,50 @@ export default defineComponent({
   font-weight: 700;
   line-height: 16px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
+}
+:deep(.fc100-position-marker) {
+  position: relative;
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  pointer-events: none;
+}
+:deep(.fc100-airframe) {
+  width: 34px;
+  height: 34px;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.55));
+}
+:deep(.fc100-airframe .fc100-arms) {
+  fill: none;
+  stroke: #20262c;
+  stroke-width: 2.2;
+}
+:deep(.fc100-airframe .fc100-props) {
+  fill: #111417;
+}
+:deep(.fc100-airframe .fc100-motors) {
+  fill: #cfd5da;
+  stroke: #20262c;
+  stroke-width: 0.7;
+}
+:deep(.fc100-airframe .fc100-body path) {
+  fill: #e2e7eb;
+  stroke: #20262c;
+  stroke-width: 0.9;
+}
+:deep(.fc100-airframe .fc100-body rect) {
+  fill: #606870;
+  stroke: #262b30;
+  stroke-width: 0.7;
+}
+:deep(.fc100-airframe .fc100-body circle) {
+  fill: #939aa1;
+}
+:deep(.fc100-airframe .fc100-accents) {
+  fill: #ff7a1a;
 }
 </style>
