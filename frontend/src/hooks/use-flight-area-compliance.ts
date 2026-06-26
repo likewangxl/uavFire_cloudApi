@@ -12,13 +12,16 @@ import type { PlannedWaypoint } from '/@/hooks/use-wayline-planning'
 import { gcj02towgs84 } from '/@/vendors/coordtransform'
 // @ts-ignore .mjs 纯计算模块（node 测试可直跑）
 import { checkWaylineCompliance, circleToRing, summarizeViolations } from '/@/components/wayline-planner/flight-area-compliance.mjs'
+// @ts-ignore .mjs 纯计算模块
+import { geojsonToZones } from '/@/components/wayline-planner/airspace-import.mjs'
 
 export type FlightAreaKind = 'circle' | 'polygon'
 
 export interface NormalizedZone {
   id: string
   name: string
-  type: EFlightAreaType
+  // 'warning' = 仅渲染的增强警示区（不参与硬判定，见 airspace-import）。
+  type: EFlightAreaType | 'warning'
   kind: FlightAreaKind
   // 渲染用闭合环（圆已转 64 边形），WGS84 [lng,lat]
   ring: Array<[number, number]>
@@ -66,18 +69,36 @@ function normalizeZone (area: any): NormalizedZone | null {
   return null
 }
 
-export async function loadFlightAreas (): Promise<void> {
-  if (state.loading) return
-  state.loading = true
+// 系统自定义飞行区（后端库）。读取失败返回 []（不阻断规划）。
+async function loadSystemZones (): Promise<NormalizedZone[]> {
   try {
     const res: any = await getFlightAreaList()
     const list: any[] = Array.isArray(res?.data) ? res.data : []
     // 仅纳入已启用（status !== false）的飞行区；停用的不作为规划约束。
-    state.zones = list.filter(a => a?.status !== false).map(normalizeZone).filter(Boolean) as NormalizedZone[]
-    state.loaded = true
+    return list.filter(a => a?.status !== false).map(normalizeZone).filter(Boolean) as NormalizedZone[]
   } catch (e) {
-    // 读取失败不阻断规划：留空 zones（视为无约束）。
-    state.zones = []
+    return []
+  }
+}
+
+// 离线导入空域：DJI FlySafe 西安周边 100km 限飞区静态快照（见 data/airspace，sub_areas 已逐层展开）。
+// 动态 import 资源：按需加载、不进主包；坐标 WGS84，与系统区同口径。
+async function loadImportedZones (): Promise<NormalizedZone[]> {
+  try {
+    const mod: any = await import('/@/assets/airspace/dji_flysafe_xian.json')
+    return geojsonToZones(mod?.default ?? mod) as NormalizedZone[]
+  } catch (e) {
+    return []
+  }
+}
+
+export async function loadFlightAreas (): Promise<void> {
+  if (state.loading) return
+  state.loading = true
+  try {
+    // 系统区 + 离线导入区合并：两路各自吞错，互不阻断。
+    const [sys, imported] = await Promise.all([loadSystemZones(), loadImportedZones()])
+    state.zones = [...sys, ...imported]
     state.loaded = true
   } finally {
     state.loading = false

@@ -123,7 +123,7 @@ export function usePlannerOverlays (
 
   // ---- GeoJSON 源/层（连线、多边形、轨迹）懒创建一次，之后 setData ----
   const SRC = { route: 'plan-route', home: 'plan-home', area: 'plan-area', track: 'plan-track', fa: 'plan-fa', faBad: 'plan-fa-bad' }
-  const FA_COLOR = ['match', ['get', 'type'], 'nfz', '#ff4d4f', 'dfence', '#52c41a', '#8a93a3'] as any
+  const FA_COLOR = ['match', ['get', 'type'], 'nfz', '#ff4d4f', 'dfence', '#52c41a', 'warning', '#faad14', '#8a93a3'] as any
   function ensureLayers (map: any) {
     if (layersReady) return true
     if (!map || typeof map.isStyleLoaded !== 'function' || !map.isStyleLoaded()) return false
