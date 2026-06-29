@@ -796,6 +796,8 @@ export default defineComponent({
       if (waylineMapLayer.value !== 'satellite') {
         setWaylineMapLayer('satellite')
       }
+      // 默认比例尺对齐 TSA(~100m)：天地图 17 级缩放下 ScaleControl(120px) 在作业纬度即显示 100m
+      if (typeof root.$map.setZoom === 'function') root.$map.setZoom(17)
     }
     watch(isWaylineRoute, () => applyWaylineDefaultLayer(), { immediate: true })
 

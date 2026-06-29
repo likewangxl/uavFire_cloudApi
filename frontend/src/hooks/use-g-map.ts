@@ -6,10 +6,12 @@ import { gcj02towgs84 } from '/@/vendors/coordtransform'
 
 // 地图引擎已从高德(GCJ-02)迁移到 MapLibre + 天地图(WGS84)。坐标全程 WGS84。
 // 旧缓存是 GCJ-02，换新 key 不复用，避免几百米偏移。
-const LAST_MAP_CENTER_KEY = 'g_map_last_center_wgs'
+// v2：默认 zoom 调到 17(比例尺≈100m)，旧缓存存着老 zoom 会顶掉默认值，升版作废一次
+const LAST_MAP_CENTER_KEY = 'g_map_last_center_wgs_v2'
 // 兜底：西安（把原 GCJ-02 默认中心转成 WGS84）
 const DEFAULT_CENTER: [number, number] = gcj02towgs84(108.92854, 34.231804) as [number, number]
-const DEFAULT_ZOOM = 15
+// 默认比例尺对齐 TSA/航线页(~100m)：天地图 17 级在作业纬度下 ScaleControl(120px) 即显示 100m
+const DEFAULT_ZOOM = 17
 
 function readCachedCenter (): { center: [number, number], zoom: number } | null {
   try {
@@ -85,8 +87,8 @@ export function useGMapManage () {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const p: [number, number] = [pos.coords.longitude, pos.coords.latitude]
-          map.jumpTo({ center: p, zoom: 14 })
-          saveMapCenter(p, 14)
+          map.jumpTo({ center: p, zoom: DEFAULT_ZOOM })
+          saveMapCenter(p, DEFAULT_ZOOM)
         },
         () => { /* 拒绝/失败忽略 */ },
         { enableHighAccuracy: true, timeout: 6000 }
