@@ -43,8 +43,10 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
     public List<DeliveryDeviceDTO> listDevices(String workspaceId) {
         long t0 = System.currentTimeMillis();
         var devices = List.of(
-            new DeliveryDeviceDTO("FC100_MOCK_001", "FC100", "ONLINE", "BOUND"),
-            new DeliveryDeviceDTO("FC100_MOCK_002", "FC100", "OFFLINE", "BOUND"));
+            new DeliveryDeviceDTO("FC100_MOCK_001", "FC100", "ONLINE", "BOUND",
+                "DJI Flycart100", "DJI Flycart100", "FC100", "FC100"),
+            new DeliveryDeviceDTO("FC100_MOCK_002", "FC100", "OFFLINE", "BOUND",
+                "DJI Flycart100", "DJI Flycart100", "FC100", "FC100"));
         logService.recordSuccess("listDevices", null, "GET",
             "/devices?workspaceId=" + workspaceId, "", 200,
             devices.toString(), null, (int) (System.currentTimeMillis() - t0));

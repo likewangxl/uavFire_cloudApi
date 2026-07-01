@@ -4,7 +4,6 @@
       <header class="cockpit-topbar">
         <div class="cockpit-title">
           <h1>森林灭火综合驾驶舱</h1>
-          <p>火情识别 / 双光复核 / FC100 投放 / 飞机状态</p>
         </div>
         <div class="cockpit-actions">
           <span class="status-pill default" :title="cockpitLastRefreshText">{{ cockpitRefreshLabel }}</span>
@@ -13,118 +12,305 @@
       </header>
 
       <section class="summary-grid">
-        <article
+        <template
           v-for="item in cockpitSummary.metrics"
           :key="item.key"
-          class="shell-card summary-card"
-          :class="item.tone"
-          :title="item.source"
         >
-          <div class="section-meta">{{ item.label }}</div>
-          <div class="summary-value">{{ item.value }}</div>
-          <p>{{ item.note }}</p>
-        </article>
+          <a-popover
+            v-if="item.detailPopover"
+            trigger="hover"
+            placement="bottomLeft"
+            overlayClassName="cockpit-summary-popover"
+          >
+            <template #content>
+              <template
+                v-for="popover in [item.detailPopover]"
+                :key="popover.title"
+              >
+                <section class="summary-popover-panel">
+                  <header class="summary-popover-header">
+                    <div>
+                      <span>{{ popover.subtitle }}</span>
+                      <h4>{{ popover.title }}</h4>
+                    </div>
+                    <span class="status-pill" :class="popover.statusTone || item.tone">
+                      {{ popover.statusLabel }}
+                    </span>
+                  </header>
+
+                  <div
+                    v-if="popover.stats && popover.stats.length"
+                    class="summary-popover-stats"
+                  >
+                    <section
+                      v-for="stat in popover.stats"
+                      :key="stat.key"
+                      class="summary-popover-stat"
+                      :class="stat.tone"
+                    >
+                      <span>{{ stat.label }}</span>
+                      <strong>{{ stat.value }}</strong>
+                    </section>
+                  </div>
+
+                  <div v-if="popover.error" class="summary-popover-empty error">
+                    {{ popover.error }}
+                  </div>
+                  <div v-else-if="popover.rows && popover.rows.length" class="summary-popover-list">
+                    <section
+                      v-for="row in popover.rows"
+                      :key="row.key"
+                      class="summary-popover-row"
+                    >
+                      <div class="summary-popover-row-head">
+                        <div>
+                          <strong>{{ row.title }}</strong>
+                          <span>{{ row.meta }}</span>
+                        </div>
+                        <span class="status-pill" :class="row.statusTone">
+                          {{ row.status }}
+                        </span>
+                      </div>
+                      <p>{{ row.detail }}</p>
+                      <div
+                        v-if="row.metrics && row.metrics.length"
+                        class="summary-popover-row-metrics"
+                      >
+                        <span
+                          v-for="metric in row.metrics"
+                          :key="metric.key"
+                        >
+                          {{ metric.label }} {{ metric.value }}
+                        </span>
+                      </div>
+                    </section>
+                  </div>
+                  <div v-else class="summary-popover-empty">
+                    {{ popover.emptyText }}
+                  </div>
+                </section>
+              </template>
+            </template>
+
+            <article
+              class="shell-card summary-card interactive"
+              :class="item.tone"
+              @click="handleSummaryMetricFocus(item)"
+            >
+              <div class="section-meta">{{ item.label }}</div>
+              <div class="summary-value">{{ item.value }}</div>
+              <p>{{ item.note }}</p>
+            </article>
+          </a-popover>
+
+          <article
+            v-else
+            class="shell-card summary-card"
+            :class="item.tone"
+            :title="item.title || item.source"
+          >
+            <div class="section-meta">{{ item.label }}</div>
+            <div class="summary-value">{{ item.value }}</div>
+            <p>{{ item.note }}</p>
+          </article>
+        </template>
       </section>
 
       <section class="content-grid">
-      <div class="column">
-        <article class="shell-card panel-card">
-          <header class="panel-header">
+      <div class="column column-scroll left-ops-column">
+        <article class="shell-card panel-card ai-radar-panel">
+          <header class="panel-header ai-radar-header">
             <div>
-              <h3>AI 识别记录</h3>
-              <p>来自 dual-stream task events，展示最近识别和复核状态。</p>
-            </div>
-          </header>
-
-          <div class="ai-risk-alert-header">
-            <div>
-              <span class="section-meta">AI Fire Recognition</span>
-              <h4>AI 风险识别记录</h4>
+              <h3>AI 风险识别雷达</h3>
             </div>
             <span class="status-pill" :class="aiRiskPillClass">{{ aiRiskPillText }}</span>
+          </header>
+
+          <div class="ai-radar-channel-strip">
+            <span class="channel-chip visible">
+              <VideoCameraOutlined class="channel-icon" />
+              <span>可见光</span>
+            </span>
+            <span class="channel-chip thermal">
+              <FireOutlined class="channel-icon" />
+              <span>红外</span>
+            </span>
+            <span class="channel-chip fusion">
+              <DeploymentUnitOutlined class="channel-icon" />
+              <span>融合识别</span>
+            </span>
+          </div>
+
+          <div class="ai-radar-stage" :class="{ active: recentAiRiskEvents.length > 0 }">
+            <div class="ai-radar-scope" aria-hidden="true">
+              <i class="radar-ring ring-one"></i>
+              <i class="radar-ring ring-two"></i>
+              <i class="radar-ring ring-three"></i>
+              <i class="radar-sweep"></i>
+              <span
+                v-for="(event, index) in recentAiRiskEvents.slice(0, 4)"
+                :key="`${event.sourceTs || 'scope'}-${index}`"
+                class="radar-blip"
+                :class="aiRiskLevelClass(event.riskLevel)"
+              ></span>
+            </div>
+            <div class="ai-radar-readout">
+              <span class="section-meta">AI Fire Recognition</span>
+              <strong>{{ recentAiRiskEvents.length ? '风险扫描进行中' : '等待识别事件' }}</strong>
+              <p>{{ recentAiRiskEvents.length ? '按融合置信度与复核状态滚动呈现。' : cockpitSummary.emptyStateHints.aiRisk }}</p>
+            </div>
           </div>
 
           <div v-if="aiRiskState.error" class="ai-risk-empty error">
             {{ aiRiskState.error }}
           </div>
-          <div v-else-if="recentAiRiskEvents.length === 0" class="ai-risk-empty">
-            暂无 AI 识别记录
-          </div>
-          <div v-else class="info-list ai-risk-alert-list">
-            <section
+          <div v-else-if="recentAiRiskEvents.length > 0" class="ai-radar-feed">
+            <div
               v-for="event in recentAiRiskEvents"
               :key="`${event.sourceTs || 'no-ts'}-${event.analysisChannel || 'unknown'}-${event.fusionScore || 0}`"
-              class="info-card ai-risk-card"
+              class="ai-radar-feed-row"
               :class="aiRiskCardClass(event)"
             >
-              <div class="ai-risk-card-top">
-                <div>
-                  <strong>{{ formatAiEventTime(event.sourceTs) }}</strong>
-                  <span>{{ formatAiChannel(event.analysisChannel) }}</span>
-                </div>
-                <span class="status-pill" :class="aiRiskLevelClass(event.riskLevel)">
-                  {{ event.riskLevel || 'UNKNOWN' }}
-                </span>
+              <span class="feed-time">{{ formatAiEventTime(event.sourceTs) }}</span>
+              <div class="feed-main">
+                <strong>{{ formatAiChannel(event.analysisChannel) }}</strong>
+                <small>{{ formatAiReviewStatus(event.reviewStatus) }}</small>
               </div>
-              <div class="ai-risk-scores">
-                <span>可见光分数 {{ formatAiScore(event.visibleScore) }}</span>
-                <span>融合分数 {{ formatAiScore(event.fusionScore) }}</span>
-              </div>
-              <div class="ai-risk-review" :class="aiReviewStatusClass(event.reviewStatus)">
-                {{ formatAiReviewStatus(event.reviewStatus) }}
-              </div>
-            </section>
+              <span class="feed-score">{{ formatAiScore(event.fusionScore) }}</span>
+            </div>
           </div>
         </article>
 
-        <article class="shell-card panel-card">
+        <article class="shell-card panel-card fire-priority-panel">
           <header class="panel-header">
-            <div>
-              <h3>火情事件队列</h3>
-              <p>来自 /api/fire/events，按风险等级和最近更新时间排序。</p>
+            <div class="fire-events-panel-title">
+              <h3>火情事件优先队列</h3>
             </div>
+            <router-link class="fire-events-panel-header-action" to="/fire-events">
+              查看更多
+              <span>{{ cockpitSummary.activeFireEvents.length }}</span>
+            </router-link>
           </header>
+
+          <div class="fire-priority-metrics">
+            <section
+              v-for="stat in cockpitSummary.fireQueueStats"
+              :key="stat.key"
+              class="queue-stat"
+            >
+              <span>{{ stat.label }}</span>
+              <strong>{{ stat.value }}</strong>
+            </section>
+          </div>
 
           <div v-if="fireEventState.error" class="ai-risk-empty error">
             {{ fireEventState.error }}
           </div>
           <div v-else-if="cockpitSummary.recentFireEvents.length === 0" class="ai-risk-empty">
-            暂无火情事件
+            {{ cockpitSummary.emptyStateHints.fireEvents }}
           </div>
-          <div v-else class="info-list">
-            <section
+          <div v-else class="fire-priority-queue">
+            <div class="fire-priority-table-head" aria-hidden="true">
+              <span>优先级</span>
+              <span>置信度</span>
+              <span>位置 / 区域</span>
+              <span>任务状态</span>
+            </div>
+            <a-popover
               v-for="event in cockpitSummary.recentFireEvents"
               :key="event.eventId"
-              class="info-card"
+              trigger="hover"
+              placement="rightTop"
+              overlayClassName="fire-event-detail-popover"
             >
-              <div class="info-top">
-                <h4>{{ event.fireLevel || 'UNKNOWN' }} · {{ event.eventId }}</h4>
-                <span
-                  class="status-pill"
-                  :class="fireEventLevelClass(event.fireLevel)"
-                >
-                  {{ event.status }}
+              <template #content>
+                <section class="fire-event-detail-panel">
+                  <header class="fire-event-detail-header">
+                    <div>
+                      <span>事件 ID</span>
+                      <h4>{{ event.eventId }}</h4>
+                    </div>
+                    <span class="status-pill" :class="fireEventLevelClass(event.fireLevel)">
+                      {{ formatFireStatusLabel(event.status) }}
+                    </span>
+                  </header>
+                  <div class="fire-event-detail-stats">
+                    <section>
+                      <span>优先级</span>
+                      <strong>{{ event.fireLevel || '--' }}</strong>
+                    </section>
+                    <section>
+                      <span>置信度</span>
+                      <strong>{{ formatFireConfidence(event.confidence) }}</strong>
+                    </section>
+                    <section>
+                      <span>误差半径</span>
+                      <strong>{{ formatFireErrorRadius(event) }}</strong>
+                    </section>
+                    <section>
+                      <span>通知版本</span>
+                      <strong>{{ event.notificationVersion ?? 1 }}</strong>
+                    </section>
+                  </div>
+                  <div class="fire-event-detail-list">
+                    <p><span>完整坐标</span><strong>{{ formatFireEventLocation(event) }}</strong></p>
+                    <p><span>位置质量</span><strong>{{ event.geoQuality || '定位质量未知' }}</strong></p>
+                    <p><span>任务编号</span><strong>{{ event.missionNo || '未关联任务' }}</strong></p>
+                    <p><span>事件来源</span><strong>{{ event.source || '未知来源' }}</strong></p>
+                    <p><span>更新时间</span><strong>{{ formatDateTime(event.updatedAt || event.createdAt) }}</strong></p>
+                  </div>
+                </section>
+              </template>
+              <button
+                class="fire-priority-row"
+                :class="[fireEventLevelClass(event.fireLevel), { selected: situationFocusKey === event.eventId }]"
+                type="button"
+                @click="focusSituationFire(event)"
+                @keydown.enter="focusSituationFire(event)"
+              >
+                <span class="fire-priority-level">{{ formatFireLevelShort(event.fireLevel) }}</span>
+                <span class="fire-priority-confidence">{{ formatFireConfidence(event.confidence) }}</span>
+                <div class="fire-priority-location">
+                  <strong>{{ formatFireLocationSummary(event) }}</strong>
+                  <small>{{ formatFireErrorRadius(event) }} · {{ event.geoQuality || '定位质量未知' }}</small>
+                </div>
+                <span class="fire-priority-status-text" :class="fireEventLevelClass(event.fireLevel)">
+                  {{ formatFireStatusLabel(event.status) }}
                 </span>
-              </div>
-              <p>
-                置信度 {{ formatFireConfidence(event.confidence) }} ·
-                定位 {{ event.geoQuality || '未知' }} ·
-                任务 {{ event.missionNo || '未关联' }}
-              </p>
-              <p>
-                {{ formatFireEventLocation(event) }} ·
-                通知版本 {{ event.notificationVersion ?? 1 }}
-              </p>
+              </button>
+            </a-popover>
+          </div>
+        </article>
+
+        <article class="shell-card panel-card response-closure-panel">
+          <header class="panel-header">
+            <div>
+              <h3>处置闭环</h3>
+            </div>
+            <span class="status-pill" :class="leftResponseReady ? 'safe' : 'default'">
+              {{ leftResponseReady ? '可推进' : '待补齐' }}
+            </span>
+          </header>
+
+          <div class="response-closure-list">
+            <section
+              v-for="item in leftResponseItems"
+              :key="item.key"
+              class="response-closure-item"
+              :class="item.tone"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+              <small>{{ item.note }}</small>
             </section>
           </div>
         </article>
       </div>
 
-      <article class="shell-card panel-card map-panel" :class="{ 'live-mode': activeVisualTab !== 'map' }">
+      <article class="shell-card panel-card map-panel">
         <header class="panel-header map-header">
           <div>
             <h3>{{ visualPanelTitle }}</h3>
-            <p>{{ visualPanelDescription }}</p>
           </div>
           <div class="map-header-actions">
             <div class="visual-tabs">
@@ -134,7 +320,7 @@
                 class="visual-tab"
                 :class="{ active: activeVisualTab === tab.key }"
                 type="button"
-                @click="activeVisualTab = tab.key"
+                @click="switchVisualTab(tab.key)"
               >
                 {{ tab.label }}
               </button>
@@ -149,52 +335,37 @@
           </div>
         </header>
 
-        <div v-if="activeVisualTab === 'map'" class="map-stage">
-          <div class="mountain mountain-one"></div>
-          <div class="mountain mountain-two"></div>
-          <div class="mountain mountain-three"></div>
-          <div class="fire-zone fire-major"></div>
-          <div class="fire-zone fire-secondary"></div>
-          <div class="protection-zone zone-one"></div>
-          <div class="protection-zone zone-two"></div>
-          <div class="route route-one"></div>
-          <div class="route route-two"></div>
-          <div class="route route-three"></div>
+        <div class="visual-stage">
+          <CockpitSituationMap
+            v-if="activeVisualTab === 'map'"
+            :layers="situationLayers"
+            :focus-key="situationFocusKey"
+            @select="handleSituationLayerSelect"
+          />
 
-          <div
-            v-for="node in mapNodes"
-            :key="node.name"
-            class="map-node"
-            :style="{ top: node.top, left: node.left }"
-          >
-            <span class="map-node-dot"></span>
-            <span class="map-node-label">{{ node.name }}</span>
-          </div>
-        </div>
-
-        <div v-else-if="activeVisualTab === 'fire-monitor'" class="livestream-stage dual-stream-stage">
-          <div
-            ref="fireMonitorFullscreenShell"
-            class="dual-stream-shell"
-            :class="{ fullscreen: fireMonitorFullscreen }">
-            <div class="dual-stream-stage-head">
-              <CockpitAircraftStreamSelector
-                v-model:value="selectedFireMonitorTargetKey"
-                role="fire-monitor"
-                :targets="fireMonitorTargets"
-                :loading="dualStreamState.loading"
-                @change="handleFireMonitorTargetChange"
-              />
-              <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
-              <button
-                class="fire-detect-btn"
-                :class="{ active: fireDetectionState.running }"
-                :disabled="fireDetectionState.loading"
-                @click="onToggleFireDetection"
-              >
-                {{ fireDetectionButtonText }}
-              </button>
-            </div>
+          <div v-else-if="activeVisualTab === 'fire-monitor'" class="livestream-stage dual-stream-stage">
+            <div
+              ref="fireMonitorFullscreenShell"
+              class="dual-stream-shell"
+              :class="{ fullscreen: fireMonitorFullscreen }">
+              <div class="dual-stream-stage-head">
+                <CockpitAircraftStreamSelector
+                  v-model:value="selectedFireMonitorTargetKey"
+                  role="fire-monitor"
+                  :targets="fireMonitorTargets"
+                  :loading="dualStreamState.loading"
+                  @change="handleFireMonitorTargetChange"
+                />
+                <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
+                <button
+                  class="fire-detect-btn"
+                  :class="{ active: fireDetectionState.running }"
+                  :disabled="fireDetectionState.loading"
+                  @click="onToggleFireDetection"
+                >
+                  {{ fireDetectionButtonText }}
+                </button>
+              </div>
 
             <div class="dual-stream-player-stage">
               <div ref="primaryPlayerShell" class="dual-stream-player primary"></div>
@@ -303,101 +474,207 @@
               />
             </div>
 
+            </div>
           </div>
-        </div>
 
-        <div v-else class="livestream-stage delivery-stage">
-          <div class="dual-stream-shell">
-            <div class="dual-stream-stage-head">
-              <CockpitAircraftStreamSelector
-                v-model:value="selectedDeliveryTargetKey"
-                role="delivery"
-                :targets="deliveryExecutionTargets"
+          <div v-else class="livestream-stage delivery-stage">
+            <div class="dual-stream-shell">
+              <div class="dual-stream-stage-head">
+                <CockpitAircraftStreamSelector
+                  v-model:value="selectedDeliveryTargetKey"
+                  role="delivery"
+                  :targets="deliveryExecutionTargets"
+                  :loading="deliveryTargetsLoading"
+                />
+              </div>
+              <CockpitDeliveryExecutionPanel
+                :target="selectedDeliveryTarget"
+                :delivery-targets="deliveryExecutionTargets"
                 :loading="deliveryTargetsLoading"
+                @refresh-targets="loadDeliveryExecutionTargets"
               />
             </div>
-            <CockpitDeliveryExecutionPanel
-              :target="selectedDeliveryTarget"
-              :delivery-targets="deliveryExecutionTargets"
-              :loading="deliveryTargetsLoading"
-              @refresh-targets="loadDeliveryExecutionTargets"
-            />
           </div>
         </div>
 
-        <div v-if="activeVisualTab === 'map'" class="map-kpi-grid">
-          <section
-            v-for="item in visualKpis"
-            :key="item.label"
-            class="map-kpi"
-          >
-            <div class="section-meta">{{ item.label }}</div>
-            <div class="map-kpi-value">{{ item.value }}</div>
-          </section>
+        <div class="visual-instrument-belt">
+          <div class="instrument-section-list">
+            <section
+              v-for="section in visualInstrumentBelt.sections"
+              :key="section.key"
+              class="instrument-section"
+              :class="`status-${section.status || 'idle'}`"
+            >
+              <header class="instrument-section-head">
+                <span>{{ section.title }}</span>
+                <strong>{{ section.summary }}</strong>
+              </header>
+
+              <div v-if="section.key === 'videoLink'" class="instrument-signal-body">
+                <div class="signal-row">
+                  <span
+                    v-for="signal in section.signals"
+                    :key="signal.key"
+                    class="signal-dot-label"
+                    :class="`status-${signal.status || 'idle'}`"
+                  >
+                    <i></i>{{ signal.label }}
+                  </span>
+                </div>
+                <div class="signal-wave" aria-hidden="true">
+                  <i v-for="n in 18" :key="n" :style="{ height: `${18 + ((n * 13) % 36)}px` }"></i>
+                </div>
+                <div class="instrument-footer-row">
+                  <span v-for="item in section.footers" :key="item.label">{{ item.label }} {{ item.value }}</span>
+                </div>
+              </div>
+
+              <div v-else-if="section.key === 'flightReadouts'" class="flight-readout-grid">
+                <div
+                  v-for="readout in section.readouts"
+                  :key="readout.key"
+                  class="flight-readout"
+                >
+                  <span>{{ readout.label }}</span>
+                  <strong>{{ readout.value }}</strong>
+                  <small v-if="readout.unit">{{ readout.unit }}</small>
+                </div>
+              </div>
+
+              <div v-else class="ai-observation-body">
+                <div class="ai-tick-line">
+                  <span
+                    v-for="tick in section.ticks"
+                    :key="tick.key"
+                    :class="`status-${tick.status || 'idle'}`"
+                  ></span>
+                </div>
+                <p>{{ section.note }}</p>
+              </div>
+            </section>
+          </div>
+
+          <div class="instrument-event-strip">
+            <span class="event-strip-title">系统事件</span>
+            <span
+              v-for="event in visualInstrumentBelt.events"
+              :key="event.key"
+              class="event-strip-item"
+              :class="`status-${event.status || 'idle'}`"
+            >
+              <small>{{ event.time }}</small>{{ event.label }}
+            </span>
+          </div>
         </div>
       </article>
 
-      <div class="column">
-        <article class="shell-card panel-card">
+      <div class="column column-scroll right-status-column">
+        <article class="shell-card panel-card aircraft-status-panel">
           <header class="panel-header">
             <div>
               <h3>飞机与直播状态</h3>
-              <p>聚合 MSDK Agent、双光直播和 FC100 投放设备状态。</p>
             </div>
           </header>
 
-          <div v-if="cockpitSummary.aircraftRows.length === 0" class="ai-risk-empty">
-            暂无飞机状态，请确认 MSDK Agent 或 FC100 投放平台已接入。
-          </div>
-          <div v-else class="info-list">
-            <section
-              v-for="aircraft in cockpitSummary.aircraftRows"
-              :key="aircraft.key"
-              class="info-card"
-            >
-              <div class="info-top">
-                <h4>{{ aircraft.name }}</h4>
-                <span class="status-pill" :class="aircraft.online ? 'safe' : 'danger'">
-                  {{ aircraft.role }}
-                </span>
-              </div>
-              <p>{{ aircraft.status }} · 电量 {{ formatAircraftBattery(aircraft.battery) }}</p>
-              <p>{{ aircraft.detail }}</p>
+          <div class="aircraft-status-overview">
+            <section>
+              <span>在线节点</span>
+              <strong>{{ cockpitSummary.aircraftRows.filter(item => item.online).length }}/{{ cockpitSummary.aircraftRows.length }}</strong>
             </section>
+            <section>
+              <span>直播链路</span>
+              <strong>{{ dualStreamPillText }}</strong>
+            </section>
+          </div>
+
+          <div v-if="cockpitSummary.aircraftRows.length === 0" class="ai-risk-empty">
+            {{ cockpitSummary.emptyStateHints.aircraft }}
+          </div>
+          <div v-else class="aircraft-node-list">
+            <template
+              v-for="group in cockpitSummary.aircraftGroups"
+              :key="group.key"
+            >
+              <div class="aircraft-node-group">{{ group.label }} · {{ group.rows.length }}</div>
+              <section
+                v-for="aircraft in group.rows"
+                :key="aircraft.key"
+                class="aircraft-node-card"
+                :class="{ online: aircraft.online }"
+              >
+                <div class="aircraft-node-main">
+                  <div>
+                    <h4>{{ aircraft.name }}</h4>
+                  </div>
+                  <span class="status-pill" :class="aircraft.online ? 'safe' : 'danger'">
+                    {{ aircraft.online ? '在线' : '离线' }}
+                  </span>
+                </div>
+                <div class="aircraft-node-meter">
+                  <span :style="{ width: formatAircraftBatteryWidth(aircraft.battery) }"></span>
+                </div>
+                <div class="aircraft-node-meta">
+                  <span>{{ aircraft.status }}</span>
+                  <span>电量 {{ formatAircraftBattery(aircraft.battery) }}</span>
+                </div>
+                <p>{{ aircraft.detail }}</p>
+              </section>
+            </template>
           </div>
         </article>
 
-        <article class="shell-card panel-card">
+        <article class="shell-card panel-card link-status-panel">
           <header class="panel-header">
             <div>
-              <h3>FC100 投放与链路状态</h3>
-              <p>投放任务来自 delivery 接口；系统链路健康没有统一 health 汇总接口的部分明确标注。</p>
+              <h3>投放与链路状态</h3>
             </div>
           </header>
 
-          <div class="info-list">
+          <div class="link-status-timeline">
+            <section
+              v-if="cockpitSummary.taskRows.length === 0"
+              class="link-node-card primary"
+            >
+              <div class="link-node-head">
+                <span>投放任务</span>
+                <strong>待命</strong>
+              </div>
+              <p>{{ cockpitSummary.emptyStateHints.deliveryTasks }}</p>
+            </section>
             <section
               v-for="task in cockpitSummary.taskRows"
               :key="task.taskId || task.missionId || task.deviceSn"
-              class="info-card"
+              class="link-node-card primary"
             >
-              <div class="info-top">
-                <h4>{{ task.taskName || task.taskId || '投放任务' }}</h4>
-                <span class="status-pill default">{{ task.status || task.phase || '同步中' }}</span>
+              <div class="link-node-head">
+                <span>{{ task.taskName || '投放任务' }}</span>
+                <strong>{{ task.status || task.phase || '同步中' }}</strong>
+              </div>
+              <div
+                v-if="task.taskId || task.missionId"
+                class="link-node-id"
+                :title="task.taskId || task.missionId"
+              >
+                任务编号 {{ formatMiddleEllipsis(task.taskId || task.missionId, 8, 4, '--') }}
+              </div>
+              <div class="link-node-progress">
+                <span :style="{ width: formatTaskProgress(task.progressPercent) }"></span>
               </div>
               <p>阶段 {{ task.phase || '--' }} · 进度 {{ formatTaskProgress(task.progressPercent) }}</p>
-              <p>{{ task.message || task.displayMessage || task.reason || '等待投放平台返回任务消息' }}</p>
+              <p :title="task.message || task.displayMessage || task.reason">
+                {{ formatDeliveryTaskMessage(task) }}
+              </p>
             </section>
             <section
-              v-for="gap in cockpitSummary.dataGaps"
-              :key="gap.key"
-              class="info-card"
+              v-for="row in cockpitSummary.sideHealthRows"
+              :key="row.key"
+              class="link-node-card"
             >
-              <div class="info-top">
-                <h4>{{ gap.label }}</h4>
-                <span class="status-pill default">{{ gap.value }}</span>
+              <div class="link-node-head">
+                <span>{{ row.label }}</span>
+                <strong>{{ row.value }}</strong>
               </div>
-              <p>{{ gap.note }}</p>
+              <p>{{ row.note }}</p>
             </section>
           </div>
         </article>
@@ -410,6 +687,7 @@
 <script lang="ts" setup>
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { notification } from 'ant-design-vue'
+import { DeploymentUnitOutlined, FireOutlined, VideoCameraOutlined } from '@ant-design/icons-vue'
 import {
   getDualStreamGroup,
   getDualStreamTaskEvents,
@@ -422,14 +700,17 @@ import {
   type DualStreamGroup
 } from '/@/api/manage'
 import { eventApi as fireEventApi } from '/@/api/fire/event'
+import { waypointApi } from '/@/api/fire/waypoint'
 import { deliveryApi, type DeliveryDeviceDTO } from '/@/api/fire/delivery'
 import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
 import type { FireEventDTO } from '/@/types/fire/event'
+import type { WaypointDTO } from '/@/types/fire/waypoint'
 import { useMyStore } from '/@/store'
 import { EModeCode } from '/@/types/device'
 import CockpitAircraftStreamSelector, { type CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
 import CockpitDeliveryExecutionPanel from '/@/components/cockpit/CockpitDeliveryExecutionPanel.vue'
 import CockpitFlightControlPanel from '/@/components/cockpit/CockpitFlightControlPanel.vue'
+import CockpitSituationMap from './CockpitSituationMap.vue'
 import {
   buildDualStreamCandidateSns,
   buildLivePaneState,
@@ -439,6 +720,7 @@ import {
   swapPrimaryPreference
 } from './leadership-cockpit-live-layout.mjs'
 import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
+import { buildSituationLayers } from './leadership-cockpit-situation.mjs'
 
 const store = useMyStore()
 const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
@@ -554,21 +836,9 @@ const fireEventState = reactive({
   events: [] as FireEventDTO[]
 })
 const deliveryTaskStatuses = ref<any[]>([])
+const missionWaypoints = ref<Record<string, WaypointDTO[]>>({})
+const situationFocusKey = ref('')
 const cockpitLastRefreshAt = ref(0)
-
-const mapNodes = computed(() => {
-  const events = cockpitSummary.value.recentFireEvents
-  if (events.length === 0) {
-    return [{ name: '等待火情定位', top: '48%', left: '48%' }]
-  }
-  return events.slice(0, 5).map((event, index) => ({
-    name: `${event.fireLevel || 'UNKNOWN'} ${event.eventId}`,
-    top: `${20 + (index % 3) * 22}%`,
-    left: `${24 + (index % 2) * 34}%`
-  }))
-})
-
-const mapKpis = computed(() => cockpitSummary.value.metrics.slice(0, 4))
 
 const visualTabs = [
   { key: 'map', label: '态势图' },
@@ -576,7 +846,9 @@ const visualTabs = [
   { key: 'delivery-execution', label: '投放执行画面' }
 ] as const
 
-const activeVisualTab = ref<typeof visualTabs[number]['key']>('map')
+type VisualTabKey = typeof visualTabs[number]['key']
+
+const activeVisualTab = ref<VisualTabKey>('map')
 const msdkDeviceSnapshots = ref<MsdkDeviceState[]>([])
 const selectedFireMonitorTargetKey = ref('')
 const deliveryExecutionTargets = ref<CockpitStreamTarget[]>([])
@@ -607,6 +879,60 @@ const cockpitSummary = computed(() => buildCockpitSummary({
   fireEventsError: fireEventState.error,
   aiEventsError: aiRiskState.error,
   dualStreamError: dualStreamState.error
+}))
+
+const leftResponseItems = computed(() => {
+  const summary = cockpitSummary.value
+  const activeCount = summary.activeFireEvents.length
+  const pending = responseStatValue('pending')
+  const missionLinked = responseStatValue('missionLinked')
+  const routeReady = responseStatValue('routeReady')
+  const onlineAircraft = summary.aircraftRows.filter((item: any) => item.online).length
+  return [
+    {
+      key: 'fireScope',
+      label: '重点火情',
+      value: `${pending}/${activeCount}`,
+      note: activeCount > 0 ? '按优先级持续处置' : '等待火情上报',
+      tone: activeCount > 0 ? 'danger' : 'default'
+    },
+    {
+      key: 'missionBinding',
+      label: '任务关联',
+      value: `${missionLinked}/${activeCount}`,
+      note: missionLinked > 0 ? '已有任务关联' : '等待任务创建',
+      tone: missionLinked > 0 ? 'safe' : 'default'
+    },
+    {
+      key: 'routeReady',
+      label: '航线准备',
+      value: `${routeReady}/${activeCount}`,
+      note: routeReady > 0 ? '可生成航线' : '定位质量待确认',
+      tone: routeReady > 0 ? 'safe' : 'warning'
+    },
+    {
+      key: 'forceReady',
+      label: '力量就绪',
+      value: `${onlineAircraft}/${summary.aircraftRows.length}`,
+      note: summary.aircraftRows.length > 0 ? '监测/投放设备在线' : '等待设备接入',
+      tone: onlineAircraft > 0 ? 'safe' : 'default'
+    }
+  ]
+})
+
+const leftResponseReady = computed(() => leftResponseItems.value.some(item => item.tone === 'safe'))
+
+function responseStatValue (key: string) {
+  const value = cockpitSummary.value.fireQueueStats.find((item: any) => item.key === key)?.value
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+const situationLayers = computed(() => buildSituationLayers({
+  fireEvents: fireEventState.events,
+  missionWaypoints: missionWaypoints.value,
+  msdkDevices: msdkDeviceSnapshots.value,
+  deliveryTargets: deliveryExecutionTargets.value
 }))
 
 const cockpitDataStatusText = computed(() => {
@@ -730,16 +1056,6 @@ const visualPanelTitle = computed(() => {
   return 'FC100 投放执行画面'
 })
 
-const visualPanelDescription = computed(() => {
-  if (activeVisualTab.value === 'map') {
-    return '领导视角聚焦火势范围、保护圈、力量投向、受威胁对象和处置效果。'
-  }
-  if (activeVisualTab.value === 'fire-monitor') {
-    return '选择火情监测飞行器，查看可见光、红外复核、AI 识别和飞行 HUD。'
-  }
-  return '选择 FC100 投放飞行器，查看投放执行直播、任务阶段、进度和飞行器状态。'
-})
-
 const visualPanelPillText = computed(() => {
   if (activeVisualTab.value === 'map') return '空地协同封控中'
   if (activeVisualTab.value === 'fire-monitor') return livestreamStatusPill.value
@@ -767,16 +1083,27 @@ const deliveryPanelPillClass = computed(() => {
   return 'default'
 })
 
-const fireMonitorKpis = computed(() => [
-  { label: '播放对象', value: selectedFireMonitorTarget.value?.callsign || '未选择' },
-  { label: '可见光状态', value: dualStreamSummary.value.visible },
-  { label: '红外状态', value: dualStreamSummary.value.thermal },
-  { label: 'AI 识别记录', value: `${recentAiRiskEvents.value.length} 条` }
-])
+async function switchVisualTab (tab: VisualTabKey) {
+  activeVisualTab.value = tab
+  if (tab === 'delivery-execution' && deliveryExecutionTargets.value.length === 0) {
+    loadDeliveryExecutionTargets()
+  }
+  if (tab === 'fire-monitor') {
+    if (!dualStreamState.group && !dualStreamState.loading) {
+      loadDualStreamState()
+    }
+    ensureVisibleDefaultZoom(selectedFireMonitorTarget.value?.deviceSn)
+    await nextTick()
+    syncLivePlayers()
+    ensureThermalPreviewMode()
+  }
+}
 
-const visualKpis = computed(() => {
-  if (activeVisualTab.value === 'map') return mapKpis.value
-  return fireMonitorKpis.value
+const visualInstrumentBelt = computed(() => {
+  return cockpitSummary.value.visualInstrumentBelt?.[activeVisualTab.value] || {
+    sections: [],
+    events: []
+  }
 })
 
 const aiRiskState = reactive({
@@ -1186,14 +1513,26 @@ function handleFireMonitorTargetChange (target: CockpitStreamTarget) {
   loadDualStreamState()
 }
 
+function resolveDeliveryDeviceModel (device: DeliveryDeviceDTO) {
+  const explicit = device.displayName || device.model
+  if (explicit) return explicit
+  const raw = `${device.deviceType || ''} ${device.deviceModelKey || ''} ${device.deviceModelClass || ''}`.toLowerCase()
+  if (raw.includes('0-122-0') || raw.includes('fc100') || raw.includes('flycart')) return 'DJI Flycart100'
+  if (raw.includes('fc30')) return 'DJI FlyCart 30'
+  return device.deviceType || 'DJI Flycart100'
+}
+
 function toDeliveryTarget (device: DeliveryDeviceDTO): CockpitStreamTarget {
   const onlineText = String(device.online || '').toLowerCase()
   const online = onlineText === 'true' || onlineText === 'online' || onlineText === '1'
+  const model = resolveDeliveryDeviceModel(device)
   return {
     key: `delivery:${device.deviceSn}`,
     role: 'delivery',
     deviceSn: device.deviceSn,
-    callsign: 'FC100',
+    callsign: model,
+    model,
+    displayName: model,
     online,
     streamStatus: online ? 'idle' : 'offline',
     compactLabel: true
@@ -1229,9 +1568,16 @@ async function loadDeliveryExecutionTargets () {
           primaryPlayUrl: live?.playUrl || '',
           streamStatus: live?.streamStatus === 'running'
             ? 'running'
-            : (target.online ? 'idle' : 'offline')
+            : ((props?.onlineStatus ?? target.online) ? 'idle' : 'offline')
         } as CockpitStreamTarget
         ;(enrichedTarget as any).batteryPercent = props?.batteryPercent
+        ;(enrichedTarget as any).latitude = props?.latitude
+        ;(enrichedTarget as any).longitude = props?.longitude
+        ;(enrichedTarget as any).altitude = props?.altitude
+        ;(enrichedTarget as any).horizontalSpeed = props?.horizontalSpeed
+        ;(enrichedTarget as any).verticalSpeed = props?.verticalSpeed
+        ;(enrichedTarget as any).homeDistance = props?.homeDistance
+        ;(enrichedTarget as any).windSpeed = props?.windSpeed
         return enrichedTarget
       } catch {
         return target
@@ -1425,6 +1771,25 @@ const ensureThermalPreviewMode = async () => {
   // Do not auto-switch RC Plus to thermal/PIP just to populate the web preview.
 }
 
+function focusSituationFire (event: FireEventDTO) {
+  activeVisualTab.value = 'map'
+  situationFocusKey.value = event.eventId
+}
+
+function handleSituationLayerSelect (key: string) {
+  situationFocusKey.value = key
+}
+
+function handleSummaryMetricFocus (item: any) {
+  if (!['activeFireEvents', 'highestFireLevel', 'aiEvents', 'aircraftOnline'].includes(item?.key)) return
+  activeVisualTab.value = 'map'
+  const firstFire = situationLayers.value.fireMarkers[0]
+  const firstAircraft = situationLayers.value.aircraftMarkers[0]
+  situationFocusKey.value = item.key === 'aircraftOnline'
+    ? (firstAircraft?.id || '')
+    : (firstFire?.eventId || firstFire?.id || '')
+}
+
 // 火情事件弹窗：每 3 秒拉一次 backend /api/fire/events，新出现的 LOW/MEDIUM/HIGH
 // 火情弹 antd notification 带带框的标注图缩略图。lastSeenFireEventId 防止首次进
 // 页面把历史事件全弹出来。
@@ -1442,7 +1807,8 @@ async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
     fireEventState.error = ''
     cockpitLastRefreshAt.value = Date.now()
     const missionNos = Array.from(new Set(events.map(event => event.missionNo).filter(Boolean))) as string[]
-    const statuses = await Promise.all(missionNos.slice(0, 6).map(async (missionNo) => {
+    const visibleMissionNos = missionNos.slice(0, 6)
+    const statuses = await Promise.all(visibleMissionNos.map(async (missionNo) => {
       try {
         const statusRes = await deliveryApi.status(missionNo)
         return statusRes.data?.data || null
@@ -1451,6 +1817,15 @@ async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
       }
     }))
     deliveryTaskStatuses.value = statuses.filter(Boolean)
+    const waypointEntries = await Promise.all(visibleMissionNos.map(async (missionNo) => {
+      try {
+        const waypointRes = await waypointApi.list(missionNo)
+        return [missionNo, waypointRes.data?.data || []] as [string, WaypointDTO[]]
+      } catch {
+        return [missionNo, []] as [string, WaypointDTO[]]
+      }
+    }))
+    missionWaypoints.value = Object.fromEntries(waypointEntries)
     return events
   } catch (e) {
     console.warn('[cockpit] fire event poll failed', e)
@@ -1712,6 +2087,37 @@ const formatFireConfidence = (confidence: number | string) => {
   return Number.isFinite(n) ? n.toFixed(2) : '--'
 }
 
+const formatMiddleEllipsis = (
+  value: string | number | null | undefined,
+  head = 10,
+  tail = 6,
+  fallback = '--'
+) => {
+  const text = value == null ? '' : String(value)
+  if (!text) return fallback
+  if (text.length <= head + tail + 1) return text
+  const start = text.slice(0, head)
+  const end = text.slice(-tail)
+  return `${start}…${end}`
+}
+
+const formatFireLevelShort = (level?: string | null) => {
+  const normalized = String(level || '').toUpperCase()
+  if (normalized === 'HIGH') return '高'
+  if (normalized === 'MEDIUM') return '中'
+  if (normalized === 'LOW') return '低'
+  return '--'
+}
+
+const formatFireStatusLabel = (status?: string | null) => {
+  const normalized = String(status || '').toUpperCase()
+  if (normalized === 'NEW') return '待处置'
+  if (normalized === 'LOW_CONFIDENCE') return '待确认'
+  if (normalized === 'MISSION_CREATED') return '已建任务'
+  if (normalized === 'IGNORED') return '已忽略'
+  return status || '--'
+}
+
 const formatFireEventLocation = (event: FireEventDTO) => {
   const lat = Number(event.lat)
   const lng = Number(event.lng)
@@ -1719,6 +2125,42 @@ const formatFireEventLocation = (event: FireEventDTO) => {
   const errorRadius = Number(event.geoErrorRadiusM)
   const errorText = Number.isFinite(errorRadius) ? ` · 误差 ${errorRadius.toFixed(1)}m` : ''
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}${errorText}`
+}
+
+const formatFireLocationSummary = (event: FireEventDTO) => {
+  const lat = Number(event.lat)
+  const lng = Number(event.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '位置未返回'
+  return `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+}
+
+const formatFireLatitude = (event: FireEventDTO) => {
+  const lat = Number(event.lat)
+  return Number.isFinite(lat) ? lat.toFixed(5) : '--'
+}
+
+const formatFireLongitude = (event: FireEventDTO) => {
+  const lng = Number(event.lng)
+  return Number.isFinite(lng) ? lng.toFixed(5) : '--'
+}
+
+const formatFireErrorRadius = (event: FireEventDTO) => {
+  const errorRadius = Number(event.geoErrorRadiusM)
+  return Number.isFinite(errorRadius) ? `误差 ${errorRadius.toFixed(1)}m` : '误差 --'
+}
+
+const formatDateTime = (value?: string | number | null) => {
+  if (value == null || value === '') return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
 }
 
 const fireEventLevelClass = (level?: string | null) => {
@@ -1733,9 +2175,25 @@ const formatAircraftBattery = (battery?: number) => {
   return Number.isFinite(n) ? `${n.toFixed(0)}%` : '--'
 }
 
+const formatAircraftBatteryWidth = (battery?: number) => {
+  const n = Number(battery)
+  if (!Number.isFinite(n)) return '0%'
+  return `${Math.min(100, Math.max(0, n)).toFixed(0)}%`
+}
+
 const formatTaskProgress = (progress?: number | null) => {
   const n = Number(progress)
   return Number.isFinite(n) ? `${n.toFixed(0)}%` : '--'
+}
+
+const formatDeliveryTaskMessage = (task: any) => {
+  const status = String(task?.status || task?.phase || '').toUpperCase()
+  if (status === 'NOT_FOUND') return '平台未返回该投放任务'
+  if (task?.displayMessage) return task.displayMessage
+  if (task?.reason) return task.reason
+  const message = String(task?.message || '').trim()
+  if (!message) return '等待投放平台返回任务消息'
+  return message.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig, '任务编号')
 }
 
 const formatAiEventTime = (sourceTs?: number) => {
@@ -1876,6 +2334,7 @@ watch(
 
 <style lang="scss" scoped>
 .leadership-cockpit {
+  box-sizing: border-box;
   min-height: calc(100vh - 60px);
   padding: 16px;
   background: linear-gradient(180deg, #07111d 0%, #030812 100%);
@@ -1892,13 +2351,13 @@ watch(
 .summary-grid,
 .content-grid,
 .footer-grid,
-.small-metric-grid,
-.map-kpi-grid {
+.small-metric-grid {
   display: grid;
   gap: 14px;
 }
 
 .cockpit-shell {
+  box-sizing: border-box;
   min-height: calc(100vh - 92px);
   padding: 18px;
   border: 1px solid rgba(69, 221, 255, 0.42);
@@ -1945,8 +2404,10 @@ watch(
 }
 
 .content-grid {
-  grid-template-columns: 340px minmax(0, 1fr) 340px;
-  align-items: start;
+  grid-template-columns: 460px minmax(0, 1fr) 340px;
+  align-items: stretch;
+  min-height: clamp(860px, 82vh, 1120px);
+  height: auto;
   margin-bottom: 14px;
 }
 
@@ -1958,6 +2419,54 @@ watch(
   display: grid;
   gap: 14px;
   min-width: 0;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  align-content: start;
+}
+
+.column-scroll {
+  overflow: visible;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  padding-bottom: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(69, 221, 255, 0.42) rgba(255, 255, 255, 0.04);
+}
+
+.column-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.column-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(69, 221, 255, 0.42);
+}
+
+.column-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.right-status-column {
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  gap: 14px;
+}
+
+.right-status-column .link-status-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.right-status-column .link-status-timeline {
+  flex: 1 1 auto;
+  align-content: start;
+  gap: 8px;
+}
+
+.left-ops-column {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .shell-card {
@@ -2010,92 +2519,235 @@ watch(
   line-height: 1.6;
 }
 
-.ai-risk-alert-header,
-.ai-risk-card-top,
-.ai-risk-scores {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+.ai-radar-panel {
+  overflow: hidden;
+  border-color: rgba(67, 215, 255, 0.26);
+  background:
+    linear-gradient(180deg, rgba(7, 30, 47, 0.92), rgba(6, 18, 32, 0.88)),
+    rgba(9, 28, 43, 0.82);
 }
 
-.ai-risk-alert-header {
+.ai-radar-header {
+  margin-bottom: 10px;
+}
+
+.ai-radar-channel-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
   margin-bottom: 12px;
 }
 
-.ai-risk-alert-header h4 {
-  margin-top: 4px;
-  color: #f0f6ff;
+.channel-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid rgba(69, 221, 255, 0.18);
+  border-radius: 6px;
+  color: #c9f4ff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  background: rgba(69, 221, 255, 0.06);
+  white-space: nowrap;
+}
+
+.channel-chip.visible {
+  border-color: rgba(255, 105, 120, 0.28);
+  background: rgba(255, 105, 120, 0.08);
+}
+
+.channel-chip.thermal {
+  border-color: rgba(255, 191, 77, 0.3);
+  background: rgba(255, 191, 77, 0.08);
+}
+
+.channel-chip.fusion {
+  border-color: rgba(66, 226, 157, 0.3);
+  background: rgba(66, 226, 157, 0.08);
+}
+
+.channel-icon {
+  flex: 0 0 auto;
   font-size: 15px;
-  line-height: 1.4;
 }
 
-.ai-risk-alert-list {
+.ai-radar-stage {
   display: grid;
-  gap: 10px;
-  max-height: 260px;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 116px;
   margin-bottom: 12px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.ai-risk-card {
-  display: grid;
-  gap: 10px;
   padding: 12px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(69, 221, 255, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(69, 221, 255, 0.1), rgba(69, 221, 255, 0.025)),
+    rgba(3, 17, 30, 0.52);
 }
 
-.ai-risk-card.attention {
-  border-color: rgba(255, 97, 114, 0.34);
-  background: rgba(255, 97, 114, 0.08);
+.ai-radar-scope {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  border: 1px solid rgba(69, 221, 255, 0.28);
+  background:
+    radial-gradient(circle at center, rgba(69, 221, 255, 0.16), rgba(69, 221, 255, 0.03) 48%, transparent 50%),
+    linear-gradient(rgba(69, 221, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(69, 221, 255, 0.08) 1px, transparent 1px);
+  background-size: auto, 24px 24px, 24px 24px;
+  overflow: hidden;
 }
 
-.ai-risk-card.resolved {
-  border-color: rgba(66, 226, 157, 0.24);
-  background: rgba(66, 226, 157, 0.06);
+.radar-ring {
+  position: absolute;
+  inset: 18px;
+  border: 1px solid rgba(69, 221, 255, 0.18);
+  border-radius: 50%;
 }
 
-.ai-risk-card-top strong {
+.radar-ring.ring-two {
+  inset: 31px;
+}
+
+.radar-ring.ring-three {
+  inset: 43px;
+}
+
+.radar-sweep {
+  position: absolute;
+  inset: 0;
+  background: conic-gradient(from -45deg, rgba(66, 226, 157, 0.42), transparent 20%, transparent);
+  animation: radar-sweep 4s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes radar-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.radar-blip {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #42e29d;
+  box-shadow: 0 0 14px rgba(66, 226, 157, 0.72);
+}
+
+.radar-blip:nth-of-type(1) {
+  top: 28px;
+  left: 60px;
+}
+
+.radar-blip:nth-of-type(2) {
+  top: 54px;
+  left: 30px;
+}
+
+.radar-blip:nth-of-type(3) {
+  top: 64px;
+  left: 68px;
+}
+
+.radar-blip:nth-of-type(4) {
+  top: 22px;
+  left: 34px;
+}
+
+.radar-blip.danger {
+  background: #ff6978;
+  box-shadow: 0 0 16px rgba(255, 105, 120, 0.74);
+}
+
+.ai-radar-readout {
+  min-width: 0;
+}
+
+.ai-radar-readout strong {
   display: block;
-  color: #f0f6ff;
-  font-size: 13px;
-  line-height: 1.4;
+  margin: 5px 0;
+  color: #eefbff;
+  font-size: 15px;
+  line-height: 1.3;
 }
 
-.ai-risk-card-top span,
-.ai-risk-scores span,
-.ai-risk-review,
+.ai-radar-readout p,
 .ai-risk-empty {
   color: #8fa6c1;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.ai-risk-scores {
-  justify-content: flex-start;
-  flex-wrap: wrap;
+.ai-radar-feed {
+  display: grid;
+  border-block: 1px solid rgba(69, 221, 255, 0.14);
 }
 
-.ai-risk-review {
-  width: fit-content;
-  max-width: 100%;
-  padding: 4px 8px;
-  border-radius: 10px;
-  background: rgba(103, 184, 255, 0.1);
-  color: #cfe7ff;
+.ai-radar-feed-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 54px;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(69, 221, 255, 0.1);
 }
 
-.ai-risk-review.danger {
-  background: rgba(255, 97, 114, 0.12);
+.ai-radar-feed-row:last-child {
+  border-bottom: 0;
+}
+
+.ai-radar-feed-row.attention {
   color: #ffe1e6;
 }
 
-.ai-risk-review.safe {
-  background: rgba(66, 226, 157, 0.12);
-  color: #e4fff3;
+.ai-radar-feed-row.resolved {
+  color: #d9ffed;
+}
+
+.feed-time,
+.feed-main small,
+.feed-score {
+  color: #8fb8d0;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.feed-main {
+  min-width: 0;
+}
+
+.feed-main strong {
+  display: block;
+  color: #eafcff;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-main small {
+  display: block;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-score {
+  color: #dff7ff;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .ai-risk-empty {
@@ -2156,6 +2808,25 @@ watch(
   min-height: 108px;
 }
 
+.summary-card.interactive {
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.summary-card.interactive:hover {
+  border-color: rgba(69, 221, 255, 0.64);
+  background:
+    linear-gradient(180deg, rgba(69, 221, 255, 0.09), rgba(12, 31, 48, 0.64)),
+    rgba(10, 33, 48, 0.72);
+  box-shadow: 0 0 0 1px rgba(69, 221, 255, 0.12), 0 16px 34px rgba(0, 16, 30, 0.22);
+}
+
+.summary-card p {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .summary-value {
   margin: 8px 0;
   color: #e9f8ff;
@@ -2176,12 +2847,203 @@ watch(
   color: #ffd866;
 }
 
+:global(.cockpit-summary-popover) {
+  max-width: min(440px, calc(100vw - 32px));
+}
+
+:global(.cockpit-summary-popover .ant-popover-inner) {
+  border: 1px solid rgba(69, 221, 255, 0.34);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(9, 28, 45, 0.98), rgba(5, 16, 29, 0.98));
+  box-shadow: 0 24px 54px rgba(0, 8, 18, 0.54), inset 0 1px 0 rgba(146, 230, 255, 0.12);
+}
+
+:global(.cockpit-summary-popover .ant-popover-inner-content) {
+  width: min(420px, calc(100vw - 40px));
+  padding: 0;
+}
+
+:global(.cockpit-summary-popover .ant-popover-arrow-content) {
+  background: #091c2d;
+  border-color: rgba(69, 221, 255, 0.28);
+}
+
+:global(.summary-popover-panel) {
+  min-width: 0;
+  color: #e9f8ff;
+}
+
+:global(.summary-popover-header) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(69, 221, 255, 0.18);
+}
+
+:global(.summary-popover-header span:first-child) {
+  display: block;
+  max-width: 270px;
+  color: #7db8d8;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+:global(.summary-popover-header h4) {
+  margin: 4px 0 0;
+  color: #effbff;
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+:global(.summary-popover-stats) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  padding: 12px 16px 0;
+}
+
+:global(.summary-popover-stat) {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(82, 174, 223, 0.16);
+  background: rgba(69, 221, 255, 0.06);
+}
+
+:global(.summary-popover-stat span) {
+  display: block;
+  color: #8fb8d0;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:global(.summary-popover-stat strong) {
+  display: block;
+  margin-top: 4px;
+  color: #eafcff;
+  font-size: 17px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+:global(.summary-popover-stat.danger strong) {
+  color: #ff6978;
+}
+
+:global(.summary-popover-stat.warning strong) {
+  color: #ffd866;
+}
+
+:global(.summary-popover-stat.safe strong) {
+  color: #72ff6a;
+}
+
+:global(.summary-popover-list) {
+  display: grid;
+  gap: 9px;
+  max-height: min(52vh, 430px);
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+}
+
+:global(.summary-popover-row) {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(69, 221, 255, 0.16);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(69, 221, 255, 0.08), rgba(69, 221, 255, 0.02)),
+    rgba(11, 35, 52, 0.72);
+}
+
+:global(.summary-popover-row-head) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+:global(.summary-popover-row-head strong) {
+  display: block;
+  color: #f2fbff;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+:global(.summary-popover-row-head div > span) {
+  display: block;
+  margin-top: 2px;
+  color: #77a6c0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+:global(.summary-popover-row p) {
+  margin: 8px 0 0;
+  color: #a6c3d8;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+:global(.summary-popover-row-metrics) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+:global(.summary-popover-row-metrics span) {
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(103, 184, 255, 0.1);
+  color: #9dc7df;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+:global(.summary-popover-empty) {
+  margin: 12px 16px 16px;
+  padding: 16px;
+  border: 1px dashed rgba(69, 221, 255, 0.22);
+  border-radius: 8px;
+  color: #96b9cf;
+  font-size: 12px;
+  line-height: 1.6;
+  background: rgba(69, 221, 255, 0.05);
+}
+
+:global(.summary-popover-empty.error) {
+  border-color: rgba(255, 105, 120, 0.34);
+  color: #ffc3c9;
+  background: rgba(255, 105, 120, 0.08);
+}
+
 .panel-card {
   min-width: 0;
 }
 
 .panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 14px;
+}
+
+.panel-header > div {
+  min-width: 0;
 }
 
 .panel-header h3 {
@@ -2192,6 +3054,769 @@ watch(
 .info-list {
   display: grid;
   gap: 12px;
+}
+
+.fire-priority-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  border-color: rgba(69, 221, 255, 0.28);
+  background:
+    linear-gradient(180deg, rgba(24, 31, 35, 0.68), rgba(7, 20, 33, 0.9)),
+    rgba(9, 28, 43, 0.82);
+}
+
+.fire-priority-panel .fire-priority-queue {
+  flex: 1 1 auto;
+}
+
+.fire-priority-metrics,
+.queue-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.queue-stat {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(69, 221, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(69, 221, 255, 0.06);
+}
+
+.queue-stat span {
+  display: block;
+  color: #8bb8d7;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.queue-stat strong {
+  display: block;
+  margin-top: 6px;
+  color: #e8f7ff;
+  font-size: 20px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.fire-priority-queue {
+  display: grid;
+  border-top: 1px solid rgba(255, 191, 77, 0.16);
+  border-bottom: 1px solid rgba(255, 191, 77, 0.16);
+}
+
+.fire-priority-table-head,
+.fire-priority-row {
+  display: grid;
+  grid-template-columns: 44px 68px minmax(126px, 1fr) 82px;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.fire-priority-table-head {
+  padding: 9px 8px 9px 12px;
+  color: #90b6cd;
+  font-size: 12px;
+  line-height: 1.2;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(3, 17, 30, 0.42);
+}
+
+.fire-priority-table-head span {
+  min-width: 0;
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.fire-priority-row {
+  appearance: none;
+  position: relative;
+  width: 100%;
+  min-height: 66px;
+  padding: 11px 8px 11px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.fire-priority-row:last-child {
+  border-bottom: 0;
+}
+
+.fire-priority-row::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: #42e29d;
+}
+
+.fire-priority-row.danger::before {
+  background: #ff6978;
+  box-shadow: 0 0 12px rgba(255, 105, 120, 0.56);
+}
+
+.fire-priority-row.default::before {
+  background: #ffbf4d;
+  box-shadow: 0 0 10px rgba(255, 191, 77, 0.48);
+}
+
+.fire-priority-row:hover,
+.fire-priority-row.selected {
+  background: rgba(255, 255, 255, 0.045);
+  transform: translateX(2px);
+}
+
+.fire-priority-id,
+.fire-priority-location,
+.fire-priority-mission {
+  min-width: 0;
+}
+
+.fire-priority-level {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  color: #ffbf4d;
+  font-size: 14px;
+  font-weight: 800;
+  background: rgba(255, 191, 77, 0.12);
+  border: 1px solid rgba(255, 191, 77, 0.28);
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.fire-priority-row.danger .fire-priority-level {
+  color: #ff7f8c;
+  background: rgba(255, 105, 120, 0.12);
+  border-color: rgba(255, 105, 120, 0.34);
+}
+
+.fire-priority-row.default .fire-priority-level {
+  color: #ffcf6e;
+}
+
+.fire-priority-id strong,
+.fire-priority-location strong {
+  display: block;
+  color: #f4fbff;
+  font-size: 12px;
+  line-height: 1.32;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.fire-priority-id strong,
+.fire-priority-mission {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.fire-priority-id small,
+.fire-priority-location small {
+  display: block;
+  margin-top: 3px;
+  color: #91adc5;
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.coordinate-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.coordinate-pair span {
+  min-width: 0;
+}
+
+.coordinate-pair small {
+  display: block;
+  margin: 0 0 2px;
+  color: #6f91aa;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.coordinate-pair strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.coordinate-error {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.fire-priority-confidence {
+  color: #d7f4ff;
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.fire-priority-location strong {
+  color: #f4fbff;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.fire-priority-location small {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.fire-priority-status-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(103, 184, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(103, 184, 255, 0.1);
+  color: #d9f3ff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fire-priority-status-text.danger {
+  border-color: rgba(255, 105, 120, 0.34);
+  background: rgba(255, 105, 120, 0.12);
+  color: #ffdce1;
+}
+
+.fire-priority-status-text.safe {
+  border-color: rgba(66, 226, 157, 0.26);
+  background: rgba(66, 226, 157, 0.1);
+  color: #dfffee;
+}
+
+:global(.fire-event-detail-popover) {
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+:global(.fire-event-detail-popover .ant-popover-inner) {
+  border: 1px solid rgba(69, 221, 255, 0.34);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(9, 28, 45, 0.98), rgba(5, 16, 29, 0.98));
+  box-shadow: 0 24px 54px rgba(0, 8, 18, 0.54), inset 0 1px 0 rgba(146, 230, 255, 0.12);
+}
+
+:global(.fire-event-detail-popover .ant-popover-inner-content) {
+  width: min(400px, calc(100vw - 40px));
+  padding: 0;
+}
+
+:global(.fire-event-detail-popover .ant-popover-arrow-content) {
+  background: #091c2d;
+  border-color: rgba(69, 221, 255, 0.28);
+}
+
+:global(.fire-event-detail-panel) {
+  min-width: 0;
+  color: #e9f8ff;
+}
+
+:global(.fire-event-detail-header) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid rgba(69, 221, 255, 0.18);
+}
+
+:global(.fire-event-detail-header div) {
+  min-width: 0;
+}
+
+:global(.fire-event-detail-header span:first-child) {
+  display: block;
+  color: #7db8d8;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+:global(.fire-event-detail-header h4) {
+  margin: 4px 0 0;
+  color: #effbff;
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 800;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+:global(.fire-event-detail-stats) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  padding: 12px 16px 0;
+}
+
+:global(.fire-event-detail-stats section) {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(82, 174, 223, 0.16);
+  background: rgba(69, 221, 255, 0.06);
+}
+
+:global(.fire-event-detail-stats span) {
+  display: block;
+  color: #8fb8d0;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:global(.fire-event-detail-stats strong) {
+  display: block;
+  margin-top: 4px;
+  color: #eafcff;
+  font-size: 15px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+:global(.fire-event-detail-list) {
+  display: grid;
+  gap: 8px;
+  padding: 12px 16px 16px;
+}
+
+:global(.fire-event-detail-list p) {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin: 0;
+  color: #a6c3d8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+:global(.fire-event-detail-list span) {
+  color: #7fa8c3;
+  white-space: nowrap;
+}
+
+:global(.fire-event-detail-list strong) {
+  min-width: 0;
+  color: #e9f8ff;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.task-identifier {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fire-events-panel-header-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid rgba(69, 221, 255, 0.32);
+  border-radius: 999px;
+  background: rgba(69, 221, 255, 0.08);
+  color: #bceeff;
+  font-size: 12px;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.fire-events-panel-header-action:hover {
+  border-color: rgba(69, 221, 255, 0.64);
+  background: rgba(69, 221, 255, 0.16);
+  color: #ffffff;
+}
+
+.fire-events-panel-header-action span {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(69, 221, 255, 0.16);
+  color: #45ddff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.view-all-fire-events {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 12px;
+  border-top: 1px solid rgba(69, 221, 255, 0.2);
+  color: #91c9e8;
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: none;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.view-all-fire-events:hover {
+  color: #e6f8ff;
+  background: rgba(69, 221, 255, 0.06);
+}
+
+.view-all-fire-events span {
+  color: #45ddff;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.response-closure-panel {
+  border-color: rgba(69, 221, 255, 0.24);
+  background:
+    linear-gradient(135deg, rgba(69, 221, 255, 0.06), rgba(66, 226, 157, 0.035)),
+    rgba(8, 26, 40, 0.88);
+}
+
+.response-closure-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.response-closure-item {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(69, 221, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(7, 22, 36, 0.64);
+}
+
+.response-closure-item span,
+.response-closure-item small {
+  display: block;
+  color: #8fb8d0;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.response-closure-item strong {
+  display: block;
+  margin: 5px 0 3px;
+  color: #effbff;
+  font-size: 18px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.response-closure-item.safe {
+  border-color: rgba(66, 226, 157, 0.24);
+}
+
+.response-closure-item.warning {
+  border-color: rgba(255, 191, 77, 0.24);
+}
+
+.response-closure-item.danger {
+  border-color: rgba(255, 105, 120, 0.28);
+}
+
+.aircraft-status-panel,
+.link-status-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.aircraft-status-panel::before,
+.link-status-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(69, 221, 255, 0.08), transparent 38%),
+    radial-gradient(circle at 88% 12%, rgba(66, 226, 157, 0.08), transparent 28%);
+}
+
+.aircraft-status-overview {
+  position: relative;
+  display: grid;
+  grid-template-columns: 0.78fr 1.22fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.aircraft-status-overview section {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(69, 221, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(5, 23, 38, 0.58);
+}
+
+.aircraft-status-overview span,
+.aircraft-node-group {
+  display: block;
+  color: #81abc6;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.aircraft-status-overview strong {
+  display: block;
+  margin-top: 5px;
+  color: #e9fbff;
+  font-size: 16px;
+  line-height: 1.25;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aircraft-node-list {
+  position: relative;
+  display: grid;
+  gap: 9px;
+}
+
+.aircraft-node-group {
+  margin-top: 2px;
+  color: #45ddff;
+  font-weight: 700;
+}
+
+.aircraft-node-card {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 105, 120, 0.2);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(255, 105, 120, 0.08), rgba(69, 221, 255, 0.03)),
+    rgba(13, 35, 52, 0.78);
+}
+
+.aircraft-node-card.online {
+  border-color: rgba(66, 226, 157, 0.22);
+  background:
+    linear-gradient(90deg, rgba(66, 226, 157, 0.08), rgba(69, 221, 255, 0.03)),
+    rgba(13, 35, 52, 0.78);
+}
+
+.aircraft-node-main,
+.aircraft-node-meta,
+.link-node-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.aircraft-node-main div {
+  min-width: 0;
+}
+
+.aircraft-node-main span:first-child {
+  display: block;
+  color: #81abc6;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.aircraft-node-main h4 {
+  margin: 3px 0 0;
+  color: #e9fbff;
+  font-size: 15px;
+  line-height: 1.25;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aircraft-node-meter,
+.link-node-progress {
+  height: 5px;
+  margin: 11px 0 9px;
+  border-radius: 999px;
+  background: rgba(119, 164, 190, 0.16);
+  overflow: hidden;
+}
+
+.aircraft-node-meter span,
+.link-node-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #42e29d, #45ddff);
+  box-shadow: 0 0 12px rgba(69, 221, 255, 0.35);
+}
+
+.aircraft-node-meta {
+  color: #9abbd1;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.aircraft-node-card p,
+.link-node-card p {
+  margin: 7px 0 0;
+  color: #8fb1c9;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.link-status-panel {
+  border-color: rgba(69, 221, 255, 0.24);
+}
+
+.link-status-timeline {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding-left: 12px;
+}
+
+.link-status-timeline::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(69, 221, 255, 0.72), rgba(66, 226, 157, 0.24));
+}
+
+.link-node-card {
+  position: relative;
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid rgba(69, 221, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(13, 35, 52, 0.78);
+}
+
+.link-node-card::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 20px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #45ddff;
+  box-shadow: 0 0 10px rgba(69, 221, 255, 0.6);
+}
+
+.link-node-card.primary {
+  border-color: rgba(255, 191, 77, 0.24);
+  background:
+    linear-gradient(90deg, rgba(255, 191, 77, 0.08), rgba(69, 221, 255, 0.03)),
+    rgba(13, 35, 52, 0.78);
+}
+
+.link-node-card.primary::before {
+  background: #ffbf4d;
+  box-shadow: 0 0 10px rgba(255, 191, 77, 0.6);
+}
+
+.link-node-head span {
+  min-width: 0;
+  color: #e9fbff;
+  font-size: 14px;
+  line-height: 1.25;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-node-head strong {
+  flex: 0 0 auto;
+  max-width: 92px;
+  padding: 5px 8px;
+  border: 1px solid rgba(103, 184, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(103, 184, 255, 0.1);
+  color: #d9f3ff;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.link-node-id {
+  margin-top: 8px;
+  color: #8fb1c9;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .decision-card,
@@ -2236,11 +3861,9 @@ watch(
 
 .map-panel {
   display: grid;
-  grid-template-rows: auto minmax(420px, 1fr) auto;
-}
-
-.map-panel.live-mode {
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 0;
 }
 
 .map-header {
@@ -2303,9 +3926,24 @@ watch(
   transform: translateY(-1px);
 }
 
+.visual-stage {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.visual-stage > .map-stage,
+.visual-stage > .livestream-stage {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
 .map-stage {
   position: relative;
-  min-height: 420px;
+  min-height: 0;
+  height: 100%;
   border-radius: 28px;
   overflow: hidden;
   border: 1px solid rgba(113, 179, 255, 0.14);
@@ -2328,6 +3966,7 @@ watch(
 .livestream-stage {
   min-height: 0;
   min-width: 0;
+  height: 100%;
   overflow: visible;
 }
 
@@ -2337,9 +3976,11 @@ watch(
 
 .dual-stream-shell {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
   min-width: 0;
+  height: 100%;
 }
 
 .dual-stream-shell.fullscreen {
@@ -2427,7 +4068,7 @@ watch(
 .dual-stream-player-stage {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 100%;
   min-height: 0;
   border-radius: 26px;
   background:
@@ -2922,9 +4563,239 @@ watch(
   text-align: center;
 }
 
-.map-kpi-grid {
+.visual-instrument-belt {
+  margin-top: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(33, 179, 235, 0.46);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(0, 180, 255, 0.08), rgba(5, 18, 32, 0.08) 18%, rgba(0, 180, 255, 0.05)),
+    rgba(5, 18, 30, 0.72);
+  box-shadow: inset 0 1px 0 rgba(133, 226, 255, 0.1);
+}
+
+.instrument-section-list {
+  display: grid;
+  grid-template-columns: 1.12fr 1.28fr 1fr;
+  border: 1px solid rgba(36, 176, 228, 0.24);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.instrument-section {
+  min-width: 0;
+  padding: 13px 16px 12px;
+  border-right: 1px solid rgba(77, 190, 235, 0.18);
+  background: rgba(9, 29, 45, 0.46);
+}
+
+.instrument-section:last-child {
+  border-right: 0;
+}
+
+.instrument-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.instrument-section-head span {
+  color: #17d7ff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.instrument-section-head strong {
+  min-width: 0;
+  color: #dff6ff;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.signal-row,
+.instrument-footer-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.signal-dot-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #b9d8ed;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.signal-dot-label i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6d8191;
+}
+
+.status-online i,
+.event-strip-item.status-online::before {
+  background: #42e29d;
+  box-shadow: 0 0 10px rgba(66, 226, 157, 0.65);
+}
+
+.status-warning i,
+.event-strip-item.status-warning::before {
+  background: #ffbf4d;
+  box-shadow: 0 0 10px rgba(255, 191, 77, 0.55);
+}
+
+.status-offline i,
+.event-strip-item.status-offline::before {
+  background: #ff6172;
+  box-shadow: 0 0 10px rgba(255, 97, 114, 0.5);
+}
+
+.signal-wave {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 46px;
+  margin: 8px 0;
+  padding-inline: 2px;
+  border-block: 1px solid rgba(88, 194, 235, 0.1);
+}
+
+.signal-wave i {
+  flex: 1;
+  min-width: 2px;
+  max-width: 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(69, 221, 255, 0.94), rgba(66, 226, 157, 0.42));
+}
+
+.instrument-footer-row {
+  justify-content: space-between;
+  color: #85a9c4;
+  font-size: 11px;
+}
+
+.flight-readout-grid {
+  display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-top: 14px;
+  gap: 10px 14px;
+}
+
+.flight-readout {
+  min-width: 0;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(96, 190, 231, 0.14);
+}
+
+.flight-readout span {
+  display: block;
+  color: #8eabc3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.flight-readout strong {
+  display: inline-block;
+  margin-top: 4px;
+  color: #e9fbff;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.flight-readout small {
+  margin-left: 4px;
+  color: #7fa2bb;
+  font-size: 10px;
+}
+
+.ai-observation-body p {
+  margin: 12px 0 0;
+  color: #94b4cb;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-tick-line {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  border-block: 1px solid rgba(88, 194, 235, 0.1);
+}
+
+.ai-tick-line span {
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(125, 163, 188, 0.42);
+}
+
+.ai-tick-line .status-high {
+  height: 6px;
+  background: #ff6172;
+  box-shadow: 0 0 10px rgba(255, 97, 114, 0.55);
+}
+
+.ai-tick-line .status-medium {
+  height: 5px;
+  background: #ffbf4d;
+}
+
+.ai-tick-line .status-low,
+.ai-tick-line .status-online {
+  height: 4px;
+  background: #42e29d;
+}
+
+.instrument-event-strip {
+  display: grid;
+  grid-template-columns: 92px repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 16px;
+  min-height: 36px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(66, 181, 231, 0.24);
+}
+
+.event-strip-title {
+  color: #b9d8ed;
+  font-size: 12px;
+}
+
+.event-strip-item {
+  position: relative;
+  min-width: 0;
+  padding-left: 14px;
+  color: #9fbcd2;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.event-strip-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: #6d8191;
+}
+
+.event-strip-item small {
+  margin-right: 10px;
+  color: #80a7c2;
+  font-size: 12px;
 }
 
 .footer-card h3 {
@@ -2988,7 +4859,7 @@ watch(
   }
 
   .content-grid {
-    grid-template-columns: 300px minmax(0, 1fr) 300px;
+    grid-template-columns: 430px minmax(0, 1fr) 300px;
   }
 
   .footer-grid {
@@ -3002,10 +4873,42 @@ watch(
     grid-template-columns: 1fr;
   }
 
+  .content-grid {
+    height: auto;
+  }
+
+  .visual-stage {
+    min-height: clamp(420px, 52vh, 620px);
+    height: auto;
+  }
+
+  .column {
+    height: auto;
+    max-height: none;
+  }
+
+  .column-scroll {
+    overflow: visible;
+    padding-right: 0;
+  }
+
   .summary-grid,
-  .map-kpi-grid,
   .small-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .instrument-section-list,
+  .instrument-event-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .instrument-section {
+    border-right: 0;
+    border-bottom: 1px solid rgba(77, 190, 235, 0.18);
+  }
+
+  .instrument-section:last-child {
+    border-bottom: 0;
   }
 
   .cockpit-topbar {

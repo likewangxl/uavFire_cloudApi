@@ -138,7 +138,7 @@ test('primary player loading and failure share the same right-side status HUD', 
   )
   assert.match(
     cockpitSource,
-    /\.dual-stream-status-card\s*\{[\s\S]*?inset:\s*auto 24px 24px auto;[\s\S]*?width:\s*min\(420px,\s*calc\(100% - 48px\)\);/,
+    /\.dual-stream-status-card\s*\{[\s\S]*?inset:\s*auto 24px 64px auto;[\s\S]*?width:\s*min\(420px,\s*calc\(100% - 48px\)\);/,
     'status card should live at the same right-side position previously used by playback failure'
   )
   assert.doesNotMatch(

@@ -15,6 +15,19 @@ function manualChunks (id: string) {
     return
   }
 
+  if (
+    id.includes('node_modules/tellux') ||
+    id.includes('node_modules/three') ||
+    id.includes('node_modules/3d-tiles-renderer') ||
+    id.includes('node_modules/@takram') ||
+    id.includes('node_modules/postprocessing') ||
+    id.includes('node_modules/pmtiles') ||
+    id.includes('node_modules/@mapbox/vector-tile') ||
+    id.includes('node_modules/pbf')
+  ) {
+    return 'vendor-tellux'
+  }
+
   if (id.includes('@ant-design/icons-svg')) {
     const iconMatch = id.match(/icons-svg\/(?:es|lib)\/asn\/([^/.]+)/)
     const iconGroup = iconMatch ? iconMatch[1].charAt(0).toLowerCase() : 'core'
@@ -110,8 +123,13 @@ export default ({ command, mode }: ConfigEnv): UserConfigExport => defineConfig(
     }
   },
   base: '/',
+  optimizeDeps: {
+    esbuildOptions: {
+      target: 'es2020'
+    }
+  },
   build: {
-    target: ['es2015'], // 最低支持 es2015
+    target: ['es2020'], // Tellux / 3D Tiles 依赖 BigInt，三维驾驶舱使用现代浏览器基线。
     sourcemap: true,
     rollupOptions: {
       output: {

@@ -556,12 +556,31 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
         static List<DeliveryDeviceDTO> toDeviceList(DjiDeviceListResponse resp) {
             if (resp == null || resp.getData() == null || resp.getData().getList() == null) return List.of();
             return Arrays.stream(resp.getData().getList())
-                .map(item -> new DeliveryDeviceDTO(
-                    item.getSn(),
-                    item.getDeviceModelKey(),
-                    null,
-                    item.getDeviceModelClass()))
+                .map(item -> {
+                    String model = displayDeviceModel(item.getDeviceModelKey(), item.getDeviceModelClass());
+                    return new DeliveryDeviceDTO(
+                        item.getSn(),
+                        item.getDeviceModelKey(),
+                        null,
+                        item.getDeviceModelClass(),
+                        model,
+                        model,
+                        item.getDeviceModelKey(),
+                        item.getDeviceModelClass());
+                })
                 .collect(java.util.stream.Collectors.toList());
+        }
+
+        private static String displayDeviceModel(String modelKey, String modelClass) {
+            String raw = ((modelKey == null ? "" : modelKey) + " " + (modelClass == null ? "" : modelClass)).toLowerCase();
+            if (raw.contains("0-122-0") || raw.contains("fc100") || raw.contains("flycart")) {
+                return "DJI Flycart100";
+            }
+            if (raw.contains("fc30")) {
+                return "DJI FlyCart 30";
+            }
+            String fallback = modelKey != null && !modelKey.isBlank() ? modelKey : modelClass;
+            return fallback != null && !fallback.isBlank() ? fallback : "DJI Flycart100";
         }
 
         static DeliveryDeviceProperties toDeviceProperties(String deviceSn, DjiDevicePropertiesResponse resp) {

@@ -1,0 +1,794 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "created_at": "2026-06-25",
+    "source": "UOM airspace information query page, logged-in manual session",
+    "city": "Xi'an, Shaanxi",
+    "roi_pixels": {
+      "x1": 247,
+      "y1": 174,
+      "x2": 1919,
+      "y2": 1030
+    },
+    "calibration": {
+      "top_left": {
+        "pixel": [
+          300,
+          220
+        ],
+        "lon": 107.85944444444443,
+        "lat": 34.77861111111111,
+        "raw": "E107deg51m34s N34deg46m43s"
+      },
+      "top_right": {
+        "pixel": [
+          1700,
+          220
+        ],
+        "lon": 109.78083333333333,
+        "lat": 34.77861111111111,
+        "raw": "E109deg46m51s N34deg46m43s"
+      },
+      "bottom_left": {
+        "pixel": [
+          300,
+          940
+        ],
+        "lon": 107.85805555555555,
+        "lat": 33.962500000000006,
+        "raw": "E107deg51m29s N33deg57m45s"
+      },
+      "bottom_right": {
+        "pixel": [
+          1700,
+          940
+        ],
+        "lon": 109.78083333333333,
+        "lat": 33.962500000000006,
+        "raw": "E109deg46m51s N33deg57m45s"
+      },
+      "center_check": {
+        "pixel": [
+          1080,
+          600
+        ],
+        "lon": 108.92916666666667,
+        "lat": 34.348888888888894,
+        "raw": "E108deg55m45s N34deg20m56s"
+      }
+    },
+    "source_coordinate_system": "uom_web_map_coordinate_readout_assumed_gcj02",
+    "render_coordinate_system": "wgs84_for_tianditu_maplibre",
+    "projection_fit": "web_mercator_y_interpolation",
+    "center_check": {
+      "uom_from_pixel": [
+        108.929625,
+        34.3488765
+      ],
+      "wgs84_from_pixel": [
+        108.9249931,
+        34.3504433
+      ],
+      "wgs84_from_readout": [
+        108.9245358,
+        34.3504563
+      ],
+      "error_degrees": {
+        "lon": 0.0004573,
+        "lat": -1.3e-05
+      }
+    },
+    "feature_count": 4,
+    "warning": "This is a screenshot-derived reference layer, not official UOM/USS coordinate geometry."
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "xian_visible_flyable_area_1",
+        "province": "Shaanxi",
+        "city": "Xi'an",
+        "area_type": "flyable_airspace_reference",
+        "source": "UOM airspace information query page screenshot",
+        "source_screenshot": "data/uom_shaanxi/screenshots/xian_calibration_zoom10_wiggle/xian_zoom10_left_top_in.png",
+        "zoom_level": 10,
+        "source_coordinate_system": "uom_web_map_coordinate_readout_assumed_gcj02",
+        "render_coordinate_system": "wgs84_for_tianditu_maplibre",
+        "projection_fit": "web_mercator_y_interpolation",
+        "precision": "screenshot_calibrated_reference_only",
+        "usage": "reference_only_preflight_required",
+        "contour_area_px": 380778.5
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              110.074721,
+              34.141279
+            ],
+            [
+              110.0185631,
+              34.1220686
+            ],
+            [
+              110.0035173,
+              34.0800489
+            ],
+            [
+              109.9556274,
+              34.0995159
+            ],
+            [
+              109.8527042,
+              34.0677152
+            ],
+            [
+              109.5080111,
+              34.1665007
+            ],
+            [
+              109.3513221,
+              34.3705178
+            ],
+            [
+              109.0727699,
+              34.1662931
+            ],
+            [
+              109.0522307,
+              34.0810807
+            ],
+            [
+              108.9811177,
+              34.0619388
+            ],
+            [
+              108.9263846,
+              34.0836719
+            ],
+            [
+              108.9071931,
+              34.1212048
+            ],
+            [
+              108.9277462,
+              34.1859447
+            ],
+            [
+              108.901699,
+              34.2200275
+            ],
+            [
+              108.945541,
+              34.2438106
+            ],
+            [
+              108.9099229,
+              34.2778957
+            ],
+            [
+              108.9071827,
+              34.2506689
+            ],
+            [
+              108.8769899,
+              34.244989
+            ],
+            [
+              108.8673719,
+              34.267672
+            ],
+            [
+              108.9016937,
+              34.2858387
+            ],
+            [
+              108.841249,
+              34.3379374
+            ],
+            [
+              108.7807518,
+              34.303824
+            ],
+            [
+              108.8508915,
+              34.1120732
+            ],
+            [
+              108.5503597,
+              34.0142628
+            ],
+            [
+              108.5874718,
+              33.9596571
+            ],
+            [
+              108.5366059,
+              33.9185811
+            ],
+            [
+              108.4718667,
+              33.9389046
+            ],
+            [
+              108.4608454,
+              33.9844269
+            ],
+            [
+              108.4209449,
+              33.9763838
+            ],
+            [
+              108.3619107,
+              34.1345092
+            ],
+            [
+              108.0091326,
+              34.134634
+            ],
+            [
+              107.9557598,
+              34.0813599
+            ],
+            [
+              107.8748094,
+              34.0746011
+            ],
+            [
+              107.8073831,
+              34.1222422
+            ],
+            [
+              107.8211383,
+              34.2222222
+            ],
+            [
+              107.7812342,
+              34.2323721
+            ],
+            [
+              107.7950159,
+              33.9082676
+            ],
+            [
+              108.164268,
+              33.9081183
+            ],
+            [
+              108.165648,
+              33.8625285
+            ],
+            [
+              109.9131691,
+              33.8627744
+            ],
+            [
+              109.9227661,
+              33.895822
+            ],
+            [
+              109.9419542,
+              33.862735
+            ],
+            [
+              110.0747462,
+              33.8624143
+            ],
+            [
+              110.074721,
+              34.141279
+            ]
+          ],
+          [
+            [
+              108.922277,
+              34.0518316
+            ],
+            [
+              108.9551352,
+              34.0494972
+            ],
+            [
+              108.9715489,
+              34.0369397
+            ],
+            [
+              108.9729179,
+              34.0164536
+            ],
+            [
+              108.9660814,
+              34.0062295
+            ],
+            [
+              108.952403,
+              33.9982963
+            ],
+            [
+              108.9236512,
+              34.0006241
+            ],
+            [
+              108.9044581,
+              34.0222629
+            ],
+            [
+              108.9044574,
+              34.0313661
+            ],
+            [
+              108.9099426,
+              34.0325014
+            ],
+            [
+              108.922277,
+              34.0518316
+            ]
+          ],
+          [
+            [
+              109.1482904,
+              34.1322541
+            ],
+            [
+              109.1744174,
+              34.1323023
+            ],
+            [
+              109.1922929,
+              34.125515
+            ],
+            [
+              109.2115364,
+              34.1073559
+            ],
+            [
+              109.2156591,
+              34.0959919
+            ],
+            [
+              109.21154,
+              34.0652843
+            ],
+            [
+              109.1950488,
+              34.0504744
+            ],
+            [
+              109.1661744,
+              34.0401843
+            ],
+            [
+              109.1537983,
+              34.0401613
+            ],
+            [
+              109.1249301,
+              34.0526302
+            ],
+            [
+              109.1166866,
+              34.0594462
+            ],
+            [
+              109.1070716,
+              34.0810474
+            ],
+            [
+              109.1125619,
+              34.108338
+            ],
+            [
+              109.1276721,
+              34.1242669
+            ],
+            [
+              109.1482904,
+              34.1322541
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "xian_visible_flyable_area_2",
+        "province": "Shaanxi",
+        "city": "Xi'an",
+        "area_type": "flyable_airspace_reference",
+        "source": "UOM airspace information query page screenshot",
+        "source_screenshot": "data/uom_shaanxi/screenshots/xian_calibration_zoom10_wiggle/xian_zoom10_left_top_in.png",
+        "zoom_level": 10,
+        "source_coordinate_system": "uom_web_map_coordinate_readout_assumed_gcj02",
+        "render_coordinate_system": "wgs84_for_tianditu_maplibre",
+        "projection_fit": "web_mercator_y_interpolation",
+        "precision": "screenshot_calibrated_reference_only",
+        "usage": "reference_only_preflight_required",
+        "contour_area_px": 317730.0
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              107.7812265,
+              34.3265177
+            ],
+            [
+              107.9776456,
+              34.2981983
+            ],
+            [
+              107.9803696,
+              34.4601806
+            ],
+            [
+              108.4787119,
+              34.4589459
+            ],
+            [
+              108.4787289,
+              34.2504441
+            ],
+            [
+              108.6354418,
+              34.2994185
+            ],
+            [
+              108.576453,
+              34.3663237
+            ],
+            [
+              108.5997911,
+              34.3878527
+            ],
+            [
+              108.5874356,
+              34.4240898
+            ],
+            [
+              108.5172899,
+              34.4069876
+            ],
+            [
+              108.5117761,
+              34.4567804
+            ],
+            [
+              108.5640782,
+              34.4455791
+            ],
+            [
+              108.6107537,
+              34.5247758
+            ],
+            [
+              108.6888265,
+              34.5766403
+            ],
+            [
+              108.7683635,
+              34.583373
+            ],
+            [
+              108.8398558,
+              34.5620186
+            ],
+            [
+              108.8714681,
+              34.5835323
+            ],
+            [
+              108.9345669,
+              34.5190923
+            ],
+            [
+              108.9030487,
+              34.4931124
+            ],
+            [
+              108.9126543,
+              34.4104929
+            ],
+            [
+              109.0686275,
+              34.5255474
+            ],
+            [
+              108.9810694,
+              34.6409953
+            ],
+            [
+              109.1606123,
+              34.7446282
+            ],
+            [
+              109.1881069,
+              34.8314334
+            ],
+            [
+              109.0083933,
+              34.8314515
+            ],
+            [
+              108.9988265,
+              34.8044504
+            ],
+            [
+              108.9687496,
+              34.8124244
+            ],
+            [
+              108.9673805,
+              34.8315734
+            ],
+            [
+              108.8934172,
+              34.8316784
+            ],
+            [
+              108.8934184,
+              34.8170383
+            ],
+            [
+              108.879689,
+              34.8316724
+            ],
+            [
+              107.781185,
+              34.8315377
+            ],
+            [
+              107.7811966,
+              34.6917803
+            ],
+            [
+              107.8348646,
+              34.6873588
+            ],
+            [
+              107.7811979,
+              34.6759851
+            ],
+            [
+              107.7812265,
+              34.3265177
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "xian_visible_flyable_area_3",
+        "province": "Shaanxi",
+        "city": "Xi'an",
+        "area_type": "flyable_airspace_reference",
+        "source": "UOM airspace information query page screenshot",
+        "source_screenshot": "data/uom_shaanxi/screenshots/xian_calibration_zoom10_wiggle/xian_zoom10_left_top_in.png",
+        "zoom_level": 10,
+        "source_coordinate_system": "uom_web_map_coordinate_readout_assumed_gcj02",
+        "render_coordinate_system": "wgs84_for_tianditu_maplibre",
+        "projection_fit": "web_mercator_y_interpolation",
+        "precision": "screenshot_calibrated_reference_only",
+        "usage": "reference_only_preflight_required",
+        "contour_area_px": 39203.5
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              110.0746621,
+              34.7806051
+            ],
+            [
+              110.0513598,
+              34.7806361
+            ],
+            [
+              110.0185109,
+              34.6995421
+            ],
+            [
+              109.8278883,
+              34.6545863
+            ],
+            [
+              109.7632502,
+              34.6070719
+            ],
+            [
+              109.7550153,
+              34.5234478
+            ],
+            [
+              109.7632585,
+              34.5144065
+            ],
+            [
+              109.774253,
+              34.5132852
+            ],
+            [
+              109.7756285,
+              34.5031089
+            ],
+            [
+              109.8485454,
+              34.4387396
+            ],
+            [
+              110.0746893,
+              34.4870733
+            ],
+            [
+              110.0746795,
+              34.5933283
+            ],
+            [
+              110.0308381,
+              34.584367
+            ],
+            [
+              110.0239958,
+              34.5753467
+            ],
+            [
+              109.9802189,
+              34.563047
+            ],
+            [
+              109.9637994,
+              34.5630934
+            ],
+            [
+              109.951479,
+              34.5710338
+            ],
+            [
+              109.9460022,
+              34.5653961
+            ],
+            [
+              109.8925219,
+              34.5575391
+            ],
+            [
+              109.8911489,
+              34.5530182
+            ],
+            [
+              109.8540377,
+              34.5518535
+            ],
+            [
+              109.856787,
+              34.5688087
+            ],
+            [
+              109.9268194,
+              34.584637
+            ],
+            [
+              109.9323006,
+              34.5947956
+            ],
+            [
+              109.9473685,
+              34.6015444
+            ],
+            [
+              110.0007346,
+              34.6036549
+            ],
+            [
+              110.0144139,
+              34.6149076
+            ],
+            [
+              110.0390494,
+              34.6125847
+            ],
+            [
+              110.074677,
+              34.6204331
+            ],
+            [
+              110.0746621,
+              34.7806051
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "xian_visible_flyable_area_4",
+        "province": "Shaanxi",
+        "city": "Xi'an",
+        "area_type": "flyable_airspace_reference",
+        "source": "UOM airspace information query page screenshot",
+        "source_screenshot": "data/uom_shaanxi/screenshots/xian_calibration_zoom10_wiggle/xian_zoom10_left_top_in.png",
+        "zoom_level": 10,
+        "source_coordinate_system": "uom_web_map_coordinate_readout_assumed_gcj02",
+        "render_coordinate_system": "wgs84_for_tianditu_maplibre",
+        "projection_fit": "web_mercator_y_interpolation",
+        "precision": "screenshot_calibrated_reference_only",
+        "usage": "reference_only_preflight_required",
+        "contour_area_px": 17450.5
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              109.8636443,
+              34.7809495
+            ],
+            [
+              109.6836805,
+              34.7808529
+            ],
+            [
+              109.6836817,
+              34.7673302
+            ],
+            [
+              109.4033951,
+              34.6644638
+            ],
+            [
+              109.3924159,
+              34.6644633
+            ],
+            [
+              109.3773276,
+              34.6892942
+            ],
+            [
+              109.3704737,
+              34.6915569
+            ],
+            [
+              109.3691037,
+              34.6870458
+            ],
+            [
+              109.4226286,
+              34.621582
+            ],
+            [
+              109.4226297,
+              34.6091603
+            ],
+            [
+              109.3526743,
+              34.5651272
+            ],
+            [
+              109.7838561,
+              34.7458775
+            ],
+            [
+              109.7934823,
+              34.7549092
+            ],
+            [
+              109.809991,
+              34.7560644
+            ],
+            [
+              109.8636443,
+              34.7809495
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

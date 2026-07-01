@@ -93,6 +93,8 @@ export interface CockpitStreamTarget {
   role: 'fire-monitor' | 'delivery'
   deviceSn: string
   callsign: string
+  model?: string
+  displayName?: string
   online: boolean
   taskStatus?: string
   progressPercent?: number

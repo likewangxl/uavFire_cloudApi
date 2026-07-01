@@ -6,6 +6,10 @@ export interface DeliveryDeviceDTO {
   deviceType: string | null;
   online: string | null;
   bindStatus: string | null;
+  model?: string | null;
+  displayName?: string | null;
+  deviceModelKey?: string | null;
+  deviceModelClass?: string | null;
 }
 
 export interface DeliveryDeviceProperties {

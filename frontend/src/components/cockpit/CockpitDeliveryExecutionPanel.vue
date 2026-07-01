@@ -423,7 +423,8 @@ async function refreshPanel () {
 <style scoped lang="scss">
 .delivery-execution-panel {
   min-width: 0;
-  min-height: 100%;
+  min-height: 0;
+  height: 100%;
   color: #e8f3ff;
 }
 
@@ -431,8 +432,8 @@ async function refreshPanel () {
   position: relative;
   width: 100%;
   min-width: 0;
-  aspect-ratio: 16 / 9;
-  min-height: clamp(560px, 64vh, 860px);
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid rgba(69, 221, 255, 0.16);
   border-radius: 26px;
@@ -659,7 +660,7 @@ async function refreshPanel () {
 
 @media (max-width: 920px) {
   .delivery-live-frame {
-    min-height: clamp(460px, 64vh, 700px);
+    min-height: 0;
   }
 
   .delivery-live-badge {

@@ -10,29 +10,34 @@ function readSource (path) {
   return readFileSync(resolve(root, path), 'utf8')
 }
 
-test('delivery execution tab hides the lower KPI grid so live video can use the space', () => {
+test('delivery execution tab uses the shared visual stage and instrument belt', () => {
   const cockpitSource = readSource('src/pages/page-web/projects/leadership-cockpit.vue')
   const deliveryPanelSource = readSource('src/components/cockpit/CockpitDeliveryExecutionPanel.vue')
 
   assert.match(
     cockpitSource,
-    /v-if="activeVisualTab === 'map'"\s+class="map-kpi-grid"/,
-    'only the map tab should render the lower KPI grid'
+    /class="visual-stage"/,
+    'delivery execution should share the same visual-stage container as the map and monitor tabs'
+  )
+  assert.match(
+    cockpitSource,
+    /class="visual-instrument-belt"/,
+    'delivery execution should keep the lower continuous instrument belt instead of hiding it'
   )
   assert.doesNotMatch(
     cockpitSource,
-    /const deliveryExecutionKpis = computed/,
-    'delivery KPI cards should not be maintained for the hidden lower grid'
+    /v-if="activeVisualTab === 'map'"\s+class="map-kpi-grid"/,
+    'context metrics should no longer be map-only'
   )
-  assert.match(
+  assert.doesNotMatch(
     deliveryPanelSource,
     /min-height:\s*clamp\(560px,\s*64vh,\s*860px\)/,
-    'delivery live frame should expand into the recovered vertical space'
+    'delivery live frame should not keep a taller independent stage height'
   )
-  assert.match(
+  assert.doesNotMatch(
     deliveryPanelSource,
     /aspect-ratio:\s*16\s*\/\s*9/,
-    'delivery live frame should use the same video stage ratio as fire monitoring'
+    'delivery live frame should fill the shared visual stage instead of enforcing a separate ratio'
   )
   assert.match(
     deliveryPanelSource,
@@ -141,14 +146,24 @@ test('delivery execution target list excludes rc controller devices', () => {
   )
 })
 
-test('delivery execution selector uses compact FC100 model and SN labels', () => {
+test('delivery execution selector uses compact full model and SN labels', () => {
   const cockpitSource = readSource('src/pages/page-web/projects/leadership-cockpit.vue')
   const selectorSource = readSource('src/components/cockpit/CockpitAircraftStreamSelector.vue')
 
   assert.match(
     cockpitSource,
-    /callsign:\s*'FC100'/,
-    'delivery selector should show the FC100 model instead of a generated callsign suffix'
+    /callsign:\s*model/,
+    'delivery selector should show the resolved full device model instead of a generated callsign suffix'
+  )
+  assert.match(
+    cockpitSource,
+    /DJI Flycart100/,
+    'delivery selector should resolve FC100 devices to the full DJI Flycart100 model label'
+  )
+  assert.match(
+    cockpitSource,
+    /0-122-0/,
+    'delivery selector should normalize DJI numeric FC100 model keys returned by Delivery Sync'
   )
   assert.match(
     cockpitSource,

@@ -490,6 +490,7 @@ import { useFlightArea } from './flight-area/use-flight-area'
 import { useFlightAreaDroneLocationEvent } from './flight-area/use-flight-area-drone-location-event'
 import { getPlanningStateRaw, setFlightPositionFromWgs } from '/@/hooks/use-wayline-planning'
 import { usePlannerOverlays } from '/@/hooks/use-planner-overlays'
+import { loadFlightAreas } from '/@/hooks/use-flight-area-compliance'
 
 export default defineComponent({
   components: {
@@ -742,6 +743,7 @@ export default defineComponent({
     onMounted(() => {
       const app = getApp()
       useGMapManageHook.globalPropertiesConfig(app)
+      loadFlightAreas()
       // MapLibre 样式加载完成后再首绘覆盖物（否则 source/layer 还没就绪）
       const map = root?.$map
       if (map && typeof map.once === 'function') {
