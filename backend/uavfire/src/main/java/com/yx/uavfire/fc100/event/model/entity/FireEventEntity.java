@@ -43,6 +43,8 @@ public class FireEventEntity {
     private String lastSourceEventId;
     private Integer notificationVersion;
     private String status;
+    private String confirmedStatus;
+    private Long linkedIncidentId;
     private Integer deleted;
     private String createdBy;
     private String updatedBy;

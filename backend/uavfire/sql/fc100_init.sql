@@ -43,6 +43,8 @@ CREATE TABLE `fire_event` (
   `last_source_event_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT '最近一次 AI 原始事件编号',
   `notification_version` int NOT NULL DEFAULT 1 COMMENT '事件级通知版本，风险升级时递增',
   `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'NEW / LOW_CONFIDENCE / MISSION_CREATED / IGNORED',
+  `confirmed_status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING / CONFIRMED / REJECTED',
+  `linked_incident_id` bigint unsigned DEFAULT NULL COMMENT 'operation_incident.id',
   `deleted` tinyint(1) NOT NULL DEFAULT 0,
   `created_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
   `updated_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
@@ -52,6 +54,8 @@ CREATE TABLE `fire_event` (
   UNIQUE KEY `UNI_EVENT_ID` (`event_id`),
   KEY `idx_workspace_status` (`workspace_id`,`status`),
   KEY `idx_event_timestamp` (`event_timestamp`),
+  KEY `idx_fire_event_confirmed` (`confirmed_status`,`update_time`),
+  KEY `idx_fire_event_incident` (`linked_incident_id`),
   KEY `idx_fire_event_merge` (`workspace_id`,`device_sn`,`deleted`,`last_seen_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='火情事件';
 
@@ -105,6 +109,7 @@ CREATE TABLE `fc100_fire_mission` (
   `mission_no` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'MISSION-yyyyMMdd-HHmmss-NNNN',
   `workspace_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT 'DEFAULT',
   `fire_event_id` bigint unsigned NOT NULL,
+  `incident_id` bigint unsigned DEFAULT NULL COMMENT 'operation_incident.id',
   `parent_mission_id` bigint unsigned DEFAULT NULL COMMENT 'H-2 二次投放父任务',
   `attempt_index` int NOT NULL DEFAULT 1 COMMENT 'H-2 同火情第几次出任务',
   `aircraft_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
@@ -141,6 +146,7 @@ CREATE TABLE `fc100_fire_mission` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `UNI_MISSION_NO` (`mission_no`),
   KEY `idx_fire_event_id` (`fire_event_id`),
+  KEY `idx_fc100_mission_incident` (`incident_id`),
   KEY `idx_workspace_status_ct` (`workspace_id`,`status`,`create_time`),
   KEY `idx_aircraft_sn` (`aircraft_sn`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='FC100 灭火任务';
@@ -238,6 +244,98 @@ CREATE TABLE `fc100_mission_log` (
 -- ---------------------------------------------------------------------------
 -- 7. fc100_payload_event — 投放事件
 -- ---------------------------------------------------------------------------
+-- operation incident orchestration tables.
+DROP TABLE IF EXISTS `operation_incident`;
+CREATE TABLE `operation_incident` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `incident_no` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `fire_event_id` bigint unsigned NOT NULL,
+  `level` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'CANDIDATE / CONFIRMED / DISPATCHING / RESPONDING / RECHECKING / RESOLVED / FALSE_ALARM / ABORTED / ARCHIVED',
+  `center_lat` double DEFAULT NULL,
+  `center_lng` double DEFAULT NULL,
+  `risk_radius_m` double DEFAULT NULL,
+  `created_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `confirmed_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `closed_at` bigint DEFAULT NULL,
+  `create_time` bigint NOT NULL,
+  `update_time` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `UNI_OPERATION_INCIDENT_NO` (`incident_no`),
+  KEY `idx_operation_incident_fire_event` (`fire_event_id`),
+  KEY `idx_operation_incident_status_ct` (`status`,`create_time`),
+  KEY `idx_operation_incident_level_ct` (`level`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='operation incident orchestration root';
+
+DROP TABLE IF EXISTS `operation_assignment`;
+CREATE TABLE `operation_assignment` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `incident_id` bigint unsigned NOT NULL,
+  `resource_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `role` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `lease_id` bigint unsigned DEFAULT NULL,
+  `assigned_at` bigint NOT NULL,
+  `released_at` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_operation_assignment_incident` (`incident_id`,`assigned_at`),
+  KEY `idx_operation_assignment_role_status` (`incident_id`,`role`,`status`),
+  KEY `idx_operation_assignment_resource` (`resource_sn`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='operation incident resource/personnel assignment';
+
+DROP TABLE IF EXISTS `operation_resource_lease`;
+CREATE TABLE `operation_resource_lease` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `resource_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `lease_type` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `owner_type` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `owner_id` bigint unsigned NOT NULL,
+  `expires_at` bigint DEFAULT NULL,
+  `heartbeat_at` bigint DEFAULT NULL,
+  `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_operation_lease_resource` (`resource_sn`,`status`),
+  KEY `idx_operation_lease_owner` (`owner_type`,`owner_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='operation resource lease placeholder for S4';
+
+DROP TABLE IF EXISTS `operation_command_event`;
+CREATE TABLE `operation_command_event` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `command_id` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `target_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `command_type` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `payload_json` longtext,
+  `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `idempotency_key` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `retry_count` int NOT NULL DEFAULT 0,
+  `ack_at` bigint DEFAULT NULL,
+  `error_message` text,
+  `create_time` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `UNI_OPERATION_COMMAND_ID` (`command_id`),
+  KEY `idx_operation_command_target` (`target_sn`,`status`,`create_time`),
+  KEY `idx_operation_command_idempotency` (`idempotency_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='operation command event queue placeholder for S4';
+
+DROP TABLE IF EXISTS `operation_incident_log`;
+CREATE TABLE `operation_incident_log` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `incident_id` bigint unsigned NOT NULL,
+  `action` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `from_status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `to_status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `operator_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `operator_role` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `client_ip` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `request_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `idempotency_key` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `remark` text,
+  `create_time` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_operation_incident_log_ct` (`incident_id`,`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='operation incident audit log';
+
+-- fc100_payload_event
 DROP TABLE IF EXISTS `fc100_payload_event`;
 CREATE TABLE `fc100_payload_event` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

@@ -14,6 +14,7 @@ public class FireMissionEntity {
     private String missionNo;
     private String workspaceId;
     private Long fireEventId;
+    private Long incidentId;
     private Long parentMissionId;
     private Integer attemptIndex;
     private String aircraftSn;

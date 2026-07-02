@@ -14,6 +14,7 @@ public enum Fc100ErrorCode {
     VERSION_MISMATCH(2002, "version mismatch, please refresh"),
     IDEMPOTENCY_REPLAY(2003, "idempotency replay"),
     DUPLICATE_FROM_EVENT(2004, "duplicate mission from same fire event"),
+    INCIDENT_NOT_FOUND(2005, "operation incident not found"),
 
     // 3xxx 安全
     SAFETY_CHECK_FAILED(3000, "safety check failed"),
