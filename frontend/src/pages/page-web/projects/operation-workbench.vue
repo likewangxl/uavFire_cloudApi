@@ -32,6 +32,8 @@
         :detail="detail"
         :loading="detailLoading"
         :submitting-action="submittingAction"
+        :preflight-result="preflightResult"
+        :preflight-loading="preflightLoading"
         @run-action="runIncidentAction"
       />
 
@@ -51,6 +53,7 @@ import IncidentDetailPanel from '/@/components/operation/IncidentDetailPanel.vue
 import OperationMap from '/@/components/operation/OperationMap.vue'
 import OperationTimeline from '/@/components/operation/OperationTimeline.vue'
 import { operationIncidentApi, useOperationMock } from '/@/api/operation/incident'
+import { operationComplianceApi } from '/@/api/operation/compliance'
 import { eventApi } from '/@/api/fire/event'
 import { missionApi } from '/@/api/fire/mission'
 import { payloadApi } from '/@/api/fire/payload'
@@ -59,6 +62,7 @@ import type {
   OperationIncidentDetailDTO,
   OperationTimelineItem,
 } from '/@/types/operation/incident'
+import type { PreflightResult } from '/@/types/operation/compliance'
 import type { FireEventDTO } from '/@/types/fire/event'
 import { ELocalStorageKey } from '/@/types'
 
@@ -71,7 +75,9 @@ const levelFilter = ref('')
 const listLoading = ref(false)
 const detailLoading = ref(false)
 const timelineLoading = ref(false)
+const preflightLoading = ref(false)
 const submittingAction = ref('')
+const preflightResult = ref<PreflightResult | null>(null)
 
 const selectedIncident = computed<OperationIncidentDTO | null>(() => {
   if (!selectedIncidentId.value) return detail.value
@@ -128,6 +134,7 @@ async function loadIncidents (selectFirst: boolean) {
 
 async function selectIncident (incident: OperationIncidentDTO) {
   selectedIncidentId.value = incident.id
+  preflightResult.value = null
   if (incident.sourceKind === 'FIRE_EVENT_CANDIDATE') {
     detail.value = candidateDetail(incident)
     timeline.value = []
@@ -150,7 +157,7 @@ async function loadIncidentDetail (id: number) {
       operationIncidentApi.detail(id),
       operationIncidentApi.timeline(id),
     ])
-    const dto = detailRes.data.data
+    const dto = await enrichIncidentDetail(detailRes.data.data)
     const items = timelineRes.data.data || dto?.timeline || []
     detail.value = dto ? { ...dto, timeline: items } : null
     timeline.value = items
@@ -162,7 +169,7 @@ async function loadIncidentDetail (id: number) {
   }
 }
 
-async function runIncidentAction (payload: { actionId: string; reason?: string }) {
+async function runIncidentAction (payload: { actionId: string; reason?: string; [key: string]: any }) {
   if (!detail.value) return
   const id = detail.value.id
   const body = {
@@ -234,6 +241,76 @@ async function runIncidentAction (payload: { actionId: string; reason?: string }
     return
   }
 
+  if (payload.actionId === 'ASSIGN_DELIVERY' || payload.actionId === 'ASSIGN_MONITOR') {
+    submittingAction.value = payload.actionId
+    try {
+      const assignBody = {
+        resourceSn: String(payload.resourceSn || '').trim(),
+        role: String(payload.role || ''),
+        operatorId: currentOperatorId(),
+        remark: payload.remark,
+      }
+      if (payload.actionId === 'ASSIGN_DELIVERY') {
+        await operationIncidentApi.assignDelivery(id, assignBody)
+      } else {
+        await operationIncidentApi.assignMonitor(id, assignBody)
+      }
+      message.success('资源已分配')
+      await loadIncidents(false)
+      await loadIncidentDetail(id)
+    } catch (e: any) {
+      message.error(errorMessage(e) || '资源分配失败')
+    } finally {
+      submittingAction.value = ''
+    }
+    return
+  }
+
+  if (payload.actionId === 'RUN_PREFLIGHT') {
+    preflightLoading.value = true
+    submittingAction.value = payload.actionId
+    try {
+      const res = await operationComplianceApi.runPreflight({
+        incidentId: id,
+        operatorId: currentOperatorId(),
+      })
+      preflightResult.value = res.data.data || null
+      message.success(preflightResult.value?.status === 'PASS' ? '预检通过' : '预检已完成，存在阻断项')
+    } catch (e: any) {
+      const blocked = extractPreflightResult(e)
+      if (blocked) preflightResult.value = blocked
+      Modal.error({
+        title: '运行预检失败',
+        content: errorMessage(e) || '请检查后端服务状态',
+      })
+    } finally {
+      submittingAction.value = ''
+      preflightLoading.value = false
+    }
+    return
+  }
+
+  if ([
+    'RECORD_FLIGHT_APPLICATION',
+    'RECORD_TAKEOFF_CONFIRMATION',
+    'RECORD_LANDING_REPORT',
+    'RECORD_QUALIFICATION',
+  ].includes(payload.actionId)) {
+    submittingAction.value = payload.actionId
+    try {
+      await submitComplianceRecord(id, payload)
+      message.success('合规记录已提交')
+    } catch (e: any) {
+      Modal.error({
+        title: '提交合规记录失败',
+        content: errorMessage(e) || '请检查后端服务状态',
+      })
+    } finally {
+      submittingAction.value = ''
+    }
+    return
+  }
+
   if (payload.actionId === 'CONFIRM_RELEASE') {
     if (!detail.value.missionNo) {
       message.error('未找到待释放任务编号')
@@ -279,8 +356,8 @@ async function runIncidentAction (payload: { actionId: string; reason?: string }
     return
   }
 
-  if (['CONFIRM_FIRE', 'GENERATE_MISSION', 'RUN_PREFLIGHT'].includes(payload.actionId)) {
-    message.info('该操作为一期骨架占位，后续阶段接入真实联动')
+  if (payload.actionId === 'GENERATE_MISSION') {
+    message.info(detail.value.missionNo ? '任务草稿已存在' : '当前后端为确认火情时自动生成任务草稿，无独立生成接口')
     return
   }
 
@@ -307,13 +384,96 @@ async function runIncidentAction (payload: { actionId: string; reason?: string }
     await loadIncidents(false)
     await loadIncidentDetail(id)
   } catch (e: any) {
+    const blocked = extractPreflightResult(e)
+    if (blocked) preflightResult.value = blocked
     Modal.error({
       title: '操作失败',
-      content: e?.response?.data?.message || e?.message || '请检查后端服务状态',
+      content: errorMessage(e) || '请检查后端服务状态',
     })
   } finally {
     submittingAction.value = ''
   }
+}
+
+async function submitComplianceRecord (incidentId: number, payload: Record<string, any>) {
+  const operatorId = currentOperatorId()
+  switch (payload.actionId) {
+    case 'RECORD_FLIGHT_APPLICATION':
+      return operationComplianceApi.recordFlightApplication({
+        incidentId,
+        applicationNo: payload.applicationNo,
+        approvalNo: payload.approvalNo,
+        validFrom: payload.validFrom,
+        validTo: payload.validTo,
+        operatorId,
+      })
+    case 'RECORD_TAKEOFF_CONFIRMATION':
+      return operationComplianceApi.recordTakeoffConfirmation({
+        incidentId,
+        operatorId,
+        confirmationNo: payload.confirmationNo,
+        confirmedAt: payload.confirmedAt,
+      })
+    case 'RECORD_LANDING_REPORT':
+      return operationComplianceApi.recordLandingReport({
+        incidentId,
+        operatorId,
+        reportNo: payload.reportNo,
+        landedAt: payload.landedAt,
+      })
+    case 'RECORD_QUALIFICATION':
+      return operationComplianceApi.createQualification({
+        qualificationType: payload.qualificationType,
+        qualificationNo: payload.qualificationNo,
+        issuer: payload.issuer,
+        validFrom: payload.validFrom,
+        validTo: payload.validTo,
+        status: payload.status || 'VALID',
+        operatorId,
+      })
+    default:
+      throw new Error(`unknown compliance action: ${payload.actionId}`)
+  }
+}
+
+async function enrichIncidentDetail (dto?: OperationIncidentDetailDTO): Promise<OperationIncidentDetailDTO | null> {
+  if (!dto) return null
+  const needsFireEvent = dto.fireEventId && (
+    dto.locationQuality == null ||
+    dto.confidence == null ||
+    dto.thermalTemperature == null
+  )
+  if (!needsFireEvent) return dto
+  try {
+    const res = await eventApi.get(dto.fireEventEventId || dto.fireEventId)
+    const event = res.data.data
+    if (!event) return dto
+    return {
+      ...dto,
+      centerLat: dto.centerLat ?? event.lat,
+      centerLng: dto.centerLng ?? event.lng,
+      riskRadiusM: dto.riskRadiusM ?? event.geoErrorRadiusM ?? undefined,
+      confidence: dto.confidence ?? event.confidence,
+      locationQuality: dto.locationQuality || event.locationQuality || event.geoQuality || 'UNKNOWN',
+      thermalTemperature: dto.thermalTemperature ?? event.thermalTemperature,
+      missionNo: dto.missionNo ?? event.missionNo,
+      missionStatus: dto.missionStatus ?? event.missionStatus,
+    }
+  } catch (e) {
+    return dto
+  }
+}
+
+function extractPreflightResult (e: any): PreflightResult | null {
+  const data = e?.response?.data?.data || e?.data?.data || e?.data
+  if (data && Array.isArray(data.items) && data.status) {
+    return data as PreflightResult
+  }
+  return null
+}
+
+function errorMessage (e: any) {
+  return e?.response?.data?.message || e?.data?.message || e?.message || ''
 }
 
 function currentOperatorId () {

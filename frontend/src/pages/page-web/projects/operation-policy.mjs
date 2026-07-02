@@ -38,17 +38,26 @@ const ACTION_META = {
     disabled: true,
     disabledReason: '当前后端未开放 CONFIRM 接口，S3 仅保留入口',
   },
+  ASSIGN_DELIVERY: {
+    label: '分配 FC100',
+    type: 'default',
+    disabled: false,
+  },
+  ASSIGN_MONITOR: {
+    label: '分配巡检机',
+    type: 'default',
+    disabled: false,
+  },
   GENERATE_MISSION: {
     label: '生成灭火任务',
     type: 'default',
     disabled: true,
-    disabledReason: 'TODO S6 接入',
+    disabledReason: '确认火情时后端自动生成草稿任务',
   },
   RUN_PREFLIGHT: {
     label: '运行预检',
     type: 'default',
-    disabled: true,
-    disabledReason: 'TODO S5 接入',
+    disabled: false,
   },
   DISPATCH: {
     label: '派发',
@@ -105,7 +114,9 @@ export function buildIncidentActions ({ status, assignments = [], missionStatus 
 
   return [
     action('CONFIRM_FIRE', normalized === 'CANDIDATE', { disabled: false, disabledReason: undefined }),
-    action('GENERATE_MISSION', normalized === 'CONFIRMED'),
+    action('ASSIGN_DELIVERY', normalized === 'CONFIRMED'),
+    action('ASSIGN_MONITOR', normalized === 'CONFIRMED'),
+    action('GENERATE_MISSION', false),
     action('RUN_PREFLIGHT', normalized === 'CONFIRMED'),
     action('DISPATCH', canDispatch),
     action('ABORT', ['CONFIRMED', 'DISPATCHING', 'RESPONDING', 'RECHECKING'].includes(normalized)),
@@ -179,4 +190,28 @@ export function draftMissionHint (quality) {
     return { type: 'success', text: '坐标精确，确认后可生成 CREATED 草稿任务' }
   }
   return { type: 'warning', text: '坐标非 PRECISE，确认后需复测或人工标注坐标，不生成投放任务草稿' }
+}
+
+export function missionPresentation ({ missionNo, missionStatus, locationQuality } = {}) {
+  const no = String(missionNo || '').trim()
+  const status = String(missionStatus || '').trim()
+  if (no) {
+    return {
+      state: 'EXISTING',
+      title: `任务 ${no}（${status || '-'}）`,
+      type: 'success',
+    }
+  }
+  if (String(locationQuality || '').toUpperCase() === 'PRECISE') {
+    return {
+      state: 'AUTO_ON_CONFIRM',
+      title: '确认时自动生成',
+      type: 'info',
+    }
+  }
+  return {
+    state: 'BLOCKED_BY_LOCATION',
+    title: '坐标非 PRECISE，暂不生成任务',
+    type: 'warning',
+  }
 }

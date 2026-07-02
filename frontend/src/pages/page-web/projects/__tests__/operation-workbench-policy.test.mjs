@@ -8,6 +8,7 @@ import {
   coordinateQualityBadge,
   shouldShowSaturationWarning,
   draftMissionHint,
+  missionPresentation,
   requiresDangerConfirmation,
   requiresActionReason,
   sortTimelineItems,
@@ -16,6 +17,8 @@ import {
 
 const allActionIds = [
   'CONFIRM_FIRE',
+  'ASSIGN_DELIVERY',
+  'ASSIGN_MONITOR',
   'GENERATE_MISSION',
   'RUN_PREFLIGHT',
   'DISPATCH',
@@ -58,7 +61,14 @@ test('button visibility rules cover every operation incident status', () => {
   ])
 
   assertVisibleOnly('CANDIDATE', ['CONFIRM_FIRE', 'MARK_FALSE_ALARM'])
-  assertVisibleOnly('CONFIRMED', ['GENERATE_MISSION', 'RUN_PREFLIGHT', 'DISPATCH', 'ABORT', 'MARK_FALSE_ALARM'], [
+  assertVisibleOnly('CONFIRMED', [
+    'ASSIGN_DELIVERY',
+    'ASSIGN_MONITOR',
+    'RUN_PREFLIGHT',
+    'DISPATCH',
+    'ABORT',
+    'MARK_FALSE_ALARM',
+  ], [
     { role: 'DELIVERY_PRIMARY', status: 'ACTIVE', resourceSn: 'FC100-001' },
   ])
   assertVisibleOnly('DISPATCHING', ['ABORT'])
@@ -68,6 +78,20 @@ test('button visibility rules cover every operation incident status', () => {
   assertVisibleOnly('ARCHIVED', [])
   assertVisibleOnly('FALSE_ALARM', ['ARCHIVE'])
   assertVisibleOnly('ABORTED', ['ARCHIVE'])
+})
+
+test('confirmed incidents expose assignment actions and enabled preflight', () => {
+  const actions = buildIncidentActions({ status: 'CONFIRMED' })
+  const assignDelivery = actions.find(item => item.id === 'ASSIGN_DELIVERY')
+  const assignMonitor = actions.find(item => item.id === 'ASSIGN_MONITOR')
+  const preflight = actions.find(item => item.id === 'RUN_PREFLIGHT')
+
+  assert.equal(assignDelivery?.visible, true)
+  assert.equal(assignDelivery?.disabled, false)
+  assert.equal(assignMonitor?.visible, true)
+  assert.equal(assignMonitor?.disabled, false)
+  assert.equal(preflight?.visible, true)
+  assert.equal(preflight?.disabled, false)
 })
 
 test('dispatch stays hidden until CONFIRMED incident has active DELIVERY_PRIMARY assignment', () => {
@@ -174,4 +198,38 @@ test('thermal saturation warning follows configured threshold', () => {
 test('draft mission hint explains non precise coordinate behavior', () => {
   assert.equal(draftMissionHint('PRECISE').type, 'success')
   assert.match(draftMissionHint('ESTIMATED').text, /需复测或人工标注坐标/)
+})
+
+test('mission presentation distinguishes existing mission, precise no mission, and non precise no mission', () => {
+  assert.ok(!visibleActionIds('CONFIRMED').includes('GENERATE_MISSION'))
+
+  assert.deepEqual(missionPresentation({
+    missionNo: 'FM-20260702-001',
+    missionStatus: 'CREATED',
+    locationQuality: 'PRECISE',
+  }), {
+    state: 'EXISTING',
+    title: '任务 FM-20260702-001（CREATED）',
+    type: 'success',
+  })
+
+  assert.deepEqual(missionPresentation({
+    missionNo: null,
+    missionStatus: null,
+    locationQuality: 'PRECISE',
+  }), {
+    state: 'AUTO_ON_CONFIRM',
+    title: '确认时自动生成',
+    type: 'info',
+  })
+
+  assert.deepEqual(missionPresentation({
+    missionNo: null,
+    missionStatus: null,
+    locationQuality: 'ESTIMATED',
+  }), {
+    state: 'BLOCKED_BY_LOCATION',
+    title: '坐标非 PRECISE，暂不生成任务',
+    type: 'warning',
+  })
 })

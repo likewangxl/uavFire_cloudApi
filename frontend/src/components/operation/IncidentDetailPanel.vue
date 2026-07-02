@@ -42,6 +42,13 @@
         </a-descriptions>
 
         <a-alert
+          v-if="detail.status !== 'CANDIDATE'"
+          class="detail-alert"
+          :type="missionInfo.type"
+          show-icon
+          :message="missionInfo.title"
+        />
+        <a-alert
           v-if="shouldShowSaturationWarning(detail.thermalTemperature, saturationTempC)"
           class="detail-alert"
           type="warning"
@@ -82,7 +89,17 @@
         </section>
 
         <section class="detail-section">
-          <h4>预检结果</h4>
+          <CompliancePanel
+            :incident-id="detail.id"
+            :preflight-result="preflightResult"
+            :preflight-loading="preflightLoading"
+            :submitting-action="submittingAction"
+            @run-action="payload => emit('run-action', payload)"
+          />
+        </section>
+
+        <section class="detail-section">
+          <h4>复测记录</h4>
           <a-form layout="vertical" class="recheck-form">
             <a-form-item label="复测温度(°C)">
               <a-input-number v-model:value="recheckForm.maxTemp" style="width: 100%" />
@@ -124,12 +141,15 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import CompliancePanel from './CompliancePanel.vue'
 import OperationActionBar from './OperationActionBar.vue'
 import type { OperationIncidentDetailDTO } from '/@/types/operation/incident'
+import type { PreflightResult } from '/@/types/operation/compliance'
 import {
   coordinateQualityBadge,
   draftMissionHint,
   levelBadge,
+  missionPresentation,
   shouldShowSaturationWarning,
   statusBadge,
 } from '/@/pages/page-web/projects/operation-policy.mjs'
@@ -138,12 +158,19 @@ const props = defineProps<{
   detail: OperationIncidentDetailDTO | null;
   loading: boolean;
   submittingAction?: string;
+  preflightResult?: PreflightResult | null;
+  preflightLoading?: boolean;
 }>()
 
 const emit = defineEmits(['run-action'])
 
 const assignments = computed(() => props.detail?.assignments || [])
 const saturationTempC = 540
+const missionInfo = computed(() => missionPresentation({
+  missionNo: props.detail?.missionNo,
+  missionStatus: props.detail?.missionStatus,
+  locationQuality: props.detail?.locationQuality,
+}))
 const recheckForm = reactive({
   maxTemp: undefined as number | undefined,
   hotAreaM2: 0,
