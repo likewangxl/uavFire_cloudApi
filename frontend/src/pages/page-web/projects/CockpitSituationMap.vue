@@ -69,11 +69,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { buildTiandituStyle } from '/@/hooks/tianditu'
+import { useUomAirspaceReferenceLayer } from '/@/hooks/use-uom-airspace-reference-layer'
 import { loadTelluxModule } from './leadership-cockpit-situation.mjs'
 
 const props = defineProps<{
   layers: any
   focusKey?: string
+  showUomAirspace?: boolean
 }>()
 
 const emit = defineEmits(['select'])
@@ -90,8 +92,10 @@ let map: maplibregl.Map | null = null
 const markers: maplibregl.Marker[] = []
 const telluxDisposeRef = ref<null |(() => void)>(null)
 const telluxModuleRef = ref<any>(null)
+const uomAirspace = useUomAirspaceReferenceLayer(() => map)
 let hasInitialViewportFit = false
 let userCameraInteraction = false
+let uomAirspaceTouched = false
 
 const telluxModuleUrl = ((import.meta.env.VITE_TELLUX_MODULE_URL as string | undefined) || '').trim()
 const quantizedMeshTerrainUrl = ((import.meta.env.VITE_TELLUX_QUANTIZED_MESH_URL as string | undefined) || '').trim()
@@ -132,6 +136,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unmountTelluxStage()
+  uomAirspace.dispose()
   clearMarkers()
   map?.remove()
   map = null
@@ -151,6 +156,11 @@ watch(
 watch(
   () => props.focusKey,
   () => focusSelectedLayer()
+)
+
+watch(
+  () => props.showUomAirspace,
+  value => setUomAirspaceVisible(Boolean(value)),
 )
 
 function activateFlatMode () {
@@ -262,6 +272,7 @@ function renderLayers () {
   if (!map.loaded()) return
   clearMarkers()
   ensureVectorSources()
+  setUomAirspaceVisible(Boolean(props.showUomAirspace))
   renderVectorLayers()
   renderMarkers()
   fitInitialSituationBounds()
@@ -336,6 +347,17 @@ function ensureTerrainSources () {
 function setTerrainLayerVisibility (visibility: 'visible' | 'none') {
   if (map?.getLayer('situation-terrain-shade')) {
     map.setLayoutProperty('situation-terrain-shade', 'visibility', visibility)
+  }
+}
+
+function setUomAirspaceVisible (visible: boolean) {
+  if (visible) {
+    uomAirspaceTouched = true
+    uomAirspace.setVisible(true)
+    return
+  }
+  if (uomAirspaceTouched) {
+    uomAirspace.setVisible(false)
   }
 }
 

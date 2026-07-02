@@ -124,6 +124,11 @@ const routes: Array<RouteRecordRaw> = [
         component: () => import('/@/pages/page-web/projects/fire/FireMissionList.vue')
       },
       {
+        path: '/' + ERouterName.OPERATION_INCIDENTS,
+        name: ERouterName.OPERATION_INCIDENTS,
+        component: () => import('/@/pages/page-web/projects/operation-workbench.vue')
+      },
+      {
         path: '/' + ERouterName.FIRE_MISSION_DETAIL + '/:no',
         name: ERouterName.FIRE_MISSION_DETAIL,
         component: () => import('/@/pages/page-web/projects/fire/FireMissionDetail.vue'),

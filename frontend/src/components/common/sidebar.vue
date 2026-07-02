@@ -58,6 +58,7 @@ export default defineComponent({
       { key: 5, label: '任务计划库', path: '/' + ERouterName.TASK, icon: 'CalendarOutlined' },
       { key: 7, label: '火情事件', path: '/' + ERouterName.FIRE_EVENTS, icon: 'FireOutlined' },
       { key: 8, label: '灭火任务', path: '/' + ERouterName.FIRE_MISSIONS, icon: 'AlertOutlined' },
+      { key: 9, label: '事件处置', path: '/' + ERouterName.OPERATION_INCIDENTS, icon: 'DeploymentUnitOutlined' },
     ]
 
     function selectedRoute (item: IOptions) {

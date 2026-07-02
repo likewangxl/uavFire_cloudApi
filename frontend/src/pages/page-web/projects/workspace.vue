@@ -43,6 +43,7 @@ const store = useMyStore()
 const FIRE_ROUTES = new Set<string>([
   ERouterName.FIRE_EVENTS,
   ERouterName.FIRE_MISSIONS,
+  ERouterName.OPERATION_INCIDENTS,
   ERouterName.FIRE_MISSION_DETAIL,
   ERouterName.FIRE_ROUTE_PREVIEW,
   ERouterName.FIRE_PAYLOAD_RELEASE,

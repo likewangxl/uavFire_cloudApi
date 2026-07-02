@@ -20,6 +20,7 @@ export enum ERouterName {
 
     FIRE_EVENTS = 'fire-events',
     FIRE_MISSIONS = 'fire-missions',
+    OPERATION_INCIDENTS = 'operation-incidents',
     FIRE_MISSION_DETAIL = 'fire-mission-detail',
     FIRE_ROUTE_PREVIEW = 'fire-route-preview',
     FIRE_PAYLOAD_RELEASE = 'fire-payload-release',
