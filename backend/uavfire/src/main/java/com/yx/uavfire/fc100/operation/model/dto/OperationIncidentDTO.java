@@ -16,6 +16,8 @@ public class OperationIncidentDTO {
     private String confirmedBy;
     private Integer recommendedRecheck;
     private String recheckReason;
+    private String missionNo;
+    private String missionStatus;
     private Long closedAt;
     private Long createTime;
     private Long updateTime;

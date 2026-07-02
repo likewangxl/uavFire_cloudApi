@@ -6,13 +6,14 @@ import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.mission.dao.FireMissionLogMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionLogEntity;
+import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
 import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
+import com.yx.uavfire.fc100.payload.config.Fc100ReleaseProperties;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,13 +25,17 @@ public class PayloadReleasePolicyService {
 
     private final FireMissionLogMapper logMapper;
     private final Clock clock;
-
-    @Value("${fc100.release.controlled-test-auto-enabled:false}")
-    private boolean controlledTestAutoEnabled;
+    private final Fc100ReleaseProperties properties;
 
     public PayloadReleasePolicyService(FireMissionLogMapper logMapper, Clock clock) {
+        this(logMapper, clock, new Fc100ReleaseProperties());
+    }
+
+    public PayloadReleasePolicyService(FireMissionLogMapper logMapper, Clock clock,
+                                       Fc100ReleaseProperties properties) {
         this.logMapper = logMapper;
         this.clock = clock;
+        this.properties = properties == null ? new Fc100ReleaseProperties() : properties;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW,
@@ -41,6 +46,12 @@ public class PayloadReleasePolicyService {
         ReleaseExecutionMode mode = ReleaseExecutionMode.fromDb(mission.getReleaseExecutionMode());
         String operatorId = safe(request == null ? null : request.getOperatorId());
 
+        if (!FireMissionStatus.PAYLOAD_RELEASE_PENDING.name().equals(mission.getStatus())) {
+            recordAudit(mission, request, "PAYLOAD_RELEASE_STATUS_DENIED", operatorId,
+                "release requires PAYLOAD_RELEASE_PENDING");
+            throw new Fc100BusinessException(Fc100ErrorCode.STATUS_TRANSITION_FORBIDDEN,
+                "release requires PAYLOAD_RELEASE_PENDING");
+        }
         if (mode == ReleaseExecutionMode.DELIVERY_SYNC_REMOTE) {
             // DJI has not provided written confirmation that the Delivery Sync
             // device command can safely release the FC100 hook. Keep this
@@ -52,11 +63,12 @@ public class PayloadReleasePolicyService {
             deny(mission, request, null, Fc100ErrorCode.RELEASE_CONFIRMATION_REQUIRED,
                 "RELEASE_CONFIRMATION_REQUIRED");
         }
-        if (policy == ReleasePolicy.MANUAL_CONFIRM && !hasConfirmationMarker(request)) {
+        validateConfirmationToken(mission, request, operatorId);
+        if (policy == ReleasePolicy.MANUAL_CONFIRM && !Boolean.TRUE.equals(request.getConfirmedRelease())) {
             deny(mission, request, operatorId, Fc100ErrorCode.RELEASE_CONFIRMATION_REQUIRED,
                 "RELEASE_CONFIRMATION_REQUIRED");
         }
-        if (policy == ReleasePolicy.CONTROLLED_TEST_AUTO && !controlledTestAutoEnabled) {
+        if (policy == ReleasePolicy.CONTROLLED_TEST_AUTO && !properties.isControlledTestAutoEnabled()) {
             deny(mission, request, operatorId, Fc100ErrorCode.CONTROLLED_TEST_AUTO_DISABLED,
                 "CONTROLLED_TEST_AUTO_DISABLED");
         }
@@ -85,7 +97,7 @@ public class PayloadReleasePolicyService {
                 AUTO_RELEASE_OPERATOR, "release_policy=" + policy.name());
             return false;
         }
-        if (!controlledTestAutoEnabled) {
+        if (!properties.isControlledTestAutoEnabled()) {
             recordAudit(mission, request, "PAYLOAD_AUTO_RELEASE_POLICY_BLOCKED",
                 AUTO_RELEASE_OPERATOR, "CONTROLLED_TEST_AUTO_DISABLED");
             return false;
@@ -107,15 +119,27 @@ public class PayloadReleasePolicyService {
         throw new Fc100BusinessException(errorCode, errorCode.defaultMessage());
     }
 
-    private boolean hasConfirmationMarker(ReleaseRequest request) {
-        if (request == null) {
-            return false;
+    private void validateConfirmationToken(FireMissionEntity mission, ReleaseRequest request, String operatorId) {
+        String submitted = safe(request == null ? null : request.getConfirmationToken());
+        String expected = safe(mission.getReleaseConfirmationToken());
+        if (submitted == null) {
+            denyToken(mission, request, operatorId, "RELEASE_CONFIRMATION_TOKEN_REQUIRED");
         }
-        if (Boolean.TRUE.equals(request.getConfirmedRelease())) {
-            return true;
+        if (expected == null || !expected.equals(submitted)) {
+            denyToken(mission, request, operatorId, "RELEASE_CONFIRMATION_TOKEN_MISMATCH");
         }
-        String token = safe(request.getConfirmationToken());
-        return token != null;
+        Long expiresAt = mission.getReleaseTokenExpiresAt();
+        if (expiresAt != null && expiresAt < clock.now()) {
+            denyToken(mission, request, operatorId, "RELEASE_CONFIRMATION_TOKEN_EXPIRED");
+        }
+        if (mission.getReleaseTokenUsedAt() != null) {
+            denyToken(mission, request, operatorId, "RELEASE_CONFIRMATION_TOKEN_REPLAYED");
+        }
+    }
+
+    private void denyToken(FireMissionEntity mission, ReleaseRequest request, String operatorId, String remark) {
+        recordAudit(mission, request, "PAYLOAD_RELEASE_TOKEN_DENIED", operatorId, remark);
+        throw new Fc100BusinessException(Fc100ErrorCode.RELEASE_CONFIRMATION_REQUIRED, remark);
     }
 
     private void recordAudit(FireMissionEntity mission, ReleaseRequest request, String action,

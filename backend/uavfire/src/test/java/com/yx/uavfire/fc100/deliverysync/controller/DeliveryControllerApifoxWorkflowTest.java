@@ -28,6 +28,7 @@ import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionLogEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
+import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
 import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
 import com.yx.uavfire.fc100.mission.service.TransitCommand;
@@ -59,6 +60,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.List;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -394,6 +396,8 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setDjiTaskId("TASK-AUTO-RELEASE-001");
         mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+        when(stateMachine.allowedEvents(FireMissionStatus.IN_PROGRESS))
+            .thenReturn(Set.of(FireMissionEvent.MARK_RELEASE_PENDING));
 
         DeliveryTaskStatus completed = new DeliveryTaskStatus();
         completed.setTaskId("TASK-AUTO-RELEASE-001");
@@ -424,11 +428,7 @@ class DeliveryControllerApifoxWorkflowTest {
 
         assertEquals("completed", result.getData().getPhase());
         verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
-        verify(stateMachine, never()).transit(any(TransitCommand.class));
-        ArgumentCaptor<FireMissionLogEntity> logCaptor = ArgumentCaptor.forClass(FireMissionLogEntity.class);
-        verify(missionLogMapper).insert(logCaptor.capture());
-        assertEquals("PAYLOAD_AUTO_RELEASE_POLICY_BLOCKED", logCaptor.getValue().getAction());
-        assertEquals("system-auto-release", logCaptor.getValue().getOperatorId());
+        verify(stateMachine).transit(any(TransitCommand.class));
     }
 
     @Test
@@ -452,6 +452,8 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+        when(stateMachine.allowedEvents(FireMissionStatus.IN_PROGRESS))
+            .thenReturn(Set.of(FireMissionEvent.MARK_RELEASE_PENDING));
 
         DeliveryTaskStatus completed = new DeliveryTaskStatus();
         completed.setTaskId("TASK-SCHEDULED-RELEASE-001");
@@ -481,8 +483,7 @@ class DeliveryControllerApifoxWorkflowTest {
         controller.pollInProgressMissionsForAutoRelease();
 
         verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
-        verify(stateMachine, never()).transit(any(TransitCommand.class));
-        verify(missionLogMapper).insert(any(FireMissionLogEntity.class));
+        verify(stateMachine).transit(any(TransitCommand.class));
     }
 
     @Test
@@ -506,6 +507,8 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setReleasePolicy(ReleasePolicy.DRY_RUN.name());
         when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+        when(stateMachine.allowedEvents(FireMissionStatus.IN_PROGRESS))
+            .thenReturn(Set.of(FireMissionEvent.MARK_RELEASE_PENDING));
 
         DeliveryTaskStatus running = new DeliveryTaskStatus();
         running.setTaskId("TASK-DROP-HOVER-001");
@@ -535,8 +538,7 @@ class DeliveryControllerApifoxWorkflowTest {
         controller.pollInProgressMissionsForAutoRelease();
 
         verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
-        verify(stateMachine, never()).transit(any(TransitCommand.class));
-        verify(missionLogMapper).insert(any(FireMissionLogEntity.class));
+        verify(stateMachine).transit(any(TransitCommand.class));
     }
 
     @Test
@@ -1170,11 +1172,11 @@ class DeliveryControllerApifoxWorkflowTest {
             Fc100BusinessException.class,
             () -> controller.releaseHook("M-FC100-001", param));
 
-        assertEquals(Fc100ErrorCode.RELEASE_CONFIRMATION_REQUIRED, ex.getErrorCode());
+        assertEquals(Fc100ErrorCode.STATUS_TRANSITION_FORBIDDEN, ex.getErrorCode());
         verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
         ArgumentCaptor<FireMissionLogEntity> logCaptor = ArgumentCaptor.forClass(FireMissionLogEntity.class);
         verify(missionLogMapper).insert(logCaptor.capture());
-        assertEquals("PAYLOAD_RELEASE_POLICY_DENIED", logCaptor.getValue().getAction());
+        assertEquals("PAYLOAD_RELEASE_STATUS_DENIED", logCaptor.getValue().getAction());
         assertEquals("operator-1", logCaptor.getValue().getOperatorId());
     }
 
@@ -1193,7 +1195,10 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setId(15L);
         mission.setMissionNo("M-FC100-QUEUE");
         mission.setAircraftSn("FC100-SN-001");
+        mission.setStatus("PAYLOAD_RELEASE_PENDING");
         mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
+        mission.setReleaseConfirmationToken("TOKEN-OK");
+        mission.setReleaseTokenExpiresAt(1779163740000L);
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
         OperationCommandEventEntity event = new OperationCommandEventEntity();
         event.setCommandId("CMD-QUEUE-001");
@@ -1209,11 +1214,14 @@ class DeliveryControllerApifoxWorkflowTest {
         DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
         param.setOperatorId("operator-1");
         param.setConfirmedRelease(true);
-        ApiResult<DeliveryCommandRef> result = controller.releaseHook("M-FC100-QUEUE", param, request);
+        param.setConfirmationToken("TOKEN-OK");
 
-        assertEquals("CMD-QUEUE-001", result.getData().getBid());
-        assertEquals("PENDING", result.getData().getStatus());
-        verify(commandQueueService).enqueue(any(), any(), any(), any(), any());
+        Fc100BusinessException ex = assertThrows(
+            Fc100BusinessException.class,
+            () -> controller.releaseHook("M-FC100-QUEUE", param, request));
+
+        assertEquals(Fc100ErrorCode.RELEASE_CAPABILITY_UNCONFIRMED, ex.getErrorCode());
+        verify(commandQueueService, never()).enqueue(any(), any(), any(), any(), any());
         verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
     }
 
@@ -1231,12 +1239,16 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setId(12L);
         mission.setMissionNo("M-FC100-002");
         mission.setAircraftSn("FC100-SN-001");
+        mission.setStatus("PAYLOAD_RELEASE_PENDING");
         mission.setReleasePolicy(ReleasePolicy.CONTROLLED_TEST_AUTO.name());
+        mission.setReleaseConfirmationToken("TOKEN-OK");
+        mission.setReleaseTokenExpiresAt(1779163740000L);
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
 
         DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
         param.setOperatorId("operator-1");
         param.setConfirmedRelease(true);
+        param.setConfirmationToken("TOKEN-OK");
 
         Fc100BusinessException ex = assertThrows(
             Fc100BusinessException.class,
@@ -1261,11 +1273,15 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setId(14L);
         mission.setMissionNo("M-FC100-DRY");
         mission.setAircraftSn("FC100-SN-001");
+        mission.setStatus("PAYLOAD_RELEASE_PENDING");
         mission.setReleasePolicy(ReleasePolicy.DRY_RUN.name());
+        mission.setReleaseConfirmationToken("TOKEN-OK");
+        mission.setReleaseTokenExpiresAt(1779163740000L);
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
 
         DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
         param.setOperatorId("operator-1");
+        param.setConfirmationToken("TOKEN-OK");
 
         ApiResult<DeliveryCommandRef> result = controller.releaseHook("M-FC100-DRY", param);
 
@@ -1291,13 +1307,17 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setId(13L);
         mission.setMissionNo("M-FC100-003");
         mission.setAircraftSn("FC100-SN-001");
+        mission.setStatus("PAYLOAD_RELEASE_PENDING");
         mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         mission.setReleaseExecutionMode(ReleaseExecutionMode.DELIVERY_SYNC_REMOTE.name());
+        mission.setReleaseConfirmationToken("TOKEN-OK");
+        mission.setReleaseTokenExpiresAt(1779163740000L);
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
 
         DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
         param.setOperatorId("operator-1");
         param.setConfirmedRelease(true);
+        param.setConfirmationToken("TOKEN-OK");
 
         Fc100BusinessException ex = assertThrows(
             Fc100BusinessException.class,
@@ -1308,10 +1328,68 @@ class DeliveryControllerApifoxWorkflowTest {
         verify(missionLogMapper).insert(any(FireMissionLogEntity.class));
     }
 
+    @Test
+    void releasePendingTimeoutEnqueuesReturnHomeAndMarksReturning() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        CommandQueueService commandQueue = mock(CommandQueueService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, null, null, null, commandQueue);
+        FireMissionEntity mission = fireMission("M-RELEASE-TIMEOUT-001", FireMissionStatus.PAYLOAD_RELEASE_PENDING.name());
+        mission.setReleaseTokenExpiresAt(1L);
+        when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
+        when(commandQueue.enqueue(any(), any(), any(), any(), any())).thenReturn(queuedCommand("CMD-RETURN-HOME"));
+
+        controller.scanReleasePendingTimeouts();
+
+        verify(commandQueue).enqueue(any(), any(), any(), any(), any());
+        ArgumentCaptor<TransitCommand> transitCaptor = ArgumentCaptor.forClass(TransitCommand.class);
+        verify(stateMachine).transit(transitCaptor.capture());
+        assertEquals(FireMissionEvent.MARK_RETURNING, transitCaptor.getValue().getEvent());
+        assertEquals("RELEASE_PENDING_TIMEOUT_AUTO_RETURN", transitCaptor.getValue().getRemark());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+    }
+
+    @Test
+    void releasePendingTimeoutDisabledOnlyAlertsWithoutCommandOrStateChange() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        CommandQueueService commandQueue = mock(CommandQueueService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, null, null, null, commandQueue);
+        ReflectionTestUtils.setField(controller, "releasePendingTimeoutAutoReturnEnabled", false);
+        FireMissionEntity mission = fireMission("M-RELEASE-TIMEOUT-002", FireMissionStatus.PAYLOAD_RELEASE_PENDING.name());
+        mission.setReleaseTokenExpiresAt(1L);
+        when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
+
+        controller.scanReleasePendingTimeouts();
+
+        verify(commandQueue, never()).enqueue(any(), any(), any(), any(), any());
+        verify(stateMachine, never()).transit(any(TransitCommand.class));
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+    }
+
     private PayloadReleasePolicyService releasePolicyService(FireMissionLogMapper missionLogMapper) {
         Clock clock = mock(Clock.class);
         when(clock.now()).thenReturn(1779163440000L);
         return new PayloadReleasePolicyService(missionLogMapper, clock);
+    }
+
+    private OperationCommandEventEntity queuedCommand(String commandId) {
+        OperationCommandEventEntity event = new OperationCommandEventEntity();
+        event.setCommandId(commandId);
+        event.setTargetSn("FC100-SN-001");
+        event.setCommandType("return_home");
+        event.setStatus("QUEUED");
+        event.setCreateTime(1779163440000L);
+        event.setUpdateTime(1779163440000L);
+        return event;
     }
 
     private byte[] kmzWithTemplate(String templateKml) throws Exception {

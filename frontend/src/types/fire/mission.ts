@@ -55,6 +55,13 @@ export interface FireMissionDTO {
   windDirectionDeg: number | null;
   djiTaskId: string | null;
   latestRouteFileId: number | null;
+  releasePolicy?: string | null;
+  releaseExecutionMode?: string | null;
+  releaseConfirmationToken?: string | null;
+  releasePendingStartedAt?: number | null;
+  releaseTokenExpiresAt?: number | null;
+  releaseTokenUsedAt?: number | null;
+  releasePendingRemainingMs?: number | null;
   isHighConfidence: number | null;
   createdBy: string | null;
   approverId: string | null;

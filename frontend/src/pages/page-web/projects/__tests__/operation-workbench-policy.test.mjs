@@ -62,8 +62,8 @@ test('button visibility rules cover every operation incident status', () => {
     { role: 'DELIVERY_PRIMARY', status: 'ACTIVE', resourceSn: 'FC100-001' },
   ])
   assertVisibleOnly('DISPATCHING', ['ABORT'])
-  assertVisibleOnly('RESPONDING', ['ABORT', 'CONFIRM_RELEASE'])
-  assertVisibleOnly('RECHECKING', ['ABORT', 'CONFIRM_RELEASE'])
+  assertVisibleOnly('RESPONDING', ['ABORT'])
+  assertVisibleOnly('RECHECKING', ['ABORT'])
   assertVisibleOnly('RESOLVED', ['ARCHIVE'])
   assertVisibleOnly('ARCHIVED', [])
   assertVisibleOnly('FALSE_ALARM', ['ARCHIVE'])
@@ -84,7 +84,7 @@ test('dispatch stays hidden until CONFIRMED incident has active DELIVERY_PRIMARY
 })
 
 test('dangerous operations require second confirmation with consequence copy', () => {
-  assert.deepEqual(DANGEROUS_ACTION_IDS, ['DISPATCH', 'ABORT', 'MARK_FALSE_ALARM', 'ARCHIVE'])
+  assert.deepEqual(DANGEROUS_ACTION_IDS, ['DISPATCH', 'ABORT', 'MARK_FALSE_ALARM', 'ARCHIVE', 'CONFIRM_RELEASE'])
 
   for (const actionId of DANGEROUS_ACTION_IDS) {
     assert.equal(requiresDangerConfirmation(actionId), true, `${actionId} should require confirmation`)
@@ -100,6 +100,20 @@ test('dangerous operations require second confirmation with consequence copy', (
   assert.equal(requiresActionReason('MARK_FALSE_ALARM'), true)
   assert.equal(requiresActionReason('DISPATCH'), false)
   assert.equal(requiresActionReason('ARCHIVE'), false)
+  assert.equal(requiresDangerConfirmation('CONFIRM_RELEASE'), true)
+})
+
+test('confirm release is visible only for responding incidents with a pending payload mission', () => {
+  assert.ok(!visibleActionIds('RESPONDING').includes('CONFIRM_RELEASE'))
+  const visible = buildIncidentActions({
+    status: 'RESPONDING',
+    missionStatus: 'PAYLOAD_RELEASE_PENDING',
+  }).filter(action => action.visible).map(action => action.id)
+  assert.ok(visible.includes('CONFIRM_RELEASE'))
+  assert.ok(!buildIncidentActions({
+    status: 'RECHECKING',
+    missionStatus: 'PAYLOAD_RELEASE_PENDING',
+  }).some(action => action.visible && action.id === 'CONFIRM_RELEASE'))
 })
 
 test('timeline sorting is ascending and stable for equal timestamps', () => {

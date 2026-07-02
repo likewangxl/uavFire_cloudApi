@@ -2,6 +2,7 @@ package com.yx.uavfire.fc100.mission.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yx.uavfire.fc100.common.Clock;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
@@ -22,10 +23,12 @@ public class FireMissionServiceImpl implements FireMissionService {
 
     private final FireMissionMapper mapper;
     private final MissionStateMachine sm;
+    private final Clock clock;
 
-    public FireMissionServiceImpl(FireMissionMapper m, MissionStateMachine sm) {
+    public FireMissionServiceImpl(FireMissionMapper m, MissionStateMachine sm, Clock clock) {
         this.mapper = m;
         this.sm = sm;
+        this.clock = clock;
     }
 
     @Override
@@ -54,6 +57,11 @@ public class FireMissionServiceImpl implements FireMissionService {
     private FireMissionDTO toDto(FireMissionEntity e) {
         FireMissionDTO d = new FireMissionDTO();
         BeanUtils.copyProperties(e, d);
+        if (e.getReleaseTokenExpiresAt() != null
+            && FireMissionStatus.PAYLOAD_RELEASE_PENDING.name().equals(e.getStatus())
+            && e.getReleaseTokenUsedAt() == null) {
+            d.setReleasePendingRemainingMs(Math.max(0L, e.getReleaseTokenExpiresAt() - clock.now()));
+        }
         d.setAvailableActions(sm.allowedEvents(FireMissionStatus.valueOf(e.getStatus()))
             .stream().map(FireMissionEvent::name).collect(Collectors.toList()));
         return d;

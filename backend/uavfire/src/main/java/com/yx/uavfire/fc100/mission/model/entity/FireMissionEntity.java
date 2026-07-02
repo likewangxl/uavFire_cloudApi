@@ -31,6 +31,10 @@ public class FireMissionEntity {
     private Long latestRouteFileId;
     private String releasePolicy;
     private String releaseExecutionMode;
+    private String releaseConfirmationToken;
+    private Long releasePendingStartedAt;
+    private Long releaseTokenExpiresAt;
+    private Long releaseTokenUsedAt;
     private String status;
     @Version
     private Long version;

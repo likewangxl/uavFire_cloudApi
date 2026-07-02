@@ -76,6 +76,7 @@ const reason = ref('')
 const visibleActions = computed<OperationUiAction[]>(() =>
   buildIncidentActions({
     status: props.incident?.status,
+    missionStatus: props.incident?.missionStatus,
     assignments: props.assignments,
   }).filter((item: OperationUiAction) => item.visible),
 )

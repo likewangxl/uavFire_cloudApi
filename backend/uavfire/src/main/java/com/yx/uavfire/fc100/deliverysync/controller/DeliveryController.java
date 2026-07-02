@@ -7,6 +7,7 @@ import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.common.idempotency.Idempotent;
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
+import com.yx.uavfire.fc100.deliverysync.DeliveryTaskStatusMapper;
 import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncProperties;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryBypassStreamDTO;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryCommandRef;
@@ -29,6 +30,7 @@ import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
+import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
 import com.yx.uavfire.fc100.mission.service.MissionStateMachine;
 import com.yx.uavfire.fc100.mission.service.TransitCommand;
 import com.yx.uavfire.fc100.operation.command.CommandQueueService;
@@ -70,6 +72,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -103,6 +106,7 @@ public class DeliveryController {
     private final PayloadReleasePolicyService releasePolicyService;
     private final CommandQueueService commandQueueService;
     private final ConcurrentHashMap<String, CachedDeviceLive> fc100BypassLiveCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Integer> deliveryFailureCounts = new ConcurrentHashMap<>();
 
     @Value("${livestream.url.rtmp.url:}")
     private String deliveryBypassRtmpUrl;
@@ -112,6 +116,12 @@ public class DeliveryController {
 
     @Value("${livestream.playback.webrtc-port:#{null}}")
     private Integer webrtcPlaybackPort;
+
+    @Value("${fc100.release.pending-timeout:5m}")
+    private Duration releasePendingTimeout = Duration.ofMinutes(5);
+
+    @Value("${fc100.release.pending-timeout-auto-return-enabled:true}")
+    private boolean releasePendingTimeoutAutoReturnEnabled = true;
 
     public DeliveryController(DeliverySyncAdapter a, DeliverySyncProperties p,
                                FireMissionMapper m, RouteExportService r, MissionStateMachine sm) {
@@ -330,7 +340,9 @@ public class DeliveryController {
             @Valid @RequestBody CreateExistingWaylineTaskParam p) {
         // TODO(S4): Wayline task dispatch remains outside operation_command_event in phase 1.
         String waylineId = p.getWaylineId().trim();
-        DeliveryTaskRef ref = adapter.createTask(CreateTaskRequest.builder()
+        DeliveryTaskRef ref;
+        try {
+            ref = adapter.createTask(CreateTaskRequest.builder()
             .workspaceId(props.getWorkspaceId())
             .deviceSn(p.getDeviceSn().trim())
             .missionNo(waylineId)
@@ -340,6 +352,10 @@ public class DeliveryController {
                 : "FC100航线-" + waylineId)
             .remark(p.getRemark())
             .build());
+            recordDeliverySuccess(waylineId, "create-existing-wayline-task");
+        } catch (RuntimeException e) {
+            throw e;
+        }
         return ApiResult.success(ref);
     }
 
@@ -552,7 +568,9 @@ public class DeliveryController {
             ? taskName.trim()
             : "FC100航线-" + firstText(importedWayline == null ? null : importedWayline.getName(), routeFile.waylineName, actualMissionId);
 
-        DeliveryTaskRef ref = adapter.createTask(CreateTaskRequest.builder()
+        DeliveryTaskRef ref;
+        try {
+            ref = adapter.createTask(CreateTaskRequest.builder()
             .workspaceId(props.getWorkspaceId())
             .deviceSn(deviceSn.trim())
             .missionNo(actualMissionId)
@@ -560,6 +578,9 @@ public class DeliveryController {
             .taskName(actualTaskName)
             .remark(remark)
             .build());
+        } catch (RuntimeException e) {
+            throw e;
+        }
         return ApiResult.success(ref);
     }
 
@@ -674,7 +695,9 @@ public class DeliveryController {
             null);
         String actualMissionId = firstText(importedWayline == null ? null : importedWayline.getWaylineId(), actualWaylineId);
 
-        DeliveryTaskRef ref = adapter.createTask(CreateTaskRequest.builder()
+        DeliveryTaskRef ref;
+        try {
+            ref = adapter.createTask(CreateTaskRequest.builder()
             .workspaceId(m.getWorkspaceId())
             .deviceSn(m.getAircraftSn())
             .missionNo(no)
@@ -683,8 +706,13 @@ public class DeliveryController {
             .remark(remark)
             .notifies(notifies)
             .waylineKmzObjectKey(file.getObjectKey())
-            .waylineKmzSha256(file.getSign())
-            .build());
+                .waylineKmzSha256(file.getSign())
+                .build());
+            recordDeliverySuccess(m.getMissionNo(), "create-task");
+        } catch (RuntimeException e) {
+            recordDeliveryFailure(m, "create-task", e);
+            throw e;
+        }
 
         sm.transit(TransitCommand.builder()
             .missionNo(no).event(FireMissionEvent.CREATE_DELIVERY_TASK)
@@ -809,11 +837,25 @@ public class DeliveryController {
             throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
                 "delivery task not created");
         }
-        DeliveryTaskOperationResult preflight = checkStartPreflight(m.getDjiTaskId(), m.getAircraftSn());
+        DeliveryTaskOperationResult preflight;
+        try {
+            preflight = checkStartPreflight(m.getDjiTaskId(), m.getAircraftSn());
+            recordDeliverySuccess(m.getMissionNo(), "start-preflight");
+        } catch (RuntimeException e) {
+            recordDeliveryFailure(m, "start-preflight", e);
+            throw e;
+        }
         if (preflight != null) {
             return ApiResult.success(preflight);
         }
-        DeliveryTaskOperationResult result = adapter.startTask(m.getDjiTaskId());
+        DeliveryTaskOperationResult result;
+        try {
+            result = adapter.startTask(m.getDjiTaskId());
+            recordDeliverySuccess(m.getMissionNo(), "start-task");
+        } catch (RuntimeException e) {
+            recordDeliveryFailure(m, "start-task", e);
+            throw e;
+        }
         if (Boolean.FALSE.equals(result.getAccepted())) {
             return ApiResult.success(result);
         }
@@ -834,8 +876,15 @@ public class DeliveryController {
             new QueryWrapper<FireMissionEntity>().eq("mission_no", no).eq("deleted", 0));
         if (m == null) throw new Fc100BusinessException(Fc100ErrorCode.MISSION_NOT_FOUND, no);
         if (m.getDjiTaskId() == null) return ApiResult.success(null);
-        DeliveryTaskStatus status = adapter.queryTaskStatus(m.getDjiTaskId());
-        autoReleaseHookWhenDeliveryReady(m, status);
+        DeliveryTaskStatus status;
+        try {
+            status = adapter.queryTaskStatus(m.getDjiTaskId());
+            recordDeliverySuccess(m.getMissionNo(), "query-task-status");
+        } catch (RuntimeException e) {
+            recordDeliveryFailure(m, "query-task-status", e);
+            throw e;
+        }
+        applyDeliveryTaskStatus(m, status);
         return ApiResult.success(status);
     }
 
@@ -854,12 +903,64 @@ public class DeliveryController {
             }
             try {
                 DeliveryTaskStatus status = adapter.queryTaskStatus(mission.getDjiTaskId());
-                autoReleaseHookWhenDeliveryReady(mission, status);
+                recordDeliverySuccess(mission.getMissionNo(), "query-task-status");
+                applyDeliveryTaskStatus(mission, status);
             } catch (Exception e) {
+                recordDeliveryFailure(mission, "query-task-status", e);
                 log.warn("FC100 auto release polling failed mission={} task={}: {}",
                     mission.getMissionNo(), mission.getDjiTaskId(), e.getMessage());
             }
         }
+    }
+
+    private void applyDeliveryTaskStatus(FireMissionEntity mission, DeliveryTaskStatus status) {
+        if (mission == null || status == null) return;
+        if (Boolean.FALSE.equals(status.getAccepted())) return;
+        DeliveryTaskStatusMapper.toMissionEvent(status)
+            .ifPresent(event -> applyDeliveryEvent(mission, event));
+        if (!FireMissionStatus.IN_PROGRESS.name().equals(mission.getStatus())) return;
+        if (!isAtDropPointAndHovering(mission)) return;
+        markReleasePendingFromDelivery(mission, "delivery-arrived-hovering");
+    }
+
+    private void applyDeliveryEvent(FireMissionEntity mission, FireMissionEvent event) {
+        FireMissionStatus current = FireMissionStatus.valueOf(mission.getStatus());
+        if (!sm.allowedEvents(current).contains(event)) {
+            return;
+        }
+        if (event == FireMissionEvent.MARK_RELEASE_PENDING) {
+            markReleasePendingFromDelivery(mission, "delivery-status");
+            return;
+        }
+        sm.transit(TransitCommand.builder()
+            .missionNo(mission.getMissionNo())
+            .event(event)
+            .operatorId("delivery-sync")
+            .remark("Delivery task status mapped to " + event.name())
+            .build());
+    }
+
+    private void markReleasePendingFromDelivery(FireMissionEntity mission, String source) {
+        if (!sm.allowedEvents(FireMissionStatus.valueOf(mission.getStatus()))
+            .contains(FireMissionEvent.MARK_RELEASE_PENDING)) {
+            return;
+        }
+        sm.transit(TransitCommand.builder()
+            .missionNo(mission.getMissionNo())
+            .event(FireMissionEvent.MARK_RELEASE_PENDING)
+            .operatorId("delivery-sync")
+            .remark("Release pending from " + source)
+            .build());
+        long now = System.currentTimeMillis();
+        missionMapper.update(null, new UpdateWrapper<FireMissionEntity>()
+            .eq("id", mission.getId())
+            .set("release_confirmation_token", "rel_" + UUID.randomUUID().toString().replace("-", ""))
+            .set("release_pending_started_at", now)
+            .set("release_token_expires_at", now + releasePendingTimeout.toMillis())
+            .set("release_token_used_at", null)
+            .set("update_time", now)
+            .set("updated_by", "delivery-sync"));
+        mission.setStatus(FireMissionStatus.PAYLOAD_RELEASE_PENDING.name());
     }
 
     private void autoReleaseHookWhenDeliveryReady(FireMissionEntity mission, DeliveryTaskStatus status) {
@@ -872,19 +973,9 @@ public class DeliveryController {
         // 轮询到速度≤阈值且距 DROP≤5m 时触发。
         if (!isAtDropPointAndHovering(mission)) return;
 
-        DeviceCommandParam command = new DeviceCommandParam();
-        command.setOperatorId("system-auto-release");
-        command.setData(Map.of("mode", 1));
-        sendMissionCommand(mission.getMissionNo(), "hoist_hook_control", command);
-
         sm.transit(TransitCommand.builder()
             .missionNo(mission.getMissionNo())
             .event(FireMissionEvent.MARK_RELEASE_PENDING)
-            .operatorId("system-auto-release")
-            .build());
-        sm.transit(TransitCommand.builder()
-            .missionNo(mission.getMissionNo())
-            .event(FireMissionEvent.CONFIRM_RELEASE)
             .operatorId("system-auto-release")
             .build());
     }
@@ -976,6 +1067,10 @@ public class DeliveryController {
                     .build());
         if (decision.isDryRun()) {
             return ApiResult.success(null);
+        }
+        if (decision.getMode() == ReleaseExecutionMode.OFFICIAL_HOOK_MANUAL) {
+            throw new Fc100BusinessException(Fc100ErrorCode.RELEASE_CAPABILITY_UNCONFIRMED,
+                "OFFICIAL_HOOK_MANUAL requires payload confirm-release evidence, not Delivery Sync remote release");
         }
         DeviceCommandParam command = new DeviceCommandParam();
         command.setOperatorId(p.getOperatorId());
@@ -1271,6 +1366,63 @@ public class DeliveryController {
     private boolean isDuplicateWaylineNameError(Fc100BusinessException e) {
         String message = e.getMessage();
         return message != null && (message.contains("203541") || message.contains("航线名称重复"));
+    }
+
+    @Scheduled(initialDelayString = "${fc100.release.pending-timeout-scan-initial-delay-ms:10000}",
+               fixedDelayString = "${fc100.release.pending-timeout-scan-delay-ms:10000}")
+    public void scanReleasePendingTimeouts() {
+        long now = System.currentTimeMillis();
+        List<FireMissionEntity> missions = missionMapper.selectList(new QueryWrapper<FireMissionEntity>()
+            .eq("deleted", 0)
+            .eq("status", FireMissionStatus.PAYLOAD_RELEASE_PENDING.name())
+            .isNotNull("release_token_expires_at")
+            .lt("release_token_expires_at", now)
+            .last("limit 20"));
+        for (FireMissionEntity mission : missions == null ? List.<FireMissionEntity>of() : missions) {
+            if (releasePendingTimeoutAutoReturnEnabled) {
+                DeviceCommandParam command = new DeviceCommandParam();
+                command.setOperatorId("release-timeout-auto-return");
+                sendDeviceCommand(mission.getAircraftSn(), "return_home", command, mission.getMissionNo(),
+                    "release-timeout-auto-return-" + mission.getMissionNo());
+                sm.transit(TransitCommand.builder()
+                    .missionNo(mission.getMissionNo())
+                    .event(FireMissionEvent.MARK_RETURNING)
+                    .operatorId("release-timeout-auto-return")
+                    .remark("RELEASE_PENDING_TIMEOUT_AUTO_RETURN")
+                    .build());
+            } else {
+                log.warn("RELEASE_PENDING_TIMEOUT_ALERT_ONLY mission={} expiresAt={}",
+                    mission.getMissionNo(), mission.getReleaseTokenExpiresAt());
+            }
+        }
+    }
+
+    private void recordDeliverySuccess(String missionNo, String operation) {
+        deliveryFailureCounts.remove(failureKey(missionNo, operation));
+    }
+
+    private void recordDeliveryFailure(FireMissionEntity mission, String operation, Exception e) {
+        if (mission == null) {
+            return;
+        }
+        int failures = deliveryFailureCounts.merge(failureKey(mission.getMissionNo(), operation), 1, Integer::sum);
+        if (failures < Math.max(1, props.getManualTakeoverFailureThreshold())) {
+            return;
+        }
+        FireMissionStatus status = FireMissionStatus.valueOf(mission.getStatus());
+        if (!sm.allowedEvents(status).contains(FireMissionEvent.TAKEOVER)) {
+            return;
+        }
+        sm.transit(TransitCommand.builder()
+            .missionNo(mission.getMissionNo())
+            .event(FireMissionEvent.TAKEOVER)
+            .operatorId("delivery-sync")
+            .remark("待人工接管: DeliveryHub unreachable during " + operation + "; " + e.getMessage())
+            .build());
+    }
+
+    private String failureKey(String missionNo, String operation) {
+        return (missionNo == null ? "-" : missionNo) + ":" + operation;
     }
 
     private String filenameWithoutExtension(String filename) {

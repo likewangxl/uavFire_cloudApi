@@ -231,6 +231,9 @@ fc100:
     saturation-temp-c: ${FC100_THERMAL_SATURATION_TEMP_C:540}
   release:
     controlled-test-auto-enabled: ${FC100_CONTROLLED_TEST_AUTO_ENABLED:false}
+    # FC100 full-load hover budget is about 12 minutes; 5 minutes leaves return-home reserve.
+    pending-timeout: ${FC100_RELEASE_PENDING_TIMEOUT:5m}
+    pending-timeout-auto-return-enabled: ${FC100_RELEASE_PENDING_TIMEOUT_AUTO_RETURN_ENABLED:true}
   command-queue:
     max-retries: ${FC100_COMMAND_QUEUE_MAX_RETRIES:3}
     send-timeout: ${FC100_COMMAND_QUEUE_SEND_TIMEOUT:10s}

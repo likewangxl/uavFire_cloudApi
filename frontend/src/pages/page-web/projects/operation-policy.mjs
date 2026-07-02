@@ -10,7 +10,7 @@ export const INCIDENT_STATUSES = [
   'ABORTED',
 ]
 
-export const DANGEROUS_ACTION_IDS = ['DISPATCH', 'ABORT', 'MARK_FALSE_ALARM', 'ARCHIVE']
+export const DANGEROUS_ACTION_IDS = ['DISPATCH', 'ABORT', 'MARK_FALSE_ALARM', 'ARCHIVE', 'CONFIRM_RELEASE']
 
 export const STATUS_BADGE_MAP = {
   CANDIDATE: { label: '待确认', color: 'gold', tone: 'warning' },
@@ -97,9 +97,11 @@ function action (id, visible, override = {}) {
   }
 }
 
-export function buildIncidentActions ({ status, assignments = [] } = {}) {
+export function buildIncidentActions ({ status, assignments = [], missionStatus } = {}) {
   const normalized = String(status || '').toUpperCase()
+  const normalizedMissionStatus = String(missionStatus || '').toUpperCase()
   const canDispatch = normalized === 'CONFIRMED' && hasActiveDeliveryPrimary(assignments)
+  const canConfirmRelease = normalized === 'RESPONDING' && normalizedMissionStatus === 'PAYLOAD_RELEASE_PENDING'
 
   return [
     action('CONFIRM_FIRE', normalized === 'CANDIDATE', { disabled: false, disabledReason: undefined }),
@@ -109,7 +111,13 @@ export function buildIncidentActions ({ status, assignments = [] } = {}) {
     action('ABORT', ['CONFIRMED', 'DISPATCHING', 'RESPONDING', 'RECHECKING'].includes(normalized)),
     action('MARK_FALSE_ALARM', ['CANDIDATE', 'CONFIRMED'].includes(normalized)),
     action('ARCHIVE', ['RESOLVED', 'FALSE_ALARM', 'ABORTED'].includes(normalized)),
-    action('CONFIRM_RELEASE', ['RESPONDING', 'RECHECKING'].includes(normalized)),
+    action('CONFIRM_RELEASE', canConfirmRelease, {
+      type: 'primary',
+      danger: true,
+      disabled: false,
+      disabledReason: undefined,
+      consequence: '确认飞手已使用官方遥控器开钩，系统将用一次性令牌记录 OFFICIAL_HOOK_MANUAL 留证并推进返航。',
+    }),
   ]
 }
 

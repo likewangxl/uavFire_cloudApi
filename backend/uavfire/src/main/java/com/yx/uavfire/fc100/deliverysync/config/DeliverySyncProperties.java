@@ -17,6 +17,7 @@ public class DeliverySyncProperties {
     private String workspaceId = "DEFAULT";
     private int connectTimeoutMs = 5000;
     private int readTimeoutMs = 15000;
+    private int manualTakeoverFailureThreshold = 3;
     private Retry retry = new Retry();
 
     @Data

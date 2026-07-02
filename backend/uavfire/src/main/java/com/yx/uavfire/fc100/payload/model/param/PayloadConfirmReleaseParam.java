@@ -7,7 +7,7 @@ import javax.validation.constraints.NotBlank;
 import java.util.Map;
 
 /**
- * spec §6.5 投放确认五项 checklist——所有 @AssertTrue 必须为 true 才能通过 Bean Validation。
+ * Payload release confirmation checklist. Every checklist item must be true.
  */
 @Data
 public class PayloadConfirmReleaseParam {
@@ -29,6 +29,12 @@ public class PayloadConfirmReleaseParam {
     @AssertTrue(message = "must confirm intent to release")
     private Boolean confirmedRelease;
 
-    /** 各项勾选时间戳，前端注入，存到 payload_event.pre_release_checklist JSON 列 */
+    @NotBlank
+    private String confirmationToken;
+
+    /** OFFICIAL_HOOK_MANUAL evidence note from the pilot/operator. */
+    private String remoteHookRemark;
+
+    /** Frontend checklist timestamps persisted as payload event JSON. */
     private Map<String, Long> checklistTimestamps;
 }

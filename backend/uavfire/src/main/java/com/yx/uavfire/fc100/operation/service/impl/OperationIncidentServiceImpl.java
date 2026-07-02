@@ -8,7 +8,9 @@ import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.event.dao.FireEventMapper;
 import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
+import com.yx.uavfire.fc100.mission.dao.FireMissionLogMapper;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
+import com.yx.uavfire.fc100.mission.model.entity.FireMissionLogEntity;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.fc100.operation.dao.OperationAssignmentMapper;
@@ -34,6 +36,7 @@ import com.yx.uavfire.fc100.operation.service.IncidentTransitCommand;
 import com.yx.uavfire.fc100.operation.service.OperationIncidentService;
 import com.yx.uavfire.fc100.operation.service.PreflightGate;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,6 +63,7 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
     private final OperationIncidentMapper incidentMapper;
     private final OperationAssignmentMapper assignmentMapper;
     private final OperationIncidentLogMapper logMapper;
+    private final FireMissionLogMapper fireMissionLogMapper;
     private final FireEventMapper fireEventMapper;
     private final FireMissionMapper fireMissionMapper;
     private final IncidentStateMachine stateMachine;
@@ -78,9 +82,26 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
                                         PreflightGate preflightGate,
                                         ResourceLeaseService leaseService,
                                         Clock clock) {
+        this(incidentMapper, assignmentMapper, logMapper, null, fireEventMapper, fireMissionMapper,
+            stateMachine, noGenerator, preflightGate, leaseService, clock);
+    }
+
+    @Autowired
+    public OperationIncidentServiceImpl(OperationIncidentMapper incidentMapper,
+                                        OperationAssignmentMapper assignmentMapper,
+                                        OperationIncidentLogMapper logMapper,
+                                        FireMissionLogMapper fireMissionLogMapper,
+                                        FireEventMapper fireEventMapper,
+                                        FireMissionMapper fireMissionMapper,
+                                        IncidentStateMachine stateMachine,
+                                        IncidentNoGenerator noGenerator,
+                                        PreflightGate preflightGate,
+                                        ResourceLeaseService leaseService,
+                                        Clock clock) {
         this.incidentMapper = incidentMapper;
         this.assignmentMapper = assignmentMapper;
         this.logMapper = logMapper;
+        this.fireMissionLogMapper = fireMissionLogMapper;
         this.fireEventMapper = fireEventMapper;
         this.fireMissionMapper = fireMissionMapper;
         this.stateMachine = stateMachine;
@@ -177,6 +198,9 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
                 items.add(item);
             }
         }
+        if (fireMissionLogMapper != null) {
+            appendMissionTimeline(id, items);
+        }
         List<OperationAssignmentEntity> assignments = assignmentsByIncident(id);
         for (OperationAssignmentEntity assignment : assignments) {
             OperationTimelineItem item = new OperationTimelineItem();
@@ -192,6 +216,35 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
         items.sort(Comparator.comparing(OperationTimelineItem::getCreateTime,
             Comparator.nullsLast(Long::compareTo)));
         return items;
+    }
+
+    private void appendMissionTimeline(Long incidentId, List<OperationTimelineItem> items) {
+        List<FireMissionEntity> missions = fireMissionMapper.selectList(new QueryWrapper<FireMissionEntity>()
+            .eq("incident_id", incidentId)
+            .eq("deleted", 0));
+        if (missions == null || missions.isEmpty()) {
+            return;
+        }
+        List<Long> missionIds = missions.stream()
+            .map(FireMissionEntity::getId)
+            .collect(Collectors.toList());
+        List<FireMissionLogEntity> logs = fireMissionLogMapper.selectList(new QueryWrapper<FireMissionLogEntity>()
+            .in("mission_id", missionIds));
+        if (logs == null) {
+            return;
+        }
+        for (FireMissionLogEntity log : logs) {
+            OperationTimelineItem item = new OperationTimelineItem();
+            item.setType("MISSION_STATUS");
+            item.setAction(log.getAction());
+            item.setFromStatus(log.getFromStatus());
+            item.setToStatus(log.getToStatus());
+            item.setOperatorId(log.getOperatorId());
+            item.setDescription("FC100 mission status: " + log.getAction()
+                + (log.getRemark() == null ? "" : "; " + log.getRemark()));
+            item.setCreateTime(log.getCreateTime());
+            items.add(item);
+        }
     }
 
     @Override
@@ -409,7 +462,23 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
     private OperationIncidentDTO toDto(OperationIncidentEntity entity) {
         OperationIncidentDTO dto = new OperationIncidentDTO();
         BeanUtils.copyProperties(entity, dto);
+        FireMissionEntity mission = latestMission(entity.getId());
+        if (mission != null) {
+            dto.setMissionNo(mission.getMissionNo());
+            dto.setMissionStatus(mission.getStatus());
+        }
         return dto;
+    }
+
+    private FireMissionEntity latestMission(Long incidentId) {
+        if (incidentId == null) {
+            return null;
+        }
+        return fireMissionMapper.selectOne(new QueryWrapper<FireMissionEntity>()
+            .eq("incident_id", incidentId)
+            .eq("deleted", 0)
+            .orderByDesc("create_time")
+            .last("limit 1"));
     }
 
     private String firstNonBlank(String value, String fallback) {

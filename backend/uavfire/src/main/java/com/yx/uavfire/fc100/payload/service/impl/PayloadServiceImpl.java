@@ -1,6 +1,7 @@
 package com.yx.uavfire.fc100.payload.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yx.uavfire.fc100.common.Clock;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
@@ -15,10 +16,13 @@ import com.yx.uavfire.fc100.payload.model.entity.PayloadEventEntity;
 import com.yx.uavfire.fc100.payload.model.param.PayloadConfirmReleaseParam;
 import com.yx.uavfire.fc100.payload.service.PayloadReleasePolicyService;
 import com.yx.uavfire.fc100.payload.service.PayloadService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class PayloadServiceImpl implements PayloadService {
@@ -29,6 +33,9 @@ public class PayloadServiceImpl implements PayloadService {
     private final ObjectMapper om;
     private final Clock clock;
     private final PayloadReleasePolicyService releasePolicyService;
+
+    @Value("${fc100.release.pending-timeout:5m}")
+    private Duration pendingTimeout = Duration.ofMinutes(5);
 
     public PayloadServiceImpl(FireMissionMapper m, PayloadEventMapper p,
                                MissionStateMachine sm, ObjectMapper om, Clock c,
@@ -48,6 +55,16 @@ public class PayloadServiceImpl implements PayloadService {
         sm.transit(TransitCommand.builder()
             .missionNo(missionNo).event(FireMissionEvent.MARK_RELEASE_PENDING)
             .operatorId(operatorId).clientIp(clientIp).requestId(requestId).build());
+        long now = clock.now();
+        String token = "rel_" + UUID.randomUUID().toString().replace("-", "");
+        missionMapper.update(null, new UpdateWrapper<FireMissionEntity>()
+            .eq("id", m.getId())
+            .set("release_confirmation_token", token)
+            .set("release_pending_started_at", now)
+            .set("release_token_expires_at", now + pendingTimeout.toMillis())
+            .set("release_token_used_at", null)
+            .set("update_time", now)
+            .set("updated_by", operatorId));
         writeEvent(m.getId(), "RELEASE_PENDING", operatorId, null, null);
     }
 
@@ -61,10 +78,12 @@ public class PayloadServiceImpl implements PayloadService {
                 PayloadReleasePolicyService.ReleaseRequest.builder()
                     .operatorId(p == null ? null : p.getOperatorId())
                     .confirmedRelease(isPayloadChecklistConfirmed(p))
+                    .confirmationToken(p == null ? null : p.getConfirmationToken())
                     .clientIp(clientIp)
                     .requestId(requestId)
                     .build());
 
+        consumeReleaseToken(m, p == null ? null : p.getConfirmationToken());
         String checklistJson;
         try {
             checklistJson = om.writeValueAsString(p == null ? null : p.getChecklistTimestamps());
@@ -76,7 +95,7 @@ public class PayloadServiceImpl implements PayloadService {
             writeEvent(m.getId(), "RELEASE_DRY_RUN", p == null ? null : p.getOperatorId(), "DRY_RUN", checklistJson);
             return;
         }
-        writeEvent(m.getId(), "RELEASED", p.getOperatorId(), null, checklistJson);
+        writeEvent(m.getId(), "RELEASED", p.getOperatorId(), releaseEvidenceValue(p), checklistJson);
         sm.transit(TransitCommand.builder()
             .missionNo(missionNo).event(FireMissionEvent.CONFIRM_RELEASE)
             .operatorId(p.getOperatorId())
@@ -125,6 +144,24 @@ public class PayloadServiceImpl implements PayloadService {
         }
         e.setCreateTime(clock.now());
         eventMapper.insert(e);
+    }
+
+    private void consumeReleaseToken(FireMissionEntity mission, String token) {
+        int rows = missionMapper.update(null, new UpdateWrapper<FireMissionEntity>()
+            .eq("id", mission.getId())
+            .eq("release_confirmation_token", token)
+            .isNull("release_token_used_at")
+            .set("release_token_used_at", clock.now())
+            .set("update_time", clock.now()));
+        if (rows == 0) {
+            throw new Fc100BusinessException(Fc100ErrorCode.RELEASE_CONFIRMATION_REQUIRED,
+                "RELEASE_CONFIRMATION_TOKEN_REPLAYED");
+        }
+    }
+
+    private String releaseEvidenceValue(PayloadConfirmReleaseParam p) {
+        String remark = p == null ? null : p.getRemoteHookRemark();
+        return "OFFICIAL_HOOK_MANUAL" + (remark == null || remark.isBlank() ? "" : ":" + remark.trim());
     }
 
     private boolean isPayloadChecklistConfirmed(PayloadConfirmReleaseParam p) {

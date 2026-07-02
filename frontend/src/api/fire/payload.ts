@@ -12,6 +12,8 @@ export const payloadApi = {
     confirmedWindOk: boolean;
     confirmedPayloadReady: boolean;
     confirmedRelease: boolean;
+    confirmationToken: string;
+    remoteHookRemark?: string;
     checklistTimestamps: Record<string, number>;
   }) =>
     client.post<ApiResult<null>>(`/api/fire/missions/${no}/payload/confirm-release`, body),

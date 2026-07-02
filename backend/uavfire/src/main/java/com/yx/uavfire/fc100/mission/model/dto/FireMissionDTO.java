@@ -27,6 +27,11 @@ public class FireMissionDTO {
     private Long latestRouteFileId;
     private String releasePolicy;
     private String releaseExecutionMode;
+    private String releaseConfirmationToken;
+    private Long releasePendingStartedAt;
+    private Long releaseTokenExpiresAt;
+    private Long releaseTokenUsedAt;
+    private Long releasePendingRemainingMs;
     private Integer isHighConfidence;
     private String createdBy;
     private String approverId;

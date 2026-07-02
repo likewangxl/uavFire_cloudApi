@@ -91,6 +91,14 @@ function fmt (ts: number | null | undefined): string {
   return new Date(ts).toLocaleString('zh-CN')
 }
 
+function fmtRemaining (ms: number | null | undefined): string {
+  if (ms == null) return '-'
+  const totalSeconds = Math.ceil(Math.max(0, Number(ms)) / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
 function fmtTemperature (temperature: number | null | undefined, unit: string | null | undefined): string {
   if (temperature == null || Number.isNaN(temperature)) return '-'
   return `${temperature.toFixed(2)} ${unit ?? 'C'}`
@@ -135,7 +143,15 @@ onMounted(refresh)
               <a-descriptions-item label="审批人">{{ dto?.approverId ?? '-' }}</a-descriptions-item>
               <a-descriptions-item label="创建时间">{{ fmt(dto?.createTime) }}</a-descriptions-item>
               <a-descriptions-item label="审批时间">{{ fmt(dto?.approvedAt) }}</a-descriptions-item>
+              <a-descriptions-item label="待释放倒计时">{{ fmtRemaining(dto?.releasePendingRemainingMs) }}</a-descriptions-item>
             </a-descriptions>
+            <a-alert
+              v-if="dto?.status === 'PAYLOAD_RELEASE_PENDING'"
+              type="warning"
+              show-icon
+              message="超时未确认将自动返航"
+              style="margin-top: 8px"
+            />
           </a-card>
         </a-col>
 

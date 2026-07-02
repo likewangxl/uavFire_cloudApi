@@ -52,6 +52,8 @@ import OperationMap from '/@/components/operation/OperationMap.vue'
 import OperationTimeline from '/@/components/operation/OperationTimeline.vue'
 import { operationIncidentApi, useOperationMock } from '/@/api/operation/incident'
 import { eventApi } from '/@/api/fire/event'
+import { missionApi } from '/@/api/fire/mission'
+import { payloadApi } from '/@/api/fire/payload'
 import type {
   OperationIncidentDTO,
   OperationIncidentDetailDTO,
@@ -232,7 +234,52 @@ async function runIncidentAction (payload: { actionId: string; reason?: string }
     return
   }
 
-  if (['CONFIRM_FIRE', 'GENERATE_MISSION', 'RUN_PREFLIGHT', 'CONFIRM_RELEASE'].includes(payload.actionId)) {
+  if (payload.actionId === 'CONFIRM_RELEASE') {
+    if (!detail.value.missionNo) {
+      message.error('未找到待释放任务编号')
+      return
+    }
+    submittingAction.value = payload.actionId
+    try {
+      const missionRes = await missionApi.detail(detail.value.missionNo)
+      const mission = missionRes.data.data
+      if (!mission?.releaseConfirmationToken || mission.status !== 'PAYLOAD_RELEASE_PENDING') {
+        message.error('任务未处于待释放状态或令牌不可用')
+        return
+      }
+      const now = Date.now()
+      await payloadApi.confirmRelease(detail.value.missionNo, {
+        operatorId: currentOperatorId(),
+        confirmedArrival: true,
+        confirmedNoPeopleRisk: true,
+        confirmedWindOk: true,
+        confirmedPayloadReady: true,
+        confirmedRelease: true,
+        confirmationToken: mission.releaseConfirmationToken,
+        remoteHookRemark: payload.reason || '飞手已使用官方遥控器完成 FC100 开钩',
+        checklistTimestamps: {
+          arrival: now,
+          noPeopleRisk: now,
+          windOk: now,
+          payloadReady: now,
+          release: now,
+        },
+      })
+      message.success('释放留证已提交')
+      await loadIncidents(false)
+      await loadIncidentDetail(id)
+    } catch (e: any) {
+      Modal.error({
+        title: '释放确认失败',
+        content: e?.response?.data?.message || e?.message || '请检查任务状态和确认令牌',
+      })
+    } finally {
+      submittingAction.value = ''
+    }
+    return
+  }
+
+  if (['CONFIRM_FIRE', 'GENERATE_MISSION', 'RUN_PREFLIGHT'].includes(payload.actionId)) {
     message.info('该操作为一期骨架占位，后续阶段接入真实联动')
     return
   }
