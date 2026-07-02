@@ -257,6 +257,8 @@ CREATE TABLE `operation_incident` (
   `risk_radius_m` double DEFAULT NULL,
   `created_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
   `confirmed_by` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `recommended_recheck` tinyint NOT NULL DEFAULT '0' COMMENT 'whether recheck/manual coordinate refinement is recommended',
+  `recheck_reason` text COMMENT 'recheck recommendation or latest recheck result reason',
   `closed_at` bigint DEFAULT NULL,
   `create_time` bigint NOT NULL,
   `update_time` bigint NOT NULL,

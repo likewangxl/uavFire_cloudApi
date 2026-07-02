@@ -12,12 +12,16 @@ import com.yx.uavfire.fc100.common.MissionNoGenerator;
 import com.yx.uavfire.fc100.event.dao.FireEventHistoryMapper;
 import com.yx.uavfire.fc100.event.dao.FireEventMapper;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
+import com.yx.uavfire.fc100.event.model.dto.FireEventDecisionResult;
 import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
 import com.yx.uavfire.fc100.event.model.dto.FireEventHistoryDTO;
+import com.yx.uavfire.fc100.event.model.dto.FireEventRecheckResultDTO;
 import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
 import com.yx.uavfire.fc100.event.model.entity.FireEventHistoryEntity;
 import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
+import com.yx.uavfire.fc100.event.model.param.FireEventActionParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireEventRecheckResultParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.yx.uavfire.fc100.event.service.FireGeoLocationResult;
 import com.yx.uavfire.fc100.event.service.FireGeoLocationService;
@@ -26,6 +30,16 @@ import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
 import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
+import com.yx.uavfire.fc100.operation.dao.OperationIncidentMapper;
+import com.yx.uavfire.fc100.operation.model.dto.OperationIncidentDTO;
+import com.yx.uavfire.fc100.operation.model.entity.OperationIncidentEntity;
+import com.yx.uavfire.fc100.operation.model.enums.OperationIncidentEvent;
+import com.yx.uavfire.fc100.operation.model.enums.OperationIncidentStatus;
+import com.yx.uavfire.fc100.operation.model.param.CreateOperationIncidentParam;
+import com.yx.uavfire.fc100.operation.model.param.OperationActionParam;
+import com.yx.uavfire.fc100.operation.service.IncidentStateMachine;
+import com.yx.uavfire.fc100.operation.service.IncidentTransitCommand;
+import com.yx.uavfire.fc100.operation.service.OperationIncidentService;
 import com.yx.uavfire.manage.service.IDeviceRedisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -33,6 +47,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -70,6 +85,15 @@ public class FireEventServiceImpl implements FireEventService {
         FireMissionStatus.RETURN_FAILED.name()
     );
 
+    private static final Set<String> ACTIVE_INCIDENT_STATUSES = Set.of(
+        OperationIncidentStatus.CANDIDATE.name(),
+        OperationIncidentStatus.CONFIRMED.name(),
+        OperationIncidentStatus.DISPATCHING.name(),
+        OperationIncidentStatus.RESPONDING.name(),
+        OperationIncidentStatus.RECHECKING.name(),
+        OperationIncidentStatus.RESOLVED.name()
+    );
+
     private final FireEventMapper eventMapper;
     private final FireEventHistoryMapper historyMapper;
     private final FireMissionMapper missionMapper;
@@ -77,18 +101,183 @@ public class FireEventServiceImpl implements FireEventService {
     private final Clock clock;
     private final IDeviceRedisService deviceRedisService;
     private final FireGeoLocationService fireGeoLocationService;
+    private final OperationIncidentService operationIncidentService;
+    private final OperationIncidentMapper operationIncidentMapper;
+    private final IncidentStateMachine incidentStateMachine;
+    private final Fc100ThermalProperties thermalProperties;
 
     public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
                                 MissionNoGenerator g, Clock c,
                                 IDeviceRedisService deviceRedisService) {
-        this(em, hm, mm, g, c, deviceRedisService, null);
+        this(em, hm, mm, g, c, deviceRedisService, null, null, null, null, null);
+    }
+
+    @Override
+    @Transactional
+    public FireEventDecisionResult confirm(String eventId, FireEventActionParam param, HttpServletRequest request) {
+        requireOperationWiring();
+        FireEventEntity event = requireEvent(eventId);
+        long now = clock.now();
+        event.setConfirmedStatus("CONFIRMED");
+        event.setUpdatedBy(param.getOperatorId());
+        event.setUpdateTime(now);
+        eventMapper.updateById(event);
+        insertDecisionHistory(event, "CONFIRMED", param.getOperatorId(), now);
+
+        OperationIncidentEntity existing = findActiveIncident(event.getId());
+        OperationIncidentDTO incident;
+        boolean reused = existing != null;
+        if (existing != null) {
+            if (OperationIncidentStatus.CANDIDATE.name().equals(existing.getStatus()) && incidentStateMachine != null) {
+                OperationIncidentEntity confirmed = incidentStateMachine.transit(incidentCmd(
+                    existing.getId(), OperationIncidentEvent.CONFIRM, param, request)
+                    .expectedFrom(OperationIncidentStatus.CANDIDATE)
+                    .remark(param.getReason())
+                    .build());
+                incident = toIncidentDto(confirmed);
+            } else {
+                incident = toIncidentDto(existing);
+            }
+            event.setLinkedIncidentId(existing.getId());
+            eventMapper.updateById(event);
+        } else {
+            CreateOperationIncidentParam create = new CreateOperationIncidentParam();
+            create.setFireEventId(event.getId());
+            create.setCreatedBy(param.getOperatorId());
+            create.setConfirmedBy(param.getOperatorId());
+            create.setLevel(event.getFireLevel());
+            create.setCenterLat(event.getLat());
+            create.setCenterLng(event.getLng());
+            create.setRiskRadiusM(event.getGeoErrorRadiusM());
+            incident = operationIncidentService.create(create);
+            event.setLinkedIncidentId(incident.getId());
+            eventMapper.updateById(event);
+        }
+
+        RecheckAdvice advice = recheckAdvice(event);
+        updateIncidentRecheckAdvice(incident.getId(), advice, now);
+        incident.setRecommendedRecheck(advice.recommended ? 1 : 0);
+        incident.setRecheckReason(advice.reason);
+
+        FireMissionEntity existingDraft = findActiveMission(event.getId());
+        boolean draftCreated = false;
+        String draftMissionNo = existingDraft == null ? null : existingDraft.getMissionNo();
+        if (isPrecise(event)) {
+            if (existingDraft == null) {
+                FireMissionEntity draft = createDraftMission(event, incident.getId(), now);
+                draftCreated = true;
+                draftMissionNo = draft.getMissionNo();
+            } else if (existingDraft.getIncidentId() == null) {
+                existingDraft.setIncidentId(incident.getId());
+                existingDraft.setUpdateTime(now);
+                missionMapper.updateById(existingDraft);
+            }
+        }
+
+        FireEventDecisionResult result = new FireEventDecisionResult();
+        result.setFireEvent(toFireEventDto(event));
+        result.setIncident(incident);
+        result.setReusedIncident(reused);
+        result.setDraftMissionCreated(draftCreated);
+        result.setDraftMissionNo(draftMissionNo);
+        result.setRecommendedRecheck(advice.recommended);
+        result.setRecheckReason(advice.reason);
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public FireEventDecisionResult reject(String eventId, FireEventActionParam param, HttpServletRequest request) {
+        requireOperationWiring();
+        FireEventEntity event = requireEvent(eventId);
+        long now = clock.now();
+        event.setConfirmedStatus("REJECTED");
+        event.setUpdatedBy(param.getOperatorId());
+        event.setUpdateTime(now);
+        eventMapper.updateById(event);
+        insertDecisionHistory(event, "REJECTED", param.getOperatorId(), now);
+
+        OperationIncidentDTO incident = null;
+        if (event.getLinkedIncidentId() != null) {
+            OperationIncidentEntity linked = operationIncidentMapper.selectById(event.getLinkedIncidentId());
+            if (linked != null && (OperationIncidentStatus.CANDIDATE.name().equals(linked.getStatus())
+                || OperationIncidentStatus.CONFIRMED.name().equals(linked.getStatus()))) {
+                OperationActionParam action = new OperationActionParam();
+                action.setOperatorId(param.getOperatorId());
+                action.setReason(param.getReason() != null && !param.getReason().isBlank()
+                    ? param.getReason()
+                    : "fire event rejected as false alarm");
+                incident = toIncidentDto(operationIncidentService.markFalseAlarm(linked.getId(), action, request));
+            } else if (linked != null) {
+                incident = toIncidentDto(linked);
+            }
+        }
+
+        FireEventDecisionResult result = new FireEventDecisionResult();
+        result.setFireEvent(toFireEventDto(event));
+        result.setIncident(incident);
+        result.setReusedIncident(incident != null);
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public FireEventRecheckResultDTO recordRecheckResult(String eventId, FireEventRecheckResultParam param,
+                                                         HttpServletRequest request) {
+        requireOperationWiring();
+        FireEventEntity event = requireEvent(eventId);
+        if (event.getLinkedIncidentId() == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INCIDENT_NOT_FOUND,
+                "fire event has no linked operation incident: " + event.getId());
+        }
+        OperationIncidentEntity linked = operationIncidentMapper.selectById(event.getLinkedIncidentId());
+        if (linked == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INCIDENT_NOT_FOUND,
+                "operation incident not found: " + event.getLinkedIncidentId());
+        }
+
+        boolean saturated = event.getThermalTemperature() != null
+            && event.getThermalTemperature() >= thermalProperties.getSaturationTempC();
+        RecheckDecision decision = decideRecheck(event, param, saturated);
+        long now = clock.now();
+        insertRecheckHistory(event, param, decision, now);
+        updateIncidentRecheckResult(linked.getId(), decision.reason, now);
+
+        OperationIncidentEntity current = linked;
+        if (OperationIncidentStatus.RESPONDING.name().equals(current.getStatus())) {
+            current = incidentStateMachine.transit(incidentCmd(current.getId(), OperationIncidentEvent.START_RECHECK,
+                param.getOperatorId(), param.getRemark(), request).build());
+        }
+        OperationIncidentEntity next = incidentStateMachine.transit(incidentCmd(current.getId(),
+            decision.resolved ? OperationIncidentEvent.RESOLVE : OperationIncidentEvent.CONTINUE_RESPONSE,
+            param.getOperatorId(), decision.reason, request).build());
+
+        FireEventRecheckResultDTO dto = new FireEventRecheckResultDTO();
+        dto.setFireEventId(event.getId());
+        dto.setIncidentId(next.getId());
+        dto.setSaturated(saturated);
+        dto.setResolved(decision.resolved);
+        dto.setReason(decision.reason);
+        dto.setIncident(toIncidentDto(next));
+        return dto;
+    }
+
+    public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
+                                MissionNoGenerator g, Clock c,
+                                IDeviceRedisService deviceRedisService,
+                                FireGeoLocationService fireGeoLocationService) {
+        this(em, hm, mm, g, c, deviceRedisService, fireGeoLocationService, null, null, null, null);
     }
 
     @Autowired
     public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
                                 MissionNoGenerator g, Clock c,
                                 IDeviceRedisService deviceRedisService,
-                                FireGeoLocationService fireGeoLocationService) {
+                                FireGeoLocationService fireGeoLocationService,
+                                OperationIncidentService operationIncidentService,
+                                OperationIncidentMapper operationIncidentMapper,
+                                IncidentStateMachine incidentStateMachine,
+                                Fc100ThermalProperties thermalProperties) {
         this.eventMapper = em;
         this.historyMapper = hm;
         this.missionMapper = mm;
@@ -96,6 +285,10 @@ public class FireEventServiceImpl implements FireEventService {
         this.clock = c;
         this.deviceRedisService = deviceRedisService;
         this.fireGeoLocationService = fireGeoLocationService;
+        this.operationIncidentService = operationIncidentService;
+        this.operationIncidentMapper = operationIncidentMapper;
+        this.incidentStateMachine = incidentStateMachine;
+        this.thermalProperties = thermalProperties != null ? thermalProperties : new Fc100ThermalProperties();
     }
 
     @Override
@@ -158,40 +351,20 @@ public class FireEventServiceImpl implements FireEventService {
         e.setUpdateTime(now);
 
         BigDecimal c = param.getConfidence();
-        boolean autoCreate = c.compareTo(LOW) >= 0;
-        e.setStatus(autoCreate
-            ? FireEventStatus.MISSION_CREATED.name()
+        boolean candidate = c.compareTo(LOW) >= 0;
+        e.setStatus(candidate
+            ? FireEventStatus.CANDIDATE.name()
             : FireEventStatus.LOW_CONFIDENCE.name());
+        e.setConfirmedStatus("PENDING");
+        if (e.getGeoQuality() == null || e.getGeoQuality().isBlank()) {
+            e.setGeoQuality("UNKNOWN");
+        }
         eventMapper.insert(e);
         insertHistory(e, param, eventTs, now, "CREATED");
 
-        if (!autoCreate) {
-            return new FireEventCreateResponse(e.getId(), e.getEventId(),
-                false, null, e.getStatus(), true, false, true, "CREATED");
-        }
-
-        // 2. 自动建 WAITING_REVIEW 任务
-        FireMissionEntity m = new FireMissionEntity();
-        m.setMissionNo(noGen.next());
-        m.setWorkspaceId(e.getWorkspaceId());
-        m.setFireEventId(e.getId());
-        m.setAttemptIndex(1);
-        m.setStatus(FireMissionStatus.WAITING_REVIEW.name());
-        m.setReleasePolicy(ReleasePolicy.fromDb(param.getReleasePolicy()).name());
-        m.setReleaseExecutionMode(ReleaseExecutionMode.fromDb(param.getReleaseExecutionMode()).name());
-        m.setVersion(0L);
-        m.setIsHighConfidence(c.compareTo(HIGH) >= 0 ? 1 : 0);
-        m.setDeleted(0);
-        m.setCreateTime(now);
-        m.setUpdateTime(now);
-        missionMapper.insert(m);
-
-        log.info("auto-created mission {} from fire event {} (confidence={}, highConf={})",
-            m.getMissionNo(), e.getEventId(), c, m.getIsHighConfidence());
-
         return new FireEventCreateResponse(e.getId(), e.getEventId(),
-            true, m.getMissionNo(), FireMissionStatus.WAITING_REVIEW.name(),
-            true, false, true, "CREATED");
+            false, null, e.getStatus(), true, false, true, "CREATED");
+
     }
 
     @Override
@@ -675,6 +848,255 @@ public class FireEventServiceImpl implements FireEventService {
         return list.isEmpty() ? null : list.get(0);
     }
 
+    private void requireOperationWiring() {
+        if (operationIncidentService == null || operationIncidentMapper == null || incidentStateMachine == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INTERNAL_ERROR,
+                "fire event decision flow is not wired");
+        }
+    }
+
+    private FireEventEntity requireEvent(String eventId) {
+        FireEventEntity event = eventMapper.selectOne(new QueryWrapper<FireEventEntity>()
+            .eq("deleted", 0)
+            .and(w -> {
+                w.eq("event_id", eventId);
+                if (eventId != null && eventId.matches("\\d+")) {
+                    w.or().eq("id", Long.parseLong(eventId));
+                }
+            }));
+        if (event == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.MISSION_NOT_FOUND,
+                "fire event not found: " + eventId);
+        }
+        return event;
+    }
+
+    private OperationIncidentEntity findActiveIncident(Long fireEventId) {
+        List<OperationIncidentEntity> list = operationIncidentMapper.selectList(
+            new QueryWrapper<OperationIncidentEntity>()
+                .eq("fire_event_id", fireEventId)
+                .in("status", ACTIVE_INCIDENT_STATUSES)
+                .orderByDesc("create_time")
+                .last("limit 1"));
+        return list == null || list.isEmpty() ? null : list.get(0);
+    }
+
+    private FireMissionEntity createDraftMission(FireEventEntity event, Long incidentId, long now) {
+        FireMissionEntity draft = new FireMissionEntity();
+        draft.setMissionNo(noGen.next());
+        draft.setWorkspaceId(event.getWorkspaceId());
+        draft.setFireEventId(event.getId());
+        draft.setIncidentId(incidentId);
+        draft.setAttemptIndex(1);
+        draft.setStatus(FireMissionStatus.CREATED.name());
+        draft.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
+        draft.setReleaseExecutionMode(ReleaseExecutionMode.OFFICIAL_HOOK_MANUAL.name());
+        draft.setVersion(0L);
+        draft.setIsHighConfidence(event.getConfidence() != null && event.getConfidence().compareTo(HIGH) >= 0 ? 1 : 0);
+        draft.setDeleted(0);
+        draft.setCreateTime(now);
+        draft.setUpdateTime(now);
+        missionMapper.insert(draft);
+        log.info("created draft mission {} from confirmed fire event {} (confidence={}, highConf={})",
+            draft.getMissionNo(), event.getEventId(), event.getConfidence(), draft.getIsHighConfidence());
+        return draft;
+    }
+
+    private boolean isPrecise(FireEventEntity event) {
+        return event != null && "PRECISE".equalsIgnoreCase(event.getGeoQuality());
+    }
+
+    private RecheckAdvice recheckAdvice(FireEventEntity event) {
+        if (!isPrecise(event)) {
+            return new RecheckAdvice(true, "需复测或人工标注坐标");
+        }
+        if (event.getThermalTemperature() != null
+            && event.getThermalTemperature() >= thermalProperties.getSaturationTempC()) {
+            return new RecheckAdvice(true, "测温可能饱和，需结合热源面积复测");
+        }
+        return new RecheckAdvice(true, "确认后建议复测火情边界与处置效果");
+    }
+
+    private void updateIncidentRecheckAdvice(Long incidentId, RecheckAdvice advice, long now) {
+        if (incidentId == null || operationIncidentMapper == null) return;
+        OperationIncidentEntity update = new OperationIncidentEntity();
+        update.setId(incidentId);
+        update.setRecommendedRecheck(advice.recommended ? 1 : 0);
+        update.setRecheckReason(advice.reason);
+        update.setUpdateTime(now);
+        operationIncidentMapper.updateById(update);
+    }
+
+    private void updateIncidentRecheckResult(Long incidentId, String reason, long now) {
+        if (incidentId == null || operationIncidentMapper == null) return;
+        OperationIncidentEntity update = new OperationIncidentEntity();
+        update.setId(incidentId);
+        update.setRecommendedRecheck(0);
+        update.setRecheckReason(reason);
+        update.setUpdateTime(now);
+        operationIncidentMapper.updateById(update);
+    }
+
+    private RecheckDecision decideRecheck(FireEventEntity event, FireEventRecheckResultParam param, boolean saturated) {
+        boolean suggestedResolved = "RESOLVED".equalsIgnoreCase(param.getSuggestion());
+        boolean flameCleared = !Boolean.TRUE.equals(param.getFlameVisible());
+        double previousArea = previousHotArea(event);
+        double currentArea = param.getHotAreaM2() == null ? Double.MAX_VALUE : param.getHotAreaM2();
+        boolean areaCleared = previousArea > 0 ? currentArea <= previousArea * 0.5 : currentArea <= 0.1;
+        boolean temperatureDropped = event.getThermalTemperature() == null
+            || param.getMaxTemp() == null
+            || param.getMaxTemp() < event.getThermalTemperature();
+
+        if (!suggestedResolved) {
+            return new RecheckDecision(false, "复测建议继续处置");
+        }
+        if (saturated && !(flameCleared && areaCleared && temperatureDropped)) {
+            return new RecheckDecision(false, "测温可能饱和，不能仅凭绝对温度下降判定解除，需热源面积同步下降且无明火");
+        }
+        if (flameCleared && temperatureDropped) {
+            return new RecheckDecision(true, "复测建议火情已解除");
+        }
+        return new RecheckDecision(false, "复测仍存在明火或温度未下降，建议继续处置");
+    }
+
+    private double previousHotArea(FireEventEntity event) {
+        if (event == null || event.getThermalRoi() == null || event.getThermalRoi().isBlank()) {
+            return -1.0;
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> roi = JSON.readValue(event.getThermalRoi(), Map.class);
+            Object area = roi.get("areaM2");
+            if (area == null) area = roi.get("area_m2");
+            if (area instanceof Number) return ((Number) area).doubleValue();
+            Object width = roi.get("width");
+            Object height = roi.get("height");
+            if (width instanceof Number && height instanceof Number) {
+                return ((Number) width).doubleValue() * ((Number) height).doubleValue();
+            }
+        } catch (Exception ignored) {
+        }
+        return -1.0;
+    }
+
+    private void insertDecisionHistory(FireEventEntity event, String action, String operatorId, long now) {
+        FireEventHistoryEntity history = historyFromEvent(event, now);
+        history.setSourceEventId(operatorId);
+        history.setAction(action);
+        historyMapper.insert(history);
+    }
+
+    private void insertRecheckHistory(FireEventEntity event, FireEventRecheckResultParam param,
+                                      RecheckDecision decision, long now) {
+        FireEventHistoryEntity history = historyFromEvent(event, now);
+        history.setSourceEventId(param.getOperatorId());
+        history.setThermalTemperature(param.getMaxTemp());
+        history.setAction("RECHECK_RESULT");
+        historyMapper.insert(history);
+    }
+
+    private FireEventHistoryEntity historyFromEvent(FireEventEntity event, long now) {
+        FireEventHistoryEntity history = new FireEventHistoryEntity();
+        history.setFireEventId(event.getId());
+        history.setEventId(event.getEventId());
+        history.setWorkspaceId(event.getWorkspaceId());
+        history.setSource(event.getSource());
+        history.setDeviceSn(event.getDeviceSn());
+        history.setConfidence(event.getConfidence());
+        history.setFireLevel(event.getFireLevel());
+        history.setLat(event.getLat());
+        history.setLng(event.getLng());
+        history.setAlt(event.getAlt());
+        history.setAltitudeReference(event.getAltitudeReference());
+        history.setGeoMethod(event.getGeoMethod());
+        history.setGeoErrorRadiusM(event.getGeoErrorRadiusM());
+        history.setGeoQuality(event.getGeoQuality());
+        history.setGeoSourceTs(event.getGeoSourceTs());
+        history.setAircraftLat(event.getAircraftLat());
+        history.setAircraftLng(event.getAircraftLng());
+        history.setAircraftAlt(event.getAircraftAlt());
+        history.setGimbalPitch(event.getGimbalPitch());
+        history.setGimbalYaw(event.getGimbalYaw());
+        history.setGimbalRoll(event.getGimbalRoll());
+        history.setThermalRoi(event.getThermalRoi());
+        history.setThermalTemperature(event.getThermalTemperature());
+        history.setTemperatureUnit(event.getTemperatureUnit());
+        history.setThermalImageUrl(event.getThermalImageUrl());
+        history.setVisibleImageUrl(event.getVisibleImageUrl());
+        history.setEventTimestamp(now);
+        history.setCreateTime(now);
+        return history;
+    }
+
+    private IncidentTransitCommand.IncidentTransitCommandBuilder incidentCmd(Long incidentId,
+                                                                            OperationIncidentEvent event,
+                                                                            FireEventActionParam param,
+                                                                            HttpServletRequest request) {
+        return incidentCmd(incidentId, event, param.getOperatorId(), param.getReason(), request);
+    }
+
+    private IncidentTransitCommand.IncidentTransitCommandBuilder incidentCmd(Long incidentId,
+                                                                            OperationIncidentEvent event,
+                                                                            String operatorId,
+                                                                            String remark,
+                                                                            HttpServletRequest request) {
+        return IncidentTransitCommand.builder()
+            .incidentId(incidentId)
+            .event(event)
+            .operatorId(operatorId)
+            .clientIp(request == null ? null : request.getRemoteAddr())
+            .requestId(request == null ? null : request.getHeader("X-Request-Id"))
+            .idempotencyKey(request == null ? null : request.getHeader("X-Idempotency-Key"))
+            .remark(remark);
+    }
+
+    private FireEventDTO toFireEventDto(FireEventEntity entity) {
+        FireEventDTO dto = new FireEventDTO();
+        BeanUtils.copyProperties(entity, dto);
+        dto.setLocationQuality(normalizeLocationQuality(entity.getGeoQuality()));
+        fillActiveMission(dto, entity.getId());
+        return dto;
+    }
+
+    private OperationIncidentDTO toIncidentDto(OperationIncidentEntity entity) {
+        if (entity == null) return null;
+        OperationIncidentDTO dto = new OperationIncidentDTO();
+        BeanUtils.copyProperties(entity, dto);
+        return dto;
+    }
+
+    private String normalizeLocationQuality(String quality) {
+        if (quality == null || quality.isBlank()) return "UNKNOWN";
+        String normalized = quality.toUpperCase();
+        if ("AUTO_WAYPOINT_READY".equals(normalized)) return "PRECISE";
+        if ("MANUAL".equals(normalized)) return "MANUAL_MARKED";
+        if ("LOW_ACCURACY".equals(normalized) || "DEM_MISSING".equals(normalized)
+            || "RTK_NOT_FIXED".equals(normalized) || "GEO_SNAPSHOT_INCOMPLETE".equals(normalized)) {
+            return "ESTIMATED";
+        }
+        return normalized;
+    }
+
+    private static class RecheckAdvice {
+        private final boolean recommended;
+        private final String reason;
+
+        private RecheckAdvice(boolean recommended, String reason) {
+            this.recommended = recommended;
+            this.reason = reason;
+        }
+    }
+
+    private static class RecheckDecision {
+        private final boolean resolved;
+        private final String reason;
+
+        private RecheckDecision(boolean resolved, String reason) {
+            this.resolved = resolved;
+            this.reason = reason;
+        }
+    }
+
     @Override
     public FireEventDTO get(String eventId) {
         QueryWrapper<FireEventEntity> query = new QueryWrapper<FireEventEntity>()
@@ -688,10 +1110,7 @@ public class FireEventServiceImpl implements FireEventService {
         FireEventEntity e = eventMapper.selectOne(
             query);
         if (e == null) return null;
-        FireEventDTO d = new FireEventDTO();
-        BeanUtils.copyProperties(e, d);
-        fillActiveMission(d, e.getId());
-        return d;
+        return toFireEventDto(e);
     }
 
     @Override
@@ -708,12 +1127,7 @@ public class FireEventServiceImpl implements FireEventService {
             qw.eq("status", status);
         }
         return eventMapper.selectList(qw).stream()
-            .map(e -> {
-                FireEventDTO d = new FireEventDTO();
-                BeanUtils.copyProperties(e, d);
-                fillActiveMission(d, e.getId());
-                return d;
-            })
+            .map(this::toFireEventDto)
             .collect(java.util.stream.Collectors.toList());
     }
 

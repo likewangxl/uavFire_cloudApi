@@ -1,10 +1,15 @@
 package com.yx.uavfire.fc100.event.service;
 
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
+import com.yx.uavfire.fc100.event.model.dto.FireEventDecisionResult;
 import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
 import com.yx.uavfire.fc100.event.model.dto.FireEventHistoryDTO;
+import com.yx.uavfire.fc100.event.model.dto.FireEventRecheckResultDTO;
+import com.yx.uavfire.fc100.event.model.param.FireEventActionParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireEventRecheckResultParam;
 
+import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 public interface FireEventService {
@@ -19,6 +24,12 @@ public interface FireEventService {
      * 同 eventId 重复上报：返回已存在事件的任务（去重）。
      */
     FireEventCreateResponse create(FireEventCreateParam param);
+
+    FireEventDecisionResult confirm(String eventId, FireEventActionParam param, HttpServletRequest request);
+
+    FireEventDecisionResult reject(String eventId, FireEventActionParam param, HttpServletRequest request);
+
+    FireEventRecheckResultDTO recordRecheckResult(String eventId, FireEventRecheckResultParam param, HttpServletRequest request);
 
     default boolean attachVisibleImage(String eventId, String sourceEventId, String visibleImageUrl, String timestamp) {
         return attachVisibleImage(eventId, sourceEventId, visibleImageUrl, timestamp, null, null);

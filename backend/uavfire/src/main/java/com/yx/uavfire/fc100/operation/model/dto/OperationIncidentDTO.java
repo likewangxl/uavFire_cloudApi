@@ -14,6 +14,8 @@ public class OperationIncidentDTO {
     private Double riskRadiusM;
     private String createdBy;
     private String confirmedBy;
+    private Integer recommendedRecheck;
+    private String recheckReason;
     private Long closedAt;
     private Long createTime;
     private Long updateTime;

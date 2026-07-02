@@ -102,7 +102,7 @@ export function buildIncidentActions ({ status, assignments = [] } = {}) {
   const canDispatch = normalized === 'CONFIRMED' && hasActiveDeliveryPrimary(assignments)
 
   return [
-    action('CONFIRM_FIRE', normalized === 'CANDIDATE'),
+    action('CONFIRM_FIRE', normalized === 'CANDIDATE', { disabled: false, disabledReason: undefined }),
     action('GENERATE_MISSION', normalized === 'CONFIRMED'),
     action('RUN_PREFLIGHT', normalized === 'CONFIRMED'),
     action('DISPATCH', canDispatch),
@@ -146,4 +146,29 @@ export function statusBadge (status) {
 
 export function levelBadge (level) {
   return LEVEL_BADGE_MAP[String(level || '').toUpperCase()] || LEVEL_BADGE_MAP.UNKNOWN
+}
+
+export function coordinateQualityBadge (quality) {
+  const normalized = String(quality || 'UNKNOWN').toUpperCase()
+  const map = {
+    PRECISE: { label: '精确', color: 'green' },
+    ESTIMATED: { label: '估算', color: 'orange' },
+    MANUAL_MARKED: { label: '人工标注', color: 'blue' },
+    UNKNOWN: { label: '未知', color: 'default' },
+  }
+  return map[normalized] || { label: normalized, color: 'default' }
+}
+
+export function shouldShowSaturationWarning (maxTemp, threshold = 540) {
+  const value = Number(maxTemp)
+  const limit = Number(threshold)
+  return Number.isFinite(value) && Number.isFinite(limit) && value >= limit
+}
+
+export function draftMissionHint (quality) {
+  const normalized = String(quality || 'UNKNOWN').toUpperCase()
+  if (normalized === 'PRECISE') {
+    return { type: 'success', text: '坐标精确，确认后可生成 CREATED 草稿任务' }
+  }
+  return { type: 'warning', text: '坐标非 PRECISE，确认后需复测或人工标注坐标，不生成投放任务草稿' }
 }

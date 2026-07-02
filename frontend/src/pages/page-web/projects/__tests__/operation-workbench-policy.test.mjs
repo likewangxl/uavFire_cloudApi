@@ -5,6 +5,9 @@ import {
   INCIDENT_STATUSES,
   buildIncidentActions,
   DANGEROUS_ACTION_IDS,
+  coordinateQualityBadge,
+  shouldShowSaturationWarning,
+  draftMissionHint,
   requiresDangerConfirmation,
   requiresActionReason,
   sortTimelineItems,
@@ -133,4 +136,28 @@ test('status badge mapping covers all nine operation incident states', () => {
   assert.equal(STATUS_BADGE_MAP.ARCHIVED.color, 'default')
   assert.equal(STATUS_BADGE_MAP.FALSE_ALARM.color, 'orange')
   assert.equal(STATUS_BADGE_MAP.ABORTED.color, 'red')
+})
+
+test('fire candidate confirmation actions are only visible for candidate fire events', () => {
+  assert.deepEqual(visibleActionIds('CANDIDATE'), ['CONFIRM_FIRE', 'MARK_FALSE_ALARM'])
+  assert.ok(!visibleActionIds('CONFIRMED').includes('CONFIRM_FIRE'))
+  assert.ok(!visibleActionIds('RESPONDING').includes('MARK_FALSE_ALARM'))
+})
+
+test('coordinate quality badge maps S6 location quality values to distinct colors', () => {
+  assert.deepEqual(coordinateQualityBadge('PRECISE'), { label: '精确', color: 'green' })
+  assert.deepEqual(coordinateQualityBadge('ESTIMATED'), { label: '估算', color: 'orange' })
+  assert.deepEqual(coordinateQualityBadge('MANUAL_MARKED'), { label: '人工标注', color: 'blue' })
+  assert.deepEqual(coordinateQualityBadge('UNKNOWN'), { label: '未知', color: 'default' })
+})
+
+test('thermal saturation warning follows configured threshold', () => {
+  assert.equal(shouldShowSaturationWarning(540, 540), true)
+  assert.equal(shouldShowSaturationWarning(539.9, 540), false)
+  assert.equal(shouldShowSaturationWarning(null, 540), false)
+})
+
+test('draft mission hint explains non precise coordinate behavior', () => {
+  assert.equal(draftMissionHint('PRECISE').type, 'success')
+  assert.match(draftMissionHint('ESTIMATED').text, /需复测或人工标注坐标/)
 })

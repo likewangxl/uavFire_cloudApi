@@ -3,10 +3,15 @@ package com.yx.uavfire.fc100.event.controller;
 import com.yx.uavfire.fc100.common.ApiResult;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
+import com.yx.uavfire.fc100.common.idempotency.Idempotent;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
+import com.yx.uavfire.fc100.event.model.dto.FireEventDecisionResult;
 import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
 import com.yx.uavfire.fc100.event.model.dto.FireEventHistoryDTO;
+import com.yx.uavfire.fc100.event.model.dto.FireEventRecheckResultDTO;
+import com.yx.uavfire.fc100.event.model.param.FireEventActionParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireEventRecheckResultParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
+import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
 @RestController
@@ -40,6 +46,33 @@ public class FireEventController {
     @PostMapping
     public ApiResult<FireEventCreateResponse> create(@Valid @RequestBody FireEventCreateParam param) {
         return ApiResult.success(service.create(param));
+    }
+
+    @PostMapping("/{eventId}/confirm")
+    @Idempotent("fire.event.confirm")
+    public ApiResult<FireEventDecisionResult> confirm(
+            @PathVariable String eventId,
+            @Valid @RequestBody FireEventActionParam param,
+            HttpServletRequest request) {
+        return ApiResult.success(service.confirm(eventId, param, request));
+    }
+
+    @PostMapping("/{eventId}/reject")
+    @Idempotent("fire.event.reject")
+    public ApiResult<FireEventDecisionResult> reject(
+            @PathVariable String eventId,
+            @Valid @RequestBody FireEventActionParam param,
+            HttpServletRequest request) {
+        return ApiResult.success(service.reject(eventId, param, request));
+    }
+
+    @PostMapping("/{eventId}/recheck-result")
+    @Idempotent("fire.event.recheck-result")
+    public ApiResult<FireEventRecheckResultDTO> recheckResult(
+            @PathVariable String eventId,
+            @Valid @RequestBody FireEventRecheckResultParam param,
+            HttpServletRequest request) {
+        return ApiResult.success(service.recordRecheckResult(eventId, param, request));
     }
 
     @GetMapping("/{eventId}")

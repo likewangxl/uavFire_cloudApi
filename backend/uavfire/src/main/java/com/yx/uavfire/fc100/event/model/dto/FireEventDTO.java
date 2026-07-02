@@ -38,6 +38,9 @@ public class FireEventDTO {
     private String lastSourceEventId;
     private Integer notificationVersion;
     private String status;
+    private String confirmedStatus;
+    private Long linkedIncidentId;
+    private String locationQuality;
     private String missionNo;
     private String missionStatus;
     private Long createTime;

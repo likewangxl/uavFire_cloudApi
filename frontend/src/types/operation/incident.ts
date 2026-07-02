@@ -32,6 +32,15 @@ export interface OperationIncidentDTO {
   closedAt?: number;
   createTime?: number;
   updateTime?: number;
+  recommendedRecheck?: number;
+  recheckReason?: string;
+  sourceKind?: 'INCIDENT' | 'FIRE_EVENT_CANDIDATE';
+  fireEventEventId?: string;
+  confidence?: number | string;
+  locationQuality?: string | null;
+  thermalTemperature?: number | null;
+  missionNo?: string | null;
+  missionStatus?: string | null;
 }
 
 export interface OperationAssignmentDTO {

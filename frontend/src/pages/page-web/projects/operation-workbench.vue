@@ -51,11 +51,13 @@ import IncidentDetailPanel from '/@/components/operation/IncidentDetailPanel.vue
 import OperationMap from '/@/components/operation/OperationMap.vue'
 import OperationTimeline from '/@/components/operation/OperationTimeline.vue'
 import { operationIncidentApi, useOperationMock } from '/@/api/operation/incident'
+import { eventApi } from '/@/api/fire/event'
 import type {
   OperationIncidentDTO,
   OperationIncidentDetailDTO,
   OperationTimelineItem,
 } from '/@/types/operation/incident'
+import type { FireEventDTO } from '/@/types/fire/event'
 import { ELocalStorageKey } from '/@/types'
 
 const incidents = ref<OperationIncidentDTO[]>([])
@@ -85,13 +87,21 @@ onMounted(() => {
 async function loadIncidents (selectFirst: boolean) {
   listLoading.value = true
   try {
-    const res = await operationIncidentApi.list({
-      status: statusFilter.value || undefined,
-      level: levelFilter.value || undefined,
-      page: 1,
-      size: 50,
-    })
-    const rows = res.data.data || []
+    const [incidentRes, candidateRes] = await Promise.all([
+      operationIncidentApi.list({
+        status: statusFilter.value || undefined,
+        level: levelFilter.value || undefined,
+        page: 1,
+        size: 50,
+      }),
+      shouldLoadCandidates()
+        ? eventApi.list({ status: 'CANDIDATE' } as any)
+        : Promise.resolve({ data: { data: [] } } as any),
+    ])
+    const rows = [
+      ...candidateEvents(candidateRes.data.data || []),
+      ...(incidentRes.data.data || []),
+    ]
     incidents.value = rows
 
     const current = rows.find(item => item.id === selectedIncidentId.value)
@@ -116,10 +126,21 @@ async function loadIncidents (selectFirst: boolean) {
 
 async function selectIncident (incident: OperationIncidentDTO) {
   selectedIncidentId.value = incident.id
+  if (incident.sourceKind === 'FIRE_EVENT_CANDIDATE') {
+    detail.value = candidateDetail(incident)
+    timeline.value = []
+    return
+  }
   await loadIncidentDetail(incident.id)
 }
 
 async function loadIncidentDetail (id: number) {
+  const candidate = incidents.value.find(item => item.id === id && item.sourceKind === 'FIRE_EVENT_CANDIDATE')
+  if (candidate) {
+    detail.value = candidateDetail(candidate)
+    timeline.value = []
+    return
+  }
   detailLoading.value = true
   timelineLoading.value = true
   try {
@@ -145,6 +166,70 @@ async function runIncidentAction (payload: { actionId: string; reason?: string }
   const body = {
     operatorId: currentOperatorId(),
     reason: payload.reason,
+  }
+
+  if (payload.actionId === 'CONFIRM_FIRE' && detail.value.sourceKind === 'FIRE_EVENT_CANDIDATE') {
+    submittingAction.value = payload.actionId
+    try {
+      const res = await eventApi.confirm(detail.value.fireEventEventId || detail.value.fireEventId, body)
+      const incident = res.data.data?.incident
+      message.success(res.data.data?.draftMissionCreated ? '火情已确认，已生成任务草稿' : '火情已确认，需复测或人工标注坐标')
+      await loadIncidents(false)
+      if (incident?.id) {
+        selectedIncidentId.value = incident.id
+        await loadIncidentDetail(incident.id)
+      }
+    } catch (e: any) {
+      Modal.error({
+        title: '确认火情失败',
+        content: e?.response?.data?.message || e?.message || '请检查后端服务状态',
+      })
+    } finally {
+      submittingAction.value = ''
+    }
+    return
+  }
+
+  if (payload.actionId === 'MARK_FALSE_ALARM' && detail.value.sourceKind === 'FIRE_EVENT_CANDIDATE') {
+    submittingAction.value = payload.actionId
+    try {
+      await eventApi.reject(detail.value.fireEventEventId || detail.value.fireEventId, body)
+      message.success('已标记为误报')
+      await loadIncidents(true)
+    } catch (e: any) {
+      Modal.error({
+        title: '标记误报失败',
+        content: e?.response?.data?.message || e?.message || '请检查后端服务状态',
+      })
+    } finally {
+      submittingAction.value = ''
+    }
+    return
+  }
+
+  if (payload.actionId === 'SUBMIT_RECHECK') {
+    submittingAction.value = payload.actionId
+    try {
+      await eventApi.recheckResult(detail.value.fireEventEventId || detail.value.fireEventId, {
+        operatorId: currentOperatorId(),
+        maxTemp: Number((payload as any).maxTemp),
+        hotAreaM2: Number((payload as any).hotAreaM2),
+        flameVisible: Boolean((payload as any).flameVisible),
+        suggestion: String((payload as any).suggestion || 'CONTINUE_RESPONSE'),
+        remark: payload.reason,
+      })
+      message.success('复测结果已提交')
+      await loadIncidents(false)
+      await loadIncidentDetail(id)
+    } catch (e: any) {
+      Modal.error({
+        title: '提交复测失败',
+        content: e?.response?.data?.message || e?.message || '请检查后端服务状态',
+      })
+    } finally {
+      submittingAction.value = ''
+    }
+    return
   }
 
   if (['CONFIRM_FIRE', 'GENERATE_MISSION', 'RUN_PREFLIGHT', 'CONFIRM_RELEASE'].includes(payload.actionId)) {
@@ -187,6 +272,43 @@ async function runIncidentAction (payload: { actionId: string; reason?: string }
 function currentOperatorId () {
   if (typeof localStorage === 'undefined') return 'test-operator'
   return localStorage.getItem(ELocalStorageKey.UserId) || 'test-operator'
+}
+
+function shouldLoadCandidates () {
+  return !statusFilter.value || statusFilter.value === 'CANDIDATE'
+}
+
+function candidateEvents (events: FireEventDTO[]): OperationIncidentDTO[] {
+  return events
+    .filter(event => !event.linkedIncidentId)
+    .map(event => ({
+      id: -Number(event.id),
+      incidentNo: event.eventId,
+      fireEventId: event.id,
+      fireEventEventId: event.eventId,
+      level: event.fireLevel || 'UNKNOWN',
+      status: 'CANDIDATE',
+      centerLat: event.lat,
+      centerLng: event.lng,
+      riskRadiusM: event.geoErrorRadiusM || undefined,
+      createdBy: event.source || undefined,
+      createTime: event.createTime,
+      updateTime: event.lastSeenTime || event.createTime,
+      sourceKind: 'FIRE_EVENT_CANDIDATE',
+      confidence: event.confidence,
+      locationQuality: event.locationQuality || event.geoQuality || 'UNKNOWN',
+      thermalTemperature: event.thermalTemperature,
+      missionNo: event.missionNo,
+      missionStatus: event.missionStatus,
+    }))
+}
+
+function candidateDetail (incident: OperationIncidentDTO): OperationIncidentDetailDTO {
+  return {
+    ...incident,
+    assignments: [],
+    timeline: [],
+  }
 }
 </script>
 

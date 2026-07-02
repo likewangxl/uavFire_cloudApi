@@ -1,5 +1,6 @@
 export type FireEventStatus =
   | 'NEW'
+  | 'CANDIDATE'
   | 'LOW_CONFIDENCE'
   | 'MISSION_CREATED'
   | 'IGNORED';
@@ -37,6 +38,9 @@ export interface FireEventDTO {
   lastSourceEventId: string | null;
   notificationVersion: number | null;
   status: FireEventStatus;
+  confirmedStatus?: 'PENDING' | 'CONFIRMED' | 'REJECTED' | string;
+  linkedIncidentId?: number | null;
+  locationQuality?: string | null;
   missionNo: string | null;
   missionStatus: string | null;
   createTime: number;
