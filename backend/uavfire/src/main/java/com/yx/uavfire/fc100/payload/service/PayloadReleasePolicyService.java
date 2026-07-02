@@ -14,6 +14,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class PayloadReleasePolicyService {
         this(logMapper, clock, new Fc100ReleaseProperties());
     }
 
+    @Autowired
     public PayloadReleasePolicyService(FireMissionLogMapper logMapper, Clock clock,
                                        Fc100ReleaseProperties properties) {
         this.logMapper = logMapper;

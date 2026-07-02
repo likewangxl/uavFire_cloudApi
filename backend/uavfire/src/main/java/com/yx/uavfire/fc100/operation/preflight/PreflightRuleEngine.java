@@ -1,6 +1,7 @@
 package com.yx.uavfire.fc100.operation.preflight;
 
 import com.yx.uavfire.fc100.operation.preflight.rules.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -11,6 +12,9 @@ public class PreflightRuleEngine {
     private final List<PreflightRule> rules;
     private final PreflightProperties properties;
 
+    // 规则实例是普通对象而非 Spring Bean：容器装配必须走单参构造器，
+    // 若把 @Autowired 标到双参构造器上，Spring 会注入空规则列表导致门禁全部放行。
+    @Autowired
     public PreflightRuleEngine(PreflightProperties properties) {
         this(properties, List.of(
             new FireConfirmedRule(),
