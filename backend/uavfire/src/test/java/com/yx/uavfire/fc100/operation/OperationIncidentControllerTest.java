@@ -27,15 +27,15 @@ class OperationIncidentControllerTest {
         HttpServletRequest request = mock(HttpServletRequest.class);
         OperationActionParam param = new OperationActionParam();
         param.setOperatorId("commander-1");
-        OperationIncidentEntity responding = new OperationIncidentEntity();
-        responding.setId(501L);
-        responding.setStatus(OperationIncidentStatus.RESPONDING.name());
-        when(service.dispatch(501L, param, request)).thenReturn(responding);
+        OperationIncidentEntity dispatching = new OperationIncidentEntity();
+        dispatching.setId(501L);
+        dispatching.setStatus(OperationIncidentStatus.DISPATCHING.name());
+        when(service.dispatch(501L, param, request)).thenReturn(dispatching);
 
         ApiResult<OperationIncidentEntity> result = controller.dispatch(501L, param, request);
 
         assertEquals(0, result.getCode());
-        assertEquals(OperationIncidentStatus.RESPONDING.name(), result.getData().getStatus());
+        assertEquals(OperationIncidentStatus.DISPATCHING.name(), result.getData().getStatus());
         verify(service).dispatch(501L, param, request);
     }
 

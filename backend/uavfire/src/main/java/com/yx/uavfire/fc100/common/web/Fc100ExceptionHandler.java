@@ -3,6 +3,7 @@ package com.yx.uavfire.fc100.common.web;
 import com.yx.uavfire.fc100.common.ApiResult;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
+import com.yx.uavfire.fc100.operation.preflight.PreflightBlockedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +21,11 @@ public class Fc100ExceptionHandler {
     @ExceptionHandler(Fc100BusinessException.class)
     public ResponseEntity<ApiResult<?>> handleBusiness(Fc100BusinessException ex) {
         log.warn("fc100 business error: {} - {}", ex.getErrorCode(), ex.getMessage());
+        if (ex instanceof PreflightBlockedException) {
+            return ResponseEntity.status(httpFor(ex.getErrorCode()))
+                .body(ApiResult.error(ex.getErrorCode(), ex.getMessage(),
+                    ((PreflightBlockedException) ex).getResult()));
+        }
         return ResponseEntity.status(httpFor(ex.getErrorCode()))
             .body(ApiResult.error(ex.getErrorCode(), ex.getMessage()));
     }

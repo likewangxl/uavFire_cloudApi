@@ -25,6 +25,12 @@ public class ApiResult<T> {
         return r;
     }
 
+    public static <T> ApiResult<T> error(Fc100ErrorCode e, String msg, T data) {
+        ApiResult<T> r = error(e, msg);
+        r.data = data;
+        return r;
+    }
+
     public static <T> ApiResult<T> error(Fc100ErrorCode e) {
         return error(e, null);
     }

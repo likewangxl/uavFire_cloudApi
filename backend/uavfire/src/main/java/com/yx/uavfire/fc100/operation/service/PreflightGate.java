@@ -2,17 +2,22 @@ package com.yx.uavfire.fc100.operation.service;
 
 import com.yx.uavfire.fc100.operation.model.entity.OperationAssignmentEntity;
 import com.yx.uavfire.fc100.operation.model.entity.OperationIncidentEntity;
-import org.springframework.stereotype.Service;
+import com.yx.uavfire.fc100.operation.preflight.PreflightResult;
 
 public interface PreflightGate {
 
-    void check(OperationIncidentEntity incident, OperationAssignmentEntity deliveryPrimary);
+    default PreflightResult check(OperationIncidentEntity incident, OperationAssignmentEntity deliveryPrimary) {
+        return check(incident, deliveryPrimary, null);
+    }
 
-    @Service
+    PreflightResult check(OperationIncidentEntity incident, OperationAssignmentEntity deliveryPrimary, String operatorId);
+
     class NoopPreflightGate implements PreflightGate {
         @Override
-        public void check(OperationIncidentEntity incident, OperationAssignmentEntity deliveryPrimary) {
-            // TODO S5: plug compliance, airspace, weather, and release-policy gates here.
+        public PreflightResult check(OperationIncidentEntity incident, OperationAssignmentEntity deliveryPrimary,
+                                     String operatorId) {
+            long now = System.currentTimeMillis();
+            return PreflightResult.from(incident == null ? null : incident.getId(), operatorId, java.util.List.of(), now);
         }
     }
 }

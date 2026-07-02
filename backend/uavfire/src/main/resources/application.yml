@@ -235,6 +235,33 @@ fc100:
     ack-timeout: ${FC100_COMMAND_QUEUE_ACK_TIMEOUT:30s}
     retry-backoff: ${FC100_COMMAND_QUEUE_RETRY_BACKOFF:5s}
     dispatch-batch-size: ${FC100_COMMAND_QUEUE_DISPATCH_BATCH_SIZE:20}
+  preflight:
+    min-battery-pct: ${FC100_PREFLIGHT_MIN_BATTERY_PCT:30}
+    max-wind-mps: ${FC100_PREFLIGHT_MAX_WIND_MPS:12}
+    max-total-weight-kg: ${FC100_PREFLIGHT_MAX_TOTAL_WEIGHT_KG:85}
+    max-net-payload-kg: ${FC100_PREFLIGHT_MAX_NET_PAYLOAD_KG:35}
+    rules:
+      R01: true
+      R02: true
+      R03: true
+      R04: true
+      R05: true
+      R06: true
+      R07: true
+      R08: true
+      R09: true
+      R10: true
+      R11: true
+      R12: true
+      R13: true
+      R14: true
+      R15: true
+    time-budget:
+      cruise-speed-mps: ${FC100_PREFLIGHT_TIME_BUDGET_CRUISE_SPEED_MPS:8}
+      max-flight-minutes: ${FC100_PREFLIGHT_TIME_BUDGET_MAX_FLIGHT_MINUTES:40}
+      hover-minutes: ${FC100_PREFLIGHT_TIME_BUDGET_HOVER_MINUTES:12}
+      hover-ratio: ${FC100_PREFLIGHT_TIME_BUDGET_HOVER_RATIO:1.0}
+      safety-reserve-ratio: ${FC100_PREFLIGHT_TIME_BUDGET_SAFETY_RESERVE_RATIO:0.2}
   delivery-sync:
     mode: mock                # mock | http
     base-url: https://ta-api.dji.com

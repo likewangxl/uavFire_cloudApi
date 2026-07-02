@@ -264,12 +264,9 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
             throw new Fc100BusinessException(Fc100ErrorCode.STATUS_TRANSITION_FORBIDDEN,
                 "dispatch requires active DELIVERY_PRIMARY assignment");
         }
-        preflightGate.check(incident, primary);
-        stateMachine.transit(cmd(id, OperationIncidentEvent.DISPATCH, param, req)
+        preflightGate.check(incident, primary, param.getOperatorId());
+        return stateMachine.transit(cmd(id, OperationIncidentEvent.DISPATCH, param, req)
             .expectedFrom(OperationIncidentStatus.CONFIRMED)
-            .build());
-        return stateMachine.transit(cmd(id, OperationIncidentEvent.RESPOND, param, req)
-            .expectedFrom(OperationIncidentStatus.DISPATCHING)
             .build());
     }
 

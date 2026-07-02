@@ -24,6 +24,9 @@ import com.yx.uavfire.fc100.operation.model.param.AssignOperationResourceParam;
 import com.yx.uavfire.fc100.operation.model.param.CreateOperationIncidentParam;
 import com.yx.uavfire.fc100.operation.model.param.OperationActionParam;
 import com.yx.uavfire.fc100.operation.lease.ResourceLeaseService;
+import com.yx.uavfire.fc100.operation.preflight.PreflightBlockedException;
+import com.yx.uavfire.fc100.operation.preflight.PreflightResult;
+import com.yx.uavfire.fc100.operation.preflight.RuleCheckResult;
 import com.yx.uavfire.fc100.operation.service.IncidentNoGenerator;
 import com.yx.uavfire.fc100.operation.service.IncidentStateMachine;
 import com.yx.uavfire.fc100.operation.service.IncidentTransitCommand;
@@ -179,6 +182,55 @@ class OperationIncidentServiceTest {
     }
 
     @Test
+    void dispatchRejectsWhenPreflightBlocksAndDoesNotChangeIncidentStatus() {
+        Fixture f = fixture();
+        HttpServletRequest request = request();
+        OperationIncidentEntity incident = incident(501L, OperationIncidentStatus.CONFIRMED);
+        OperationAssignmentEntity primary = assignment("FC100-SN-001", OperationAssignmentRole.DELIVERY_PRIMARY);
+        when(f.incidentMapper.selectById(501L)).thenReturn(incident);
+        when(f.assignmentMapper.selectList(any(Wrapper.class))).thenReturn(List.of(primary));
+        PreflightResult blocked = PreflightResult.from(501L, "commander-1",
+            List.of(RuleCheckResult.block("R01", "火情已人工确认", "not confirmed")), fixedClock().now());
+        when(f.preflightGate.check(incident, primary, "commander-1"))
+            .thenThrow(new PreflightBlockedException(blocked));
+
+        OperationActionParam param = new OperationActionParam();
+        param.setOperatorId("commander-1");
+
+        PreflightBlockedException ex = assertThrows(PreflightBlockedException.class,
+            () -> f.service.dispatch(501L, param, request));
+
+        assertEquals(1, ex.getResult().blockingItems().size());
+        assertEquals(OperationIncidentStatus.CONFIRMED.name(), incident.getStatus());
+        verify(f.stateMachine, never()).transit(any(IncidentTransitCommand.class));
+    }
+
+    @Test
+    void dispatchPassesPreflightAndMovesIncidentToDispatchingOnly() {
+        Fixture f = fixture();
+        HttpServletRequest request = request();
+        OperationIncidentEntity confirmed = incident(501L, OperationIncidentStatus.CONFIRMED);
+        OperationIncidentEntity dispatching = incident(501L, OperationIncidentStatus.DISPATCHING);
+        OperationAssignmentEntity primary = assignment("FC100-SN-001", OperationAssignmentRole.DELIVERY_PRIMARY);
+        when(f.incidentMapper.selectById(501L)).thenReturn(confirmed);
+        when(f.assignmentMapper.selectList(any(Wrapper.class))).thenReturn(List.of(primary));
+        when(f.preflightGate.check(confirmed, primary, "commander-1"))
+            .thenReturn(PreflightResult.from(501L, "commander-1", List.of(), fixedClock().now()));
+        when(f.stateMachine.transit(any(IncidentTransitCommand.class))).thenReturn(dispatching);
+
+        OperationActionParam param = new OperationActionParam();
+        param.setOperatorId("commander-1");
+
+        OperationIncidentEntity result = f.service.dispatch(501L, param, request);
+
+        assertEquals(OperationIncidentStatus.DISPATCHING.name(), result.getStatus());
+        verify(f.stateMachine).transit(argThat(cmd ->
+            cmd.getEvent() == OperationIncidentEvent.DISPATCH
+                && OperationIncidentStatus.CONFIRMED.equals(cmd.getExpectedFrom())));
+        verify(f.stateMachine, never()).transit(argThat(cmd -> cmd.getEvent() == OperationIncidentEvent.RESPOND));
+    }
+
+    @Test
     void abortAndCloseUseStateMachineWithOperatorReasonAndRequestMetadata() {
         Fixture f = fixture();
         HttpServletRequest request = request();
@@ -307,7 +359,7 @@ class OperationIncidentServiceTest {
             incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
             stateMachine, noGenerator, preflightGate, leaseService, fixedClock());
         return new Fixture(incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
-            stateMachine, noGenerator, leaseService, service);
+            stateMachine, noGenerator, preflightGate, leaseService, service);
     }
 
     private Fixture fixtureWithRealStateMachine() {
@@ -324,7 +376,7 @@ class OperationIncidentServiceTest {
             incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
             stateMachine, noGenerator, preflightGate, leaseService, fixedClock());
         return new Fixture(incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
-            stateMachine, noGenerator, leaseService, service);
+            stateMachine, noGenerator, preflightGate, leaseService, service);
     }
 
     private FireEventEntity confirmedFireEvent() {
@@ -396,6 +448,7 @@ class OperationIncidentServiceTest {
         private final FireMissionMapper fireMissionMapper;
         private final IncidentStateMachine stateMachine;
         private final IncidentNoGenerator noGenerator;
+        private final PreflightGate preflightGate;
         private final ResourceLeaseService leaseService;
         private final OperationIncidentServiceImpl service;
 
@@ -406,6 +459,7 @@ class OperationIncidentServiceTest {
                         FireMissionMapper fireMissionMapper,
                         IncidentStateMachine stateMachine,
                         IncidentNoGenerator noGenerator,
+                        PreflightGate preflightGate,
                         ResourceLeaseService leaseService,
                         OperationIncidentServiceImpl service) {
             this.incidentMapper = incidentMapper;
@@ -415,6 +469,7 @@ class OperationIncidentServiceTest {
             this.fireMissionMapper = fireMissionMapper;
             this.stateMachine = stateMachine;
             this.noGenerator = noGenerator;
+            this.preflightGate = preflightGate;
             this.leaseService = leaseService;
             this.service = service;
         }
