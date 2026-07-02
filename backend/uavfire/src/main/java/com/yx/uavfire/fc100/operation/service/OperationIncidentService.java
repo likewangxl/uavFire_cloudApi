@@ -26,6 +26,8 @@ public interface OperationIncidentService {
 
     OperationAssignmentEntity assignDelivery(Long id, AssignOperationResourceParam param);
 
+    OperationAssignmentEntity releaseAssignment(Long assignmentId, OperationActionParam param);
+
     OperationIncidentEntity dispatch(Long id, OperationActionParam param, HttpServletRequest req);
 
     OperationIncidentEntity markFalseAlarm(Long id, OperationActionParam param, HttpServletRequest req);

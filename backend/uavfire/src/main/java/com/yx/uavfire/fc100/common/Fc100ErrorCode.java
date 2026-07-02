@@ -15,6 +15,7 @@ public enum Fc100ErrorCode {
     IDEMPOTENCY_REPLAY(2003, "idempotency replay"),
     DUPLICATE_FROM_EVENT(2004, "duplicate mission from same fire event"),
     INCIDENT_NOT_FOUND(2005, "operation incident not found"),
+    RESOURCE_CONFLICT(2006, "operation resource conflict"),
 
     // 3xxx 安全
     SAFETY_CHECK_FAILED(3000, "safety check failed"),

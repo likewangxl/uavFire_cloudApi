@@ -23,6 +23,7 @@ import com.yx.uavfire.fc100.operation.model.enums.OperationIncidentStatus;
 import com.yx.uavfire.fc100.operation.model.param.AssignOperationResourceParam;
 import com.yx.uavfire.fc100.operation.model.param.CreateOperationIncidentParam;
 import com.yx.uavfire.fc100.operation.model.param.OperationActionParam;
+import com.yx.uavfire.fc100.operation.lease.ResourceLeaseService;
 import com.yx.uavfire.fc100.operation.service.IncidentNoGenerator;
 import com.yx.uavfire.fc100.operation.service.IncidentStateMachine;
 import com.yx.uavfire.fc100.operation.service.IncidentTransitCommand;
@@ -136,6 +137,27 @@ class OperationIncidentServiceTest {
             () -> f.service.assignDelivery(501L, param));
 
         assertEquals(Fc100ErrorCode.INVALID_PARAM, ex.getErrorCode());
+        verify(f.assignmentMapper, never()).insert(any(OperationAssignmentEntity.class));
+    }
+
+    @Test
+    void assignDeliveryFailsWhenResourceLeaseIsAlreadyActiveElsewhere() {
+        Fixture f = fixture();
+        when(f.incidentMapper.selectById(501L)).thenReturn(incident(501L, OperationIncidentStatus.CONFIRMED));
+        when(f.assignmentMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
+        when(f.leaseService.acquire(any(), any(), any(), any(), any()))
+            .thenThrow(new Fc100BusinessException(Fc100ErrorCode.RESOURCE_CONFLICT,
+                "resource already leased: FC100-SN-001"));
+
+        AssignOperationResourceParam param = new AssignOperationResourceParam();
+        param.setResourceSn("FC100-SN-001");
+        param.setRole(OperationAssignmentRole.DELIVERY_PRIMARY.name());
+        param.setOperatorId("operator-1");
+
+        Fc100BusinessException ex = assertThrows(Fc100BusinessException.class,
+            () -> f.service.assignDelivery(501L, param));
+
+        assertEquals(Fc100ErrorCode.RESOURCE_CONFLICT, ex.getErrorCode());
         verify(f.assignmentMapper, never()).insert(any(OperationAssignmentEntity.class));
     }
 
@@ -280,11 +302,12 @@ class OperationIncidentServiceTest {
         IncidentStateMachine stateMachine = mock(IncidentStateMachine.class);
         IncidentNoGenerator noGenerator = mock(IncidentNoGenerator.class);
         PreflightGate preflightGate = mock(PreflightGate.class);
+        ResourceLeaseService leaseService = mock(ResourceLeaseService.class);
         OperationIncidentServiceImpl service = new OperationIncidentServiceImpl(
             incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
-            stateMachine, noGenerator, preflightGate, fixedClock());
+            stateMachine, noGenerator, preflightGate, leaseService, fixedClock());
         return new Fixture(incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
-            stateMachine, noGenerator, service);
+            stateMachine, noGenerator, leaseService, service);
     }
 
     private Fixture fixtureWithRealStateMachine() {
@@ -296,11 +319,12 @@ class OperationIncidentServiceTest {
         IncidentStateMachine stateMachine = new IncidentStateMachineImpl(incidentMapper, logMapper, fixedClock());
         IncidentNoGenerator noGenerator = mock(IncidentNoGenerator.class);
         PreflightGate preflightGate = mock(PreflightGate.class);
+        ResourceLeaseService leaseService = mock(ResourceLeaseService.class);
         OperationIncidentServiceImpl service = new OperationIncidentServiceImpl(
             incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
-            stateMachine, noGenerator, preflightGate, fixedClock());
+            stateMachine, noGenerator, preflightGate, leaseService, fixedClock());
         return new Fixture(incidentMapper, assignmentMapper, logMapper, fireEventMapper, fireMissionMapper,
-            stateMachine, noGenerator, service);
+            stateMachine, noGenerator, leaseService, service);
     }
 
     private FireEventEntity confirmedFireEvent() {
@@ -372,6 +396,7 @@ class OperationIncidentServiceTest {
         private final FireMissionMapper fireMissionMapper;
         private final IncidentStateMachine stateMachine;
         private final IncidentNoGenerator noGenerator;
+        private final ResourceLeaseService leaseService;
         private final OperationIncidentServiceImpl service;
 
         private Fixture(OperationIncidentMapper incidentMapper,
@@ -381,6 +406,7 @@ class OperationIncidentServiceTest {
                         FireMissionMapper fireMissionMapper,
                         IncidentStateMachine stateMachine,
                         IncidentNoGenerator noGenerator,
+                        ResourceLeaseService leaseService,
                         OperationIncidentServiceImpl service) {
             this.incidentMapper = incidentMapper;
             this.assignmentMapper = assignmentMapper;
@@ -389,6 +415,7 @@ class OperationIncidentServiceTest {
             this.fireMissionMapper = fireMissionMapper;
             this.stateMachine = stateMachine;
             this.noGenerator = noGenerator;
+            this.leaseService = leaseService;
             this.service = service;
         }
     }

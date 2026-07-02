@@ -32,6 +32,8 @@ import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
 import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
 import com.yx.uavfire.fc100.mission.service.TransitCommand;
 import com.yx.uavfire.fc100.mission.service.MissionStateMachine;
+import com.yx.uavfire.fc100.operation.command.CommandQueueService;
+import com.yx.uavfire.fc100.operation.model.entity.OperationCommandEventEntity;
 import com.yx.uavfire.fc100.payload.service.PayloadReleasePolicyService;
 import com.yx.uavfire.fc100.route.model.dto.RouteFileDTO;
 import com.yx.uavfire.fc100.route.service.RouteExportService;
@@ -1174,6 +1176,45 @@ class DeliveryControllerApifoxWorkflowTest {
         verify(missionLogMapper).insert(logCaptor.capture());
         assertEquals("PAYLOAD_RELEASE_POLICY_DENIED", logCaptor.getValue().getAction());
         assertEquals("operator-1", logCaptor.getValue().getOperatorId());
+    }
+
+    @Test
+    void releaseHookAfterManualConfirmationEnqueuesCommandWithoutDirectAdapterSend() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
+        CommandQueueService commandQueueService = mock(CommandQueueService.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, null, null, releasePolicyService(missionLogMapper), commandQueueService);
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(15L);
+        mission.setMissionNo("M-FC100-QUEUE");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+        OperationCommandEventEntity event = new OperationCommandEventEntity();
+        event.setCommandId("CMD-QUEUE-001");
+        event.setTargetSn("FC100-SN-001");
+        event.setCommandType("hoist_hook_control");
+        event.setStatus("PENDING");
+        when(commandQueueService.enqueue(any(), any(), any(), any(), any())).thenReturn(event);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeader("X-Request-Id")).thenReturn("REQ-QUEUE");
+        when(request.getHeader("X-Idempotency-Key")).thenReturn("IDEMP-QUEUE");
+
+        DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
+        param.setOperatorId("operator-1");
+        param.setConfirmedRelease(true);
+        ApiResult<DeliveryCommandRef> result = controller.releaseHook("M-FC100-QUEUE", param, request);
+
+        assertEquals("CMD-QUEUE-001", result.getData().getBid());
+        assertEquals("PENDING", result.getData().getStatus());
+        verify(commandQueueService).enqueue(any(), any(), any(), any(), any());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
     }
 
     @Test

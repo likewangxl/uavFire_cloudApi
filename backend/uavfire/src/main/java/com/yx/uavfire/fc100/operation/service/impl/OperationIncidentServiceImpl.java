@@ -27,6 +27,7 @@ import com.yx.uavfire.fc100.operation.model.enums.OperationIncidentStatus;
 import com.yx.uavfire.fc100.operation.model.param.AssignOperationResourceParam;
 import com.yx.uavfire.fc100.operation.model.param.CreateOperationIncidentParam;
 import com.yx.uavfire.fc100.operation.model.param.OperationActionParam;
+import com.yx.uavfire.fc100.operation.lease.ResourceLeaseService;
 import com.yx.uavfire.fc100.operation.service.IncidentNoGenerator;
 import com.yx.uavfire.fc100.operation.service.IncidentStateMachine;
 import com.yx.uavfire.fc100.operation.service.IncidentTransitCommand;
@@ -37,6 +38,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.servlet.http.HttpServletRequest;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -63,6 +65,7 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
     private final IncidentStateMachine stateMachine;
     private final IncidentNoGenerator noGenerator;
     private final PreflightGate preflightGate;
+    private final ResourceLeaseService leaseService;
     private final Clock clock;
 
     public OperationIncidentServiceImpl(OperationIncidentMapper incidentMapper,
@@ -73,6 +76,7 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
                                         IncidentStateMachine stateMachine,
                                         IncidentNoGenerator noGenerator,
                                         PreflightGate preflightGate,
+                                        ResourceLeaseService leaseService,
                                         Clock clock) {
         this.incidentMapper = incidentMapper;
         this.assignmentMapper = assignmentMapper;
@@ -82,6 +86,7 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
         this.stateMachine = stateMachine;
         this.noGenerator = noGenerator;
         this.preflightGate = preflightGate;
+        this.leaseService = leaseService;
         this.clock = clock;
     }
 
@@ -224,6 +229,30 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
 
     @Override
     @Transactional
+    public OperationAssignmentEntity releaseAssignment(Long assignmentId, OperationActionParam param) {
+        OperationAssignmentEntity assignment = assignmentMapper.selectById(assignmentId);
+        if (assignment == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
+                "operation assignment not found: " + assignmentId);
+        }
+        if (!OperationAssignmentStatus.ACTIVE.name().equals(assignment.getStatus())) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
+                "assignment is not active: " + assignmentId);
+        }
+        long now = clock.now();
+        leaseService.release(assignment.getLeaseId(), "INCIDENT", assignment.getIncidentId());
+        assignment.setStatus(OperationAssignmentStatus.RELEASED.name());
+        assignment.setReleasedAt(now);
+        assignmentMapper.updateById(assignment);
+        audit(assignment.getIncidentId(), "RELEASE_ASSIGNMENT", null, null,
+            param == null ? null : param.getOperatorId(), null,
+            assignment.getRole() + " released from " + assignment.getResourceSn()
+                + (param == null || param.getReason() == null ? "" : "; " + param.getReason()), now);
+        return assignment;
+    }
+
+    @Override
+    @Transactional
     public OperationIncidentEntity dispatch(Long id, OperationActionParam param, HttpServletRequest req) {
         OperationIncidentEntity incident = requireIncident(id);
         if (!OperationIncidentStatus.CONFIRMED.name().equals(incident.getStatus())) {
@@ -284,13 +313,16 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
                 "incident is not active: " + id);
         }
         long now = clock.now();
+        var lease = leaseService.acquire(param.getResourceSn(), role.name(), "INCIDENT", id, Duration.ofMinutes(30));
         OperationAssignmentEntity assignment = new OperationAssignmentEntity();
         assignment.setIncidentId(id);
         assignment.setResourceSn(param.getResourceSn());
         assignment.setRole(role.name());
         assignment.setStatus(OperationAssignmentStatus.ACTIVE.name());
+        assignment.setLeaseId(lease.getId());
         assignment.setAssignedAt(now);
         assignmentMapper.insert(assignment);
+        assignmentMapper.updateById(assignment);
         audit(id, action, incident.getStatus(), incident.getStatus(), param.getOperatorId(), null,
             role.name() + " -> " + param.getResourceSn()
                 + (param.getRemark() == null ? "" : "; " + param.getRemark()), now);

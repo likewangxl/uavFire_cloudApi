@@ -31,6 +31,8 @@ import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.fc100.mission.service.MissionStateMachine;
 import com.yx.uavfire.fc100.mission.service.TransitCommand;
+import com.yx.uavfire.fc100.operation.command.CommandQueueService;
+import com.yx.uavfire.fc100.operation.model.entity.OperationCommandEventEntity;
 import com.yx.uavfire.fc100.payload.service.PayloadReleasePolicyService;
 import com.yx.uavfire.fc100.route.model.dto.RouteFileDTO;
 import com.yx.uavfire.fc100.route.service.RouteExportService;
@@ -99,6 +101,7 @@ public class DeliveryController {
     private final WaypointPlannerService waypointPlannerService;
     private final SafetyCheckService safetyCheckService;
     private final PayloadReleasePolicyService releasePolicyService;
+    private final CommandQueueService commandQueueService;
     private final ConcurrentHashMap<String, CachedDeviceLive> fc100BypassLiveCache = new ConcurrentHashMap<>();
 
     @Value("${livestream.url.rtmp.url:}")
@@ -130,7 +133,19 @@ public class DeliveryController {
                                WaypointPlannerService waypointPlannerService,
                                SafetyCheckService safetyCheckService) {
         this(a, p, m, r, sm, plannedWaylineService, waylineFileService,
-            fireEventMapper, waypointPlannerService, safetyCheckService, null);
+            fireEventMapper, waypointPlannerService, safetyCheckService, null, null);
+    }
+
+    public DeliveryController(DeliverySyncAdapter a, DeliverySyncProperties p,
+                               FireMissionMapper m, RouteExportService r, MissionStateMachine sm,
+                               IPlannedWaylineService plannedWaylineService,
+                               IWaylineFileService waylineFileService,
+                               FireEventMapper fireEventMapper,
+                               WaypointPlannerService waypointPlannerService,
+                               SafetyCheckService safetyCheckService,
+                               PayloadReleasePolicyService releasePolicyService) {
+        this(a, p, m, r, sm, plannedWaylineService, waylineFileService,
+            fireEventMapper, waypointPlannerService, safetyCheckService, releasePolicyService, null);
     }
 
     @Autowired
@@ -141,7 +156,8 @@ public class DeliveryController {
                                FireEventMapper fireEventMapper,
                                WaypointPlannerService waypointPlannerService,
                                SafetyCheckService safetyCheckService,
-                               PayloadReleasePolicyService releasePolicyService) {
+                               PayloadReleasePolicyService releasePolicyService,
+                               CommandQueueService commandQueueService) {
         this.adapter = a; this.props = p; this.missionMapper = m;
         this.routeService = r; this.sm = sm;
         this.plannedWaylineService = plannedWaylineService;
@@ -150,6 +166,7 @@ public class DeliveryController {
         this.waypointPlannerService = waypointPlannerService;
         this.safetyCheckService = safetyCheckService;
         this.releasePolicyService = releasePolicyService;
+        this.commandQueueService = commandQueueService;
     }
 
     @GetMapping("/delivery/devices")
@@ -311,6 +328,7 @@ public class DeliveryController {
     @Idempotent("delivery.direct-wayline.create-existing")
     public ApiResult<DeliveryTaskRef> createTaskFromExistingWayline(
             @Valid @RequestBody CreateExistingWaylineTaskParam p) {
+        // TODO(S4): Wayline task dispatch remains outside operation_command_event in phase 1.
         String waylineId = p.getWaylineId().trim();
         DeliveryTaskRef ref = adapter.createTask(CreateTaskRequest.builder()
             .workspaceId(props.getWorkspaceId())
@@ -962,7 +980,8 @@ public class DeliveryController {
         DeviceCommandParam command = new DeviceCommandParam();
         command.setOperatorId(p.getOperatorId());
         command.setData(Map.of("mode", 1));
-        return ApiResult.success(sendDeviceCommand(mission.getAircraftSn(), "hoist_hook_control", command, no));
+        return ApiResult.success(sendDeviceCommand(mission.getAircraftSn(), "hoist_hook_control", command, no,
+            req == null ? null : req.getHeader("X-Idempotency-Key")));
     }
 
     public ApiResult<DeliveryCommandRef> releaseHook(String no, DeviceCommandParam p) {
@@ -980,7 +999,9 @@ public class DeliveryController {
     @GetMapping("/missions/{no}/delivery/commands/status")
     public ApiResult<DeliveryCommandStatus> commandStatus(@PathVariable("no") String no) {
         FireMissionEntity m = findMission(no);
-        return ApiResult.success(adapter.queryDeviceCommandStatus(m.getAircraftSn()));
+        DeliveryCommandStatus status = adapter.queryDeviceCommandStatus(m.getAircraftSn());
+        ackLatestCommand(m.getAircraftSn(), null);
+        return ApiResult.success(status);
     }
 
     @PostMapping("/delivery/devices/{sn}/emergency-stop")
@@ -1014,7 +1035,9 @@ public class DeliveryController {
 
     @GetMapping("/delivery/devices/{sn}/commands/status")
     public ApiResult<DeliveryCommandStatus> directCommandStatus(@PathVariable("sn") String sn) {
-        return ApiResult.success(adapter.queryDeviceCommandStatus(sn));
+        DeliveryCommandStatus status = adapter.queryDeviceCommandStatus(sn);
+        ackLatestCommand(sn, null);
+        return ApiResult.success(status);
     }
 
     private DeliveryCommandRef sendMissionCommand(String no, String method, DeviceCommandParam p) {
@@ -1027,12 +1050,47 @@ public class DeliveryController {
     }
 
     private DeliveryCommandRef sendDeviceCommand(String deviceSn, String method, DeviceCommandParam p, String missionNo) {
+        return sendDeviceCommand(deviceSn, method, p, missionNo, null);
+    }
+
+    private DeliveryCommandRef sendDeviceCommand(String deviceSn, String method, DeviceCommandParam p,
+                                                 String missionNo, String idempotencyKey) {
+        Map<String, Object> data = p == null || p.getData() == null ? Map.of() : p.getData();
+        if (commandQueueService != null) {
+            OperationCommandEventEntity event = commandQueueService.enqueue(deviceSn, method,
+                Map.of(
+                    "missionNo", missionNo,
+                    "deviceSn", deviceSn,
+                    "deviceCmdMethod", method,
+                    "deviceCmdData", data
+                ),
+                idempotencyKey,
+                p == null ? null : p.getOperatorId());
+            return toQueuedCommandRef(event);
+        }
         return adapter.sendDeviceCommand(DeviceCommandRequest.builder()
             .missionNo(missionNo)
             .deviceSn(deviceSn)
             .deviceCmdMethod(method)
-            .deviceCmdData(p.getData() != null ? p.getData() : Map.of())
+            .deviceCmdData(data)
             .build());
+    }
+
+    private DeliveryCommandRef toQueuedCommandRef(OperationCommandEventEntity event) {
+        DeliveryCommandRef ref = new DeliveryCommandRef();
+        ref.setBid(event.getCommandId());
+        ref.setDeviceSn(event.getTargetSn());
+        ref.setDeviceCmdMethod(event.getCommandType());
+        ref.setStatus(event.getStatus());
+        ref.setCreateTime(event.getCreateTime());
+        ref.setUpdateTime(event.getUpdateTime());
+        return ref;
+    }
+
+    private void ackLatestCommand(String deviceSn, String commandType) {
+        if (commandQueueService != null) {
+            commandQueueService.ackLatest(deviceSn, commandType);
+        }
     }
 
     private boolean allowAutoReleaseByPolicy(FireMissionEntity mission) {

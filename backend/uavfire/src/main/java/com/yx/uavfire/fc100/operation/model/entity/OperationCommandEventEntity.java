@@ -13,11 +13,16 @@ public class OperationCommandEventEntity {
     private String commandId;
     private String targetSn;
     private String commandType;
+    private String missionNo;
     private String payloadJson;
     private String status;
     private String idempotencyKey;
+    private String operatorId;
     private Integer retryCount;
+    private Long sentAt;
     private Long ackAt;
+    private Long nextAttemptAt;
     private String errorMessage;
     private Long createTime;
+    private Long updateTime;
 }

@@ -293,9 +293,14 @@ CREATE TABLE `operation_resource_lease` (
   `expires_at` bigint DEFAULT NULL,
   `heartbeat_at` bigint DEFAULT NULL,
   `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `active_resource_sn` varchar(64) GENERATED ALWAYS AS (case when `status` = 'ACTIVE' then `resource_sn` else NULL end) STORED,
+  `active_delivery_owner_id` bigint unsigned GENERATED ALWAYS AS (case when `status` = 'ACTIVE' and `lease_type` = 'DELIVERY_PRIMARY' then `owner_id` else NULL end) STORED,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `UNI_OPERATION_LEASE_ACTIVE_RESOURCE` (`active_resource_sn`),
+  UNIQUE KEY `UNI_OPERATION_LEASE_ACTIVE_DELIVERY_OWNER` (`active_delivery_owner_id`),
   KEY `idx_operation_lease_resource` (`resource_sn`,`status`),
-  KEY `idx_operation_lease_owner` (`owner_type`,`owner_id`)
+  KEY `idx_operation_lease_owner` (`owner_type`,`owner_id`),
+  KEY `idx_operation_lease_expire` (`status`,`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='operation resource lease placeholder for S4';
 
 DROP TABLE IF EXISTS `operation_command_event`;
@@ -304,17 +309,24 @@ CREATE TABLE `operation_command_event` (
   `command_id` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
   `target_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
   `command_type` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `mission_no` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
   `payload_json` longtext,
   `status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
   `idempotency_key` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `operator_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
   `retry_count` int NOT NULL DEFAULT 0,
+  `sent_at` bigint DEFAULT NULL,
   `ack_at` bigint DEFAULT NULL,
+  `next_attempt_at` bigint DEFAULT NULL,
   `error_message` text,
   `create_time` bigint NOT NULL,
+  `update_time` bigint DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `UNI_OPERATION_COMMAND_ID` (`command_id`),
+  UNIQUE KEY `UNI_OPERATION_COMMAND_IDEMPOTENCY` (`idempotency_key`),
   KEY `idx_operation_command_target` (`target_sn`,`status`,`create_time`),
-  KEY `idx_operation_command_idempotency` (`idempotency_key`)
+  KEY `idx_operation_command_mission` (`mission_no`,`create_time`),
+  KEY `idx_operation_command_due` (`status`,`next_attempt_at`,`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='operation command event queue placeholder for S4';
 
 DROP TABLE IF EXISTS `operation_incident_log`;

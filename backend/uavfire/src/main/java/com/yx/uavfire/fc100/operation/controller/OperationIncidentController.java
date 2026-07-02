@@ -71,6 +71,13 @@ public class OperationIncidentController {
         return ApiResult.success(service.assignDelivery(id, param));
     }
 
+    @PostMapping("/assignments/{assignmentId}/release")
+    public ApiResult<OperationAssignmentEntity> releaseAssignment(
+            @PathVariable("assignmentId") Long assignmentId,
+            @Valid @RequestBody OperationActionParam param) {
+        return ApiResult.success(service.releaseAssignment(assignmentId, param));
+    }
+
     @PostMapping("/{id}/dispatch")
     @Idempotent("operation.incident.dispatch")
     public ApiResult<OperationIncidentEntity> dispatch(
