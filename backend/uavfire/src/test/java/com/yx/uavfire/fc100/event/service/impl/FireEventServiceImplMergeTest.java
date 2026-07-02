@@ -13,6 +13,8 @@ import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
+import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
+import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
 import com.yx.uavfire.manage.service.IDeviceRedisService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -93,6 +95,24 @@ class FireEventServiceImplMergeTest {
         assertEquals("CREATED", response.getNotificationReason());
         verify(events).insert(any(FireEventEntity.class));
         verify(missions).insert(any(FireMissionEntity.class));
+    }
+
+    @Test
+    void createPersistsManualReleaseDefaultsOnNewMission() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        build().create(param("policy-default-event", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
+
+        ArgumentCaptor<FireMissionEntity> missionCaptor = ArgumentCaptor.forClass(FireMissionEntity.class);
+        verify(missions).insert(missionCaptor.capture());
+        assertEquals(ReleasePolicy.MANUAL_CONFIRM.name(), missionCaptor.getValue().getReleasePolicy());
+        assertEquals(ReleaseExecutionMode.OFFICIAL_HOOK_MANUAL.name(), missionCaptor.getValue().getReleaseExecutionMode());
     }
 
     @Test

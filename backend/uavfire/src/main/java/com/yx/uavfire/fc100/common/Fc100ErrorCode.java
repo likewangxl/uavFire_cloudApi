@@ -22,6 +22,9 @@ public enum Fc100ErrorCode {
     AIRCRAFT_OFFLINE(3003, "aircraft offline"),
     BATTERY_LOW(3004, "battery low"),
     RTK_NOT_FIXED(3005, "rtk not fixed"),
+    RELEASE_CONFIRMATION_REQUIRED(3006, "release confirmation required"),
+    CONTROLLED_TEST_AUTO_DISABLED(3007, "controlled test auto release disabled"),
+    RELEASE_CAPABILITY_UNCONFIRMED(3008, "release capability unconfirmed"),
 
     // 4xxx Delivery Sync
     DELIVERY_SYNC_NETWORK(4000, "delivery sync network error"),

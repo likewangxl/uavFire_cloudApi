@@ -80,6 +80,12 @@ public class FireEventCreateParam {
 
     private String visibleImageUrl;
 
+    @Pattern(regexp = "MANUAL_CONFIRM|DRY_RUN|CONTROLLED_TEST_AUTO")
+    private String releasePolicy;
+
+    @Pattern(regexp = "OFFICIAL_HOOK_MANUAL|DELIVERY_SYNC_REMOTE|PSDK_RELEASE")
+    private String releaseExecutionMode;
+
     /** ISO8601 字符串，服务端转 epoch ms */
     @NotBlank
     private String timestamp;

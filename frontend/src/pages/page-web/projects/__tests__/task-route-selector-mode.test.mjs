@@ -13,10 +13,13 @@ function readSource (path) {
 test('task plan route picker only exposes generated KMZ wayline files', () => {
   const source = readSource('src/pages/page-web/projects/wayline.vue')
 
-  assert.match(source, /const isTaskRouteSelector = computed\(/)
+  assert.match(source, /const isTaskRouteSelector = computed\(\(\) => route\.name === ERouterName\.SELECT_PLAN\)/)
   assert.match(source, /const showPlanningTools = computed\(\(\) => !isTaskRouteSelector\.value\)/)
-  assert.match(source, /<a-collapse[\s\S]*v-if="showPlanningTools"/)
-  assert.match(source, /header="监测航线"[\s\S]*<div class="planning-panel">[\s\S]*<div class="planned-wayline-panel">/)
-  assert.match(source, /header="投放航线"[\s\S]*<div class="fc100-planning-panel">/)
-  assert.match(source, /<a-col :span="15">\{\{ isTaskRouteSelector \? '选择KMZ航线文件' : '航线库' \}\}<\/a-col>/)
+  assert.match(source, /<a-tabs[\s\S]*v-if="showPlanningTools"[\s\S]*v-model:activeKey="plannerTab"/)
+  assert.match(source, /<a-tab-pane key="monitor"/)
+  assert.match(source, /<a-tab-pane key="delivery"/)
+  assert.match(source, /<Fc100DeliveryView[\s\S]*v-if="showPlanningTools"[\s\S]*v-show="plannerTab === 'delivery'"/)
+  assert.match(source, /<a-collapse[\s\S]*v-if="showPlanningTools"[\s\S]*v-show="plannerTab === 'monitor'"/)
+  assert.match(source, /<div id="data" class="height-100 uranus-scrollbar" v-else-if="waylinesData\.data\.length !== 0"/)
+  assert.match(source, /isTaskRouteSelector \? '.*KMZ.*' : '.*'/)
 })

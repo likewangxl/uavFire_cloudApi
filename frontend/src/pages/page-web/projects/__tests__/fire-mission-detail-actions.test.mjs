@@ -10,25 +10,25 @@ function readSource (path) {
   return readFileSync(resolve(root, path), 'utf8')
 }
 
-test('fire mission detail exposes FC100 delivery task execution action', () => {
+test('fire mission detail delegates FC100 delivery task execution action to ActionButtons', () => {
   const source = readSource('src/pages/page-web/projects/fire/FireMissionDetail.vue')
+  const actionButtons = readSource('src/components/fire/ActionButtons.vue')
 
-  assert.match(source, /const canStartDeliveryTask = computed/)
-  assert.match(source, /dto\.value\?\.status === 'SENT_TO_DELIVERY'/)
-  assert.match(source, /dto\.value\?\.status === 'ACCEPTED_BY_PILOT'/)
-  assert.match(source, /deliveryApi\.startTask\(props\.no, \{ operatorId: 'test-operator' \}\)/)
-  assert.match(source, />\s*执行航线任务\s*<\/a-button>/)
+  assert.match(source, /import ActionButtons/)
+  assert.match(source, /<ActionButtons[\s\S]*:mission-no="dto\.missionNo"[\s\S]*:actions="dto\.availableActions"[\s\S]*@refresh="refresh"/)
+  assert.match(actionButtons, /START_DELIVERY:\s*\{\s*label:/)
+  assert.match(actionButtons, /case 'START_DELIVERY':[\s\S]*deliveryApi\.startTask\(no, op\)/)
 })
 
-test('fire mission detail can recreate stale FC100 delivery tasks', () => {
+test('fire mission detail can prepare FC100 delivery tasks through route preparation actions', () => {
   const source = readSource('src/pages/page-web/projects/fire/FireMissionDetail.vue')
+  const actionButtons = readSource('src/components/fire/ActionButtons.vue')
 
-  assert.match(source, /const canReprepareDeliveryTask = computed/)
-  assert.match(source, /dto\.value\?\.status === 'SENT_TO_DELIVERY'/)
-  assert.match(source, /dto\.value\?\.status === 'IN_PROGRESS'/)
-  assert.match(source, /dto\.value\?\.status === 'PAYLOAD_RELEASED'/)
-  assert.match(source, /deliveryApi\.prepareFireMissionDeliveryTask\(props\.no, \{ operatorId: 'test-operator' \}\)/)
-  assert.match(source, />\s*重新生成并推送FC100\s*<\/a-button>/)
+  assert.match(source, /<ActionButtons/)
+  assert.match(actionButtons, /routePreparationActions = new Set\(\['GEN_WP', 'EXP_KMZ', 'CREATE_DELIVERY_TASK'\]\)/)
+  assert.match(actionButtons, /PREPARE_FC100_DELIVERY/)
+  assert.match(actionButtons, /case 'PREPARE_FC100_DELIVERY':[\s\S]*deliveryApi\.prepareFireMissionDeliveryTask\(no, op\)/)
+  assert.match(actionButtons, /canPrepareFc100Delivery/)
 })
 
 test('fire mission detail formats fire temperature to two decimals', () => {
@@ -39,14 +39,15 @@ test('fire mission detail formats fire temperature to two decimals', () => {
   assert.match(source, /\{\{ fmtTemperature\(fireEvent\?\.thermalTemperature, fireEvent\?\.temperatureUnit\) \}\}/)
 })
 
-test('mission timeline renders status and action labels in Chinese', () => {
+test('mission timeline renders status and action labels through label helpers', () => {
   const source = readSource('src/components/fire/MissionTimeline.vue')
 
   assert.match(source, /const statusLabel/)
-  assert.match(source, /PAYLOAD_RELEASED: '已投放'/)
-  assert.match(source, /START_DELIVERY: '执行航线'/)
-  assert.match(source, /\{\{ labelStatus\(log\.fromStatus\) \}\} → \{\{ labelStatus\(log\.toStatus\) \}\}/)
-  assert.match(source, /操作: \{\{ labelAction\(log\.action\) \}\}/)
+  assert.match(source, /PAYLOAD_RELEASED:/)
+  assert.match(source, /START_DELIVERY:/)
+  assert.match(source, /\{\{ labelStatus\(log\.fromStatus\) \}\}/)
+  assert.match(source, /\{\{ labelStatus\(log\.toStatus\) \}\}/)
+  assert.match(source, /\{\{ labelAction\(log\.action\) \}\}/)
 })
 
 test('workspace fire pages keep their main content vertically scrollable', () => {

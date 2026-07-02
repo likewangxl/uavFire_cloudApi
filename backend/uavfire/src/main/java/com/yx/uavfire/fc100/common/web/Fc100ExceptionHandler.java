@@ -47,6 +47,7 @@ public class Fc100ExceptionHandler {
             || c == Fc100ErrorCode.VERSION_MISMATCH
             || c == Fc100ErrorCode.IDEMPOTENCY_REPLAY) return HttpStatus.CONFLICT;
         if (c.code() >= 1000 && c.code() < 2000) return HttpStatus.BAD_REQUEST;
+        if (c.code() >= 3000 && c.code() < 4000) return HttpStatus.BAD_REQUEST;
         return HttpStatus.INTERNAL_SERVER_ERROR;
     }
 }

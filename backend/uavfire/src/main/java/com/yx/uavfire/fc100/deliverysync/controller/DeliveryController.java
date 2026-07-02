@@ -31,6 +31,7 @@ import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.fc100.mission.service.MissionStateMachine;
 import com.yx.uavfire.fc100.mission.service.TransitCommand;
+import com.yx.uavfire.fc100.payload.service.PayloadReleasePolicyService;
 import com.yx.uavfire.fc100.route.model.dto.RouteFileDTO;
 import com.yx.uavfire.fc100.route.service.RouteExportService;
 import com.yx.uavfire.fc100.safety.model.dto.SafetyCheckResult;
@@ -97,6 +98,7 @@ public class DeliveryController {
     private final FireEventMapper fireEventMapper;
     private final WaypointPlannerService waypointPlannerService;
     private final SafetyCheckService safetyCheckService;
+    private final PayloadReleasePolicyService releasePolicyService;
     private final ConcurrentHashMap<String, CachedDeviceLive> fc100BypassLiveCache = new ConcurrentHashMap<>();
 
     @Value("${livestream.url.rtmp.url:}")
@@ -110,14 +112,25 @@ public class DeliveryController {
 
     public DeliveryController(DeliverySyncAdapter a, DeliverySyncProperties p,
                                FireMissionMapper m, RouteExportService r, MissionStateMachine sm) {
-        this(a, p, m, r, sm, null, null, null, null, null);
+        this(a, p, m, r, sm, null, null, null, null, null, null);
     }
 
     public DeliveryController(DeliverySyncAdapter a, DeliverySyncProperties p,
                                FireMissionMapper m, RouteExportService r, MissionStateMachine sm,
                                IPlannedWaylineService plannedWaylineService,
                                IWaylineFileService waylineFileService) {
-        this(a, p, m, r, sm, plannedWaylineService, waylineFileService, null, null, null);
+        this(a, p, m, r, sm, plannedWaylineService, waylineFileService, null, null, null, null);
+    }
+
+    public DeliveryController(DeliverySyncAdapter a, DeliverySyncProperties p,
+                               FireMissionMapper m, RouteExportService r, MissionStateMachine sm,
+                               IPlannedWaylineService plannedWaylineService,
+                               IWaylineFileService waylineFileService,
+                               FireEventMapper fireEventMapper,
+                               WaypointPlannerService waypointPlannerService,
+                               SafetyCheckService safetyCheckService) {
+        this(a, p, m, r, sm, plannedWaylineService, waylineFileService,
+            fireEventMapper, waypointPlannerService, safetyCheckService, null);
     }
 
     @Autowired
@@ -127,7 +140,8 @@ public class DeliveryController {
                                IWaylineFileService waylineFileService,
                                FireEventMapper fireEventMapper,
                                WaypointPlannerService waypointPlannerService,
-                               SafetyCheckService safetyCheckService) {
+                               SafetyCheckService safetyCheckService,
+                               PayloadReleasePolicyService releasePolicyService) {
         this.adapter = a; this.props = p; this.missionMapper = m;
         this.routeService = r; this.sm = sm;
         this.plannedWaylineService = plannedWaylineService;
@@ -135,6 +149,7 @@ public class DeliveryController {
         this.fireEventMapper = fireEventMapper;
         this.waypointPlannerService = waypointPlannerService;
         this.safetyCheckService = safetyCheckService;
+        this.releasePolicyService = releasePolicyService;
     }
 
     @GetMapping("/delivery/devices")
@@ -833,6 +848,7 @@ public class DeliveryController {
         if (mission == null || status == null) return;
         if (!FireMissionStatus.IN_PROGRESS.name().equals(mission.getStatus())) return;
         if (Boolean.FALSE.equals(status.getAccepted())) return;
+        if (!allowAutoReleaseByPolicy(mission)) return;
         // 必须飞到投放点并悬停稳定后才脱钩；不再因任务 phase=completed 在下降/未稳时提前脱钩
         // （否则会出现"下降中直接脱钩"）。两航点航线末端 finishAction=noAction 会在投放点悬停，
         // 轮询到速度≤阈值且距 DROP≤5m 时触发。
@@ -897,6 +913,8 @@ public class DeliveryController {
     @Data
     public static class DeviceCommandParam {
         @NotBlank private String operatorId;
+        private Boolean confirmedRelease;
+        private String confirmationToken;
         private Map<String, Object> data;
     }
 
@@ -924,11 +942,31 @@ public class DeliveryController {
     @PostMapping("/missions/{no}/delivery/release-hook")
     @Idempotent("delivery.command.release-hook")
     public ApiResult<DeliveryCommandRef> releaseHook(@PathVariable("no") String no,
-                                                      @Valid @RequestBody DeviceCommandParam p) {
+                                                      @RequestBody(required = false) DeviceCommandParam p,
+                                                      HttpServletRequest req) {
+        FireMissionEntity mission = findMission(no);
+        PayloadReleasePolicyService.ReleasePolicyDecision decision =
+            requireReleasePolicyService().validateReleaseRequest(mission,
+                PayloadReleasePolicyService.ReleaseRequest.builder()
+                    .operatorId(p == null ? null : p.getOperatorId())
+                    .confirmedRelease(p == null ? null : p.getConfirmedRelease())
+                    .confirmationToken(p == null ? null : p.getConfirmationToken())
+                    .clientIp(req == null ? null : req.getRemoteAddr())
+                    .requestId(req == null ? null : req.getHeader("X-Request-Id"))
+                    .idempotencyKey(req == null ? null : req.getHeader("X-Idempotency-Key"))
+                    .source("DELIVERY_RELEASE_HOOK")
+                    .build());
+        if (decision.isDryRun()) {
+            return ApiResult.success(null);
+        }
         DeviceCommandParam command = new DeviceCommandParam();
         command.setOperatorId(p.getOperatorId());
         command.setData(Map.of("mode", 1));
-        return ApiResult.success(sendMissionCommand(no, "hoist_hook_control", command));
+        return ApiResult.success(sendDeviceCommand(mission.getAircraftSn(), "hoist_hook_control", command, no));
+    }
+
+    public ApiResult<DeliveryCommandRef> releaseHook(String no, DeviceCommandParam p) {
+        return releaseHook(no, p, null);
     }
 
     @PostMapping("/missions/{no}/delivery/commands/{method}")
@@ -995,6 +1033,23 @@ public class DeliveryController {
             .deviceCmdMethod(method)
             .deviceCmdData(p.getData() != null ? p.getData() : Map.of())
             .build());
+    }
+
+    private boolean allowAutoReleaseByPolicy(FireMissionEntity mission) {
+        if (releasePolicyService == null) {
+            log.warn("FC100 auto release skipped because release policy service is not wired mission={}",
+                mission == null ? null : mission.getMissionNo());
+            return false;
+        }
+        return releasePolicyService.allowAutoRelease(mission);
+    }
+
+    private PayloadReleasePolicyService requireReleasePolicyService() {
+        if (releasePolicyService == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.INTERNAL_ERROR,
+                "release policy service is not available");
+        }
+        return releasePolicyService;
     }
 
     private DeliveryTaskOperationResult checkStartPreflight(String taskId, String deviceSn) {

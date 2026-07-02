@@ -25,6 +25,8 @@ public class FireMissionDTO {
     private Double windDirectionDeg;
     private String djiTaskId;
     private Long latestRouteFileId;
+    private String releasePolicy;
+    private String releaseExecutionMode;
     private Integer isHighConfidence;
     private String createdBy;
     private String approverId;

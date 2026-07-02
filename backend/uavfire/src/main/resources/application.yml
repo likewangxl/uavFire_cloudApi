@@ -227,6 +227,8 @@ ai-service:
 
 fc100:
   enabled: true
+  release:
+    controlled-test-auto-enabled: ${FC100_CONTROLLED_TEST_AUTO_ENABLED:false}
   delivery-sync:
     mode: mock                # mock | http
     base-url: https://ta-api.dji.com

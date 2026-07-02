@@ -37,7 +37,7 @@ public class PayloadController {
     @PostMapping("/confirm-release")
     @Idempotent("payload.confirm-release")
     public ApiResult<Void> confirmRelease(@PathVariable("no") String no,
-                                           @Valid @RequestBody PayloadConfirmReleaseParam p,
+                                           @RequestBody(required = false) PayloadConfirmReleaseParam p,
                                            HttpServletRequest req) {
         service.confirmRelease(no, p, req.getRemoteAddr(), req.getHeader("X-Request-Id"));
         return ApiResult.success(null);

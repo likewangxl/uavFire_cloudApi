@@ -24,6 +24,8 @@ import com.yx.uavfire.fc100.event.service.FireGeoLocationService;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
+import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
+import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
 import com.yx.uavfire.manage.service.IDeviceRedisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -175,6 +177,8 @@ public class FireEventServiceImpl implements FireEventService {
         m.setFireEventId(e.getId());
         m.setAttemptIndex(1);
         m.setStatus(FireMissionStatus.WAITING_REVIEW.name());
+        m.setReleasePolicy(ReleasePolicy.fromDb(param.getReleasePolicy()).name());
+        m.setReleaseExecutionMode(ReleaseExecutionMode.fromDb(param.getReleaseExecutionMode()).name());
         m.setVersion(0L);
         m.setIsHighConfidence(c.compareTo(HIGH) >= 0 ? 1 : 0);
         m.setDeleted(0);

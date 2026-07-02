@@ -3,6 +3,7 @@ package com.yx.uavfire.fc100.deliverysync.controller;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.yx.uavfire.fc100.common.ApiResult;
+import com.yx.uavfire.fc100.common.Clock;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
@@ -22,11 +23,16 @@ import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
 import com.yx.uavfire.fc100.deliverysync.model.param.WaylineImportRequest;
 import com.yx.uavfire.fc100.event.dao.FireEventMapper;
 import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
+import com.yx.uavfire.fc100.mission.dao.FireMissionLogMapper;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
+import com.yx.uavfire.fc100.mission.model.entity.FireMissionLogEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
+import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
+import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
 import com.yx.uavfire.fc100.mission.service.TransitCommand;
 import com.yx.uavfire.fc100.mission.service.MissionStateMachine;
+import com.yx.uavfire.fc100.payload.service.PayloadReleasePolicyService;
 import com.yx.uavfire.fc100.route.model.dto.RouteFileDTO;
 import com.yx.uavfire.fc100.route.service.RouteExportService;
 import com.yx.uavfire.fc100.safety.model.dto.SafetyCheckResult;
@@ -57,6 +63,7 @@ import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
@@ -366,15 +373,16 @@ class DeliveryControllerApifoxWorkflowTest {
     }
 
     @Test
-    void statusAutoReleasesHookOnceWhenDeliveryTaskCompletedAndHovering() {
+    void statusAutoReleaseIsBlockedByManualPolicyAndAudited() {
         DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
         DeliverySyncProperties props = new DeliverySyncProperties();
         FireMissionMapper missionMapper = mock(FireMissionMapper.class);
         RouteExportService routeService = mock(RouteExportService.class);
         MissionStateMachine stateMachine = mock(MissionStateMachine.class);
         WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
         DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
-            null, null, null, planner, null);
+            null, null, null, planner, null, releasePolicyService(missionLogMapper));
 
         FireMissionEntity mission = new FireMissionEntity();
         mission.setId(1L);
@@ -382,6 +390,7 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setStatus("IN_PROGRESS");
         mission.setAircraftSn("FC100-SN-001");
         mission.setDjiTaskId("TASK-AUTO-RELEASE-001");
+        mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
 
         DeliveryTaskStatus completed = new DeliveryTaskStatus();
@@ -412,28 +421,25 @@ class DeliveryControllerApifoxWorkflowTest {
         ApiResult<DeliveryTaskStatus> result = controller.status("M-AUTO-RELEASE-001");
 
         assertEquals("completed", result.getData().getPhase());
-        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
-        verify(adapter).sendDeviceCommand(commandReq.capture());
-        assertEquals("FC100-SN-001", commandReq.getValue().getDeviceSn());
-        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
-        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
-
-        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
-        verify(stateMachine, times(2)).transit(transit.capture());
-        assertEquals(FireMissionEvent.MARK_RELEASE_PENDING, transit.getAllValues().get(0).getEvent());
-        assertEquals(FireMissionEvent.CONFIRM_RELEASE, transit.getAllValues().get(1).getEvent());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        verify(stateMachine, never()).transit(any(TransitCommand.class));
+        ArgumentCaptor<FireMissionLogEntity> logCaptor = ArgumentCaptor.forClass(FireMissionLogEntity.class);
+        verify(missionLogMapper).insert(logCaptor.capture());
+        assertEquals("PAYLOAD_AUTO_RELEASE_POLICY_BLOCKED", logCaptor.getValue().getAction());
+        assertEquals("system-auto-release", logCaptor.getValue().getOperatorId());
     }
 
     @Test
-    void scheduledPollingAutoReleasesCompletedInProgressMissionWithoutPageStatusPoll() {
+    void scheduledPollingBlocksManualPolicyAutoReleaseWithoutPageStatusPoll() {
         DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
         DeliverySyncProperties props = new DeliverySyncProperties();
         FireMissionMapper missionMapper = mock(FireMissionMapper.class);
         RouteExportService routeService = mock(RouteExportService.class);
         MissionStateMachine stateMachine = mock(MissionStateMachine.class);
         WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
         DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
-            null, null, null, planner, null);
+            null, null, null, planner, null, releasePolicyService(missionLogMapper));
 
         FireMissionEntity mission = new FireMissionEntity();
         mission.setId(2L);
@@ -441,6 +447,7 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setStatus("IN_PROGRESS");
         mission.setAircraftSn("FC100-SN-001");
         mission.setDjiTaskId("TASK-SCHEDULED-RELEASE-001");
+        mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
 
@@ -471,27 +478,22 @@ class DeliveryControllerApifoxWorkflowTest {
 
         controller.pollInProgressMissionsForAutoRelease();
 
-        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
-        verify(adapter).sendDeviceCommand(commandReq.capture());
-        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
-        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
-
-        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
-        verify(stateMachine, times(2)).transit(transit.capture());
-        assertEquals(FireMissionEvent.MARK_RELEASE_PENDING, transit.getAllValues().get(0).getEvent());
-        assertEquals(FireMissionEvent.CONFIRM_RELEASE, transit.getAllValues().get(1).getEvent());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        verify(stateMachine, never()).transit(any(TransitCommand.class));
+        verify(missionLogMapper).insert(any(FireMissionLogEntity.class));
     }
 
     @Test
-    void scheduledPollingAutoReleasesWhenAircraftIsHoveringAtDropWaypointBeforeTaskCompleted() {
+    void scheduledPollingBlocksAutoReleaseWhenPolicyIsNotControlledTestAuto() {
         DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
         DeliverySyncProperties props = new DeliverySyncProperties();
         FireMissionMapper missionMapper = mock(FireMissionMapper.class);
         RouteExportService routeService = mock(RouteExportService.class);
         MissionStateMachine stateMachine = mock(MissionStateMachine.class);
         WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
         DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
-            null, null, null, planner, null);
+            null, null, null, planner, null, releasePolicyService(missionLogMapper));
 
         FireMissionEntity mission = new FireMissionEntity();
         mission.setId(11L);
@@ -499,6 +501,7 @@ class DeliveryControllerApifoxWorkflowTest {
         mission.setStatus("IN_PROGRESS");
         mission.setAircraftSn("FC100-SN-001");
         mission.setDjiTaskId("TASK-DROP-HOVER-001");
+        mission.setReleasePolicy(ReleasePolicy.DRY_RUN.name());
         when(missionMapper.selectList(any(Wrapper.class))).thenReturn(List.of(mission));
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
 
@@ -529,15 +532,9 @@ class DeliveryControllerApifoxWorkflowTest {
 
         controller.pollInProgressMissionsForAutoRelease();
 
-        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
-        verify(adapter).sendDeviceCommand(commandReq.capture());
-        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
-        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
-
-        ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
-        verify(stateMachine, times(2)).transit(transit.capture());
-        assertEquals(FireMissionEvent.MARK_RELEASE_PENDING, transit.getAllValues().get(0).getEvent());
-        assertEquals(FireMissionEvent.CONFIRM_RELEASE, transit.getAllValues().get(1).getEvent());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        verify(stateMachine, never()).transit(any(TransitCommand.class));
+        verify(missionLogMapper).insert(any(FireMissionLogEntity.class));
     }
 
     @Test
@@ -1148,33 +1145,132 @@ class DeliveryControllerApifoxWorkflowTest {
     }
 
     @Test
-    void releaseHookSendsFc100HoistHookOpenCommandForMissionDevice() {
+    void releaseHookRejectsManualPolicyWithoutConfirmationAndAuditsAttempt() {
         DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
         DeliverySyncProperties props = new DeliverySyncProperties();
         FireMissionMapper missionMapper = mock(FireMissionMapper.class);
         RouteExportService routeService = mock(RouteExportService.class);
         MissionStateMachine stateMachine = mock(MissionStateMachine.class);
-        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, null, null, releasePolicyService(missionLogMapper));
         FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(11L);
         mission.setMissionNo("M-FC100-001");
         mission.setAircraftSn("FC100-SN-001");
+        mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
-        DeliveryCommandRef commandRef = new DeliveryCommandRef();
-        commandRef.setBid("BID-HOOK-001");
-        commandRef.setDeviceCmdMethod("hoist_hook_control");
-        when(adapter.sendDeviceCommand(any(DeviceCommandRequest.class))).thenReturn(commandRef);
 
         DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
         param.setOperatorId("operator-1");
-        ApiResult<DeliveryCommandRef> result = controller.releaseHook("M-FC100-001", param);
 
-        assertEquals("BID-HOOK-001", result.getData().getBid());
-        ArgumentCaptor<DeviceCommandRequest> commandReq = ArgumentCaptor.forClass(DeviceCommandRequest.class);
-        verify(adapter).sendDeviceCommand(commandReq.capture());
-        assertEquals("M-FC100-001", commandReq.getValue().getMissionNo());
-        assertEquals("FC100-SN-001", commandReq.getValue().getDeviceSn());
-        assertEquals("hoist_hook_control", commandReq.getValue().getDeviceCmdMethod());
-        assertEquals(1, commandReq.getValue().getDeviceCmdData().get("mode"));
+        Fc100BusinessException ex = assertThrows(
+            Fc100BusinessException.class,
+            () -> controller.releaseHook("M-FC100-001", param));
+
+        assertEquals(Fc100ErrorCode.RELEASE_CONFIRMATION_REQUIRED, ex.getErrorCode());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        ArgumentCaptor<FireMissionLogEntity> logCaptor = ArgumentCaptor.forClass(FireMissionLogEntity.class);
+        verify(missionLogMapper).insert(logCaptor.capture());
+        assertEquals("PAYLOAD_RELEASE_POLICY_DENIED", logCaptor.getValue().getAction());
+        assertEquals("operator-1", logCaptor.getValue().getOperatorId());
+    }
+
+    @Test
+    void releaseHookRejectsControlledTestAutoWhenSwitchIsDisabled() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, null, null, releasePolicyService(missionLogMapper));
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(12L);
+        mission.setMissionNo("M-FC100-002");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setReleasePolicy(ReleasePolicy.CONTROLLED_TEST_AUTO.name());
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+
+        DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
+        param.setOperatorId("operator-1");
+        param.setConfirmedRelease(true);
+
+        Fc100BusinessException ex = assertThrows(
+            Fc100BusinessException.class,
+            () -> controller.releaseHook("M-FC100-002", param));
+
+        assertEquals(Fc100ErrorCode.CONTROLLED_TEST_AUTO_DISABLED, ex.getErrorCode());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        verify(missionLogMapper).insert(any(FireMissionLogEntity.class));
+    }
+
+    @Test
+    void releaseHookDryRunAuditsWithoutSendingDeviceCommand() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, null, null, releasePolicyService(missionLogMapper));
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(14L);
+        mission.setMissionNo("M-FC100-DRY");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setReleasePolicy(ReleasePolicy.DRY_RUN.name());
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+
+        DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
+        param.setOperatorId("operator-1");
+
+        ApiResult<DeliveryCommandRef> result = controller.releaseHook("M-FC100-DRY", param);
+
+        assertEquals(null, result.getData());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        ArgumentCaptor<FireMissionLogEntity> logCaptor = ArgumentCaptor.forClass(FireMissionLogEntity.class);
+        verify(missionLogMapper).insert(logCaptor.capture());
+        assertEquals("PAYLOAD_RELEASE_DRY_RUN", logCaptor.getValue().getAction());
+        assertEquals("operator-1", logCaptor.getValue().getOperatorId());
+    }
+
+    @Test
+    void releaseHookRejectsDeliverySyncRemoteUntilCapabilityIsConfirmed() {
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireMissionLogMapper missionLogMapper = mock(FireMissionLogMapper.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, null, null, null, releasePolicyService(missionLogMapper));
+        FireMissionEntity mission = new FireMissionEntity();
+        mission.setId(13L);
+        mission.setMissionNo("M-FC100-003");
+        mission.setAircraftSn("FC100-SN-001");
+        mission.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
+        mission.setReleaseExecutionMode(ReleaseExecutionMode.DELIVERY_SYNC_REMOTE.name());
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(mission);
+
+        DeliveryController.DeviceCommandParam param = new DeliveryController.DeviceCommandParam();
+        param.setOperatorId("operator-1");
+        param.setConfirmedRelease(true);
+
+        Fc100BusinessException ex = assertThrows(
+            Fc100BusinessException.class,
+            () -> controller.releaseHook("M-FC100-003", param));
+
+        assertEquals(Fc100ErrorCode.RELEASE_CAPABILITY_UNCONFIRMED, ex.getErrorCode());
+        verify(adapter, never()).sendDeviceCommand(any(DeviceCommandRequest.class));
+        verify(missionLogMapper).insert(any(FireMissionLogEntity.class));
+    }
+
+    private PayloadReleasePolicyService releasePolicyService(FireMissionLogMapper missionLogMapper) {
+        Clock clock = mock(Clock.class);
+        when(clock.now()).thenReturn(1779163440000L);
+        return new PayloadReleasePolicyService(missionLogMapper, clock);
     }
 
     private byte[] kmzWithTemplate(String templateKml) throws Exception {

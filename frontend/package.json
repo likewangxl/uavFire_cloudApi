@@ -6,6 +6,7 @@
     "build:test": "vite build --mode stag",
     "build": "vite build",
     "preview": "vite preview",
+    "test:policies": "node scripts/run-policy-tests.mjs",
     "lint": "eslint --fix"
   },
   "dependencies": {
