@@ -17,6 +17,8 @@
           :incident="detail"
           :assignments="assignments"
           :submitting-action="submittingAction"
+          :device-options="deviceOptions"
+          :devices-loading="devicesLoading"
           @run="payload => emit('run-action', payload)"
         />
 
@@ -145,6 +147,7 @@ import CompliancePanel from './CompliancePanel.vue'
 import OperationActionBar from './OperationActionBar.vue'
 import type { OperationIncidentDetailDTO } from '/@/types/operation/incident'
 import type { PreflightResult } from '/@/types/operation/compliance'
+import type { AssignableDeviceOption } from '/@/types/operation/resource'
 import {
   coordinateQualityBadge,
   draftMissionHint,
@@ -160,6 +163,8 @@ const props = defineProps<{
   submittingAction?: string;
   preflightResult?: PreflightResult | null;
   preflightLoading?: boolean;
+  deviceOptions?: AssignableDeviceOption[];
+  devicesLoading?: boolean;
 }>()
 
 const emit = defineEmits(['run-action'])

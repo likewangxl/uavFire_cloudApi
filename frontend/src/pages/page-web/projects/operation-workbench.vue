@@ -34,6 +34,8 @@
         :submitting-action="submittingAction"
         :preflight-result="preflightResult"
         :preflight-loading="preflightLoading"
+        :device-options="assignableDevices"
+        :devices-loading="assignableDevicesLoading"
         @run-action="runIncidentAction"
       />
 
@@ -46,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import IncidentListPanel from '/@/components/operation/IncidentListPanel.vue'
 import IncidentDetailPanel from '/@/components/operation/IncidentDetailPanel.vue'
@@ -57,12 +59,15 @@ import { operationComplianceApi } from '/@/api/operation/compliance'
 import { eventApi } from '/@/api/fire/event'
 import { missionApi } from '/@/api/fire/mission'
 import { payloadApi } from '/@/api/fire/payload'
+import { deliveryApi, type DeliveryDeviceDTO, type DeliveryDeviceProperties } from '/@/api/fire/delivery'
+import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
 import type {
   OperationIncidentDTO,
   OperationIncidentDetailDTO,
   OperationTimelineItem,
 } from '/@/types/operation/incident'
 import type { PreflightResult } from '/@/types/operation/compliance'
+import type { AssignableDeviceOption } from '/@/types/operation/resource'
 import type { FireEventDTO } from '/@/types/fire/event'
 import { ELocalStorageKey } from '/@/types'
 
@@ -78,6 +83,9 @@ const timelineLoading = ref(false)
 const preflightLoading = ref(false)
 const submittingAction = ref('')
 const preflightResult = ref<PreflightResult | null>(null)
+const assignableDevices = ref<AssignableDeviceOption[]>([])
+const assignableDevicesLoading = ref(false)
+let assignableDevicesTimer: number | undefined
 
 const selectedIncident = computed<OperationIncidentDTO | null>(() => {
   if (!selectedIncidentId.value) return detail.value
@@ -90,6 +98,14 @@ watch([statusFilter, levelFilter], () => {
 
 onMounted(() => {
   loadIncidents(true)
+  loadAssignableDevices()
+  assignableDevicesTimer = window.setInterval(loadAssignableDevices, 10000)
+})
+
+onBeforeUnmount(() => {
+  if (assignableDevicesTimer) {
+    window.clearInterval(assignableDevicesTimer)
+  }
 })
 
 async function loadIncidents (selectFirst: boolean) {
@@ -515,6 +531,109 @@ function candidateDetail (incident: OperationIncidentDTO): OperationIncidentDeta
     ...incident,
     assignments: [],
     timeline: [],
+  }
+}
+
+async function loadAssignableDevices () {
+  assignableDevicesLoading.value = true
+  try {
+    const [deliveryResult, monitorResult] = await Promise.allSettled([
+      loadDeliveryDevices(),
+      loadMonitorDevices(),
+    ])
+    assignableDevices.value = [
+      ...(deliveryResult.status === 'fulfilled' ? deliveryResult.value : []),
+      ...(monitorResult.status === 'fulfilled' ? monitorResult.value : []),
+    ]
+  } finally {
+    assignableDevicesLoading.value = false
+  }
+}
+
+async function loadDeliveryDevices (): Promise<AssignableDeviceOption[]> {
+  const response = await deliveryApi.listDevices()
+  const devices = (response.data?.data || []).filter(isFc100DeliveryAircraftDevice)
+  const enriched = await Promise.all(devices.map(async device => {
+    let props: DeliveryDeviceProperties | undefined
+    try {
+      const propsRes = await deliveryApi.deviceProps(device.deviceSn)
+      props = propsRes.data?.data || undefined
+    } catch {
+      props = undefined
+    }
+    return toDeliveryDeviceOption(device, props)
+  }))
+  return enriched
+}
+
+async function loadMonitorDevices (): Promise<AssignableDeviceOption[]> {
+  const response = await listMsdkDevices()
+  return (response.data || [])
+    .filter(device => Boolean(device.aircraftSn))
+    .map(toMonitorDeviceOption)
+}
+
+function isFc100DeliveryAircraftDevice (device: DeliveryDeviceDTO) {
+  const deviceType = String(device.deviceType || '').trim().toLowerCase()
+  const bindStatus = String(device.bindStatus || '').trim().toLowerCase()
+  return Boolean(device.deviceSn) && deviceType !== 'rc' && bindStatus !== 'rc'
+}
+
+function toDeliveryDeviceOption (
+  device: DeliveryDeviceDTO,
+  props?: DeliveryDeviceProperties,
+): AssignableDeviceOption {
+  const online = props?.onlineStatus ?? String(device.online || '').toUpperCase() === 'ONLINE'
+  const displayName = device.displayName || device.model || 'FC100 投送机'
+  return withOptionLabel({
+    kind: 'DELIVERY',
+    resourceSn: device.deviceSn,
+    displayName,
+    model: device.model || device.deviceModelClass || device.deviceModelKey || undefined,
+    online,
+    onlineLabel: online ? '在线' : '离线',
+    batteryPercent: props?.batteryPercent,
+    rtkStatus: props?.rtkStatus,
+    latitude: props?.latitude,
+    longitude: props?.longitude,
+    altitude: props?.altitude,
+    updatedAt: props?.osdTimestamp,
+  })
+}
+
+function toMonitorDeviceOption (device: MsdkDeviceState): AssignableDeviceOption {
+  return withOptionLabel({
+    kind: 'MONITOR',
+    resourceSn: device.aircraftSn,
+    displayName: device.deviceName || device.model || 'M4T 巡检机',
+    model: device.model,
+    online: device.online,
+    onlineLabel: device.online ? '在线' : (device.connectionState || '离线'),
+    batteryPercent: device.batteryPercent,
+    rtkCount: device.rtkCount,
+    gpsCount: device.gpsCount,
+    positionFixed: device.positionFixed,
+    latitude: device.latitude,
+    longitude: device.longitude,
+    altitude: device.height ?? device.elevation,
+    updatedAt: device.updatedAt,
+  })
+}
+
+function withOptionLabel (device: AssignableDeviceOption): AssignableDeviceOption {
+  const parts = [
+    device.displayName,
+    device.resourceSn,
+    device.model,
+    device.onlineLabel,
+    device.batteryPercent == null ? null : `${device.batteryPercent}%`,
+    device.rtkStatus,
+    device.rtkCount == null ? null : `RTK${device.rtkCount}`,
+    device.gpsCount == null ? null : `GPS${device.gpsCount}`,
+  ].filter(Boolean)
+  return {
+    ...device,
+    optionLabel: parts.join(' '),
   }
 }
 </script>

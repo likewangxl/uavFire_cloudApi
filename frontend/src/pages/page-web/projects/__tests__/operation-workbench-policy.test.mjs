@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   INCIDENT_STATUSES,
@@ -14,6 +17,13 @@ import {
   sortTimelineItems,
   STATUS_BADGE_MAP,
 } from '../operation-policy.mjs'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const projectRoot = path.resolve(__dirname, '../../../../..')
+
+function readProjectFile (relativePath) {
+  return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8')
+}
 
 const allActionIds = [
   'CONFIRM_FIRE',
@@ -232,4 +242,21 @@ test('mission presentation distinguishes existing mission, precise no mission, a
     title: '坐标非 PRECISE，暂不生成任务',
     type: 'warning',
   })
+})
+
+test('operation assignment picker uses live device dropdown with battery RTK and GPS status', () => {
+  const actionBar = readProjectFile('src/components/operation/OperationActionBar.vue')
+  const workbench = readProjectFile('src/pages/page-web/projects/operation-workbench.vue')
+
+  assert.match(actionBar, /<a-select[\s\S]*show-search/, 'assignment control should be a searchable select')
+  assert.doesNotMatch(actionBar, /v-model:value="assignForm\.resourceSn"[\s\S]*<a-input/, 'assignment should not use free text SN input')
+  assert.match(actionBar, /deviceOptions/, 'assignment select should render loaded device options')
+  assert.match(actionBar, /batteryPercent/, 'device options should show battery percent')
+  assert.match(actionBar, /rtkStatus|rtkCount/, 'device options should show RTK status')
+  assert.match(actionBar, /gpsCount|positionFixed|latitude/, 'device options should show GPS or positioning status')
+
+  assert.match(workbench, /deliveryApi\.listDevices/, 'workbench should load FC100 delivery devices')
+  assert.match(workbench, /deliveryApi\.deviceProps/, 'workbench should enrich delivery devices with live properties')
+  assert.match(workbench, /listMsdkDevices/, 'workbench should load MSDK monitor aircraft')
+  assert.match(workbench, /setInterval\([\s\S]*loadAssignableDevices/, 'workbench should refresh assignable device status')
 })
