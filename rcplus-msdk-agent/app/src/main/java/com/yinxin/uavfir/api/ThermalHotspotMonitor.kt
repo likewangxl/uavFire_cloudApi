@@ -24,6 +24,10 @@ class ThermalHotspotMonitor(
     private val reportThresholdC: Double = DEFAULT_REPORT_THRESHOLD_C,
     private val probeIntervalMs: Long = DEFAULT_PROBE_INTERVAL_MS,
     private val frameTriggerDebounceMs: Long = DEFAULT_FRAME_TRIGGER_DEBOUNCE_MS,
+    private val dwellConfirmer: ThermalDwellConfirmer = ThermalDwellConfirmer(
+        sessionManager = sessionManager,
+        missionHold = NoopMissionHoldControl,
+    ),
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) : CommandPoller {
     private val probeMutex = Mutex()
@@ -63,55 +67,7 @@ class ThermalHotspotMonitor(
         }
         lastProbeAtMs = now
 
-        val result = sessionManager.measureThermalHotspot(
-            droneSn = droneSn,
-            seedRegion = lastReportedRegion,
-        )
-        if (!result.status.equals("applied", ignoreCase = true)) {
-            Log.w(TAG, "thermal hotspot probe failed drone=$droneSn message=${result.message}")
-            return
-        }
-
-        val temperature = result.thermalCenterTemperatureC ?: return
-        val region = result.thermalMeasureRegion ?: return
-        val measurements = result.thermalMeasurements
-        if (temperature < reportThresholdC) {
-            return
-        }
-
-        val taskId = taskIdFactory(droneSn)
-        val eventId = "$taskId-$now"
-        val thermalImageUrl = uploadThermalSnapshotOnceIfPresent(eventId, result.thermalSnapshotPath)
-        lastReportedRegion = region
-        recordThermalHotspotEvent(
-            taskId = taskId,
-            droneSn = droneSn,
-            sourceTs = now,
-            temperatureC = temperature,
-            thermalMeasureRoi = region.toApiMap(),
-            thermalMeasurements = measurements,
-            thermalImageUrl = thermalImageUrl,
-        )
-        if (thermalImageUrl.isNullOrBlank()) {
-            launchThermalSnapshotRetry(
-                taskId = taskId,
-                eventId = eventId,
-                droneSn = droneSn,
-                sourceTs = now,
-                seedRegion = region,
-                temperatureC = temperature,
-                thermalMeasurements = measurements,
-                initialSnapshotPath = result.thermalSnapshotPath,
-            )
-        } else {
-            launchVisibleSnapshotConfirmation(
-                taskId = taskId,
-                eventId = eventId,
-                droneSn = droneSn,
-                sourceTs = now,
-                thermalImageUrl = thermalImageUrl,
-            )
-        }
+        measureAndReportHotspot(droneSn, now)
     }
 
     private suspend fun runFrameTriggeredProbe(droneSn: String) {
@@ -157,16 +113,50 @@ class ThermalHotspotMonitor(
             return
         }
 
+        val dwellResult = dwellConfirmer.confirm(
+            droneSn = droneSn,
+            thresholdC = reportThresholdC,
+            firstSample = DwellSample(
+                temperatureC = temperature,
+                region = region,
+                atMs = now,
+            ),
+            seedRegion = region,
+        )
+        val sampleTemperatures = dwellResult.samples.joinToString(prefix = "[", postfix = "]") {
+            "%.1f".format(it.temperatureC)
+        }
+        if (dwellResult.degraded) {
+            warn(
+                "dwell-degraded drone=$droneSn samples=$sampleTemperatures " +
+                    "min=${dwellResult.minC} max=${dwellResult.maxC} spread=${dwellResult.spreadC}",
+            )
+        } else {
+            info(
+                "dwell result drone=$droneSn confirmed=${dwellResult.confirmed} " +
+                    "samples=$sampleTemperatures min=${dwellResult.minC} " +
+                    "max=${dwellResult.maxC} spread=${dwellResult.spreadC}",
+            )
+        }
+
+        if (!dwellResult.confirmed && !dwellResult.degraded) {
+            info("dwell rejected drone=$droneSn samples=$sampleTemperatures")
+            return
+        }
+
+        val reportSample = dwellResult.bestSample ?: DwellSample(temperature, region, now)
+        val reportTemperature = reportSample.temperatureC
+        val reportRegion = reportSample.region
         val taskId = taskIdFactory(droneSn)
         val eventId = "$taskId-$now"
         val thermalImageUrl = uploadThermalSnapshotOnceIfPresent(eventId, result.thermalSnapshotPath)
-        lastReportedRegion = region
+        lastReportedRegion = reportRegion
         recordThermalHotspotEvent(
             taskId = taskId,
             droneSn = droneSn,
             sourceTs = now,
-            temperatureC = temperature,
-            thermalMeasureRoi = region.toApiMap(),
+            temperatureC = reportTemperature,
+            thermalMeasureRoi = reportRegion.toApiMap(),
             thermalMeasurements = measurements,
             thermalImageUrl = thermalImageUrl,
         )
@@ -176,8 +166,8 @@ class ThermalHotspotMonitor(
                 eventId = eventId,
                 droneSn = droneSn,
                 sourceTs = now,
-                seedRegion = region,
-                temperatureC = temperature,
+                seedRegion = reportRegion,
+                temperatureC = reportTemperature,
                 thermalMeasurements = measurements,
                 initialSnapshotPath = result.thermalSnapshotPath,
             )
@@ -452,6 +442,14 @@ class ThermalHotspotMonitor(
         }
     }
 
+    private fun info(message: String) {
+        runCatching {
+            Log.i(TAG, message)
+        }.onFailure {
+            println("$TAG: $message")
+        }
+    }
+
     companion object {
         private const val TAG = "ThermalHotspotMonitor"
         const val DEFAULT_REPORT_THRESHOLD_C: Double = 45.0
@@ -467,6 +465,12 @@ class ThermalHotspotMonitor(
         private const val VISIBLE_CAPTURE_FAILED = "VISIBLE_CAPTURE_FAILED"
         private const val VISIBLE_CONFIRM_FAILED = "VISIBLE_CONFIRM_FAILED"
     }
+}
+
+private object NoopMissionHoldControl : MissionHoldControl {
+    override suspend fun holdForConfirmation(): Boolean = false
+
+    override suspend fun resumeAfterConfirmation() = Unit
 }
 
 private fun ThermalMeasureRegion.toApiMap(): Map<String, Double> = mapOf(

@@ -12,6 +12,8 @@ import com.yinxin.uavfir.api.CompositeCommandPoller
 import com.yinxin.uavfir.api.DjiFlightControlActionClient
 import com.yinxin.uavfir.api.DualStreamMsdkCommandExecutor
 import com.yinxin.uavfir.api.LegacyCommandDeduplicator
+import com.yinxin.uavfir.api.MissionHoldControl
+import com.yinxin.uavfir.api.ThermalDwellConfirmer
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
@@ -77,12 +79,6 @@ class AppServices(
         pollLegacyDualStreamUrgentOnly = true,
         commandExecutionDeduplicator = legacyCommandDeduplicator,
     )
-    private val thermalHotspotMonitor = ThermalHotspotMonitor(
-        client = backendClient,
-        sessionManager = sessionManager,
-        visibleConfirmationScope = appScope,
-    )
-
     // Wayline-agent control plane (HTTP) + event plane (MQTT).
     private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
     private val waylineClient = WaylineAgentClient(
@@ -100,6 +96,16 @@ class AppServices(
         listener = eventForwarder,
         gimbalActionClient = flightControlClient,
         scope = appScope,
+    )
+    private val missionHoldControl = WaypointMissionHoldControl(waypointExecutor)
+    private val thermalHotspotMonitor = ThermalHotspotMonitor(
+        client = backendClient,
+        sessionManager = sessionManager,
+        dwellConfirmer = ThermalDwellConfirmer(
+            sessionManager = sessionManager,
+            missionHold = missionHoldControl,
+        ),
+        visibleConfirmationScope = appScope,
     )
     private val kmzHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -261,5 +267,46 @@ private class ThermalHotspotTriggerBridge : ThermalHotspotCandidateListener {
 
     override fun onThermalHotspotCandidate(regions: List<ThermalMeasureRegion>, timestampMs: Long) {
         trigger?.invoke()
+    }
+}
+
+private class WaypointMissionHoldControl(
+    private val executor: WaypointMissionExecutor,
+) : MissionHoldControl {
+    @Volatile
+    private var held = false
+
+    override suspend fun holdForConfirmation(): Boolean {
+        val missionId = executor.activeMissionId()
+        if (missionId.isNullOrBlank()) {
+            Log.i(TAG, "dwell hold skipped: no active waypoint mission")
+            held = false
+            return false
+        }
+        return runCatching {
+            executor.pauseMission()
+            held = true
+            true
+        }.onFailure {
+            held = false
+            Log.w(TAG, "dwell hold failed missionId=$missionId message=${it.message}", it)
+        }.getOrDefault(false)
+    }
+
+    override suspend fun resumeAfterConfirmation() {
+        if (!held) {
+            return
+        }
+        val missionId = executor.activeMissionId()
+        held = false
+        runCatching {
+            executor.resumeMission()
+        }.onFailure {
+            Log.w(TAG, "dwell resume failed missionId=$missionId message=${it.message}", it)
+        }
+    }
+
+    companion object {
+        private const val TAG = "WaypointMissionHoldControl"
     }
 }

@@ -30,6 +30,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             monitorScope = this,
             visibleConfirmationScope = backgroundScope,
             clockMs = { 1780059017562L },
@@ -56,6 +57,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             monitorScope = this,
             visibleConfirmationScope = backgroundScope,
             clockMs = { now },
@@ -83,6 +85,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             monitorScope = this,
             visibleConfirmationScope = backgroundScope,
             clockMs = { 1780059017562L },
@@ -107,6 +110,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             monitorScope = this,
             visibleConfirmationScope = backgroundScope,
             clockMs = { 1780059017562L },
@@ -139,6 +143,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             clockMs = { now },
         )
 
@@ -166,6 +171,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = uploader,
             visibleConfirmationScope = backgroundScope,
             clockMs = { 1780059017562L },
@@ -195,6 +201,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = uploader,
             visibleConfirmationScope = backgroundScope,
             clockMs = { 1780059017562L },
@@ -206,6 +213,71 @@ class ThermalHotspotMonitorTest {
         assertEquals("/tmp/thermal.jpg", uploader.lastSnapshotPath)
         assertEquals("http://ai/snapshots/event-1-annotated.jpg", api.lastTaskEventBody?.thermalImageUrl)
         assertEquals(1, api.taskEvents.size)
+    }
+
+    @Test
+    fun monitor_reports_best_sample_temperature() = runTest {
+        val api = RecordingDualStreamApi()
+        val firstRegion = ThermalMeasureRegion(x = 0.42, y = 0.46, width = 0.08, height = 0.08)
+        val bestRegion = ThermalMeasureRegion(x = 0.50, y = 0.52, width = 0.06, height = 0.07)
+        val provider = SequenceHotspotStreamProvider(
+            results = listOf(
+                HotspotResult(46.0, snapshotPath = "/tmp/thermal-first.jpg", region = firstRegion),
+                HotspotResult(47.0, snapshotPath = null, region = firstRegion),
+                HotspotResult(61.0, snapshotPath = null, region = bestRegion),
+                HotspotResult(48.0, snapshotPath = null, region = firstRegion),
+            ),
+        )
+        val uploader = RecordingThermalSnapshotUploader("http://ai/snapshots/thermal.jpg")
+        val sessionManager = DualStreamSessionManager(provider)
+        sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
+        val monitor = ThermalHotspotMonitor(
+            client = AgentBackendClient(api),
+            sessionManager = sessionManager,
+            dwellConfirmer = enabledDwellConfirmer(sessionManager),
+            snapshotUploader = uploader,
+            visibleConfirmationScope = backgroundScope,
+            clockMs = { 1780059017562L },
+        )
+
+        monitor.pollOnce("DRONE-001")
+
+        assertEquals(4, provider.measureHotspotCalls)
+        assertEquals(61.0, api.lastTaskEventBody?.thermalTemperature ?: -1.0, 1e-6)
+        assertEquals(bestRegion.toApiMapForTest(), api.lastTaskEventBody?.thermalMeasureRoi)
+        assertEquals("http://ai/snapshots/thermal.jpg", api.lastTaskEventBody?.thermalImageUrl)
+    }
+
+    @Test
+    fun monitor_suppresses_report_when_dwell_rejects() = runTest {
+        val api = RecordingDualStreamApi()
+        val provider = SequenceHotspotStreamProvider(
+            results = listOf(
+                HotspotResult(46.0, snapshotPath = "/tmp/thermal-first.jpg"),
+                HotspotResult(41.0, snapshotPath = null),
+                HotspotResult(42.0, snapshotPath = null),
+                HotspotResult(43.0, snapshotPath = null),
+            ),
+        )
+        val uploader = RecordingThermalSnapshotUploader("http://ai/snapshots/thermal.jpg")
+        val sessionManager = DualStreamSessionManager(provider)
+        sessionManager.start("DRONE-001")
+        sessionManager.thermalMonitoringEnabled = true
+        val monitor = ThermalHotspotMonitor(
+            client = AgentBackendClient(api),
+            sessionManager = sessionManager,
+            dwellConfirmer = enabledDwellConfirmer(sessionManager),
+            snapshotUploader = uploader,
+            visibleConfirmationScope = backgroundScope,
+            clockMs = { 1780059017562L },
+        )
+
+        monitor.pollOnce("DRONE-001")
+
+        assertEquals(4, provider.measureHotspotCalls)
+        assertEquals(0, api.taskEvents.size)
+        assertNull(uploader.lastEventId)
     }
 
     @Test
@@ -223,6 +295,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             visibleSnapshotConfirmer = visibleConfirmer,
             visibleConfirmationScope = backgroundScope,
             clockMs = { 1780059017562L },
@@ -269,6 +342,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = uploader,
             visibleSnapshotConfirmer = visibleConfirmer,
             visibleConfirmationScope = this,
@@ -318,6 +392,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = uploader,
             visibleConfirmationScope = this,
             clockMs = { 1780059017562L },
@@ -354,6 +429,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = thermalUploader,
             visibleSnapshotConfirmer = visibleConfirmer,
             visibleConfirmationScope = this,
@@ -394,6 +470,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = thermalUploader,
             visibleSnapshotConfirmer = visibleConfirmer,
             visibleConfirmationScope = this,
@@ -431,6 +508,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = thermalUploader,
             visibleSnapshotConfirmer = visibleConfirmer,
             visibleConfirmationScope = this,
@@ -466,6 +544,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             snapshotUploader = thermalUploader,
             visibleSnapshotConfirmer = visibleConfirmer,
             visibleConfirmationScope = backgroundScope,
@@ -499,6 +578,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             clockMs = { 1780059017562L },
         )
 
@@ -521,6 +601,7 @@ class ThermalHotspotMonitorTest {
         val monitor = ThermalHotspotMonitor(
             client = AgentBackendClient(api),
             sessionManager = sessionManager,
+            dwellConfirmer = disabledDwellConfirmer(sessionManager),
             visibleConfirmationScope = backgroundScope,
             clockMs = { 1780059017562L },
         )
@@ -545,6 +626,30 @@ class ThermalHotspotMonitorTest {
         assertEquals(true, sessionManager.thermalMonitoringEnabled)
         sessionManager.executeCommand("DRONE-001", "thermal-monitor-off")
         assertEquals(false, sessionManager.thermalMonitoringEnabled)
+    }
+
+    private fun disabledDwellConfirmer(
+        sessionManager: DualStreamSessionManager,
+    ): ThermalDwellConfirmer = ThermalDwellConfirmer(
+        sessionManager = sessionManager,
+        missionHold = NoopMissionHoldControl,
+        enabled = false,
+    )
+
+    private fun enabledDwellConfirmer(
+        sessionManager: DualStreamSessionManager,
+    ): ThermalDwellConfirmer = ThermalDwellConfirmer(
+        sessionManager = sessionManager,
+        missionHold = NoopMissionHoldControl,
+        stabilizeMs = 0L,
+        sampleIntervalMs = 0L,
+        clockMs = { 1780059017562L },
+    )
+
+    private object NoopMissionHoldControl : MissionHoldControl {
+        override suspend fun holdForConfirmation(): Boolean = true
+
+        override suspend fun resumeAfterConfirmation() = Unit
     }
 
     private class HotspotStreamProvider(
