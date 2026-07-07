@@ -24,6 +24,8 @@ public class DualStreamCommandDTO {
 
     private String message;
 
+    private Boolean urgent;
+
     @JsonProperty("task_id")
     private String taskId;
 

@@ -9,4 +9,5 @@ data class AgentCommandResponse(
     val taskId: String? = null,
     val sourceTs: Long? = null,
     val thermalMeasureRoi: Map<String, Double>? = null,
+    val urgent: Boolean? = null,
 )

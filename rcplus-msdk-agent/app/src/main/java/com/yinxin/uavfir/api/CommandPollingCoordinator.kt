@@ -6,6 +6,8 @@ import com.yinxin.uavfir.session.DualStreamSessionState
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 
 class CommandPollingCoordinator(
     private val client: AgentBackendClient,
@@ -13,7 +15,9 @@ class CommandPollingCoordinator(
     private val commandExecutor: MsdkCommandExecutor? = sessionManager?.let { DualStreamMsdkCommandExecutor(it) },
     private val commandTimeoutMs: Long = DEFAULT_COMMAND_TIMEOUT_MS,
     private val pollLegacyDualStream: Boolean = true,
+    private val pollLegacyDualStreamUrgentOnly: Boolean = false,
     private val pollMsdk: Boolean = true,
+    private val commandExecutionDeduplicator: LegacyCommandDeduplicator = LegacyCommandDeduplicator(),
 ) : CommandPoller {
     override suspend fun pollOnce(droneSn: String) {
         if (pollLegacyDualStream) {
@@ -27,6 +31,9 @@ class CommandPollingCoordinator(
     private suspend fun pollLegacyDualStreamCommand(droneSn: String) {
         val sessionManager = sessionManager ?: return
         val command = client.pollCommand(droneSn) ?: return
+        if (pollLegacyDualStreamUrgentOnly && command.urgent != true) {
+            return
+        }
         if (!command.droneSn.equals(droneSn, ignoreCase = true)) {
             client.ackCommand(
                 droneSn = droneSn,
@@ -39,46 +46,53 @@ class CommandPollingCoordinator(
         if (!command.status.equals("pending", ignoreCase = true)) {
             return
         }
-
-        val result = runCatching {
-            withTimeout(commandTimeoutMs) {
-                sessionManager.executeCommand(
-                    droneSn,
-                    command.action,
-                    command.thermalMeasureRoi?.toThermalMeasureRegion(),
-                )
-            }
-        }.getOrElse { throwable ->
-            if (throwable is TimeoutCancellationException) {
-                DualStreamSessionManager.CommandExecutionResult(
-                    status = "failed",
-                    message = "command-timeout:${command.action}",
-                )
-            } else {
-                DualStreamSessionManager.CommandExecutionResult(
-                    status = "failed",
-                    message = throwable.message ?: throwable::class.simpleName ?: "command-failed",
-                )
-            }
+        if (!commandExecutionDeduplicator.tryStart(command.commandId)) {
+            return
         }
-        client.ackCommand(
-            droneSn = droneSn,
-            commandId = command.commandId,
-            status = result.status,
-            message = result.message,
-            taskId = command.taskId,
-            sourceTs = command.sourceTs,
-            thermalTemperature = result.thermalCenterTemperatureC
-                .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
-            thermalMeasureRoi = command.thermalMeasureRoi
-                .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
-        )
-        client.sendStatus(
-            droneSn = droneSn,
-            connectionState = connectionStateAfterLegacyCommand(result),
-            message = result.message ?: "command-${command.action}-${result.status}",
-            runtimeStatus = sessionManager.runtimeStatus(),
-        )
+
+        try {
+            val result = runCatching {
+                withTimeout(commandTimeoutMs) {
+                    sessionManager.executeCommand(
+                        droneSn,
+                        command.action,
+                        command.thermalMeasureRoi?.toThermalMeasureRegion(),
+                    )
+                }
+            }.getOrElse { throwable ->
+                if (throwable is TimeoutCancellationException) {
+                    DualStreamSessionManager.CommandExecutionResult(
+                        status = "failed",
+                        message = "command-timeout:${command.action}",
+                    )
+                } else {
+                    DualStreamSessionManager.CommandExecutionResult(
+                        status = "failed",
+                        message = throwable.message ?: throwable::class.simpleName ?: "command-failed",
+                    )
+                }
+            }
+            client.ackCommand(
+                droneSn = droneSn,
+                commandId = command.commandId,
+                status = result.status,
+                message = result.message,
+                taskId = command.taskId,
+                sourceTs = command.sourceTs,
+                thermalTemperature = result.thermalCenterTemperatureC
+                    .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
+                thermalMeasureRoi = command.thermalMeasureRoi
+                    .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
+            )
+            client.sendStatus(
+                droneSn = droneSn,
+                connectionState = connectionStateAfterLegacyCommand(result),
+                message = result.message ?: "command-${command.action}-${result.status}",
+                runtimeStatus = sessionManager.runtimeStatus(),
+            )
+        } finally {
+            commandExecutionDeduplicator.finish(command.commandId)
+        }
     }
 
     private fun connectionStateAfterLegacyCommand(
@@ -139,6 +153,16 @@ class CommandPollingCoordinator(
 
     companion object {
         const val DEFAULT_COMMAND_TIMEOUT_MS: Long = 180_000
+    }
+}
+
+class LegacyCommandDeduplicator {
+    private val inFlight = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    fun tryStart(commandId: String): Boolean = inFlight.add(commandId)
+
+    fun finish(commandId: String) {
+        inFlight.remove(commandId)
     }
 }
 

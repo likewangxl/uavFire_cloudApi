@@ -43,4 +43,26 @@ class ThermalFrameProbeSourceTest {
             onFrameBody.contains("now - lastSavedAtMs < SAMPLE_INTERVAL_MS"),
         )
     }
+
+    @Test
+    fun hotspotDetectionNotifiesInjectedCandidateListener() {
+        val source = String(Files.readAllBytes(
+            Paths.get("src/main/java/com/yinxin/uavfir/stream/ThermalFrameProbe.kt"),
+        ))
+        val detectBody = source.substringAfter("private fun maybeDetectHotspot")
+            .substringBefore("private fun maybeLogStats")
+
+        assertTrue(
+            "ThermalFrameProbe should define a minimal hotspot candidate listener interface",
+            source.contains("fun interface ThermalHotspotCandidateListener"),
+        )
+        assertTrue(
+            "ThermalFrameProbe constructor should inject a default no-op candidate listener",
+            source.contains("hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP"),
+        )
+        assertTrue(
+            "a detected frame hotspot should notify the injected candidate listener",
+            detectBody.contains("hotspotCandidateListener.onThermalHotspotCandidate"),
+        )
+    }
 }

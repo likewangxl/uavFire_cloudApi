@@ -11,6 +11,7 @@ import com.yinxin.uavfir.api.CommandPollingCoordinator
 import com.yinxin.uavfir.api.CompositeCommandPoller
 import com.yinxin.uavfir.api.DjiFlightControlActionClient
 import com.yinxin.uavfir.api.DualStreamMsdkCommandExecutor
+import com.yinxin.uavfir.api.LegacyCommandDeduplicator
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
@@ -19,6 +20,8 @@ import com.yinxin.uavfir.sdk.HmsReporter
 import com.yinxin.uavfir.sdk.OsdReporter
 import com.yinxin.uavfir.session.DualStreamSessionManager
 import com.yinxin.uavfir.stream.RealMsdkStreamProvider
+import com.yinxin.uavfir.stream.ThermalHotspotCandidateListener
+import com.yinxin.uavfir.stream.ThermalMeasureRegion
 import com.yinxin.uavfir.ui.ValidationConsoleController
 import com.yinxin.uavfir.wayline.WaylineAgentApi
 import com.yinxin.uavfir.wayline.WaylineAgentClient
@@ -50,23 +53,29 @@ class AppServices(
     private val backendClient = AgentBackendClient(api)
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
-    private val sessionManager = DualStreamSessionManager(RealMsdkStreamProvider())
+    private val thermalHotspotTriggerBridge = ThermalHotspotTriggerBridge()
+    private val sessionManager = DualStreamSessionManager(
+        RealMsdkStreamProvider(hotspotCandidateListener = thermalHotspotTriggerBridge),
+    )
     private val flightControlClient = DjiFlightControlActionClient()
     private val msdkCommandExecutor = DualStreamMsdkCommandExecutor(
         dualStreamExecutor = sessionManager,
         flightControlClient = flightControlClient,
     )
+    private val legacyCommandDeduplicator = LegacyCommandDeduplicator()
     private val dualStreamPoller = CommandPollingCoordinator(
         client = backendClient,
         sessionManager = sessionManager,
         commandExecutor = msdkCommandExecutor,
         pollMsdk = false,
+        commandExecutionDeduplicator = legacyCommandDeduplicator,
     )
     private val msdkControlPoller = CommandPollingCoordinator(
         client = backendClient,
-        sessionManager = null,
+        sessionManager = sessionManager,
         commandExecutor = msdkCommandExecutor,
-        pollLegacyDualStream = false,
+        pollLegacyDualStreamUrgentOnly = true,
+        commandExecutionDeduplicator = legacyCommandDeduplicator,
     )
     private val thermalHotspotMonitor = ThermalHotspotMonitor(
         client = backendClient,
@@ -151,6 +160,11 @@ class AppServices(
     )
 
     init {
+        thermalHotspotTriggerBridge.trigger = {
+            activeThermalDroneSn()?.let { droneSn ->
+                thermalHotspotMonitor.onFrameHotspotCandidate(droneSn)
+            }
+        }
         Log.i(TAG, "initialized backend=${AgentBackendConfig.DEFAULT_BASE_URL}")
         waypointExecutor.attach()
     }
@@ -182,6 +196,11 @@ class AppServices(
         if (autoStartedStreamAircraft.add(identity.aircraftSn)) {
             startDualStreamOnBoot(identity.aircraftSn)
         }
+    }
+
+    private fun activeThermalDroneSn(): String? {
+        return activeReporterIdentity?.aircraftSn
+            ?: BuildConfig.AGENT_AIRCRAFT_SN.takeIf { it.isNotBlank() }
     }
 
     /**
@@ -233,5 +252,14 @@ class AppServices(
     companion object {
         private const val TAG = "AppServices"
         private const val AUTO_START_DELAY_MS: Long = 6_000
+    }
+}
+
+private class ThermalHotspotTriggerBridge : ThermalHotspotCandidateListener {
+    @Volatile
+    var trigger: (() -> Unit)? = null
+
+    override fun onThermalHotspotCandidate(regions: List<ThermalMeasureRegion>, timestampMs: Long) {
+        trigger?.invoke()
     }
 }

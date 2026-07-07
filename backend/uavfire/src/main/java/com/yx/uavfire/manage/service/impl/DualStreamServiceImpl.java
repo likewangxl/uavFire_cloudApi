@@ -70,6 +70,12 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private static final String GROUP_KEY_PREFIX = "dual-stream:group:";
     private static final String TASK_EVENTS_KEY_PREFIX = "dual-stream:task-events:";
     private static final String DEFAULT_VISIBLE_STREAM_SUFFIX = "-0";
+    private static final List<String> URGENT_ACTIONS = List.of(
+            "thermal-monitor-on",
+            "focus-thermal",
+            "focus-visible",
+            "measure-thermal-region"
+    );
 
     private final Map<String, DualStreamLiveGroupDTO> groups = new ConcurrentHashMap<>();
     private final Map<String, List<DualStreamEventDTO>> taskEvents = new ConcurrentHashMap<>();
@@ -91,11 +97,11 @@ public class DualStreamServiceImpl implements IDualStreamService {
     @Value("${ai-service.base-url:http://127.0.0.1:9000}")
     private String aiServiceBaseUrl;
 
-    @Value("${dual-stream.thermal-measurement-timeout-ms:120000}")
-    private long thermalMeasurementTimeoutMs = 120_000L;
+    @Value("${dual-stream.thermal-measurement-timeout-ms:20000}")
+    private long thermalMeasurementTimeoutMs = 20_000L;
 
-    @Value("${dual-stream.thermal-measurement-cooldown-ms:30000}")
-    private long thermalMeasurementCooldownMs = 30_000L;
+    @Value("${dual-stream.thermal-measurement-cooldown-ms:5000}")
+    private long thermalMeasurementCooldownMs = 5_000L;
 
     private final HttpClient aiHttpClient = HttpClient.newHttpClient();
 
@@ -240,6 +246,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setCommandId(UUID.randomUUID().toString())
                 .setDroneSn(droneSn)
                 .setAction(action)
+                .setUrgent(isUrgentAction(action) ? Boolean.TRUE : null)
                 .setStatus("pending")
                 .setIssuedAt(System.currentTimeMillis());
         enqueueCommand(command);
@@ -335,6 +342,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
         return new DualStreamCommandDTO()
                 .setDroneSn(droneSn)
                 .setAction(action)
+                .setUrgent(isUrgentAction(action) ? Boolean.TRUE : null)
                 .setIssuedAt(System.currentTimeMillis());
     }
 
@@ -850,6 +858,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setCommandId(UUID.randomUUID().toString())
                 .setDroneSn(event.getDroneSn())
                 .setAction("measure-thermal-region")
+                .setUrgent(Boolean.TRUE)
                 .setStatus("pending")
                 .setTaskId(event.getTaskId())
                 .setSourceTs(event.getSourceTs())
@@ -1519,6 +1528,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
         return StringUtils.hasText(value) ? value.trim().toLowerCase() : "";
     }
 
+    private boolean isUrgentAction(String action) {
+        return URGENT_ACTIONS.contains(normalize(action));
+    }
+
     private List<DualStreamEventDTO> copyEvents(List<DualStreamEventDTO> events) {
         List<DualStreamEventDTO> copies = new CopyOnWriteArrayList<>();
         for (DualStreamEventDTO event : events) {
@@ -1537,6 +1550,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setAction(command.getAction())
                 .setStatus(command.getStatus())
                 .setMessage(command.getMessage())
+                .setUrgent(command.getUrgent())
                 .setTaskId(command.getTaskId())
                 .setSourceTs(command.getSourceTs())
                 .setThermalMeasureRoi(command.getThermalMeasureRoi())

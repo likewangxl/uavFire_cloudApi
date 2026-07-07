@@ -6,8 +6,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.PreDestroy;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.ShortBuffer;
@@ -36,11 +39,14 @@ public class HgtTerrainElevationService implements TerrainElevationService {
     private static final int MAX_CACHED_TILES = 8;
 
     private final Path demDir;
-    /** LRU：瓦片名 -> 网格（mmap）。Optional.empty 表示已确认缺失，避免重复探测。 */
-    private final Map<String, Optional<ShortBuffer>> tiles = Collections.synchronizedMap(
-            new LinkedHashMap<String, Optional<ShortBuffer>>(16, 0.75f, true) {
+    /**
+     * LRU：瓦片名 -> mmap 字节缓冲。Optional.empty 表示已确认缺失，避免重复探测。
+     * 淘汰时不主动解映射（读线程可能还持有视图，解映射会导致 JVM 崩溃），交给 GC 回收。
+     */
+    private final Map<String, Optional<ByteBuffer>> tiles = Collections.synchronizedMap(
+            new LinkedHashMap<String, Optional<ByteBuffer>>(16, 0.75f, true) {
                 @Override
-                protected boolean removeEldestEntry(Map.Entry<String, Optional<ShortBuffer>> eldest) {
+                protected boolean removeEldestEntry(Map.Entry<String, Optional<ByteBuffer>> eldest) {
                     return size() > MAX_CACHED_TILES;
                 }
             });
@@ -56,11 +62,11 @@ public class HgtTerrainElevationService implements TerrainElevationService {
         }
         int latBase = (int) Math.floor(lat);
         int lngBase = (int) Math.floor(lng);
-        Optional<ShortBuffer> tile = loadTile(latBase, lngBase);
+        Optional<ByteBuffer> tile = loadTile(latBase, lngBase);
         if (tile.isEmpty()) {
             return Optional.empty();
         }
-        ShortBuffer grid = tile.get();
+        ShortBuffer grid = tile.get().asShortBuffer();
         double row = (latBase + 1 - lat) * 3600.0; // 北边界是 row 0
         double col = (lng - lngBase) * 3600.0;
         int r0 = Math.min((int) Math.floor(row), SIZE - 2);
@@ -79,12 +85,12 @@ public class HgtTerrainElevationService implements TerrainElevationService {
         return Optional.of(top * (1 - fr) + bottom * fr);
     }
 
-    private Optional<ShortBuffer> loadTile(int latBase, int lngBase) {
+    private Optional<ByteBuffer> loadTile(int latBase, int lngBase) {
         String name = tileName(latBase, lngBase);
         return tiles.computeIfAbsent(name, this::mapTile);
     }
 
-    private Optional<ShortBuffer> mapTile(String name) {
+    private Optional<ByteBuffer> mapTile(String name) {
         Path file = demDir.resolve(name);
         if (!Files.isRegularFile(file)) {
             return Optional.empty();
@@ -96,9 +102,37 @@ public class HgtTerrainElevationService implements TerrainElevationService {
             }
             ByteBuffer mapped = channel.map(FileChannel.MapMode.READ_ONLY, 0, EXPECTED_BYTES);
             mapped.order(ByteOrder.BIG_ENDIAN);
-            return Optional.of(mapped.asShortBuffer());
+            return Optional.of(mapped);
         } catch (IOException e) {
             return Optional.empty();
+        }
+    }
+
+    /**
+     * 显式解除全部 mmap 并清空缓存。Windows 上映射不释放则文件无法删除
+     * （测试的 @TempDir 清理依赖此方法）。仅在确认没有并发查询时调用。
+     */
+    @PreDestroy
+    public void close() {
+        synchronized (tiles) {
+            tiles.values().forEach(tile -> tile.ifPresent(HgtTerrainElevationService::unmap));
+            tiles.clear();
+        }
+    }
+
+    /** JDK 9+ 无公开解映射 API，反射调用 sun.misc.Unsafe#invokeCleaner，失败则退回 GC 回收。 */
+    private static void unmap(ByteBuffer buffer) {
+        if (!buffer.isDirect()) {
+            return;
+        }
+        try {
+            Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+            Field theUnsafe = unsafeClass.getDeclaredField("theUnsafe");
+            theUnsafe.setAccessible(true);
+            Method invokeCleaner = unsafeClass.getMethod("invokeCleaner", ByteBuffer.class);
+            invokeCleaner.invoke(theUnsafe.get(null), buffer);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // 尽力而为：解映射失败时映射仍由 GC 兜底，仅影响文件句柄释放时机
         }
     }
 

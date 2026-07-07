@@ -3,7 +3,8 @@ package com.yinxin.uavfir.stream
 import kotlinx.coroutines.delay
 
 class RealMsdkStreamProvider(
-    private val binder: MsdkStreamBinder = defaultStreamBinder(),
+    hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
+    private val binder: MsdkStreamBinder = defaultStreamBinder(hotspotCandidateListener),
     private val liveStreamController: LiveStreamController = defaultLiveStreamController(),
 ) : StreamProvider {
     var visibleState: BoundStreamState = BoundStreamState.IDLE
@@ -219,9 +220,11 @@ private class StubLiveStreamController : LiveStreamController {
     override suspend fun stop() = Unit
 }
 
-private fun defaultStreamBinder(): MsdkStreamBinder {
+private fun defaultStreamBinder(
+    hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
+): MsdkStreamBinder {
     return if (com.yinxin.uavfir.AppContextHolder.get() != null) {
-        DjiMsdkStreamBinder()
+        DjiMsdkStreamBinder(hotspotCandidateListener = hotspotCandidateListener)
     } else {
         StubMsdkStreamBinder()
     }

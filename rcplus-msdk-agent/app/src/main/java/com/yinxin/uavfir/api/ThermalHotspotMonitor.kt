@@ -3,12 +3,15 @@ package com.yinxin.uavfir.api
 import android.util.Log
 import com.yinxin.uavfir.session.DualStreamSessionManager
 import com.yinxin.uavfir.session.DualStreamSessionState
+import com.yinxin.uavfir.stream.ThermalMeasuredPoint
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 
 class ThermalHotspotMonitor(
     private val client: AgentBackendClient,
@@ -16,15 +19,36 @@ class ThermalHotspotMonitor(
     private val snapshotUploader: ThermalSnapshotUploader = AiServiceThermalSnapshotUploader(),
     private val visibleSnapshotConfirmer: VisibleSnapshotConfirmer = AiServiceVisibleSnapshotConfirmer(),
     private val visibleConfirmationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val monitorScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val taskIdFactory: (String) -> String = { droneSn -> "fire-$droneSn" },
     private val reportThresholdC: Double = DEFAULT_REPORT_THRESHOLD_C,
     private val probeIntervalMs: Long = DEFAULT_PROBE_INTERVAL_MS,
+    private val frameTriggerDebounceMs: Long = DEFAULT_FRAME_TRIGGER_DEBOUNCE_MS,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) : CommandPoller {
+    private val probeMutex = Mutex()
+    @Volatile
     private var lastProbeAtMs: Long = 0L
+    @Volatile
+    private var lastFrameTriggerCompletedAtMs: Long = 0L
     private var lastReportedRegion: ThermalMeasureRegion? = null
 
+    fun onFrameHotspotCandidate(droneSn: String): Job = monitorScope.launch {
+        runFrameTriggeredProbe(droneSn)
+    }
+
     override suspend fun pollOnce(droneSn: String) {
+        if (!probeMutex.tryLock()) {
+            return
+        }
+        try {
+            pollOnceLocked(droneSn)
+        } finally {
+            probeMutex.unlock()
+        }
+    }
+
+    private suspend fun pollOnceLocked(droneSn: String) {
         if (sessionManager.sessionState != DualStreamSessionState.RUNNING) {
             return
         }
@@ -48,16 +72,164 @@ class ThermalHotspotMonitor(
             return
         }
 
-        var temperature = result.thermalCenterTemperatureC ?: return
-        var region = result.thermalMeasureRegion ?: return
-        var measurements = result.thermalMeasurements
+        val temperature = result.thermalCenterTemperatureC ?: return
+        val region = result.thermalMeasureRegion ?: return
+        val measurements = result.thermalMeasurements
         if (temperature < reportThresholdC) {
             return
         }
 
         val taskId = taskIdFactory(droneSn)
         val eventId = "$taskId-$now"
-        var thermalImageUrl = uploadThermalSnapshotIfPresent(eventId, result.thermalSnapshotPath)
+        val thermalImageUrl = uploadThermalSnapshotOnceIfPresent(eventId, result.thermalSnapshotPath)
+        lastReportedRegion = region
+        recordThermalHotspotEvent(
+            taskId = taskId,
+            droneSn = droneSn,
+            sourceTs = now,
+            temperatureC = temperature,
+            thermalMeasureRoi = region.toApiMap(),
+            thermalMeasurements = measurements,
+            thermalImageUrl = thermalImageUrl,
+        )
+        if (thermalImageUrl.isNullOrBlank()) {
+            launchThermalSnapshotRetry(
+                taskId = taskId,
+                eventId = eventId,
+                droneSn = droneSn,
+                sourceTs = now,
+                seedRegion = region,
+                temperatureC = temperature,
+                thermalMeasurements = measurements,
+                initialSnapshotPath = result.thermalSnapshotPath,
+            )
+        } else {
+            launchVisibleSnapshotConfirmation(
+                taskId = taskId,
+                eventId = eventId,
+                droneSn = droneSn,
+                sourceTs = now,
+                thermalImageUrl = thermalImageUrl,
+            )
+        }
+    }
+
+    private suspend fun runFrameTriggeredProbe(droneSn: String) {
+        if (sessionManager.sessionState != DualStreamSessionState.RUNNING) {
+            return
+        }
+        if (!sessionManager.thermalMonitoringEnabled) {
+            return
+        }
+        if (!probeMutex.tryLock()) {
+            return
+        }
+        var processed = false
+        try {
+            val now = clockMs()
+            if (lastFrameTriggerCompletedAtMs > 0L && now - lastFrameTriggerCompletedAtMs < frameTriggerDebounceMs) {
+                return
+            }
+            processed = true
+            measureAndReportHotspot(droneSn, now)
+        } finally {
+            if (processed) {
+                lastFrameTriggerCompletedAtMs = clockMs()
+            }
+            probeMutex.unlock()
+        }
+    }
+
+    private suspend fun measureAndReportHotspot(droneSn: String, now: Long) {
+        val result = sessionManager.measureThermalHotspot(
+            droneSn = droneSn,
+            seedRegion = lastReportedRegion,
+        )
+        if (!result.status.equals("applied", ignoreCase = true)) {
+            Log.w(TAG, "thermal hotspot probe failed drone=$droneSn message=${result.message}")
+            return
+        }
+
+        val temperature = result.thermalCenterTemperatureC ?: return
+        val region = result.thermalMeasureRegion ?: return
+        val measurements = result.thermalMeasurements
+        if (temperature < reportThresholdC) {
+            return
+        }
+
+        val taskId = taskIdFactory(droneSn)
+        val eventId = "$taskId-$now"
+        val thermalImageUrl = uploadThermalSnapshotOnceIfPresent(eventId, result.thermalSnapshotPath)
+        lastReportedRegion = region
+        recordThermalHotspotEvent(
+            taskId = taskId,
+            droneSn = droneSn,
+            sourceTs = now,
+            temperatureC = temperature,
+            thermalMeasureRoi = region.toApiMap(),
+            thermalMeasurements = measurements,
+            thermalImageUrl = thermalImageUrl,
+        )
+        if (thermalImageUrl.isNullOrBlank()) {
+            launchThermalSnapshotRetry(
+                taskId = taskId,
+                eventId = eventId,
+                droneSn = droneSn,
+                sourceTs = now,
+                seedRegion = region,
+                temperatureC = temperature,
+                thermalMeasurements = measurements,
+                initialSnapshotPath = result.thermalSnapshotPath,
+            )
+        } else {
+            launchVisibleSnapshotConfirmation(
+                taskId = taskId,
+                eventId = eventId,
+                droneSn = droneSn,
+                sourceTs = now,
+                thermalImageUrl = thermalImageUrl,
+            )
+        }
+    }
+
+    private fun launchThermalSnapshotRetry(
+        taskId: String,
+        eventId: String,
+        droneSn: String,
+        sourceTs: Long,
+        seedRegion: ThermalMeasureRegion,
+        temperatureC: Double,
+        thermalMeasurements: List<ThermalMeasuredPoint>,
+        initialSnapshotPath: String?,
+    ) {
+        visibleConfirmationScope.launch {
+            retryThermalSnapshotAfterReport(
+                taskId = taskId,
+                eventId = eventId,
+                droneSn = droneSn,
+                sourceTs = sourceTs,
+                seedRegion = seedRegion,
+                temperatureC = temperatureC,
+                thermalMeasurements = thermalMeasurements,
+                initialSnapshotPath = initialSnapshotPath,
+            )
+        }
+    }
+
+    private suspend fun retryThermalSnapshotAfterReport(
+        taskId: String,
+        eventId: String,
+        droneSn: String,
+        sourceTs: Long,
+        seedRegion: ThermalMeasureRegion,
+        temperatureC: Double,
+        thermalMeasurements: List<ThermalMeasuredPoint>,
+        initialSnapshotPath: String?,
+    ) {
+        var thermalImageUrl = uploadThermalSnapshotWithRetriesIfPresent(eventId, initialSnapshotPath)
+        var reportTemperatureC = temperatureC
+        var reportRegion = seedRegion
+        var reportMeasurements = thermalMeasurements
         repeat(THERMAL_SNAPSHOT_REMEASURE_ATTEMPTS) { attempt ->
             if (!thermalImageUrl.isNullOrBlank()) {
                 return@repeat
@@ -65,45 +237,65 @@ class ThermalHotspotMonitor(
             delay(THERMAL_REMEASURE_DELAY_MS)
             val retry = sessionManager.measureThermalHotspot(
                 droneSn = droneSn,
-                seedRegion = region,
+                seedRegion = seedRegion,
             )
             if (retry.status.equals("applied", ignoreCase = true)
                 && retry.thermalCenterTemperatureC != null
                 && retry.thermalMeasureRegion != null
                 && retry.thermalCenterTemperatureC >= reportThresholdC
             ) {
-                temperature = retry.thermalCenterTemperatureC
-                region = retry.thermalMeasureRegion
-                measurements = retry.thermalMeasurements
-                thermalImageUrl = uploadThermalSnapshotIfPresent(eventId, retry.thermalSnapshotPath)
+                reportTemperatureC = retry.thermalCenterTemperatureC
+                reportRegion = retry.thermalMeasureRegion
+                reportMeasurements = retry.thermalMeasurements
+                thermalImageUrl = uploadThermalSnapshotWithRetriesIfPresent(eventId, retry.thermalSnapshotPath)
             } else {
                 warn("thermal snapshot remeasure did not produce reportable hotspot event=$eventId attempt=${attempt + 1}")
             }
         }
         if (thermalImageUrl.isNullOrBlank()) {
-            warn("thermal hotspot event skipped after thermal snapshot unavailable event=$eventId")
+            warn("thermal snapshot unavailable after async retry event=$eventId")
             return
         }
-        lastReportedRegion = region
-        client.recordThermalHotspotEvent(
+        lastReportedRegion = reportRegion
+        recordThermalHotspotEvent(
             taskId = taskId,
             droneSn = droneSn,
-            sourceTs = now,
-            temperatureC = temperature,
-            thermalMeasureRoi = region.toApiMap(),
-            thermalMeasurements = measurements.map {
-                ThermalMeasurementPayload(
-                    temperatureC = it.temperatureC,
-                    roi = it.region.toApiMap(),
-                )
-            },
+            sourceTs = sourceTs,
+            temperatureC = reportTemperatureC,
+            thermalMeasureRoi = reportRegion.toApiMap(),
+            thermalMeasurements = reportMeasurements,
             thermalImageUrl = thermalImageUrl,
         )
         launchVisibleSnapshotConfirmation(
             taskId = taskId,
             eventId = eventId,
             droneSn = droneSn,
-            sourceTs = now,
+            sourceTs = sourceTs,
+            thermalImageUrl = thermalImageUrl,
+        )
+    }
+
+    private suspend fun recordThermalHotspotEvent(
+        taskId: String,
+        droneSn: String,
+        sourceTs: Long,
+        temperatureC: Double,
+        thermalMeasureRoi: Map<String, Double>,
+        thermalMeasurements: List<ThermalMeasuredPoint>,
+        thermalImageUrl: String?,
+    ) {
+        client.recordThermalHotspotEvent(
+            taskId = taskId,
+            droneSn = droneSn,
+            sourceTs = sourceTs,
+            temperatureC = temperatureC,
+            thermalMeasureRoi = thermalMeasureRoi,
+            thermalMeasurements = thermalMeasurements.map {
+                ThermalMeasurementPayload(
+                    temperatureC = it.temperatureC,
+                    roi = it.region.toApiMap(),
+                )
+            },
             thermalImageUrl = thermalImageUrl,
         )
     }
@@ -204,7 +396,23 @@ class ThermalHotspotMonitor(
         }
     }
 
-    private suspend fun uploadThermalSnapshotIfPresent(eventId: String, snapshotPath: String?): String? {
+    private suspend fun uploadThermalSnapshotOnceIfPresent(eventId: String, snapshotPath: String?): String? {
+        if (snapshotPath.isNullOrBlank()) {
+            warn("thermal snapshot unavailable event=$eventId")
+            return null
+        }
+        return runCatching { snapshotUploader.upload(eventId, snapshotPath) }
+            .onFailure {
+                warn(
+                    "thermal snapshot upload failed event=$eventId path=$snapshotPath attempt=1 message=${it.message}",
+                    it,
+                )
+            }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun uploadThermalSnapshotWithRetriesIfPresent(eventId: String, snapshotPath: String?): String? {
         if (snapshotPath.isNullOrBlank()) {
             warn("thermal snapshot unavailable event=$eventId")
             return null
@@ -247,10 +455,11 @@ class ThermalHotspotMonitor(
     companion object {
         private const val TAG = "ThermalHotspotMonitor"
         const val DEFAULT_REPORT_THRESHOLD_C: Double = 45.0
-        const val DEFAULT_PROBE_INTERVAL_MS: Long = 10_000L
+        const val DEFAULT_PROBE_INTERVAL_MS: Long = 2_000L
+        const val DEFAULT_FRAME_TRIGGER_DEBOUNCE_MS: Long = 2_000L
         private const val THERMAL_SNAPSHOT_UPLOAD_ATTEMPTS = 2
         private const val THERMAL_SNAPSHOT_UPLOAD_RETRY_DELAY_MS = 250L
-        private const val THERMAL_SNAPSHOT_REMEASURE_ATTEMPTS = 4
+        private const val THERMAL_SNAPSHOT_REMEASURE_ATTEMPTS = 1
         private const val THERMAL_REMEASURE_DELAY_MS = 500L
         private const val VISIBLE_CONFIRMATION_ATTEMPTS = 3
         private const val VISIBLE_CONFIRMATION_RETRY_DELAY_MS = 300L

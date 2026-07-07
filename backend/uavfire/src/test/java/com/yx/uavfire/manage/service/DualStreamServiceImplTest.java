@@ -59,6 +59,17 @@ class DualStreamServiceImplTest {
     }
 
     @Test
+    void issueCommand_marksThermalControlCommandsUrgent() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+
+        assertTrue(service.issueCommand("DRONE-THERMAL-MONITOR", "thermal-monitor-on").getUrgent());
+        assertTrue(service.issueCommand("DRONE-FOCUS-THERMAL", "focus-thermal").getUrgent());
+        assertTrue(service.issueCommand("DRONE-FOCUS-VISIBLE", "focus-visible").getUrgent());
+        assertTrue(service.issueCommand("DRONE-MEASURE", "measure-thermal-region").getUrgent());
+        assertNotEquals(Boolean.TRUE, service.issueCommand("DRONE-START", "start").getUrgent());
+    }
+
+    @Test
     void acknowledgeCommand_updatesCommandStatusWithoutErasingGroupState() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         service.acceptHeartbeat("DRONE-001", new DualStreamAgentHeartbeatDTO()
@@ -985,6 +996,37 @@ class DualStreamServiceImplTest {
 
         assertTrue(queues == null || !queues.containsKey("DRONE-001") || queues.get("DRONE-001").isEmpty());
         assertEquals("THERMAL_REJECTED", service.listEvents("task-001").get(1).getReviewStatus());
+    }
+
+    @Test
+    void acceptEvent_allowsThermalRegionMeasurementAfterDefaultFiveSecondCooldown() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        Map<String, Double> roi = Map.of(
+                "x", 0.32,
+                "y", 0.44,
+                "width", 0.08,
+                "height", 0.08);
+        @SuppressWarnings("unchecked")
+        Map<String, Long> completedAtByDrone =
+                (Map<String, Long>) ReflectionTestUtils.getField(service, "lastThermalMeasurementCompletedAtByDrone");
+        completedAtByDrone.put("DRONE-001", System.currentTimeMillis() - 5_100L);
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(System.currentTimeMillis())
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("LOW")
+                .setThermalScore(0.011)
+                .setFusionScore(0.011)
+                .setThermalImageUrl("http://snapshots/task-001-thermal-annotated.jpg")
+                .setThermalMeasureRoi(roi));
+
+        DualStreamCommandDTO command = service.pollCommand("DRONE-001");
+
+        assertEquals("THERMAL_MEASURING", service.listEvents("task-001").get(0).getReviewStatus());
+        assertNotNull(command);
+        assertEquals("measure-thermal-region", command.getAction());
     }
 
     @Test

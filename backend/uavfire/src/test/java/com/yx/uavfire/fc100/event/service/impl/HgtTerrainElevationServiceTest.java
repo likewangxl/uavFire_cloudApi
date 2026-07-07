@@ -1,5 +1,6 @@
 package com.yx.uavfire.fc100.event.service.impl;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,6 +45,12 @@ class HgtTerrainElevationServiceTest {
             }
         }
         service = new HgtTerrainElevationService(demDir.toString());
+    }
+
+    /** Windows 上 mmap 不解除则 .hgt 文件被锁，@TempDir 清理会失败。 */
+    @AfterEach
+    void unmapTiles() {
+        service.close();
     }
 
     @Test

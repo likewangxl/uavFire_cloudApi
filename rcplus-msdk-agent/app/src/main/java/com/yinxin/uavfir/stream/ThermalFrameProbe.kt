@@ -18,11 +18,20 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+fun interface ThermalHotspotCandidateListener {
+    fun onThermalHotspotCandidate(regions: List<ThermalMeasureRegion>, timestampMs: Long)
+
+    companion object {
+        val NO_OP = ThermalHotspotCandidateListener { _, _ -> }
+    }
+}
+
 class ThermalFrameProbe(
     private val componentIndex: ComponentIndexType = ComponentIndexType.LEFT_OR_MAIN,
     private val keyManager: KeyManager = KeyManager.getInstance(),
     private val cameraStreamManager: ICameraStreamManager = MediaDataCenter.getInstance().cameraStreamManager,
     private val hotspotDetector: ThermalHotspotFrameDetector = ThermalHotspotFrameDetector(),
+    private val hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
 ) {
     private val running = AtomicBoolean(false)
     private val saveExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -228,10 +237,16 @@ class ThermalFrameProbe(
             return
         }
         val result = results.first()
-        latestHotspot = TimedHotspot(results.map { it.region }, now)
+        val regions = results.map { it.region }
+        latestHotspot = TimedHotspot(regions, now)
+        runCatching {
+            hotspotCandidateListener.onThermalHotspotCandidate(regions, now)
+        }.onFailure {
+            Log.w(TAG, "hotspot candidate listener failed: ${it.message}", it)
+        }
         Log.i(
             TAG,
-            "hotspot rois=${results.map { it.region }} max=${result.maxBrightness} threshold=${result.threshold} " +
+            "hotspot rois=$regions max=${result.maxBrightness} threshold=${result.threshold} " +
                 "areaRatio=${"%.4f".format(result.componentAreaRatio)} detectCostMs=${result.detectCostMs}",
         )
     }

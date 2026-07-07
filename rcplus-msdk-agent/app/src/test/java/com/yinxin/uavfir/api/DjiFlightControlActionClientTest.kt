@@ -23,6 +23,7 @@ class DjiFlightControlActionClientTest {
         val source = File("src/main/java/com/yinxin/uavfir/api/MsdkCommandExecutor.kt").readText()
         val constructorArgs = source.substringAfter("return VirtualStickFlightControlParam(")
             .substringBefore("VerticalControlMode.VELOCITY")
+            .replace("\r\n", "\n")
 
         assertTrue(
             "Real M4T/RC Plus testing showed the MSDK constructor's first horizontal value drives lateral motion; pass rollVelocity first and pitchVelocity second so W/S become forward/back.",

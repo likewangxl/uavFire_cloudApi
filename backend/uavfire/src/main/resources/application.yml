@@ -225,6 +225,10 @@ ai-service:
   auto-trigger-on-livestream: ${AI_SERVICE_AUTO_TRIGGER_ON_LIVESTREAM:true}
   auto-trigger-on-wayline: ${AI_SERVICE_AUTO_TRIGGER_ON_WAYLINE:true}
 
+dual-stream:
+  thermal-measurement-cooldown-ms: ${DUAL_STREAM_THERMAL_COOLDOWN_MS:5000}
+  thermal-measurement-timeout-ms: ${DUAL_STREAM_THERMAL_TIMEOUT_MS:20000}
+
 fc100:
   enabled: true
   thermal:

@@ -6,7 +6,9 @@ import com.yinxin.uavfir.stream.MockStreamProvider
 import com.yinxin.uavfir.stream.StreamProvider
 import com.yinxin.uavfir.stream.StreamStartResult
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -14,6 +16,110 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CommandPollingCoordinatorTest {
+    @Test
+    fun urgentPoller_executesUrgentLegacyDualStreamCommand() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-urgent-focus",
+                    droneSn = "DRONE-001",
+                    action = "focus-visible",
+                    status = "pending",
+                    urgent = true,
+                ),
+            ),
+        )
+        val manager = DualStreamSessionManager(MockStreamProvider())
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            pollLegacyDualStreamUrgentOnly = true,
+            pollMsdk = false,
+        )
+
+        coordinator.pollOnce("DRONE-001")
+
+        assertEquals("cmd-urgent-focus", api.lastAck?.commandId)
+        assertEquals("applied", api.lastAck?.status)
+    }
+
+    @Test
+    fun urgentPoller_skipsLegacyDualStreamCommandWhenUrgentFieldIsMissing() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-normal-focus",
+                    droneSn = "DRONE-001",
+                    action = "focus-visible",
+                    status = "pending",
+                ),
+            ),
+        )
+        val manager = DualStreamSessionManager(MockStreamProvider())
+        val urgentCoordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            pollLegacyDualStreamUrgentOnly = true,
+            pollMsdk = false,
+        )
+        val normalCoordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            pollMsdk = false,
+        )
+
+        urgentCoordinator.pollOnce("DRONE-001")
+        assertNull(api.lastAck)
+
+        normalCoordinator.pollOnce("DRONE-001")
+
+        assertEquals("cmd-normal-focus", api.lastAck?.commandId)
+        assertEquals("applied", api.lastAck?.status)
+    }
+
+    @Test
+    fun urgentAndNormalPollers_doNotExecuteSameLegacyCommandConcurrently() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-urgent-start",
+                    droneSn = "DRONE-001",
+                    action = "start",
+                    status = "pending",
+                    urgent = true,
+                ),
+            ),
+        )
+        val provider = BlockingStartStreamProvider()
+        val manager = DualStreamSessionManager(provider)
+        val deduplicator = LegacyCommandDeduplicator()
+        val urgentCoordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            commandExecutionDeduplicator = deduplicator,
+            pollLegacyDualStreamUrgentOnly = true,
+            pollMsdk = false,
+        )
+        val normalCoordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            commandExecutionDeduplicator = deduplicator,
+            pollMsdk = false,
+        )
+
+        val urgentJob = launch { urgentCoordinator.pollOnce("DRONE-001") }
+        provider.startEntered.await()
+        normalCoordinator.pollOnce("DRONE-001")
+
+        assertEquals(1, provider.startCalls)
+
+        provider.releaseStart.complete(Unit)
+        urgentJob.join()
+
+        assertEquals(1, provider.startCalls)
+        assertEquals("cmd-urgent-start", api.lastAck?.commandId)
+    }
+
     @Test
     fun pollOnce_startCommandStartsSession_andAcknowledgesApplied() = runTest {
         val api = RecordingDualStreamApi(
@@ -810,6 +916,34 @@ class CommandPollingCoordinatorTest {
     private class HangingStreamProvider : StreamProvider {
         override suspend fun start(droneSn: String): StreamStartResult {
             awaitCancellation()
+        }
+
+        override suspend fun focusVisible(droneSn: String): StreamStartResult = StreamStartResult(
+            visibleState = BoundStreamState.BOUND,
+            thermalState = BoundStreamState.IDLE,
+        )
+
+        override suspend fun focusThermal(droneSn: String): StreamStartResult = StreamStartResult(
+            visibleState = BoundStreamState.BOUND,
+            thermalState = BoundStreamState.BOUND,
+        )
+
+        override suspend fun stop() = Unit
+    }
+
+    private class BlockingStartStreamProvider : StreamProvider {
+        var startCalls = 0
+        val startEntered = CompletableDeferred<Unit>()
+        val releaseStart = CompletableDeferred<Unit>()
+
+        override suspend fun start(droneSn: String): StreamStartResult {
+            startCalls += 1
+            startEntered.complete(Unit)
+            releaseStart.await()
+            return StreamStartResult(
+                visibleState = BoundStreamState.BOUND,
+                thermalState = BoundStreamState.IDLE,
+            )
         }
 
         override suspend fun focusVisible(droneSn: String): StreamStartResult = StreamStartResult(
