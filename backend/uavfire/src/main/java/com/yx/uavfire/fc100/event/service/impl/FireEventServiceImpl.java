@@ -44,6 +44,7 @@ import com.yx.uavfire.manage.service.IDeviceRedisService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,8 +63,6 @@ public class FireEventServiceImpl implements FireEventService {
 
     private static final BigDecimal LOW = new BigDecimal("0.10");
     private static final BigDecimal HIGH = new BigDecimal("0.90");
-    private static final double MERGE_RADIUS_METERS = 10.0;
-    private static final long MERGE_WINDOW_MS = 30 * 60 * 1000L;
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /** 已绑定活跃任务的 mission 状态集合（用于同 eventId 去重） */
@@ -105,6 +104,15 @@ public class FireEventServiceImpl implements FireEventService {
     private final OperationIncidentMapper operationIncidentMapper;
     private final IncidentStateMachine incidentStateMachine;
     private final Fc100ThermalProperties thermalProperties;
+
+    @Value("${fc100.fire-event.dedup-enabled:true}")
+    private boolean fireEventDedupEnabled = true;
+
+    @Value("${fc100.fire-event.dedup-radius-m:40}")
+    private double fireEventDedupRadiusM = 40.0;
+
+    @Value("${fc100.fire-event.dedup-active-window-ms:1800000}")
+    private long fireEventDedupActiveWindowMs = 30 * 60 * 1000L;
 
     public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
                                 MissionNoGenerator g, Clock c,
@@ -296,6 +304,7 @@ public class FireEventServiceImpl implements FireEventService {
     public FireEventCreateResponse create(FireEventCreateParam param) {
         resolveFirePointFromGeoSnapshot(param);
         fillThermalRoiFromMeasureRoi(param);
+        boolean spatialDedupCoordinateEligible = param.getLat() != null && param.getLng() != null;
         fillPositionFromOsdIfMissing(param);
         long eventTs = Instant.parse(param.getTimestamp()).toEpochMilli();
 
@@ -316,21 +325,25 @@ public class FireEventServiceImpl implements FireEventService {
         }
 
         long now = clock.now();
-        FireEventEntity mergeCandidate = findMergeCandidate(param, eventTs);
+        FireEventEntity mergeCandidate = spatialDedupCoordinateEligible
+            ? findNearbyActiveEvent(param, now)
+            : null;
         if (mergeCandidate != null) {
-            MergeResult mergeResult = mergeIntoExisting(mergeCandidate, param, eventTs, now);
+            boolean levelUpgraded = mergeIntoExisting(mergeCandidate, param, now);
             insertHistory(mergeCandidate, param, eventTs, now, "MERGED");
             String activeMissionNo = findActiveMissionNo(mergeCandidate.getId());
             return new FireEventCreateResponse(
                 mergeCandidate.getId(),
                 mergeCandidate.getEventId(),
-                false,
+                activeMissionNo != null,
                 activeMissionNo,
-                mergeCandidate.getStatus(),
+                activeMissionNo != null
+                    ? FireMissionStatus.WAITING_REVIEW.name()
+                    : mergeCandidate.getStatus(),
                 false,
                 true,
-                mergeResult.notificationRequired,
-                mergeResult.notificationReason);
+                levelUpgraded,
+                levelUpgraded ? "LEVEL_UPGRADED" : "MERGED_NEARBY");
         }
 
         FireEventEntity e = new FireEventEntity();
@@ -518,33 +531,47 @@ public class FireEventServiceImpl implements FireEventService {
         return true;
     }
 
-    private FireEventEntity findMergeCandidate(FireEventCreateParam param, long eventTs) {
-        if (param.getLat() == null || param.getLng() == null || param.getDeviceSn() == null || param.getDeviceSn().isBlank()) {
+    /**
+     * Single-instance deployment assumption: concurrent reporters can still race on multi-instance deployments,
+     * which would need a distributed lock. Future larger datasets can add idx_fire_event_workspace_lastseen.
+     */
+    private FireEventEntity findNearbyActiveEvent(FireEventCreateParam param, long now) {
+        if (!fireEventDedupEnabled || param.getLat() == null || param.getLng() == null) {
             return null;
         }
+        double latDelta = fireEventDedupRadiusM / 111320.0;
+        double cos = Math.cos(Math.toRadians(param.getLat()));
+        double lngDelta = fireEventDedupRadiusM / (111320.0 * Math.max(Math.abs(cos), 1e-6));
+        long activeSince = now - fireEventDedupActiveWindowMs;
         List<FireEventEntity> candidates = eventMapper.selectList(new QueryWrapper<FireEventEntity>()
             .eq("workspace_id", workspaceIdOf(param))
-            .eq("device_sn", param.getDeviceSn())
             .eq("deleted", 0)
-            .ge("last_seen_time", eventTs - MERGE_WINDOW_MS)
-            .last("limit 20"));
+            .ne("status", FireEventStatus.IGNORED.name())
+            .ge("last_seen_time", activeSince)
+            .isNotNull("lat")
+            .isNotNull("lng")
+            .between("lat", param.getLat() - latDelta, param.getLat() + latDelta)
+            .between("lng", param.getLng() - lngDelta, param.getLng() + lngDelta)
+            .orderByDesc("last_seen_time")
+            .last("limit 50"));
         if (candidates == null || candidates.isEmpty()) {
             return null;
         }
         FireEventEntity best = null;
         double bestDistance = Double.MAX_VALUE;
         for (FireEventEntity candidate : candidates) {
-            if (candidate.getLat() == null || candidate.getLng() == null) {
+            if (candidate.getLat() == null || candidate.getLng() == null
+                || candidate.getDeleted() == null || candidate.getDeleted() != 0
+                || FireEventStatus.IGNORED.name().equals(candidate.getStatus())
+                || !workspaceIdOf(param).equals(candidate.getWorkspaceId())) {
                 continue;
             }
-            long candidateTs = candidate.getLastSeenTime() != null
-                ? candidate.getLastSeenTime()
-                : candidate.getEventTimestamp() != null ? candidate.getEventTimestamp() : 0L;
-            if (Math.abs(eventTs - candidateTs) > MERGE_WINDOW_MS) {
+            Long candidateLastSeen = candidate.getLastSeenTime();
+            if (candidateLastSeen == null || candidateLastSeen < activeSince) {
                 continue;
             }
             double distance = distanceMeters(param.getLat(), param.getLng(), candidate.getLat(), candidate.getLng());
-            if (distance <= MERGE_RADIUS_METERS && distance < bestDistance) {
+            if (distance <= fireEventDedupRadiusM && distance < bestDistance) {
                 best = candidate;
                 bestDistance = distance;
             }
@@ -552,10 +579,10 @@ public class FireEventServiceImpl implements FireEventService {
         return best;
     }
 
-    private MergeResult mergeIntoExisting(FireEventEntity existing, FireEventCreateParam param, long eventTs, long now) {
+    private boolean mergeIntoExisting(FireEventEntity existing, FireEventCreateParam param, long now) {
         boolean levelUpgraded = fireLevelRank(param.getFireLevel()) > fireLevelRank(existing.getFireLevel());
-        existing.setLastSeenTime(eventTs);
-        existing.setReportCount(existing.getReportCount() == null ? 2 : existing.getReportCount() + 1);
+        existing.setLastSeenTime(now);
+        existing.setReportCount((existing.getReportCount() == null ? 1 : existing.getReportCount()) + 1);
         existing.setLastSourceEventId(param.getEventId());
         existing.setUpdateTime(now);
         if (param.getConfidence() != null) {
@@ -569,20 +596,47 @@ public class FireEventServiceImpl implements FireEventService {
         } else if (existing.getNotificationVersion() == null) {
             existing.setNotificationVersion(1);
         }
-        if (param.getThermalTemperature() != null) {
-            existing.setThermalTemperature(param.getThermalTemperature());
-        }
-        if (param.getThermalImageUrl() != null && !param.getThermalImageUrl().isBlank()) {
+        existing.setThermalTemperature(maxNullable(existing.getThermalTemperature(), param.getThermalTemperature()));
+        if (param.getThermalImageUrl() != null && !param.getThermalImageUrl().isBlank()
+            && (existing.getThermalImageUrl() == null || existing.getThermalImageUrl().isBlank())) {
             existing.setThermalImageUrl(param.getThermalImageUrl());
         }
-        if (param.getVisibleImageUrl() != null && !param.getVisibleImageUrl().isBlank()) {
+        if (param.getVisibleImageUrl() != null && !param.getVisibleImageUrl().isBlank()
+            && (existing.getVisibleImageUrl() == null || existing.getVisibleImageUrl().isBlank())) {
             existing.setVisibleImageUrl(param.getVisibleImageUrl());
         }
-        copyGeoFields(param, existing);
+        if (geoError(param.getGeoErrorRadiusM()) < geoError(existing.getGeoErrorRadiusM())) {
+            existing.setLat(param.getLat());
+            existing.setLng(param.getLng());
+            existing.setAlt(param.getAlt());
+            existing.setAltitudeReference(param.getAltitudeReference());
+            existing.setGeoMethod(param.getGeoMethod());
+            existing.setGeoErrorRadiusM(param.getGeoErrorRadiusM());
+            existing.setGeoQuality(param.getGeoQuality());
+            existing.setGeoSourceTs(param.getGeoSourceTs());
+        }
         eventMapper.updateById(existing);
-        return levelUpgraded
-            ? new MergeResult(true, "LEVEL_UPGRADED")
-            : new MergeResult(false, "DUPLICATE_SUPPRESSED");
+        return levelUpgraded;
+    }
+
+    private Double maxNullable(Double oldValue, Double newValue) {
+        if (oldValue == null) return newValue;
+        if (newValue == null) return oldValue;
+        return Math.max(oldValue, newValue);
+    }
+
+    private double geoError(Double errorRadiusM) {
+        return errorRadiusM == null ? Double.POSITIVE_INFINITY : errorRadiusM;
+    }
+
+    private int fireLevelRank(String level) {
+        if (level == null) return 0;
+        switch (level.toUpperCase()) {
+            case "HIGH": return 3;
+            case "MEDIUM": return 2;
+            case "LOW": return 1;
+            default: return 0;
+        }
     }
 
     private void insertHistory(FireEventEntity parent, FireEventCreateParam param, long eventTs, long now, String action) {
@@ -733,16 +787,6 @@ public class FireEventServiceImpl implements FireEventService {
         target.setThermalRoi(param.getThermalRoi());
     }
 
-    private int fireLevelRank(String level) {
-        if (level == null) return 0;
-        switch (level.toUpperCase()) {
-            case "HIGH": return 3;
-            case "MEDIUM": return 2;
-            case "LOW": return 1;
-            default: return 0;
-        }
-    }
-
     private double distanceMeters(double lat1, double lng1, double lat2, double lng2) {
         double earthRadiusMeters = 6371000.0;
         double dLat = Math.toRadians(lat2 - lat1);
@@ -751,16 +795,6 @@ public class FireEventServiceImpl implements FireEventService {
             + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
             * Math.sin(dLng / 2) * Math.sin(dLng / 2);
         return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    }
-
-    private static class MergeResult {
-        private final boolean notificationRequired;
-        private final String notificationReason;
-
-        private MergeResult(boolean notificationRequired, String notificationReason) {
-            this.notificationRequired = notificationRequired;
-            this.notificationReason = notificationReason;
-        }
     }
 
     /**

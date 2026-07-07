@@ -1,6 +1,7 @@
 package com.yx.uavfire.fc100.event.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.dji.sdk.cloudapi.device.OsdDockDrone;
 import com.yx.uavfire.fc100.common.Clock;
 import com.yx.uavfire.fc100.common.MissionNoGenerator;
 import com.yx.uavfire.fc100.event.dao.FireEventMapper;
@@ -18,10 +19,12 @@ import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
 import com.yx.uavfire.manage.service.IDeviceRedisService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -30,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -45,37 +49,40 @@ class FireEventServiceImplMergeTest {
     private FireEventServiceImpl build() {
         when(clock.now()).thenReturn(1779163500000L);
         when(noGen.next()).thenReturn("M-001");
+        when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of());
         return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis);
     }
 
     @Test
-    void mergesSameDeviceEventWithinTenMetersAndFiveMinutesWithoutNewMission() {
+    void create_merges_into_nearby_active_event() {
         FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
 
-        FireEventCreateResponse response = build().create(param("new-event", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
+        FireEventCreateResponse response = build().create(param("new-event", 34.658870, 109.340600, "MEDIUM", "0.72", 1779163440000L));
 
         assertEquals(1L, response.getFireEventId());
         assertEquals("old-event", response.getEventId());
         assertFalse(response.getMissionCreated());
         assertTrue(response.getMerged());
         assertFalse(response.getNotificationRequired());
-        assertEquals("DUPLICATE_SUPPRESSED", response.getNotificationReason());
+        assertEquals("MERGED_NEARBY", response.getNotificationReason());
 
         ArgumentCaptor<FireEventEntity> updateCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
         verify(events).updateById(updateCaptor.capture());
         FireEventEntity updated = updateCaptor.getValue();
-        assertEquals(1779163440000L, updated.getLastSeenTime());
+        assertEquals(1779163500000L, updated.getLastSeenTime());
         assertEquals(4, updated.getReportCount());
         assertEquals("new-event", updated.getLastSourceEventId());
         assertEquals(new BigDecimal("0.72"), updated.getConfidence());
+        assertEquals("MEDIUM", updated.getFireLevel());
+        assertEquals(1, updated.getNotificationVersion());
         verify(events, never()).insert(any(FireEventEntity.class));
         verify(missions, never()).insert(any(FireMissionEntity.class));
     }
 
     @Test
-    void createsNewEventWhenCandidateIsOutsideTenMeters() {
+    void create_skips_merge_beyond_radius() {
         FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
@@ -85,7 +92,7 @@ class FireEventServiceImplMergeTest {
             return 1;
         });
 
-        FireEventCreateResponse response = build().create(param("far-event", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
+        FireEventCreateResponse response = build().create(param("far-event", 34.659140, 109.340600, "MEDIUM", "0.72", 1779163440000L));
 
         assertEquals(2L, response.getFireEventId());
         assertEquals("far-event", response.getEventId());
@@ -95,6 +102,45 @@ class FireEventServiceImplMergeTest {
         assertEquals("CREATED", response.getNotificationReason());
         verify(events).insert(any(FireEventEntity.class));
         verify(missions, never()).insert(any(FireMissionEntity.class));
+    }
+
+    @Test
+    void create_skips_merge_when_window_expired() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163500000L - 1800001L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        FireEventCreateResponse response = build().create(param("expired-window", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals(2L, response.getFireEventId());
+        assertTrue(response.getCreated());
+        assertFalse(response.getMerged());
+        verify(events).insert(any(FireEventEntity.class));
+    }
+
+    @Test
+    void create_skips_merge_for_ignored_event() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setStatus(FireEventStatus.IGNORED.name());
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        FireEventCreateResponse response = build().create(param("ignored-nearby", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals(2L, response.getFireEventId());
+        assertTrue(response.getCreated());
+        assertFalse(response.getMerged());
+        verify(events).insert(any(FireEventEntity.class));
     }
 
     @Test
@@ -135,20 +181,28 @@ class FireEventServiceImplMergeTest {
     }
 
     @Test
-    void mergeUsesLatestConfidenceInsteadOfKeepingStalePeakScore() {
+    void merge_downgrade_overwrites_level_without_notification() {
         FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "HIGH", "1.0000", 1779163200000L);
+        existing.setNotificationVersion(3);
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
 
-        build().create(param("thermal-reference", 34.658650, 109.340650, "LOW", "0.011", 1779163440000L));
+        FireEventCreateResponse response = build().create(param("thermal-reference", 34.658650, 109.340650, "LOW", "0.011", 1779163440000L));
+
+        assertTrue(response.getMerged());
+        assertFalse(response.getNotificationRequired());
+        assertEquals("MERGED_NEARBY", response.getNotificationReason());
 
         ArgumentCaptor<FireEventEntity> updateCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
         verify(events).updateById(updateCaptor.capture());
         assertEquals(new BigDecimal("0.011"), updateCaptor.getValue().getConfidence());
+        assertEquals("LOW", updateCaptor.getValue().getFireLevel());
+        assertEquals(3, updateCaptor.getValue().getNotificationVersion());
+        assertEquals(FireEventStatus.MISSION_CREATED.name(), updateCaptor.getValue().getStatus());
     }
 
     @Test
-    void mergeUsesLatestFireLevelForListWhileKeepingHistorySnapshots() {
+    void merge_keeps_history_snapshots_from_new_report() {
         FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "HIGH", "1.0000", 1779163200000L);
         existing.setThermalTemperature(95.0);
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
@@ -175,9 +229,9 @@ class FireEventServiceImplMergeTest {
     }
 
     @Test
-    void mergingRiskUpgradeRequiresNotificationAndIncrementsVersion() {
+    void merge_upgrades_level_bumps_notification_version() {
         FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "LOW", "0.18", 1779163200000L);
-        existing.setNotificationVersion(2);
+        existing.setNotificationVersion(1);
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
 
@@ -192,7 +246,176 @@ class FireEventServiceImplMergeTest {
         FireEventEntity updated = updateCaptor.getValue();
         assertEquals("HIGH", updated.getFireLevel());
         assertEquals(new BigDecimal("0.91"), updated.getConfidence());
-        assertEquals(3, updated.getNotificationVersion());
+        assertEquals(2, updated.getNotificationVersion());
+    }
+
+    @Test
+    void merge_same_level_keeps_notification_version() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setNotificationVersion(5);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FireEventCreateResponse response = build().create(param("same-level-event", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
+
+        assertTrue(response.getMerged());
+        assertFalse(response.getNotificationRequired());
+        assertEquals("MERGED_NEARBY", response.getNotificationReason());
+
+        ArgumentCaptor<FireEventEntity> updateCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(updateCaptor.capture());
+        FireEventEntity updated = updateCaptor.getValue();
+        assertEquals("MEDIUM", updated.getFireLevel());
+        assertEquals(5, updated.getNotificationVersion());
+    }
+
+    @Test
+    void merge_updates_confidence_from_new_report() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        build().create(param("confidence-update", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
+
+        ArgumentCaptor<FireEventEntity> updateCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(updateCaptor.capture());
+        assertEquals(new BigDecimal("0.72"), updateCaptor.getValue().getConfidence());
+    }
+
+    @Test
+    void merge_keeps_better_geo() {
+        FireEventEntity betterExisting = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        betterExisting.setGeoErrorRadiusM(5.0);
+        betterExisting.setGeoMethod("OLD_GEO");
+        FireEventCreateParam worseNew = param("worse-geo", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        worseNew.setGeoErrorRadiusM(20.0);
+        worseNew.setGeoMethod("NEW_GEO");
+        worseNew.setGeoQuality("LOW_ACCURACY");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(betterExisting));
+
+        build().create(worseNew);
+
+        ArgumentCaptor<FireEventEntity> firstUpdate = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(firstUpdate.capture());
+        assertEquals(34.658600, firstUpdate.getValue().getLat(), 1e-6);
+        assertEquals("OLD_GEO", firstUpdate.getValue().getGeoMethod());
+
+        reset(events, histories, missions, noGen, clock, redis);
+        FireEventEntity worseExisting = existingEvent(2L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        worseExisting.setGeoErrorRadiusM(20.0);
+        worseExisting.setGeoMethod("OLD_GEO");
+        FireEventCreateParam betterNew = param("better-geo", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        betterNew.setAlt(388.0);
+        betterNew.setAltitudeReference("AGL");
+        betterNew.setGeoErrorRadiusM(5.0);
+        betterNew.setGeoMethod("NEW_GEO");
+        betterNew.setGeoQuality("PRECISE");
+        betterNew.setGeoSourceTs(1779163439000L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(worseExisting));
+
+        build().create(betterNew);
+
+        ArgumentCaptor<FireEventEntity> secondUpdate = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(secondUpdate.capture());
+        FireEventEntity updated = secondUpdate.getValue();
+        assertEquals(34.658650, updated.getLat(), 1e-6);
+        assertEquals(109.340600, updated.getLng(), 1e-6);
+        assertEquals(388.0, updated.getAlt(), 1e-6);
+        assertEquals("AGL", updated.getAltitudeReference());
+        assertEquals("NEW_GEO", updated.getGeoMethod());
+        assertEquals(5.0, updated.getGeoErrorRadiusM(), 1e-6);
+        assertEquals("PRECISE", updated.getGeoQuality());
+        assertEquals(1779163439000L, updated.getGeoSourceTs());
+    }
+
+    @Test
+    void merge_takes_max_temperature() {
+        FireEventEntity hotExisting = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        hotExisting.setThermalTemperature(120.0);
+        FireEventCreateParam coolerNew = param("cooler", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        coolerNew.setThermalTemperature(90.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(hotExisting));
+
+        build().create(coolerNew);
+
+        ArgumentCaptor<FireEventEntity> firstUpdate = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(firstUpdate.capture());
+        assertEquals(120.0, firstUpdate.getValue().getThermalTemperature(), 1e-6);
+
+        reset(events, histories, missions, noGen, clock, redis);
+        FireEventEntity nullExisting = existingEvent(2L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        nullExisting.setThermalTemperature(null);
+        FireEventCreateParam measuredNew = param("measured", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        measuredNew.setThermalTemperature(88.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(nullExisting));
+
+        build().create(measuredNew);
+
+        ArgumentCaptor<FireEventEntity> secondUpdate = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(secondUpdate.capture());
+        assertEquals(88.0, secondUpdate.getValue().getThermalTemperature(), 1e-6);
+    }
+
+    @Test
+    void dedup_disabled_preserves_current_behavior() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        FireEventServiceImpl service = build();
+        ReflectionTestUtils.setField(service, "fireEventDedupEnabled", false);
+
+        FireEventCreateResponse response = service.create(param("dedup-disabled", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals(2L, response.getFireEventId());
+        assertTrue(response.getCreated());
+        assertFalse(response.getMerged());
+        verify(events).insert(any(FireEventEntity.class));
+    }
+
+    @Test
+    void create_without_coordinates_skips_spatial_dedup() {
+        OsdDockDrone osd = new OsdDockDrone();
+        osd.setLatitude(34.65865f);
+        osd.setLongitude(109.3406f);
+        when(redis.getDeviceOsd(any(), any())).thenReturn(Optional.of(osd));
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        FireEventCreateParam p = param("no-coordinates", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        p.setLat(null);
+        p.setLng(null);
+
+        FireEventCreateResponse response = build().create(p);
+
+        assertEquals(2L, response.getFireEventId());
+        assertTrue(response.getCreated());
+        verify(events, never()).selectList(any(QueryWrapper.class));
+    }
+
+    @Test
+    void event_id_dedup_takes_precedence() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(existing);
+
+        FireEventCreateResponse response = build().create(param("old-event", 34.658600, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals(1L, response.getFireEventId());
+        assertEquals("EXISTING_EVENT_ID", response.getNotificationReason());
+        verify(events, never()).selectList(any(QueryWrapper.class));
+        verify(events, never()).updateById(any(FireEventEntity.class));
+        verify(events, never()).insert(any(FireEventEntity.class));
     }
 
     @Test
@@ -202,9 +425,10 @@ class FireEventServiceImplMergeTest {
         mission.setMissionNo("MISSION-001");
         mission.setStatus("WAITING_REVIEW");
         when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(event));
-        when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of(mission));
 
-        List<FireEventDTO> list = build().list("DEFAULT", null, 50);
+        FireEventServiceImpl service = build();
+        when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of(mission));
+        List<FireEventDTO> list = service.list("DEFAULT", null, 50);
 
         assertEquals("MISSION-001", list.get(0).getMissionNo());
         assertEquals("WAITING_REVIEW", list.get(0).getMissionStatus());
