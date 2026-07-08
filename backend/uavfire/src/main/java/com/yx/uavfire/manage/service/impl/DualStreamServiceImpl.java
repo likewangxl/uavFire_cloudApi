@@ -688,6 +688,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setThermalMeasureRoi(event.getThermalMeasureRoi())
                 .setThermalMeasurements(event.getThermalMeasurements())
                 .setGeoSnapshot(event.getGeoSnapshot())
+                .setFireLat(event.getFireLat())
+                .setFireLng(event.getFireLng())
+                .setFireAlt(event.getFireAlt())
                 .setGeoQuality(event.getGeoQuality())
                 .setGeoErrorRadiusM(event.getGeoErrorRadiusM())
                 .setGeoMethod(event.getGeoMethod());
@@ -1012,6 +1015,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
         }
         param.setThermalMeasureRoi(event.getThermalMeasureRoi());
         param.setGeoSnapshot(event.getGeoSnapshot());
+        param.setLat(event.getFireLat());
+        param.setLng(event.getFireLng());
+        param.setAlt(event.getFireAlt());
         param.setGeoQuality(event.getGeoQuality());
         param.setGeoErrorRadiusM(event.getGeoErrorRadiusM());
         param.setGeoMethod(event.getGeoMethod());

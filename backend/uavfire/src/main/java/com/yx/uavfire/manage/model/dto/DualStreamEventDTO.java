@@ -55,6 +55,12 @@ public class DualStreamEventDTO {
     @JsonAlias("geoSnapshot")
     private FireGeoSnapshotDTO geoSnapshot;
 
+    private Double fireLat;
+
+    private Double fireLng;
+
+    private Double fireAlt;
+
     private String geoQuality;
 
     private Double geoErrorRadiusM;

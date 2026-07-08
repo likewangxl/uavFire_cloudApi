@@ -209,6 +209,11 @@ class AgentBackendClient(
         thermalMeasurements: List<ThermalMeasurementPayload> = emptyList(),
         thermalImageUrl: String? = null,
         geoSnapshot: GeoSnapshot? = null,
+        fireLat: Double? = null,
+        fireLng: Double? = null,
+        fireAlt: Double? = null,
+        geoMethod: String? = null,
+        geoErrorRadiusM: Double? = null,
     ) {
         debug("thermal hotspot event task=$taskId drone=$droneSn temp=$temperatureC roi=$thermalMeasureRoi")
         api.recordTaskEvent(
@@ -222,6 +227,11 @@ class AgentBackendClient(
                 thermalMeasurements = thermalMeasurements,
                 thermalImageUrl = thermalImageUrl,
                 geoSnapshot = geoSnapshot,
+                fireLat = fireLat,
+                fireLng = fireLng,
+                fireAlt = fireAlt,
+                geoMethod = geoMethod,
+                geoErrorRadiusM = geoErrorRadiusM,
             ),
         )
         debug("thermal hotspot event response task=$taskId drone=$droneSn")
@@ -236,6 +246,11 @@ class AgentBackendClient(
         thermalMeasurements: List<ThermalMeasurementPayload> = emptyList(),
         thermalImageUrl: String? = null,
         geoSnapshot: GeoSnapshot? = null,
+        fireLat: Double? = null,
+        fireLng: Double? = null,
+        fireAlt: Double? = null,
+        geoMethod: String? = null,
+        geoErrorRadiusM: Double? = null,
     ): DualStreamEventRequest {
         val score = temperatureToThermalScore(temperatureC)
         return DualStreamEventRequest(
@@ -252,6 +267,11 @@ class AgentBackendClient(
                 listOf(ThermalMeasurementPayload(temperatureC, thermalMeasureRoi))
             },
             geoSnapshot = geoSnapshot,
+            fireLat = fireLat,
+            fireLng = fireLng,
+            fireAlt = fireAlt,
+            geoMethod = geoMethod,
+            geoErrorRadiusM = geoErrorRadiusM,
         )
     }
 

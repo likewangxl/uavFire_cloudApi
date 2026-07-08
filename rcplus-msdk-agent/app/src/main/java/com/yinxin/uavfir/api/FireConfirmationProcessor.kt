@@ -119,6 +119,7 @@ class FireConfirmationProcessor(
     private val laserSampleIntervalMs: Long = DEFAULT_LASER_SAMPLE_INTERVAL_MS,
     private val laserMinNormalSamples: Int = DEFAULT_LASER_MIN_NORMAL_SAMPLES,
     private val laserScatterLimitM: Double = DEFAULT_LASER_SCATTER_LIMIT_M,
+    private val laserGeoErrorRadiusM: Double = DEFAULT_LASER_GEO_ERROR_RADIUS_M,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) {
     private val running = AtomicBoolean(false)
@@ -196,6 +197,7 @@ class FireConfirmationProcessor(
 
                         val sourceTs = clockMs()
                         val thermalEventId = "${request.taskId}-$sourceTs"
+                        val reportLaserFix = laserFix?.takeIf { it.confidence == "HIGH" }
                         client.recordThermalHotspotEvent(
                             taskId = request.taskId,
                             droneSn = request.droneSn,
@@ -204,6 +206,11 @@ class FireConfirmationProcessor(
                             thermalMeasureRoi = measureResult.thermalMeasureRegion.toApiMap(),
                             thermalMeasurements = measureResult.thermalMeasurements.toPayload(),
                             thermalImageUrl = null,
+                            fireLat = reportLaserFix?.latitude,
+                            fireLng = reportLaserFix?.longitude,
+                            fireAlt = reportLaserFix?.altitude,
+                            geoMethod = reportLaserFix?.let { LASER_GEO_METHOD },
+                            geoErrorRadiusM = reportLaserFix?.let { laserGeoErrorRadiusM },
                         )
                         thermalReported = true
 
@@ -450,6 +457,8 @@ class FireConfirmationProcessor(
         private const val DEFAULT_LASER_SAMPLE_INTERVAL_MS = 300L
         private const val DEFAULT_LASER_MIN_NORMAL_SAMPLES = 3
         private const val DEFAULT_LASER_SCATTER_LIMIT_M = 15.0
+        private const val DEFAULT_LASER_GEO_ERROR_RADIUS_M = 5.0
+        private const val LASER_GEO_METHOD = "LASER_RANGEFINDER"
         private const val DEFAULT_FLY_TO_SPEED_MPS = 5.0
         private const val METERS_PER_LAT_DEG = 111_320.0
         private const val ARRIVAL_RADIUS_M = 5.0

@@ -152,6 +152,67 @@ class DeliveryControllerApifoxWorkflowTest {
     }
 
     @Test
+    void prepareFireMissionDeliveryTaskAcceptsPreciseGeoQuality() throws Exception {
+        // PRECISE 是复测/激光测距/人工标注后的已验证定位质量（FireEventServiceImpl.isPrecise），
+        // 自动航点门禁必须与 AUTO_WAYPOINT_READY 同等放行，否则激光精测事件反而无法投放。
+        DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
+        DeliverySyncProperties props = new DeliverySyncProperties();
+        FireMissionMapper missionMapper = mock(FireMissionMapper.class);
+        RouteExportService routeService = mock(RouteExportService.class);
+        MissionStateMachine stateMachine = mock(MissionStateMachine.class);
+        FireEventMapper eventMapper = mock(FireEventMapper.class);
+        WaypointPlannerService planner = mock(WaypointPlannerService.class);
+        SafetyCheckService safety = mock(SafetyCheckService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        DeliveryController controller = new DeliveryController(adapter, props, missionMapper, routeService, stateMachine,
+            null, null, eventMapper, planner, safety);
+
+        FireMissionEntity approved = fireMission("M-LASER-001", "APPROVED");
+        FireMissionEntity routeGenerated = fireMission("M-LASER-001", "ROUTE_GENERATED");
+        FireMissionEntity routeExported = fireMission("M-LASER-001", "ROUTE_EXPORTED");
+        FireEventEntity event = new FireEventEntity();
+        event.setId(99L);
+        event.setLat(22.123456);
+        event.setLng(113.654321);
+        event.setAlt(12.0);
+        event.setConfidence(new BigDecimal("0.96"));
+        event.setGeoQuality("PRECISE");
+        event.setGeoErrorRadiusM(5.0);
+
+        SafetyCheckResult safe = new SafetyCheckResult();
+        safe.setPassed(true);
+        RouteFileDTO route = new RouteFileDTO();
+        route.setId(23L);
+        route.setObjectKey("/tmp/M-LASER-001.kmz");
+        route.setSign("sha256");
+        MissionWaypointDTO wp = new MissionWaypointDTO();
+        wp.setWaypointIndex(0);
+
+        when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(approved, routeGenerated, routeExported);
+        when(eventMapper.selectById(99L)).thenReturn(event);
+        when(safety.check(any(), any())).thenReturn(safe);
+        when(planner.plan(any(WaypointGenerateParam.class))).thenReturn(List.of(wp));
+        when(routeService.exportKmz("M-LASER-001", "operator-1", "127.0.0.1", "REQ-001")).thenReturn(route);
+        when(routeService.getLatest("M-LASER-001")).thenReturn(route);
+        when(routeService.downloadById(23L)).thenReturn(kmzWithTemplate("<kml><Document><name>M-LASER-001</name></Document></kml>"));
+        when(adapter.importWayline(any(WaylineImportRequest.class))).thenReturn(DeliveryWaylineImportResult.builder()
+            .waylineId("WAYLINE-LASER-001")
+            .name("M-LASER-001")
+            .build());
+        when(adapter.createTask(any(CreateTaskRequest.class))).thenReturn(new DeliveryTaskRef("TASK-LASER-001", "2"));
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        when(request.getHeader("X-Request-Id")).thenReturn("REQ-001");
+
+        DeliveryController.PrepareFireMissionDeliveryTaskParam param =
+            new DeliveryController.PrepareFireMissionDeliveryTaskParam();
+        param.setOperatorId("operator-1");
+        ApiResult<DeliveryTaskRef> result = controller.prepareFireMissionDeliveryTask("M-LASER-001", param, request);
+
+        assertEquals("TASK-LASER-001", result.getData().getTaskId());
+        verify(planner).plan(any(WaypointGenerateParam.class));
+    }
+
+    @Test
     void prepareFireMissionDeliveryTaskRejectsLowQualityFireCoordinates() throws Exception {
         DeliverySyncAdapter adapter = mock(DeliverySyncAdapter.class);
         DeliverySyncProperties props = new DeliverySyncProperties();

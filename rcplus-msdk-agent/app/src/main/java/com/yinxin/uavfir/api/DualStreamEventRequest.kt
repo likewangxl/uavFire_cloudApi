@@ -17,6 +17,11 @@ data class DualStreamEventRequest(
     val thermalMeasureRoi: Map<String, Double>? = null,
     val thermalMeasurements: List<ThermalMeasurementPayload> = emptyList(),
     val geoSnapshot: GeoSnapshot? = null,
+    val fireLat: Double? = null,
+    val fireLng: Double? = null,
+    val fireAlt: Double? = null,
+    val geoMethod: String? = null,
+    val geoErrorRadiusM: Double? = null,
 )
 
 data class ThermalMeasurementPayload(

@@ -64,6 +64,8 @@ public class FireEventServiceImpl implements FireEventService {
     private static final BigDecimal LOW = new BigDecimal("0.10");
     private static final BigDecimal HIGH = new BigDecimal("0.90");
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String GEO_METHOD_LASER_RANGEFINDER = "LASER_RANGEFINDER";
+    private static final String GEO_QUALITY_PRECISE = "PRECISE";
 
     /** 已绑定活跃任务的 mission 状态集合（用于同 eventId 去重） */
     private static final Set<String> ACTIVE_MISSION_STATUSES = Set.of(
@@ -695,6 +697,13 @@ public class FireEventServiceImpl implements FireEventService {
     }
 
     private void resolveFirePointFromGeoSnapshot(FireEventCreateParam param) {
+        if (hasLaserRangefinderGeo(param)) {
+            param.setGeoQuality(GEO_QUALITY_PRECISE);
+            if (param.getGeoSourceTs() == null && param.getTimestamp() != null && !param.getTimestamp().isBlank()) {
+                param.setGeoSourceTs(Instant.parse(param.getTimestamp()).toEpochMilli());
+            }
+            return;
+        }
         if (param == null || param.getGeoSnapshot() == null || fireGeoLocationService == null) {
             copyGeoSnapshotTelemetry(param);
             return;
@@ -721,6 +730,13 @@ public class FireEventServiceImpl implements FireEventService {
         if (result.getGeoSourceTs() != null) {
             param.setGeoSourceTs(result.getGeoSourceTs());
         }
+    }
+
+    private boolean hasLaserRangefinderGeo(FireEventCreateParam param) {
+        return param != null
+            && param.getLat() != null
+            && param.getLng() != null
+            && GEO_METHOD_LASER_RANGEFINDER.equalsIgnoreCase(param.getGeoMethod());
     }
 
     private void copyGeoSnapshotTelemetry(FireEventCreateParam param) {

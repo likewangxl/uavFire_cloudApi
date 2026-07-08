@@ -8,10 +8,13 @@ import com.yx.uavfire.fc100.event.dao.FireEventMapper;
 import com.yx.uavfire.fc100.event.dao.FireEventHistoryMapper;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
 import com.yx.uavfire.fc100.event.model.dto.FireEventDTO;
+import com.yx.uavfire.fc100.event.model.dto.FireGeoSnapshotDTO;
 import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
 import com.yx.uavfire.fc100.event.model.entity.FireEventHistoryEntity;
 import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.service.FireGeoLocationResult;
+import com.yx.uavfire.fc100.event.service.FireGeoLocationService;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
@@ -55,6 +58,13 @@ class FireEventServiceImplMergeTest {
         when(noGen.next()).thenReturn("M-001");
         when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of());
         return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis);
+    }
+
+    private FireEventServiceImpl buildWithGeoService(FireGeoLocationService geoService) {
+        when(clock.now()).thenReturn(1779163500000L);
+        when(noGen.next()).thenReturn("M-001");
+        when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis, geoService);
     }
 
     private FireEventServiceImpl buildWithApproachDispatcher(FireApproachDispatcher dispatcher) {
@@ -473,6 +483,104 @@ class FireEventServiceImplMergeTest {
         assertEquals(5.0, updated.getGeoErrorRadiusM(), 1e-6);
         assertEquals("PRECISE", updated.getGeoQuality());
         assertEquals(1779163439000L, updated.getGeoSourceTs());
+    }
+
+    @Test
+    void thermal_event_with_laser_geo_creates_precise_fire_event() {
+        FireGeoLocationService geoService = mock(FireGeoLocationService.class);
+        FireGeoSnapshotDTO snapshot = new FireGeoSnapshotDTO().setSourceTs(1779163439000L);
+        FireEventCreateParam laser = param("laser-event", 34.658650, 109.340600, "HIGH", "0.95", 1779163440000L);
+        laser.setAlt(386.0);
+        laser.setGeoMethod("LASER_RANGEFINDER");
+        laser.setGeoErrorRadiusM(5.0);
+        laser.setGeoSnapshot(snapshot);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        buildWithGeoService(geoService).create(laser);
+
+        verify(geoService, never()).resolve(any(FireGeoSnapshotDTO.class));
+        ArgumentCaptor<FireEventEntity> insertCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).insert(insertCaptor.capture());
+        FireEventEntity inserted = insertCaptor.getValue();
+        assertEquals(34.658650, inserted.getLat(), 1e-6);
+        assertEquals(109.340600, inserted.getLng(), 1e-6);
+        assertEquals(386.0, inserted.getAlt(), 1e-6);
+        assertEquals("LASER_RANGEFINDER", inserted.getGeoMethod());
+        assertEquals(5.0, inserted.getGeoErrorRadiusM(), 1e-6);
+        assertEquals("PRECISE", inserted.getGeoQuality());
+        assertEquals(1779163440000L, inserted.getGeoSourceTs());
+    }
+
+    @Test
+    void thermal_event_without_geo_uses_existing_resolution() {
+        FireGeoLocationService geoService = mock(FireGeoLocationService.class);
+        FireGeoSnapshotDTO snapshot = new FireGeoSnapshotDTO().setSourceTs(1779163439000L);
+        when(geoService.resolve(snapshot)).thenReturn(new FireGeoLocationResult()
+                .setLat(34.658700)
+                .setLng(109.340700)
+                .setAlt(381.0)
+                .setGeoMethod("RAY_DEM_RTK")
+                .setGeoErrorRadiusM(30.0)
+                .setGeoQuality("LOW_ACCURACY")
+                .setGeoSourceTs(1779163439000L));
+        FireEventCreateParam rayDem = param("raydem-event", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        rayDem.setLat(null);
+        rayDem.setLng(null);
+        rayDem.setGeoSnapshot(snapshot);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        buildWithGeoService(geoService).create(rayDem);
+
+        verify(geoService).resolve(snapshot);
+        ArgumentCaptor<FireEventEntity> insertCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).insert(insertCaptor.capture());
+        FireEventEntity inserted = insertCaptor.getValue();
+        assertEquals(34.658700, inserted.getLat(), 1e-6);
+        assertEquals(109.340700, inserted.getLng(), 1e-6);
+        assertEquals(381.0, inserted.getAlt(), 1e-6);
+        assertEquals("RAY_DEM_RTK", inserted.getGeoMethod());
+        assertEquals(30.0, inserted.getGeoErrorRadiusM(), 1e-6);
+        assertEquals("LOW_ACCURACY", inserted.getGeoQuality());
+        assertEquals(1779163439000L, inserted.getGeoSourceTs());
+    }
+
+    @Test
+    void merge_upgrades_raydem_event_to_laser_geo_with_smaller_error_radius() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.72", 1779163200000L);
+        existing.setGeoMethod("RAY_DEM_RTK");
+        existing.setGeoErrorRadiusM(30.0);
+        existing.setGeoQuality("LOW_ACCURACY");
+        FireEventCreateParam laser = param("laser-merge", 34.658650, 109.340600, "MEDIUM", "0.95", 1779163440000L);
+        laser.setAlt(386.0);
+        laser.setGeoMethod("LASER_RANGEFINDER");
+        laser.setGeoErrorRadiusM(5.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FireEventCreateResponse response = build().create(laser);
+
+        assertTrue(response.getMerged());
+        ArgumentCaptor<FireEventEntity> updateCaptor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).updateById(updateCaptor.capture());
+        FireEventEntity updated = updateCaptor.getValue();
+        assertEquals(34.658650, updated.getLat(), 1e-6);
+        assertEquals(109.340600, updated.getLng(), 1e-6);
+        assertEquals(386.0, updated.getAlt(), 1e-6);
+        assertEquals("LASER_RANGEFINDER", updated.getGeoMethod());
+        assertEquals(5.0, updated.getGeoErrorRadiusM(), 1e-6);
+        assertEquals("PRECISE", updated.getGeoQuality());
     }
 
     @Test

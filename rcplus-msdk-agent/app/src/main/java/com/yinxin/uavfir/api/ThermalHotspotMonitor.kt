@@ -289,6 +289,11 @@ class ThermalHotspotMonitor(
                 )
             },
             thermalImageUrl = thermalImageUrl,
+            fireLat = null,
+            fireLng = null,
+            fireAlt = null,
+            geoMethod = null,
+            geoErrorRadiusM = null,
         )
     }
 

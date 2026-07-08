@@ -92,6 +92,8 @@ public class DeliveryController {
     private static final double AUTO_RELEASE_VERTICAL_SPEED_MPS = 0.5;
     private static final double AUTO_WAYPOINT_MAX_GEO_ERROR_RADIUS_M = 10.0;
     private static final String GEO_QUALITY_AUTO_WAYPOINT_READY = "AUTO_WAYPOINT_READY";
+    /** 复测/激光测距/人工标注确认后的已验证定位质量，见 FireEventServiceImpl.isPrecise。 */
+    private static final String GEO_QUALITY_PRECISE = "PRECISE";
 
     private final DeliverySyncAdapter adapter;
     private final DeliverySyncProperties props;
@@ -771,7 +773,9 @@ public class DeliveryController {
             throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
                 "fire event coordinate is required");
         }
-        if (!GEO_QUALITY_AUTO_WAYPOINT_READY.equals(event.getGeoQuality())
+        boolean qualityAccepted = GEO_QUALITY_AUTO_WAYPOINT_READY.equals(event.getGeoQuality())
+            || GEO_QUALITY_PRECISE.equalsIgnoreCase(event.getGeoQuality());
+        if (!qualityAccepted
             || event.getGeoErrorRadiusM() == null
             || event.getGeoErrorRadiusM() > AUTO_WAYPOINT_MAX_GEO_ERROR_RADIUS_M) {
             throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,

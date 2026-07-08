@@ -82,6 +82,42 @@ class FireConfirmationProcessorTest {
     }
 
     @Test
+    fun report_carries_laser_fix_when_high_confidence() = runTest {
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(
+                LaserRangefinderResult(34.00041, 108.00051, 386.0, 58.0, "NORMAL"),
+            ),
+        )
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        val body = processorApi(processor).lastTaskEventBody
+        assertEquals(34.00041, body?.fireLat ?: -1.0, 1e-6)
+        assertEquals(108.00051, body?.fireLng ?: -1.0, 1e-6)
+        assertEquals(386.0, body?.fireAlt ?: -1.0, 1e-6)
+        assertEquals("LASER_RANGEFINDER", body?.geoMethod)
+        assertEquals(5.0, body?.geoErrorRadiusM ?: -1.0, 1e-6)
+    }
+
+    @Test
+    fun report_omits_geo_when_laser_unavailable() = runTest {
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(null),
+        )
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        val body = processorApi(processor).lastTaskEventBody
+        assertNull(body?.fireLat)
+        assertNull(body?.fireLng)
+        assertNull(body?.fireAlt)
+        assertNull(body?.geoMethod)
+        assertNull(body?.geoErrorRadiusM)
+    }
+
+    @Test
     fun flyto_timeout_triggers_reset() = runTest {
         val streamProvider = ConfirmationStreamProvider()
         val sessionManager = runningSession(streamProvider)

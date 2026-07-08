@@ -338,6 +338,37 @@ class DualStreamServiceImplTest {
     }
 
     @Test
+    void confirmedThermalEventMapsLaserGeoToFireEventParam() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("HIGH")
+                .setThermalScore(1.0)
+                .setFusionScore(1.0)
+                .setThermalImageUrl("http://snapshots/thermal.jpg")
+                .setFireLat(34.658650)
+                .setFireLng(109.340600)
+                .setFireAlt(386.0)
+                .setGeoMethod("LASER_RANGEFINDER")
+                .setGeoErrorRadiusM(5.0));
+
+        ArgumentCaptor<FireEventCreateParam> fireEventCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
+        verify(fireEventService).create(fireEventCaptor.capture());
+        FireEventCreateParam param = fireEventCaptor.getValue();
+        assertEquals(34.658650, param.getLat(), 1e-6);
+        assertEquals(109.340600, param.getLng(), 1e-6);
+        assertEquals(386.0, param.getAlt(), 1e-6);
+        assertEquals("LASER_RANGEFINDER", param.getGeoMethod());
+        assertEquals(5.0, param.getGeoErrorRadiusM(), 1e-6);
+    }
+
+    @Test
     void thermalMeasurementAck_requestsVisibleConfirmationForNonHighThermalHotspot() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
