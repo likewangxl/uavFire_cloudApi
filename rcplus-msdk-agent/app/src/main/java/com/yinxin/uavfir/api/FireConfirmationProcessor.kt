@@ -14,6 +14,7 @@ import dji.sdk.keyvalue.value.camera.LaserWorkMode
 import dji.sdk.keyvalue.value.common.CameraLensType
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
+import dji.sdk.keyvalue.value.flightcontroller.WindDirection
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.et.create
@@ -29,9 +30,11 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.sin
 
 enum class FireConfirmationPhase {
     IDLE,
@@ -65,6 +68,9 @@ data class FireConfirmationResult(
     val resetCompleted: Boolean,
     val geoMethod: String? = null,
     val laserFix: RobustLaserFix? = null,
+    val orbitFix: RobustLaserFix? = null,
+    val orbitPointsVisited: Int = 0,
+    val legsCompleted: Int = 0,
 )
 
 data class LaserRangefinderResult(
@@ -93,6 +99,19 @@ object NoopLaserRangefinderClient : LaserRangefinderClient {
     override suspend fun measure(): LaserRangefinderResult? = null
 }
 
+data class WindReading(
+    val speedMps: Double,
+    val sourceBearingDeg: Double?,
+)
+
+interface WindProvider {
+    suspend fun currentWind(): WindReading?
+}
+
+object NoopWindProvider : WindProvider {
+    override suspend fun currentWind(): WindReading? = null
+}
+
 class FireConfirmationProcessor(
     private val sessionManager: DualStreamSessionManager,
     private val flightControl: FlightControlActionClient,
@@ -109,6 +128,12 @@ class FireConfirmationProcessor(
     private val resetRetryCount: Int = DEFAULT_RESET_RETRIES,
     private val visibleSnapshotConfirmer: VisibleSnapshotConfirmer = AiServiceVisibleSnapshotConfirmer(),
     private val laserRangefinder: LaserRangefinderClient = DjiLaserRangefinderClient(),
+    private val windProvider: WindProvider = DjiWindProvider(),
+    private val approachLegsM: List<Double> = DEFAULT_APPROACH_LEGS,
+    private val orbitBearingCount: Int = DEFAULT_ORBIT_BEARING_COUNT,
+    private val orbitPerPointLaserSamples: Int = DEFAULT_ORBIT_PER_POINT_LASER_SAMPLES,
+    private val orbitRadiusM: Double = approachLegsM.lastOrNull() ?: DEFAULT_STANDOFF_M,
+    private val upwindMinWindSpeedMps: Double = DEFAULT_UPWIND_MIN_WIND_SPEED_MPS,
     private val pollIntervalMs: Long = DEFAULT_POLL_INTERVAL_MS,
     private val aimMaxIterations: Int = DEFAULT_AIM_MAX_ITERATIONS,
     private val aimToleranceFrac: Double = DEFAULT_AIM_TOLERANCE_FRAC,
@@ -145,6 +170,9 @@ class FireConfirmationProcessor(
         var preciseLng: Double? = null
         var geoMethod: String? = null
         var laserFix: RobustLaserFix? = null
+        var orbitFix: RobustLaserFix? = null
+        var orbitPointsVisited = 0
+        var legsCompleted = 0
         var thermalReported = false
         var resetCompleted = false
 
@@ -153,84 +181,159 @@ class FireConfirmationProcessor(
             runCatching { missionHold.holdForConfirmation() }
                 .onFailure { warn("mission hold failed task=${request.taskId} message=${it.message}", it) }
 
-            phaseReached = FireConfirmationPhase.FLY_TO
-            val flyToTarget = flyToStandoffPoint(request)
-            if (flyToTarget == null) {
-                failureReason = "aircraft-location-unavailable"
-                buildResult(phaseReached, thermalReported, failureReason, closeTemperature, preciseLat, preciseLng, resetCompleted, geoMethod, laserFix)
-            } else {
+            val legs = approachLegsM.filter { it > 0.0 }.ifEmpty { listOf(standoffHorizontalM) }
+            var target = AircraftLocation(request.fireLat, request.fireLng, request.fireAlt ?: 0.0)
+            var finalCloseMeasure: CloseMeasureResult? = null
+            var finalThermalResult: DualStreamSessionManager.CommandExecutionResult? = null
+            var aborted = false
+
+            for ((index, legM) in legs.withIndex()) {
+                phaseReached = FireConfirmationPhase.FLY_TO
+                val flyToTarget = flyToStandoffPoint(target, legM)
+                if (flyToTarget == null) {
+                    failureReason = "aircraft-location-unavailable"
+                    aborted = true
+                    break
+                }
                 preciseLat = flyToTarget.latitude
                 preciseLng = flyToTarget.longitude
                 geoMethod = "standoff-hover-point-fallback"
 
-                val arrived = withTimeoutOrNull(flyToTimeoutMs) {
-                    flightControl.flyToPoint(flyToTarget.latitude, flyToTarget.longitude, flyToTarget.altitudeM, DEFAULT_FLY_TO_SPEED_MPS)
-                    waitUntilArrived(flyToTarget)
-                } == true
+                val arrived = runCatching {
+                    withTimeoutOrNull(flyToTimeoutMs) {
+                        flightControl.flyToPoint(flyToTarget.latitude, flyToTarget.longitude, flyToTarget.altitudeM, DEFAULT_FLY_TO_SPEED_MPS)
+                        waitUntilArrived(flyToTarget)
+                    } == true
+                }.getOrElse {
+                    warn("fly-to failed task=${request.taskId} leg=${index + 1} message=${it.message}", it)
+                    false
+                }
                 if (!arrived) {
                     runCatching { flightControl.stopFlyToPoint() }
                         .onFailure { warn("stop fly-to failed task=${request.taskId} message=${it.message}", it) }
                     failureReason = "fly-to-timeout"
-                    buildResult(phaseReached, thermalReported, failureReason, closeTemperature, preciseLat, preciseLng, resetCompleted, geoMethod, laserFix)
-                } else {
-                    phaseReached = FireConfirmationPhase.MEASURE_CLOSE
-                    val closeMeasure = measureClose(request)
-                    val measureResult = closeMeasure.result
-                    closeTemperature = measureResult.thermalCenterTemperatureC
-                    if (!measureResult.status.equals("applied", ignoreCase = true) ||
-                        measureResult.thermalCenterTemperatureC == null ||
-                        measureResult.thermalMeasureRegion == null
-                    ) {
+                    aborted = true
+                    break
+                }
+
+                legsCompleted += 1
+                phaseReached = FireConfirmationPhase.MEASURE_CLOSE
+                val closeMeasure = measureClose(request)
+                val measureResult = closeMeasure.result
+                closeTemperature = measureResult.thermalCenterTemperatureC ?: closeTemperature
+                val finalLeg = index == legs.lastIndex
+                if (!measureResult.status.equals("applied", ignoreCase = true) ||
+                    measureResult.thermalCenterTemperatureC == null ||
+                    measureResult.thermalMeasureRegion == null
+                ) {
+                    if (finalLeg) {
                         failureReason = "thermal-close-measure-failed"
-                        buildResult(phaseReached, thermalReported, failureReason, closeTemperature, preciseLat, preciseLng, resetCompleted, geoMethod, laserFix)
+                        aborted = true
+                        break
                     } else {
-                        runCatching { measureRobustLaserFix(request, closeMeasure.centered) }
-                            .onSuccess { fix ->
-                                if (fix != null) {
-                                    laserFix = fix
-                                    preciseLat = fix.latitude
-                                    preciseLng = fix.longitude
-                                    geoMethod = "laser-rangefinder"
-                                }
-                            }
-                            .onFailure { warn("laser measure failed task=${request.taskId} message=${it.message}", it) }
-
-                        val sourceTs = clockMs()
-                        val thermalEventId = "${request.taskId}-$sourceTs"
-                        val reportLaserFix = laserFix?.takeIf { it.confidence == "HIGH" }
-                        client.recordThermalHotspotEvent(
-                            taskId = request.taskId,
-                            droneSn = request.droneSn,
-                            sourceTs = sourceTs,
-                            temperatureC = measureResult.thermalCenterTemperatureC,
-                            thermalMeasureRoi = measureResult.thermalMeasureRegion.toApiMap(),
-                            thermalMeasurements = measureResult.thermalMeasurements.toPayload(),
-                            thermalImageUrl = null,
-                            fireLat = reportLaserFix?.latitude,
-                            fireLng = reportLaserFix?.longitude,
-                            fireAlt = reportLaserFix?.altitude,
-                            geoMethod = reportLaserFix?.let { LASER_GEO_METHOD },
-                            geoErrorRadiusM = reportLaserFix?.let { laserGeoErrorRadiusM },
-                        )
-                        thermalReported = true
-
-                        phaseReached = FireConfirmationPhase.VISIBLE_CONFIRM
-                        val visibleFailure = runCatching {
-                            confirmVisible(request, thermalEventId, sourceTs)
-                        }.exceptionOrNull()
-                        if (visibleFailure != null) {
-                            failureReason = "visible-confirm-failed"
-                        }
-
-                        buildResult(phaseReached, thermalReported, failureReason, closeTemperature, preciseLat, preciseLng, resetCompleted, geoMethod, laserFix)
+                        warn("intermediate close measure failed task=${request.taskId} leg=${index + 1}")
+                        continue
                     }
                 }
+
+                finalCloseMeasure = closeMeasure
+                finalThermalResult = measureResult
+                runCatching { measureRobustLaserFix(request, closeMeasure.centered, legM) }
+                    .onSuccess { fix ->
+                        if (fix != null) {
+                            laserFix = fix
+                            target = AircraftLocation(fix.latitude, fix.longitude, fix.altitude ?: target.altitudeM)
+                            preciseLat = fix.latitude
+                            preciseLng = fix.longitude
+                            geoMethod = "laser-rangefinder"
+                            warn(
+                                "laser fix task=${request.taskId} leg=${index + 1} " +
+                                    "lat=${fix.latitude} lng=${fix.longitude} samples=${fix.normalSampleCount}",
+                            )
+                        } else {
+                            warn("laser fix unavailable task=${request.taskId} leg=${index + 1}")
+                        }
+                    }
+                    .onFailure { warn("laser measure failed task=${request.taskId} leg=${index + 1} message=${it.message}", it) }
             }
+
+            if (!aborted && finalCloseMeasure != null && finalThermalResult != null) {
+                val orbitResult = runCatching { measureOrbitFix(request, target) }
+                    .onFailure { warn("orbit measure failed task=${request.taskId} message=${it.message}", it) }
+                    .getOrNull()
+                if (orbitResult != null) {
+                    orbitFix = orbitResult.fix
+                    orbitPointsVisited = orbitResult.pointsVisited
+                    if (orbitFix != null) {
+                        preciseLat = orbitFix.latitude
+                        preciseLng = orbitFix.longitude
+                        geoMethod = "laser-rangefinder"
+                    }
+                }
+
+                val sourceTs = clockMs()
+                val thermalEventId = "${request.taskId}-$sourceTs"
+                val reportLaserFix = (orbitFix ?: laserFix)?.takeIf { it.confidence == "HIGH" }
+                val measureResult = finalThermalResult
+                client.recordThermalHotspotEvent(
+                    taskId = request.taskId,
+                    droneSn = request.droneSn,
+                    sourceTs = sourceTs,
+                    temperatureC = measureResult.thermalCenterTemperatureC!!,
+                    thermalMeasureRoi = measureResult.thermalMeasureRegion!!.toApiMap(),
+                    thermalMeasurements = measureResult.thermalMeasurements.toPayload(),
+                    thermalImageUrl = null,
+                    fireLat = reportLaserFix?.latitude,
+                    fireLng = reportLaserFix?.longitude,
+                    fireAlt = reportLaserFix?.altitude,
+                    geoMethod = reportLaserFix?.let { LASER_GEO_METHOD },
+                    geoErrorRadiusM = reportLaserFix?.let { laserGeoErrorRadiusM },
+                )
+                thermalReported = true
+
+                phaseReached = FireConfirmationPhase.VISIBLE_CONFIRM
+                val visibleFailure = runCatching {
+                    confirmVisible(request, thermalEventId, sourceTs)
+                }.exceptionOrNull()
+                if (visibleFailure != null) {
+                    failureReason = "visible-confirm-failed"
+                }
+            } else if (!aborted) {
+                failureReason = "thermal-close-measure-failed"
+            }
+
+            buildResult(
+                phaseReached,
+                thermalReported,
+                failureReason,
+                closeTemperature,
+                preciseLat,
+                preciseLng,
+                resetCompleted,
+                geoMethod,
+                laserFix,
+                orbitFix,
+                orbitPointsVisited,
+                legsCompleted,
+            )
         } catch (throwable: Throwable) {
             if (failureReason == null) {
                 failureReason = throwable.message ?: throwable::class.simpleName ?: "fire-confirmation-failed"
             }
-            buildResult(phaseReached, thermalReported, failureReason, closeTemperature, preciseLat, preciseLng, resetCompleted, geoMethod, laserFix)
+            buildResult(
+                phaseReached,
+                thermalReported,
+                failureReason,
+                closeTemperature,
+                preciseLat,
+                preciseLng,
+                resetCompleted,
+                geoMethod,
+                laserFix,
+                orbitFix,
+                orbitPointsVisited,
+                legsCompleted,
+            )
         } finally {
             resetCompleted = reset(previousMonitoring)
             running.set(false)
@@ -238,21 +341,13 @@ class FireConfirmationProcessor(
         return coreResult.copy(resetCompleted = resetCompleted)
     }
 
-    private suspend fun flyToStandoffPoint(request: FireConfirmationRequest): AircraftLocation? {
+    private suspend fun flyToStandoffPoint(target: AircraftLocation, standoffM: Double): AircraftLocation? {
         val current = aircraftLocationProvider() ?: return null
-        val metersPerLat = METERS_PER_LAT_DEG
-        val metersPerLng = metersPerLat * cos(request.fireLat.toRadians()).coerceAtLeast(0.01)
-        val currentDxM = (current.longitude - request.fireLng) * metersPerLng
-        val currentDyM = (current.latitude - request.fireLat) * metersPerLat
-        val distanceM = hypot(currentDxM, currentDyM)
-        val unitX = if (distanceM > 0.1) currentDxM / distanceM else -1.0
-        val unitY = if (distanceM > 0.1) currentDyM / distanceM else 0.0
-        val targetLat = request.fireLat + unitY * standoffHorizontalM / metersPerLat
-        val targetLng = request.fireLng + unitX * standoffHorizontalM / metersPerLng
-        return AircraftLocation(
-            latitude = targetLat,
-            longitude = targetLng,
-            altitudeM = max(current.altitudeM, request.fireAlt ?: current.altitudeM),
+        return pointAtBearing(
+            center = target,
+            bearingDeg = selectApproachBearingDeg(target, current),
+            radiusM = standoffM,
+            altitudeM = max(current.altitudeM, target.altitudeM.takeIf { it.isFinite() } ?: current.altitudeM),
         )
     }
 
@@ -314,10 +409,22 @@ class FireConfirmationProcessor(
     private suspend fun measureRobustLaserFix(
         request: FireConfirmationRequest,
         centered: Boolean,
+        horizontalDistanceM: Double = standoffHorizontalM,
+        sampleCount: Int = laserSampleCount,
     ): RobustLaserFix? {
-        val expectedDistanceM = expectedLaserDistanceM(request)
+        val samples = collectLaserSamples(request, horizontalDistanceM, sampleCount)
+        return samples.toRobustFix(centered, laserMinNormalSamples, laserScatterLimitM)
+    }
+
+    private suspend fun collectLaserSamples(
+        request: FireConfirmationRequest,
+        horizontalDistanceM: Double,
+        sampleCount: Int,
+    ): List<LaserFixSample> {
+        val expectedDistanceM = expectedLaserDistanceM(request, horizontalDistanceM)
         val samples = mutableListOf<LaserFixSample>()
-        repeat(laserSampleCount.coerceAtLeast(0)) { index ->
+        val safeSampleCount = sampleCount.coerceAtLeast(0)
+        repeat(safeSampleCount) { index ->
             val laser = laserRangefinder.measure()
             if (laser != null &&
                 laser.state.equals("NORMAL", ignoreCase = true) &&
@@ -332,35 +439,94 @@ class FireConfirmationProcessor(
                     distanceM = laser.distanceM,
                 )
             }
-            if (index < laserSampleCount - 1) {
+            if (index < safeSampleCount - 1) {
                 delay(laserSampleIntervalMs)
             }
         }
-        if (samples.size < laserMinNormalSamples) {
-            return null
-        }
-        if (samples.hasScatterBeyondLimit(laserScatterLimitM)) {
-            return null
-        }
-        return RobustLaserFix(
-            latitude = samples.map { it.latitude }.median(),
-            longitude = samples.map { it.longitude }.median(),
-            altitude = samples.mapNotNull { it.altitude }.medianOrNull(),
-            distanceM = samples.mapNotNull { it.distanceM }.medianOrNull(),
-            normalSampleCount = samples.size,
-            centered = centered,
-            confidence = "HIGH",
-        )
+        return samples
     }
 
-    private fun expectedLaserDistanceM(request: FireConfirmationRequest): Double {
+    private fun expectedLaserDistanceM(request: FireConfirmationRequest, horizontalDistanceM: Double): Double {
         val aircraft = aircraftLocationProvider()
         val heightDeltaM = if (aircraft != null && request.fireAlt != null) {
             abs(aircraft.altitudeM - request.fireAlt)
         } else {
-            standoffHorizontalM
+            horizontalDistanceM
         }
-        return hypot(standoffHorizontalM, heightDeltaM)
+        return hypot(horizontalDistanceM, heightDeltaM)
+    }
+
+    private suspend fun measureOrbitFix(
+        request: FireConfirmationRequest,
+        center: AircraftLocation,
+    ): OrbitMeasureResult {
+        val count = orbitBearingCount.coerceAtLeast(0)
+        if (count == 0) {
+            return OrbitMeasureResult(fix = null, pointsVisited = 0)
+        }
+        val startBearing = selectApproachBearingDeg(center, aircraftLocationProvider() ?: center)
+        val stepDeg = 360.0 / count
+        val samples = mutableListOf<LaserFixSample>()
+        var visited = 0
+        repeat(count) { index ->
+            val current = aircraftLocationProvider()
+            val target = pointAtBearing(
+                center = center,
+                bearingDeg = startBearing + stepDeg * index,
+                radiusM = orbitRadiusM,
+                altitudeM = max(current?.altitudeM ?: center.altitudeM, center.altitudeM),
+            )
+            val arrived = runCatching {
+                withTimeoutOrNull(flyToTimeoutMs) {
+                    flightControl.flyToPoint(target.latitude, target.longitude, target.altitudeM, DEFAULT_FLY_TO_SPEED_MPS)
+                    waitUntilArrived(target)
+                } == true
+            }.getOrElse {
+                warn("orbit fly-to failed task=${request.taskId} point=${index + 1} message=${it.message}", it)
+                false
+            }
+            if (!arrived) {
+                runCatching { flightControl.stopFlyToPoint() }
+                    .onFailure { warn("stop orbit fly-to failed task=${request.taskId} message=${it.message}", it) }
+                warn("orbit point skipped task=${request.taskId} point=${index + 1}")
+                return@repeat
+            }
+            visited += 1
+            val closeMeasure = measureClose(request)
+            val measureResult = closeMeasure.result
+            if (!measureResult.status.equals("applied", ignoreCase = true) ||
+                measureResult.thermalCenterTemperatureC == null ||
+                measureResult.thermalMeasureRegion == null
+            ) {
+                warn("orbit close measure skipped task=${request.taskId} point=${index + 1}")
+                return@repeat
+            }
+            val pointSamples = collectLaserSamples(request, orbitRadiusM, orbitPerPointLaserSamples)
+            if (pointSamples.hasScatterBeyondLimit(laserScatterLimitM)) {
+                warn("orbit laser samples rejected by scatter task=${request.taskId} point=${index + 1}")
+                return@repeat
+            }
+            samples += pointSamples
+        }
+        return OrbitMeasureResult(
+            fix = samples.toRobustFix(centered = true, laserMinNormalSamples, laserScatterLimitM),
+            pointsVisited = visited,
+        )
+    }
+
+    private suspend fun selectApproachBearingDeg(target: AircraftLocation, current: AircraftLocation): Double {
+        val wind = runCatching { windProvider.currentWind() }
+            .onFailure { warn("wind read failed message=${it.message}", it) }
+            .getOrNull()
+        val windBearing = wind?.sourceBearingDeg
+        if (wind != null &&
+            wind.speedMps >= upwindMinWindSpeedMps &&
+            windBearing != null &&
+            windBearing.isFinite()
+        ) {
+            return windBearing.normalizeDeg()
+        }
+        return bearingFrom(target, current)
     }
 
     private suspend fun confirmVisible(request: FireConfirmationRequest, thermalEventId: String, sourceTs: Long) {
@@ -415,6 +581,9 @@ class FireConfirmationProcessor(
         resetCompleted: Boolean,
         geoMethod: String?,
         laserFix: RobustLaserFix?,
+        orbitFix: RobustLaserFix?,
+        orbitPointsVisited: Int,
+        legsCompleted: Int,
     ): FireConfirmationResult = FireConfirmationResult(
         phaseReached = phaseReached,
         success = thermalReported,
@@ -425,6 +594,9 @@ class FireConfirmationProcessor(
         resetCompleted = resetCompleted,
         geoMethod = geoMethod,
         laserFix = laserFix,
+        orbitFix = orbitFix,
+        orbitPointsVisited = orbitPointsVisited,
+        legsCompleted = legsCompleted,
     )
 
     private fun warn(message: String, throwable: Throwable? = null) {
@@ -458,6 +630,10 @@ class FireConfirmationProcessor(
         private const val DEFAULT_LASER_MIN_NORMAL_SAMPLES = 3
         private const val DEFAULT_LASER_SCATTER_LIMIT_M = 15.0
         private const val DEFAULT_LASER_GEO_ERROR_RADIUS_M = 5.0
+        private val DEFAULT_APPROACH_LEGS = listOf(100.0, 60.0)
+        private const val DEFAULT_ORBIT_BEARING_COUNT = 3
+        private const val DEFAULT_ORBIT_PER_POINT_LASER_SAMPLES = 3
+        private const val DEFAULT_UPWIND_MIN_WIND_SPEED_MPS = 2.0
         private const val LASER_GEO_METHOD = "LASER_RANGEFINDER"
         private const val DEFAULT_FLY_TO_SPEED_MPS = 5.0
         private const val METERS_PER_LAT_DEG = 111_320.0
@@ -476,6 +652,11 @@ private data class LaserFixSample(
     val longitude: Double,
     val altitude: Double?,
     val distanceM: Double?,
+)
+
+private data class OrbitMeasureResult(
+    val fix: RobustLaserFix?,
+    val pointsVisited: Int,
 )
 
 class FireConfirmationAutoTrigger(
@@ -503,6 +684,34 @@ class FireConfirmationAutoTrigger(
                 ),
             )
         }
+    }
+}
+
+class DjiWindProvider : WindProvider {
+    override suspend fun currentWind(): WindReading? {
+        // Verified against DJI MSDK v5.18.0 dji-sdk-v5-aircraft-provided.jar:
+        // FlightControllerKey.KeyWindSpeed is DJIKeyInfo<Integer> and
+        // KeyWindDirection is DJIKeyInfo<WindDirection>. Official DJI MSDK v5
+        // docs state KeyWindSpeed is dm/s, so this converts to m/s.
+        // WindDirection values are world-coordinate cardinal enums
+        // (WINDLESS/NORTH/NORTH_EAST/EAST/SOUTH_EAST/SOUTH/SOUTH_WEST/WEST/
+        // NORTH_WEST/UNKNOWN). The docs do not state source-vs-destination;
+        // this provider treats the enum as wind source bearing to satisfy
+        // upwind approach semantics. This assumption is pending real-aircraft
+        // validation (待实机验证).
+        val speedDmps = runCatching {
+            FlightControllerKey.KeyWindSpeed.create().get(0)
+        }.getOrNull()
+        val direction = runCatching {
+            FlightControllerKey.KeyWindDirection.create().get(WindDirection.UNKNOWN)
+        }.getOrNull()
+        if (speedDmps == null && direction == null) {
+            return null
+        }
+        return WindReading(
+            speedMps = (speedDmps ?: 0).toDouble() / 10.0,
+            sourceBearingDeg = direction?.toSourceBearingDeg(),
+        )
     }
 }
 
@@ -604,6 +813,32 @@ private fun horizontalDistanceM(a: AircraftLocation, b: AircraftLocation): Doubl
     return hypot(dx, dy)
 }
 
+private fun pointAtBearing(
+    center: AircraftLocation,
+    bearingDeg: Double,
+    radiusM: Double,
+    altitudeM: Double,
+): AircraftLocation {
+    val bearingRad = bearingDeg.toRadians()
+    val metersPerLng = 111_320.0 * cos(center.latitude.toRadians()).coerceAtLeast(0.01)
+    return AircraftLocation(
+        latitude = center.latitude + cos(bearingRad) * radiusM / 111_320.0,
+        longitude = center.longitude + sin(bearingRad) * radiusM / metersPerLng,
+        altitudeM = altitudeM,
+    )
+}
+
+private fun bearingFrom(origin: AircraftLocation, point: AircraftLocation): Double {
+    val metersPerLng = 111_320.0 * cos(origin.latitude.toRadians()).coerceAtLeast(0.01)
+    val dx = (point.longitude - origin.longitude) * metersPerLng
+    val dy = (point.latitude - origin.latitude) * 111_320.0
+    val distanceM = hypot(dx, dy)
+    if (distanceM <= 0.1) {
+        return 270.0
+    }
+    return atan2(dx, dy).toDegrees().normalizeDeg()
+}
+
 private fun horizontalDistanceM(a: LaserFixSample, b: LaserFixSample): Double =
     horizontalDistanceM(
         AircraftLocation(a.latitude, a.longitude, a.altitude ?: 0.0),
@@ -619,6 +854,28 @@ private fun List<LaserFixSample>.hasScatterBeyondLimit(limitM: Double): Boolean 
         }
     }
     return false
+}
+
+private fun List<LaserFixSample>.toRobustFix(
+    centered: Boolean,
+    minNormalSamples: Int,
+    scatterLimitM: Double,
+): RobustLaserFix? {
+    if (size < minNormalSamples) {
+        return null
+    }
+    if (hasScatterBeyondLimit(scatterLimitM)) {
+        return null
+    }
+    return RobustLaserFix(
+        latitude = map { it.latitude }.median(),
+        longitude = map { it.longitude }.median(),
+        altitude = mapNotNull { it.altitude }.medianOrNull(),
+        distanceM = mapNotNull { it.distanceM }.medianOrNull(),
+        normalSampleCount = size,
+        centered = centered,
+        confidence = "HIGH",
+    )
 }
 
 private fun Double?.isPlausibleLaserDistance(expectedDistanceM: Double): Boolean =
@@ -643,4 +900,22 @@ private fun List<Double>.median(): Double {
 
 private fun List<Double>.medianOrNull(): Double? = if (isEmpty()) null else median()
 
+private fun WindDirection.toSourceBearingDeg(): Double? = when (this) {
+    WindDirection.NORTH -> 0.0
+    WindDirection.NORTH_EAST -> 45.0
+    WindDirection.EAST -> 90.0
+    WindDirection.SOUTH_EAST -> 135.0
+    WindDirection.SOUTH -> 180.0
+    WindDirection.SOUTH_WEST -> 225.0
+    WindDirection.WEST -> 270.0
+    WindDirection.NORTH_WEST -> 315.0
+    WindDirection.WINDLESS,
+    WindDirection.UNKNOWN,
+    -> null
+}
+
 private fun Double.toRadians(): Double = this / 180.0 * PI
+
+private fun Double.toDegrees(): Double = this * 180.0 / PI
+
+private fun Double.normalizeDeg(): Double = ((this % 360.0) + 360.0) % 360.0

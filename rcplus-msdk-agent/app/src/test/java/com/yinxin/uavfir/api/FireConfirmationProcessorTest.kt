@@ -17,6 +17,13 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
+
+private const val METERS_PER_LAT_DEG = 111_320.0
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FireConfirmationProcessorTest {
@@ -49,6 +56,8 @@ class FireConfirmationProcessorTest {
                 ),
             ),
             aircraftLocationProvider = { aircraftLocation },
+            approachLegsM = listOf(60.0),
+            orbitBearingCount = 0,
             flyToTimeoutMs = 5_000,
             pollIntervalMs = 100,
             clockMs = { 1780059017562L },
@@ -143,6 +152,264 @@ class FireConfirmationProcessorTest {
         assertTrue(result.resetCompleted)
         assertEquals(listOf("thermal"), camera.streamSources)
         assertEquals(listOf("hold", "resume"), missionHold.calls)
+    }
+
+    @Test
+    fun legs_progress_toward_laser_fix() = runTest {
+        val request = defaultRequest()
+        val firstFix = LaserRangefinderResult(34.0015, 108.0016, 110.0, 95.0, "NORMAL")
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(
+                firstFix,
+                firstFix,
+                firstFix,
+                firstFix,
+                firstFix,
+                LaserRangefinderResult(34.00151, 108.00161, 110.0, 58.0, "NORMAL"),
+            ),
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 0,
+        )
+        val flight = processorFlight(processor)
+
+        val result = processor.run(request)
+
+        assertTrue(result.success)
+        assertEquals(2, result.legsCompleted)
+        assertEquals(2, flight.flyToCalls.size)
+        assertEquals(60.0, horizontalDistanceM(flight.flyToCalls[1].location, firstFix.toLocation()), 1.0)
+    }
+
+    @Test
+    fun legs_keep_original_target_without_fix() = runTest {
+        val request = defaultRequest()
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(null, null, null, null, null),
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 0,
+        )
+        val flight = processorFlight(processor)
+
+        val result = processor.run(request)
+
+        assertTrue(result.success)
+        assertEquals(2, result.legsCompleted)
+        assertEquals(2, flight.flyToCalls.size)
+        assertEquals(60.0, horizontalDistanceM(flight.flyToCalls[1].location, request.toLocation()), 1.0)
+        assertNull(result.laserFix)
+    }
+
+    @Test
+    fun leg_flyto_timeout_triggers_reset_preserving_report() = runTest {
+        val streamProvider = ConfirmationStreamProvider()
+        val sessionManager = runningSession(streamProvider)
+        val flight = RecordingFlightControl()
+        val camera = RecordingCameraControl()
+        val missionHold = RecordingMissionHold()
+        val api = RecordingDualStreamApi()
+        val processor = processor(
+            sessionManager = sessionManager,
+            flight = flight,
+            camera = camera,
+            missionHold = missionHold,
+            api = api,
+            aircraftLocationProvider = { AircraftLocation(34.0, 108.0, 120.0) },
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 0,
+            flyToTimeoutMs = 300,
+            pollIntervalMs = 100,
+        )
+
+        val result = processor.run(defaultRequest())
+
+        assertFalse(result.success)
+        assertEquals(FireConfirmationPhase.FLY_TO, result.phaseReached)
+        assertEquals("fly-to-timeout", result.failureReason)
+        assertEquals(0, result.legsCompleted)
+        assertEquals(0, api.taskEvents.size)
+        assertTrue(flight.stopFlyToPointCalled)
+        assertTrue(result.resetCompleted)
+        assertEquals(listOf("thermal"), camera.streamSources)
+        assertEquals(listOf("hold", "resume"), missionHold.calls)
+    }
+
+    @Test
+    fun orbit_visits_configured_bearings() = runTest {
+        val singleFix = LaserRangefinderResult(34.0015, 108.0016, 110.0, 58.0, "NORMAL")
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(singleFix),
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 3,
+            orbitPerPointLaserSamples = 3,
+        )
+        val flight = processorFlight(processor)
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        assertEquals(2, result.legsCompleted)
+        assertEquals(3, result.orbitPointsVisited)
+        assertEquals(5, flight.flyToCalls.size)
+        val orbitBearings = flight.flyToCalls.drop(2).map {
+            bearingFrom(singleFix.toLocation(), it.location)
+        }
+        assertEquals(120.0, angleDiffDeg(orbitBearings[0], orbitBearings[1]), 2.0)
+        assertEquals(120.0, angleDiffDeg(orbitBearings[1], orbitBearings[2]), 2.0)
+    }
+
+    @Test
+    fun orbit_fix_median_across_points() = runTest {
+        val legFix = LaserRangefinderResult(34.0015, 108.0016, 110.0, 58.0, "NORMAL")
+        val orbitSamples = listOf(
+            LaserRangefinderResult(34.00001, 108.00001, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00003, 108.00003, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00002, 108.00002, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00007, 108.00007, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00005, 108.00005, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00006, 108.00006, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00004, 108.00004, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00008, 108.00008, 110.0, 58.0, "NORMAL"),
+            LaserRangefinderResult(34.00009, 108.00009, 110.0, 58.0, "NORMAL"),
+        )
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(
+                *List(10) { legFix }.plus(orbitSamples).toTypedArray(),
+            ),
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 3,
+            orbitPerPointLaserSamples = 3,
+        )
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        assertEquals(34.00005, result.orbitFix?.latitude ?: -1.0, 1e-6)
+        assertEquals(108.00005, result.orbitFix?.longitude ?: -1.0, 1e-6)
+        assertEquals(34.00005, result.preciseLat ?: -1.0, 1e-6)
+        assertEquals(108.00005, result.preciseLng ?: -1.0, 1e-6)
+        assertEquals(9, result.orbitFix?.normalSampleCount)
+    }
+
+    @Test
+    fun orbit_point_timeout_skipped_not_fatal() = runTest {
+        val streamProvider = ConfirmationStreamProvider()
+        val sessionManager = runningSession(streamProvider)
+        val flight = RecordingFlightControl()
+        val legFix = LaserRangefinderResult(34.0015, 108.0016, 110.0, 58.0, "NORMAL")
+        val laser = RecordingLaserRangefinder(legFix)
+        var aircraftLocation = AircraftLocation(34.0, 108.0, 120.0)
+        val processor = processor(
+            sessionManager = sessionManager,
+            flight = flight,
+            laserRangefinder = laser,
+            aircraftLocationProvider = { aircraftLocation },
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 3,
+            orbitPerPointLaserSamples = 3,
+            flyToTimeoutMs = 300,
+            pollIntervalMs = 100,
+        )
+        flight.onFlyToPoint = { lat, lng, height ->
+            if (flight.flyToCalls.size != 4) {
+                aircraftLocation = AircraftLocation(lat, lng, height)
+            }
+        }
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        assertEquals(2, result.orbitPointsVisited)
+        assertEquals(FireConfirmationPhase.VISIBLE_CONFIRM, result.phaseReached)
+    }
+
+    @Test
+    fun orbit_disabled_by_zero_count() = runTest {
+        val singleFix = LaserRangefinderResult(34.0015, 108.0016, 110.0, 58.0, "NORMAL")
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(singleFix),
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 0,
+        )
+        val flight = processorFlight(processor)
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        assertEquals(2, flight.flyToCalls.size)
+        assertNull(result.orbitFix)
+        assertEquals(0, result.orbitPointsVisited)
+    }
+
+    @Test
+    fun upwind_bias_selects_wind_source_bearing() = runTest {
+        val request = defaultRequest()
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(null),
+            approachLegsM = listOf(60.0),
+            orbitBearingCount = 0,
+            windProvider = StaticWindProvider(WindReading(speedMps = 3.0, sourceBearingDeg = 90.0)),
+        )
+        val flight = processorFlight(processor)
+
+        processor.run(request)
+
+        assertEquals(1, flight.flyToCalls.size)
+        assertEquals(60.0, horizontalDistanceM(flight.flyToCalls[0].location, request.toLocation()), 1.0)
+        assertEquals(90.0, bearingFrom(request.toLocation(), flight.flyToCalls[0].location), 2.0)
+    }
+
+    @Test
+    fun no_wind_falls_back_to_aircraft_bearing() = runTest {
+        val request = defaultRequest()
+        val current = AircraftLocation(34.0, 108.0, 120.0)
+        val expectedFallbackBearing = bearingFrom(request.toLocation(), current)
+        val noWindProcessor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(null),
+            approachLegsM = listOf(60.0),
+            orbitBearingCount = 0,
+            windProvider = StaticWindProvider(null),
+            initialAircraftLocation = current,
+        )
+        val lowWindProcessor = processorWithArrivingAircraft(
+            laserRangefinder = RecordingLaserRangefinder(null),
+            approachLegsM = listOf(60.0),
+            orbitBearingCount = 0,
+            windProvider = StaticWindProvider(WindReading(speedMps = 1.0, sourceBearingDeg = 90.0)),
+            initialAircraftLocation = current,
+        )
+
+        noWindProcessor.run(request)
+        lowWindProcessor.run(request)
+
+        assertEquals(expectedFallbackBearing, bearingFrom(request.toLocation(), processorFlight(noWindProcessor).flyToCalls[0].location), 2.0)
+        assertEquals(expectedFallbackBearing, bearingFrom(request.toLocation(), processorFlight(lowWindProcessor).flyToCalls[0].location), 2.0)
+    }
+
+    @Test
+    fun report_happens_once_after_orbit() = runTest {
+        val legFix = LaserRangefinderResult(34.0015, 108.0016, 110.0, 58.0, "NORMAL")
+        val orbitFix = LaserRangefinderResult(34.00005, 108.00005, 110.0, 58.0, "NORMAL")
+        val laser = RecordingLaserRangefinder(
+            *List(10) { legFix }.plus(List(9) { orbitFix }).toTypedArray(),
+        )
+        val api = RecordingDualStreamApi(onRecord = { laser.calls })
+        val processor = processorWithArrivingAircraft(
+            laserRangefinder = laser,
+            api = api,
+            approachLegsM = listOf(100.0, 60.0),
+            orbitBearingCount = 3,
+            orbitPerPointLaserSamples = 3,
+        )
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        assertEquals(1, api.taskEvents.size)
+        assertEquals(listOf(19), api.recordMarkers)
+        assertEquals(34.00005, api.lastTaskEventBody?.fireLat ?: -1.0, 1e-6)
+        assertEquals(108.00005, api.lastTaskEventBody?.fireLng ?: -1.0, 1e-6)
+        assertEquals(34.00005, result.preciseLat ?: -1.0, 1e-6)
+        assertEquals(108.00005, result.preciseLng ?: -1.0, 1e-6)
     }
 
     @Test
@@ -520,6 +787,10 @@ class FireConfirmationProcessorTest {
         laserRangefinder: LaserRangefinderClient = NoopLaserRangefinderClient,
         enabled: Boolean = true,
         aircraftLocationProvider: () -> AircraftLocation? = { AircraftLocation(34.0, 108.0, 120.0) },
+        approachLegsM: List<Double> = listOf(60.0),
+        orbitBearingCount: Int = 0,
+        orbitPerPointLaserSamples: Int = 3,
+        windProvider: WindProvider = StaticWindProvider(null),
         flyToTimeoutMs: Long = 5_000,
         pollIntervalMs: Long = 100,
     ): FireConfirmationProcessor {
@@ -532,28 +803,44 @@ class FireConfirmationProcessorTest {
             client = AgentBackendClient(api),
             visibleSnapshotConfirmer = visibleSnapshotConfirmer,
             laserRangefinder = laserRangefinder,
+            windProvider = windProvider,
             aircraftLocationProvider = aircraftLocationProvider,
             enabled = enabled,
+            approachLegsM = approachLegsM,
+            orbitBearingCount = orbitBearingCount,
+            orbitPerPointLaserSamples = orbitPerPointLaserSamples,
             flyToTimeoutMs = flyToTimeoutMs,
             pollIntervalMs = pollIntervalMs,
             clockMs = { 1780059017562L },
         )
         processorApiByInstance[processor] = api
+        processorFlightByInstance[processor] = flight
         return processor
     }
 
     private suspend fun processorWithArrivingAircraft(
         laserRangefinder: LaserRangefinderClient,
         streamProvider: ConfirmationStreamProvider = ConfirmationStreamProvider(),
+        api: RecordingDualStreamApi = RecordingDualStreamApi(),
+        approachLegsM: List<Double> = listOf(60.0),
+        orbitBearingCount: Int = 0,
+        orbitPerPointLaserSamples: Int = 3,
+        windProvider: WindProvider = StaticWindProvider(null),
+        initialAircraftLocation: AircraftLocation = AircraftLocation(34.0, 108.0, 120.0),
     ): FireConfirmationProcessor {
         val sessionManager = runningSession(streamProvider)
         val flight = RecordingFlightControl()
-        var aircraftLocation = AircraftLocation(34.0, 108.0, 120.0)
+        var aircraftLocation = initialAircraftLocation
         val processor = processor(
             sessionManager = sessionManager,
             flight = flight,
+            api = api,
             laserRangefinder = laserRangefinder,
             aircraftLocationProvider = { aircraftLocation },
+            approachLegsM = approachLegsM,
+            orbitBearingCount = orbitBearingCount,
+            orbitPerPointLaserSamples = orbitPerPointLaserSamples,
+            windProvider = windProvider,
         )
         flight.onFlyToPoint = { lat, lng, height ->
             aircraftLocation = AircraftLocation(lat, lng, height)
@@ -564,6 +851,9 @@ class FireConfirmationProcessorTest {
     private fun processorApi(processor: FireConfirmationProcessor): RecordingDualStreamApi =
         requireNotNull(processorApiByInstance[processor])
 
+    private fun processorFlight(processor: FireConfirmationProcessor): RecordingFlightControl =
+        requireNotNull(processorFlightByInstance[processor])
+
     private fun defaultRequest(taskId: String = "task-fire-001") = FireConfirmationRequest(
         droneSn = "DRONE-001",
         taskId = taskId,
@@ -571,6 +861,12 @@ class FireConfirmationProcessorTest {
         fireLng = 108.0009,
         fireAlt = 110.0,
     )
+
+    private fun FireConfirmationRequest.toLocation(): AircraftLocation =
+        AircraftLocation(fireLat, fireLng, fireAlt ?: 0.0)
+
+    private fun LaserRangefinderResult.toLocation(): AircraftLocation =
+        AircraftLocation(requireNotNull(latitude), requireNotNull(longitude), altitude ?: 0.0)
 
     private class ConfirmationStreamProvider(
         private val measureStatus: String = "applied",
@@ -635,6 +931,7 @@ class FireConfirmationProcessorTest {
 
     private class RecordingFlightControl : FlightControlActionClient {
         var stopFlyToPointCalled = false
+        val flyToCalls = mutableListOf<FlyToCall>()
         var onFlyToPoint: ((Double, Double, Double) -> Unit)? = null
         var onFlyToPointSuspend: (suspend (Double, Double, Double) -> Unit)? = null
 
@@ -652,12 +949,18 @@ class FireConfirmationProcessorTest {
         override suspend fun sendVirtualStick(key: String, durationMs: Long) = Unit
 
         override suspend fun flyToPoint(latitude: Double, longitude: Double, height: Double, speed: Double) {
+            flyToCalls += FlyToCall(AircraftLocation(latitude, longitude, height), speed)
             onFlyToPointSuspend?.invoke(latitude, longitude, height)
             onFlyToPoint?.invoke(latitude, longitude, height)
         }
 
         override suspend fun setNavigationLight(enabled: Boolean) = Unit
     }
+
+    private data class FlyToCall(
+        val location: AircraftLocation,
+        val speed: Double,
+    )
 
     private class RecordingGimbalControl : GimbalActionClient {
         val pitchOrResetCalls = mutableListOf<Double>()
@@ -767,10 +1070,13 @@ class FireConfirmationProcessorTest {
         }
     }
 
-    private class RecordingDualStreamApi : DualStreamApi {
+    private class RecordingDualStreamApi(
+        private val onRecord: (() -> Int)? = null,
+    ) : DualStreamApi {
         var lastTaskEventTaskId: String? = null
         var lastTaskEventBody: DualStreamEventRequest? = null
         val taskEvents = mutableListOf<DualStreamEventRequest>()
+        val recordMarkers = mutableListOf<Int>()
 
         override suspend fun heartbeat(droneSn: String, body: AgentHeartbeatRequest) = Unit
         override suspend fun status(droneSn: String, body: AgentStatusRequest) = Unit
@@ -779,6 +1085,7 @@ class FireConfirmationProcessorTest {
         override suspend fun ackCommand(droneSn: String, body: AgentCommandAckRequest) = Unit
 
         override suspend fun recordTaskEvent(taskId: String, body: DualStreamEventRequest) {
+            onRecord?.let { recordMarkers += it() }
             lastTaskEventTaskId = taskId
             lastTaskEventBody = body
             taskEvents += body
@@ -789,7 +1096,39 @@ class FireConfirmationProcessorTest {
         override suspend fun ackMsdkCommand(aircraftSn: String, body: MsdkCommandAckRequest) = Unit
     }
 
+    private class StaticWindProvider(
+        private val wind: WindReading?,
+    ) : WindProvider {
+        override suspend fun currentWind(): WindReading? = wind
+    }
+
     private companion object {
         val processorApiByInstance = mutableMapOf<FireConfirmationProcessor, RecordingDualStreamApi>()
+        val processorFlightByInstance = mutableMapOf<FireConfirmationProcessor, RecordingFlightControl>()
     }
 }
+
+private fun horizontalDistanceM(a: AircraftLocation, b: AircraftLocation): Double {
+    val metersPerLng = METERS_PER_LAT_DEG * cos(((a.latitude + b.latitude) / 2.0).toRadians()).coerceAtLeast(0.01)
+    val dx = (a.longitude - b.longitude) * metersPerLng
+    val dy = (a.latitude - b.latitude) * METERS_PER_LAT_DEG
+    return hypot(dx, dy)
+}
+
+private fun bearingFrom(origin: AircraftLocation, point: AircraftLocation): Double {
+    val metersPerLng = METERS_PER_LAT_DEG * cos(origin.latitude.toRadians()).coerceAtLeast(0.01)
+    val dx = (point.longitude - origin.longitude) * metersPerLng
+    val dy = (point.latitude - origin.latitude) * METERS_PER_LAT_DEG
+    return atan2(dx, dy).toDegrees().normalizeDeg()
+}
+
+private fun angleDiffDeg(a: Double, b: Double): Double {
+    val diff = abs(a.normalizeDeg() - b.normalizeDeg())
+    return if (diff > 180.0) 360.0 - diff else diff
+}
+
+private fun Double.toRadians(): Double = this / 180.0 * PI
+
+private fun Double.toDegrees(): Double = this * 180.0 / PI
+
+private fun Double.normalizeDeg(): Double = ((this % 360.0) + 360.0) % 360.0
