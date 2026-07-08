@@ -65,6 +65,8 @@ class FireConfirmationProcessorTest {
         assertEquals(34.0004, result.preciseLat ?: -1.0, 1e-6)
         assertEquals(108.0005, result.preciseLng ?: -1.0, 1e-6)
         assertEquals("laser-rangefinder", result.geoMethod)
+        assertEquals(5, result.laserFix?.normalSampleCount)
+        assertEquals(true, result.laserFix?.centered)
         assertTrue(result.resetCompleted)
         assertTrue(sessionManager.thermalMonitoringEnabled)
         assertEquals(listOf("hold", "resume"), missionHold.calls)
@@ -313,6 +315,158 @@ class FireConfirmationProcessorTest {
         assertEquals(121.5, receivedRequest?.fireAlt ?: -1.0, 1e-6)
     }
 
+    @Test
+    fun aim_converges_within_iterations() = runTest {
+        val streamProvider = ConfirmationStreamProvider(
+            thermalMeasureRegions = listOf(
+                ThermalMeasureRegion(x = 0.56, y = 0.56, width = 0.12, height = 0.12),
+                ThermalMeasureRegion(x = 0.50, y = 0.38, width = 0.12, height = 0.12),
+                ThermalMeasureRegion(x = 0.44, y = 0.44, width = 0.12, height = 0.12),
+            ),
+        )
+        val sessionManager = runningSession(streamProvider)
+        val flight = RecordingFlightControl()
+        val gimbal = RecordingGimbalControl()
+        val laser = RecordingLaserRangefinder(
+            LaserRangefinderResult(
+                latitude = 34.0004,
+                longitude = 108.0005,
+                distanceM = 58.0,
+                state = "NORMAL",
+            ),
+        )
+        var aircraftLocation = AircraftLocation(34.0, 108.0, 120.0)
+        val processor = processor(
+            sessionManager = sessionManager,
+            flight = flight,
+            gimbal = gimbal,
+            laserRangefinder = laser,
+            aircraftLocationProvider = { aircraftLocation },
+        )
+        flight.onFlyToPoint = { lat, lng, height ->
+            aircraftLocation = AircraftLocation(lat, lng, height)
+        }
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        assertEquals(true, result.laserFix?.centered)
+        assertEquals(3, streamProvider.measureHotspotCalls)
+        assertEquals(0, gimbal.rotationCalls.size)
+        assertEquals(2, gimbal.relativeRotationCalls.size)
+        assertEquals(-4.44, gimbal.relativeRotationCalls[0].pitch, 1e-6)
+        assertEquals(5.4, gimbal.relativeRotationCalls[0].yaw, 1e-6)
+        assertEquals(2.22, gimbal.relativeRotationCalls[1].pitch, 1e-6)
+        assertEquals(2.7, gimbal.relativeRotationCalls[1].yaw, 1e-6)
+    }
+
+    @Test
+    fun aim_failure_does_not_block_laser() = runTest {
+        val streamProvider = ConfirmationStreamProvider(
+            thermalMeasureRegions = List(4) {
+                ThermalMeasureRegion(x = 0.70, y = 0.70, width = 0.10, height = 0.10)
+            },
+        )
+        val laser = RecordingLaserRangefinder(
+            LaserRangefinderResult(
+                latitude = 34.0004,
+                longitude = 108.0005,
+                distanceM = 58.0,
+                state = "NORMAL",
+            ),
+        )
+        val sessionManager = runningSession(streamProvider)
+        val flight = RecordingFlightControl()
+        var aircraftLocation = AircraftLocation(34.0, 108.0, 120.0)
+        val processor = processor(
+            sessionManager = sessionManager,
+            flight = flight,
+            laserRangefinder = laser,
+            aircraftLocationProvider = { aircraftLocation },
+        )
+        flight.onFlyToPoint = { lat, lng, height ->
+            aircraftLocation = AircraftLocation(lat, lng, height)
+        }
+
+        val result = processor.run(defaultRequest())
+
+        assertTrue(result.success)
+        assertEquals("laser-rangefinder", result.geoMethod)
+        assertEquals(false, result.laserFix?.centered)
+        assertEquals(5, laser.calls)
+    }
+
+    @Test
+    fun laser_median_of_normal_samples() = runTest {
+        val laser = RecordingLaserRangefinder(
+            LaserRangefinderResult(latitude = null, longitude = null, distanceM = null, state = "NO_SIGNAL"),
+            LaserRangefinderResult(latitude = 34.00001, longitude = 108.00001, distanceM = 70.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = 34.00002, longitude = 108.00002, distanceM = 72.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = 34.0009, longitude = 108.0009, distanceM = 500.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = 34.00003, longitude = 108.00003, distanceM = 74.0, state = "NORMAL"),
+        )
+        val processor = processorWithArrivingAircraft(laserRangefinder = laser)
+
+        val result = processor.run(defaultRequest())
+
+        assertEquals("laser-rangefinder", result.geoMethod)
+        assertEquals(34.00002, result.preciseLat ?: -1.0, 1e-6)
+        assertEquals(108.00002, result.preciseLng ?: -1.0, 1e-6)
+        assertEquals("HIGH", result.laserFix?.confidence)
+        assertEquals(3, result.laserFix?.normalSampleCount)
+    }
+
+    @Test
+    fun laser_insufficient_normal_falls_back() = runTest {
+        val laser = RecordingLaserRangefinder(
+            LaserRangefinderResult(latitude = 34.0001, longitude = 108.0001, distanceM = 70.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = null, longitude = null, distanceM = null, state = "NO_SIGNAL"),
+            LaserRangefinderResult(latitude = 34.0002, longitude = 108.0002, distanceM = 72.0, state = "NORMAL"),
+            null,
+            null,
+        )
+        val processor = processorWithArrivingAircraft(laserRangefinder = laser)
+
+        val result = processor.run(defaultRequest())
+
+        assertNull(result.laserFix)
+        assertEquals("standoff-hover-point-fallback", result.geoMethod)
+    }
+
+    @Test
+    fun laser_scatter_rejected() = runTest {
+        val laser = RecordingLaserRangefinder(
+            LaserRangefinderResult(latitude = 34.0000, longitude = 108.0000, distanceM = 70.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = 34.0010, longitude = 108.0000, distanceM = 71.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = 34.0000, longitude = 108.0010, distanceM = 72.0, state = "NORMAL"),
+            null,
+            null,
+        )
+        val processor = processorWithArrivingAircraft(laserRangefinder = laser)
+
+        val result = processor.run(defaultRequest())
+
+        assertNull(result.laserFix)
+        assertEquals("standoff-hover-point-fallback", result.geoMethod)
+    }
+
+    @Test
+    fun laser_plausibility_gate_rejects_near_echo() = runTest {
+        val laser = RecordingLaserRangefinder(
+            LaserRangefinderResult(latitude = 34.0001, longitude = 108.0001, distanceM = 2.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = 34.0002, longitude = 108.0002, distanceM = 70.0, state = "NORMAL"),
+            LaserRangefinderResult(latitude = 34.0003, longitude = 108.0003, distanceM = 72.0, state = "NORMAL"),
+            null,
+            null,
+        )
+        val processor = processorWithArrivingAircraft(laserRangefinder = laser)
+
+        val result = processor.run(defaultRequest())
+
+        assertNull(result.laserFix)
+        assertEquals("standoff-hover-point-fallback", result.geoMethod)
+    }
+
     private suspend fun runningSession(streamProvider: ConfirmationStreamProvider): DualStreamSessionManager {
         val sessionManager = DualStreamSessionManager(streamProvider)
         sessionManager.start("DRONE-001")
@@ -352,6 +506,25 @@ class FireConfirmationProcessorTest {
         return processor
     }
 
+    private suspend fun processorWithArrivingAircraft(
+        laserRangefinder: LaserRangefinderClient,
+        streamProvider: ConfirmationStreamProvider = ConfirmationStreamProvider(),
+    ): FireConfirmationProcessor {
+        val sessionManager = runningSession(streamProvider)
+        val flight = RecordingFlightControl()
+        var aircraftLocation = AircraftLocation(34.0, 108.0, 120.0)
+        val processor = processor(
+            sessionManager = sessionManager,
+            flight = flight,
+            laserRangefinder = laserRangefinder,
+            aircraftLocationProvider = { aircraftLocation },
+        )
+        flight.onFlyToPoint = { lat, lng, height ->
+            aircraftLocation = AircraftLocation(lat, lng, height)
+        }
+        return processor
+    }
+
     private fun processorApi(processor: FireConfirmationProcessor): RecordingDualStreamApi =
         requireNotNull(processorApiByInstance[processor])
 
@@ -366,6 +539,9 @@ class FireConfirmationProcessorTest {
     private class ConfirmationStreamProvider(
         private val measureStatus: String = "applied",
         private val visibleSnapshotPath: String? = "/tmp/visible.jpg",
+        private val thermalMeasureRegions: List<ThermalMeasureRegion> = listOf(
+            ThermalMeasureRegion(x = 0.40, y = 0.44, width = 0.12, height = 0.12),
+        ),
     ) : StreamProvider {
         var focusThermalCalls = 0
         var focusVisibleCalls = 0
@@ -401,7 +577,9 @@ class FireConfirmationProcessorTest {
                 thermalState = BoundStreamState.BOUND,
                 playbackStatus = "shared-side-by-side-preview",
                 thermalCenterTemperatureC = 91.5,
-                thermalMeasureRegion = ThermalMeasureRegion(x = 0.40, y = 0.44, width = 0.12, height = 0.12),
+                thermalMeasureRegion = thermalMeasureRegions[
+                    (measureHotspotCalls - 1).coerceAtMost(thermalMeasureRegions.lastIndex)
+                ],
                 thermalSnapshotPath = "/tmp/thermal.jpg",
             )
         }
@@ -447,17 +625,36 @@ class FireConfirmationProcessorTest {
 
     private class RecordingGimbalControl : GimbalActionClient {
         val pitchOrResetCalls = mutableListOf<Double>()
+        val rotationCalls = mutableListOf<GimbalRotationCall>()
+        val relativeRotationCalls = mutableListOf<GimbalRelativeRotationCall>()
 
         override suspend fun resetGimbal() {
             pitchOrResetCalls += 0.0
         }
 
-        override suspend fun rotateGimbal(pitch: Double, yaw: Double, roll: Double) = Unit
+        override suspend fun rotateGimbal(pitch: Double, yaw: Double, roll: Double) {
+            rotationCalls += GimbalRotationCall(pitch, yaw, roll)
+        }
+
+        override suspend fun rotateGimbalBy(pitchDelta: Double, yawDelta: Double) {
+            relativeRotationCalls += GimbalRelativeRotationCall(pitchDelta, yawDelta)
+        }
 
         override suspend fun rotateGimbalToPitch(pitch: Double) {
             pitchOrResetCalls += pitch
         }
     }
+
+    private data class GimbalRotationCall(
+        val pitch: Double,
+        val yaw: Double,
+        val roll: Double,
+    )
+
+    private data class GimbalRelativeRotationCall(
+        val pitch: Double,
+        val yaw: Double,
+    )
 
     private class RecordingCameraControl(
         private val failThermalStreamAttempts: Int = 0,
@@ -523,9 +720,15 @@ class FireConfirmationProcessorTest {
     }
 
     private class RecordingLaserRangefinder(
-        private val result: LaserRangefinderResult?,
+        vararg private val results: LaserRangefinderResult?,
     ) : LaserRangefinderClient {
-        override suspend fun measure(): LaserRangefinderResult? = result
+        var calls = 0
+
+        override suspend fun measure(): LaserRangefinderResult? {
+            val index = calls.coerceAtMost(results.lastIndex)
+            calls += 1
+            return results.getOrNull(index)
+        }
     }
 
     private class RecordingDualStreamApi : DualStreamApi {

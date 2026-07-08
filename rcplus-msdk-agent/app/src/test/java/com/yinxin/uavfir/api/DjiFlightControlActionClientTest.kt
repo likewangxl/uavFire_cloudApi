@@ -71,4 +71,23 @@ class DjiFlightControlActionClientTest {
         assertTrue(source.contains("GimbalAngleRotationMode.ABSOLUTE_ANGLE"))
         assertTrue(source.contains("KeyRotateByAngle"))
     }
+
+    @Test
+    fun gimbalRelativeAimCorrectionUsesAngleRotation() {
+        val source = File("src/main/java/com/yinxin/uavfir/api/MsdkCommandExecutor.kt").readText()
+        val body = source.substringAfter("override suspend fun rotateGimbalBy(")
+            .substringBefore("override suspend fun rotateGimbalToPitch")
+
+        assertTrue(source.contains("fun rotateGimbalBy("))
+        assertTrue(body.contains("GimbalAngleRotationMode.RELATIVE_ANGLE"))
+        assertTrue(body.contains("KeyRotateByAngle"))
+        assertTrue(body.contains("pitchDelta"))
+        assertTrue(body.contains("yawDelta"))
+        // 忽略标志必须为 pitchIgnored=false, rollIgnored=true, yawIgnored=false：
+        // yawIgnored=true 时水平对中修正会被云台静默丢弃（评审抓到过此回归）。
+        assertTrue(
+            "rotateGimbalBy ignore flags must keep pitch+yaw active (roll ignored only)",
+            Regex("""yawDelta,\s*false,\s*true,\s*false,""").containsMatchIn(body),
+        )
+    }
 }

@@ -880,6 +880,10 @@ class CommandPollingCoordinatorTest {
             actions += "gimbal_rotate:$pitch:$yaw:$roll"
         }
 
+        override suspend fun rotateGimbalBy(pitchDelta: Double, yawDelta: Double) {
+            actions += "gimbal_rotate_by:$pitchDelta:$yawDelta"
+        }
+
         override suspend fun rotateGimbalToPitch(pitch: Double) {
             actions += "gimbal_pitch:$pitch"
         }

@@ -91,6 +91,9 @@ interface GimbalActionClient {
         roll: Double,
     )
 
+    /** Angle-relative rotation (RELATIVE_ANGLE): pitchDelta/yawDelta are degrees; signs indicate direction. */
+    suspend fun rotateGimbalBy(pitchDelta: Double, yawDelta: Double)
+
     suspend fun rotateGimbalToPitch(pitch: Double)
 }
 
@@ -219,6 +222,26 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         )
         performAction(
             KeyTools.createKey(DJIGimbalKey.KeyRotateBySpeed, ComponentIndexType.LEFT_OR_MAIN),
+            rotation,
+        )
+    }
+
+    override suspend fun rotateGimbalBy(pitchDelta: Double, yawDelta: Double) {
+        // 对中修正需要 pitch 和 yaw 同时生效：仅忽略不可控的 roll（对照 resetGimbal 的标志位）。
+        val rotation = GimbalAngleRotation(
+            GimbalAngleRotationMode.RELATIVE_ANGLE,
+            pitchDelta,
+            0.0,
+            yawDelta,
+            false,
+            true,
+            false,
+            GIMBAL_RECENTER_DURATION_SEC,
+            false,
+            GIMBAL_RECENTER_TIMEOUT_SEC,
+        )
+        performAction(
+            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, ComponentIndexType.LEFT_OR_MAIN),
             rotation,
         )
     }
