@@ -9,6 +9,7 @@ import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
 
 import java.util.List;
+import java.util.Map;
 
 public interface IDualStreamService {
 
@@ -23,6 +24,8 @@ public interface IDualStreamService {
     List<DualStreamEventDTO> listEvents(String taskId);
 
     DualStreamCommandDTO issueCommand(String droneSn, String action);
+
+    DualStreamCommandDTO issueCommand(String droneSn, String action, Map<String, Object> params);
 
     DualStreamCommandDTO pollCommand(String droneSn);
 

@@ -38,6 +38,8 @@ public class DualStreamCommandDTO {
     @JsonProperty("thermal_image_url")
     private String thermalImageUrl;
 
+    private Map<String, Object> params;
+
     private Long issuedAt;
 
     private Long ackedAt;

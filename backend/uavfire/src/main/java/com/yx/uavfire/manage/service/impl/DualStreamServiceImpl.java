@@ -240,6 +240,11 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     @Override
     public DualStreamCommandDTO issueCommand(String droneSn, String action) {
+        return issueCommand(droneSn, action, null);
+    }
+
+    @Override
+    public DualStreamCommandDTO issueCommand(String droneSn, String action, Map<String, Object> params) {
         if (!StringUtils.hasText(droneSn) || !StringUtils.hasText(action)) {
             return null;
         }
@@ -248,6 +253,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setDroneSn(droneSn)
                 .setAction(action)
                 .setUrgent(isUrgentAction(action) ? Boolean.TRUE : null)
+                .setParams(params == null || params.isEmpty() ? null : new LinkedHashMap<>(params))
                 .setStatus("pending")
                 .setIssuedAt(System.currentTimeMillis());
         enqueueCommand(command);
@@ -1556,6 +1562,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setSourceTs(command.getSourceTs())
                 .setThermalMeasureRoi(command.getThermalMeasureRoi())
                 .setThermalImageUrl(command.getThermalImageUrl())
+                .setParams(command.getParams() == null ? null : new LinkedHashMap<>(command.getParams()))
                 .setIssuedAt(command.getIssuedAt())
                 .setAckedAt(command.getAckedAt());
     }

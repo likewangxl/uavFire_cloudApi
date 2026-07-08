@@ -59,6 +59,23 @@ class DualStreamServiceImplTest {
     }
 
     @Test
+    void issueCommand_preservesParamsThroughQueue() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+
+        DualStreamCommandDTO issued = service.issueCommand(
+                "DRONE-001",
+                "fire-confirmation-mission",
+                Map.of("lat", 34.6596, "lng", 109.3416, "taskId", "fire-DRONE-001"));
+        DualStreamCommandDTO pending = service.pollCommand("DRONE-001");
+
+        assertNotNull(issued.getParams());
+        assertNotNull(pending.getParams());
+        assertEquals(34.6596, ((Number) pending.getParams().get("lat")).doubleValue(), 1e-6);
+        assertEquals(109.3416, ((Number) pending.getParams().get("lng")).doubleValue(), 1e-6);
+        assertEquals("fire-DRONE-001", pending.getParams().get("taskId"));
+    }
+
+    @Test
     void issueCommand_marksThermalControlCommandsUrgent() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
 

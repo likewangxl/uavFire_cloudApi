@@ -104,6 +104,7 @@ public class FireEventServiceImpl implements FireEventService {
     private final OperationIncidentMapper operationIncidentMapper;
     private final IncidentStateMachine incidentStateMachine;
     private final Fc100ThermalProperties thermalProperties;
+    private final FireApproachDispatcher fireApproachDispatcher;
 
     @Value("${fc100.fire-event.dedup-enabled:true}")
     private boolean fireEventDedupEnabled = true;
@@ -117,7 +118,7 @@ public class FireEventServiceImpl implements FireEventService {
     public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
                                 MissionNoGenerator g, Clock c,
                                 IDeviceRedisService deviceRedisService) {
-        this(em, hm, mm, g, c, deviceRedisService, null, null, null, null, null);
+        this(em, hm, mm, g, c, deviceRedisService, null, null, null, null, null, null);
     }
 
     @Override
@@ -274,7 +275,19 @@ public class FireEventServiceImpl implements FireEventService {
                                 MissionNoGenerator g, Clock c,
                                 IDeviceRedisService deviceRedisService,
                                 FireGeoLocationService fireGeoLocationService) {
-        this(em, hm, mm, g, c, deviceRedisService, fireGeoLocationService, null, null, null, null);
+        this(em, hm, mm, g, c, deviceRedisService, fireGeoLocationService, null, null, null, null, null);
+    }
+
+    public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
+                                MissionNoGenerator g, Clock c,
+                                IDeviceRedisService deviceRedisService,
+                                FireGeoLocationService fireGeoLocationService,
+                                OperationIncidentService operationIncidentService,
+                                OperationIncidentMapper operationIncidentMapper,
+                                IncidentStateMachine incidentStateMachine,
+                                Fc100ThermalProperties thermalProperties) {
+        this(em, hm, mm, g, c, deviceRedisService, fireGeoLocationService, operationIncidentService,
+            operationIncidentMapper, incidentStateMachine, thermalProperties, null);
     }
 
     @Autowired
@@ -285,7 +298,8 @@ public class FireEventServiceImpl implements FireEventService {
                                 OperationIncidentService operationIncidentService,
                                 OperationIncidentMapper operationIncidentMapper,
                                 IncidentStateMachine incidentStateMachine,
-                                Fc100ThermalProperties thermalProperties) {
+                                Fc100ThermalProperties thermalProperties,
+                                FireApproachDispatcher fireApproachDispatcher) {
         this.eventMapper = em;
         this.historyMapper = hm;
         this.missionMapper = mm;
@@ -297,6 +311,7 @@ public class FireEventServiceImpl implements FireEventService {
         this.operationIncidentMapper = operationIncidentMapper;
         this.incidentStateMachine = incidentStateMachine;
         this.thermalProperties = thermalProperties != null ? thermalProperties : new Fc100ThermalProperties();
+        this.fireApproachDispatcher = fireApproachDispatcher;
     }
 
     @Override
@@ -332,7 +347,9 @@ public class FireEventServiceImpl implements FireEventService {
             boolean levelUpgraded = mergeIntoExisting(mergeCandidate, param, now);
             insertHistory(mergeCandidate, param, eventTs, now, "MERGED");
             String activeMissionNo = findActiveMissionNo(mergeCandidate.getId());
-            return new FireEventCreateResponse(
+            return createdResponse(
+                mergeCandidate,
+                new FireEventCreateResponse(
                 mergeCandidate.getId(),
                 mergeCandidate.getEventId(),
                 activeMissionNo != null,
@@ -343,7 +360,7 @@ public class FireEventServiceImpl implements FireEventService {
                 false,
                 true,
                 levelUpgraded,
-                levelUpgraded ? "LEVEL_UPGRADED" : "MERGED_NEARBY");
+                    levelUpgraded ? "LEVEL_UPGRADED" : "MERGED_NEARBY"));
         }
 
         FireEventEntity e = new FireEventEntity();
@@ -375,9 +392,16 @@ public class FireEventServiceImpl implements FireEventService {
         eventMapper.insert(e);
         insertHistory(e, param, eventTs, now, "CREATED");
 
-        return new FireEventCreateResponse(e.getId(), e.getEventId(),
-            false, null, e.getStatus(), true, false, true, "CREATED");
+        return createdResponse(e, new FireEventCreateResponse(e.getId(), e.getEventId(),
+            false, null, e.getStatus(), true, false, true, "CREATED"));
 
+    }
+
+    private FireEventCreateResponse createdResponse(FireEventEntity event, FireEventCreateResponse response) {
+        if (fireApproachDispatcher != null) {
+            fireApproachDispatcher.dispatchIfEligible(event);
+        }
+        return response;
     }
 
     @Override

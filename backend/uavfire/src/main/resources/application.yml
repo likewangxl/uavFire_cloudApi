@@ -235,6 +235,8 @@ fc100:
     dedup-enabled: ${FIRE_EVENT_DEDUP_ENABLED:true}
     dedup-radius-m: ${FIRE_EVENT_DEDUP_RADIUS_M:40}
     dedup-active-window-ms: ${FIRE_EVENT_DEDUP_WINDOW_MS:1800000}
+    auto-approach-enabled: ${FIRE_EVENT_AUTO_APPROACH_ENABLED:false}
+    auto-approach-cooldown-ms: ${FIRE_EVENT_AUTO_APPROACH_COOLDOWN_MS:600000}
   thermal:
     saturation-temp-c: ${FC100_THERMAL_SATURATION_TEMP_C:540}
   release:

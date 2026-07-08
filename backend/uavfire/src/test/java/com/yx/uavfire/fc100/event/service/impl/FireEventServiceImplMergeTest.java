@@ -16,7 +16,9 @@ import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
 import com.yx.uavfire.fc100.mission.model.enums.ReleasePolicy;
+import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.service.IDeviceRedisService;
+import com.yx.uavfire.manage.service.IDualStreamService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -31,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -45,12 +48,28 @@ class FireEventServiceImplMergeTest {
     private final MissionNoGenerator noGen = mock(MissionNoGenerator.class);
     private final Clock clock = mock(Clock.class);
     private final IDeviceRedisService redis = mock(IDeviceRedisService.class);
+    private final IDualStreamService dualStream = mock(IDualStreamService.class);
 
     private FireEventServiceImpl build() {
         when(clock.now()).thenReturn(1779163500000L);
         when(noGen.next()).thenReturn("M-001");
         when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of());
         return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis);
+    }
+
+    private FireEventServiceImpl buildWithApproachDispatcher(FireApproachDispatcher dispatcher) {
+        when(clock.now()).thenReturn(1779163500000L);
+        when(noGen.next()).thenReturn("M-001");
+        when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis,
+            null, null, null, null, null, dispatcher);
+    }
+
+    private FireApproachDispatcher dispatcher(boolean enabled) {
+        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock);
+        ReflectionTestUtils.setField(dispatcher, "autoApproachEnabled", enabled);
+        ReflectionTestUtils.setField(dispatcher, "autoApproachCooldownMs", 600000L);
+        return dispatcher;
     }
 
     @Test
@@ -162,6 +181,132 @@ class FireEventServiceImplMergeTest {
         assertEquals(FireEventStatus.CANDIDATE.name(), eventCaptor.getValue().getStatus());
         assertEquals("PENDING", eventCaptor.getValue().getConfirmedStatus());
         verify(missions, never()).insert(any(FireMissionEntity.class));
+    }
+
+    @Test
+    void auto_approach_dispatches_on_created_event() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        FireEventCreateParam p = param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L);
+        p.setAlt(88.5);
+        when(dualStream.issueCommand(any(), any(), any())).thenReturn(new DualStreamCommandDTO());
+
+        FireEventCreateResponse response = buildWithApproachDispatcher(dispatcher(true)).create(p);
+
+        assertEquals("CREATED", response.getNotificationReason());
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(dualStream).issueCommand(eq("DRONE-1"), eq("fire-confirmation-mission"), paramsCaptor.capture());
+        Map<String, Object> params = paramsCaptor.getValue();
+        assertEquals(34.659600, ((Number) params.get("lat")).doubleValue(), 1e-6);
+        assertEquals(109.341600, ((Number) params.get("lng")).doubleValue(), 1e-6);
+        assertEquals(88.5, ((Number) params.get("alt")).doubleValue(), 1e-6);
+        assertEquals("fire-DRONE-1", params.get("taskId"));
+    }
+
+    @Test
+    void auto_approach_dispatches_on_merged_event() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setEventId("fire-DRONE-1-1779163200000");
+        existing.setStatus(FireEventStatus.CANDIDATE.name());
+        existing.setAlt(66.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(dualStream.issueCommand(any(), any(), any())).thenReturn(new DualStreamCommandDTO());
+
+        FireEventCreateResponse response = buildWithApproachDispatcher(dispatcher(true))
+            .create(param("merge-event", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals("MERGED_NEARBY", response.getNotificationReason());
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(dualStream).issueCommand(eq("DRONE-1"), eq("fire-confirmation-mission"), paramsCaptor.capture());
+        Map<String, Object> params = paramsCaptor.getValue();
+        assertEquals(34.658600, ((Number) params.get("lat")).doubleValue(), 1e-6);
+        assertEquals(109.340600, ((Number) params.get("lng")).doubleValue(), 1e-6);
+        assertEquals(66.0, ((Number) params.get("alt")).doubleValue(), 1e-6);
+        assertEquals("fire-DRONE-1", params.get("taskId"));
+    }
+
+    @Test
+    void auto_approach_disabled_by_default() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock);
+
+        assertFalse((Boolean) ReflectionTestUtils.getField(dispatcher, "autoApproachEnabled"));
+        FireEventCreateResponse response = buildWithApproachDispatcher(dispatcher)
+            .create(param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals("CREATED", response.getNotificationReason());
+        verify(dualStream, never()).issueCommand(any(), any(), any());
+    }
+
+    @Test
+    void auto_approach_respects_cooldown() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setStatus(FireEventStatus.CANDIDATE.name());
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(dualStream.issueCommand(any(), any(), any())).thenReturn(new DualStreamCommandDTO());
+        FireEventServiceImpl service = buildWithApproachDispatcher(dispatcher(true));
+
+        service.create(param("merge-event-1", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
+        service.create(param("merge-event-2", 34.658660, 109.340660, "MEDIUM", "0.73", 1779163450000L));
+
+        verify(dualStream).issueCommand(any(), eq("fire-confirmation-mission"), any());
+    }
+
+    @Test
+    void auto_approach_skips_event_without_coordinates() {
+        FireEventEntity event = existingEvent(2L, 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L);
+        event.setStatus(FireEventStatus.CANDIDATE.name());
+        event.setLat(null);
+        event.setLng(null);
+
+        dispatcher(true).dispatchIfEligible(event);
+
+        verify(dualStream, never()).issueCommand(any(), any(), any());
+    }
+
+    @Test
+    void auto_approach_skips_mission_created_status() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FireEventCreateResponse response = buildWithApproachDispatcher(dispatcher(true))
+            .create(param("merge-event", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals("MERGED_NEARBY", response.getNotificationReason());
+        verify(dualStream, never()).issueCommand(any(), any(), any());
+    }
+
+    @Test
+    void dispatch_failure_does_not_break_create() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        when(dualStream.issueCommand(any(), any(), any())).thenThrow(new IllegalStateException("queue down"));
+
+        FireEventCreateResponse response = buildWithApproachDispatcher(dispatcher(true))
+            .create(param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals(2L, response.getFireEventId());
+        assertEquals("CREATED", response.getNotificationReason());
+        verify(dualStream).issueCommand(any(), eq("fire-confirmation-mission"), any());
     }
 
     @Test
