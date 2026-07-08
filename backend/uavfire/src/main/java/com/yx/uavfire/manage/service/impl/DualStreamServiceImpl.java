@@ -74,7 +74,8 @@ public class DualStreamServiceImpl implements IDualStreamService {
             "thermal-monitor-on",
             "focus-thermal",
             "focus-visible",
-            "measure-thermal-region"
+            "measure-thermal-region",
+            "fire-confirmation-mission"
     );
 
     private final Map<String, DualStreamLiveGroupDTO> groups = new ConcurrentHashMap<>();

@@ -9,8 +9,13 @@ import com.yinxin.uavfir.api.AgentReporter
 import com.yinxin.uavfir.api.AgentRuntimeLoop
 import com.yinxin.uavfir.api.CommandPollingCoordinator
 import com.yinxin.uavfir.api.CompositeCommandPoller
+import com.yinxin.uavfir.api.DjiAircraftLocationProvider
 import com.yinxin.uavfir.api.DjiFlightControlActionClient
 import com.yinxin.uavfir.api.DualStreamMsdkCommandExecutor
+import com.yinxin.uavfir.api.FireConfirmationAutoTrigger
+import com.yinxin.uavfir.api.FireConfirmationProcessor
+import com.yinxin.uavfir.api.FireConfirmationRequest
+import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.api.LegacyCommandDeduplicator
 import com.yinxin.uavfir.api.MissionHoldControl
 import com.yinxin.uavfir.api.ThermalDwellConfirmer
@@ -56,8 +61,10 @@ class AppServices(
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val thermalHotspotTriggerBridge = ThermalHotspotTriggerBridge()
+    private val fireConfirmationRunnerBridge = FireConfirmationRunnerBridge()
     private val sessionManager = DualStreamSessionManager(
         RealMsdkStreamProvider(hotspotCandidateListener = thermalHotspotTriggerBridge),
+        fireConfirmationRunner = fireConfirmationRunnerBridge::run,
     )
     private val flightControlClient = DjiFlightControlActionClient()
     private val msdkCommandExecutor = DualStreamMsdkCommandExecutor(
@@ -98,6 +105,20 @@ class AppServices(
         scope = appScope,
     )
     private val missionHoldControl = WaypointMissionHoldControl(waypointExecutor)
+    private val fireConfirmationProcessor = FireConfirmationProcessor(
+        sessionManager = sessionManager,
+        flightControl = flightControlClient,
+        gimbalControl = flightControlClient,
+        cameraControl = flightControlClient,
+        missionHold = missionHoldControl,
+        client = backendClient,
+        aircraftLocationProvider = { DjiAircraftLocationProvider.current() },
+    )
+    private val fireConfirmationAutoTrigger = FireConfirmationAutoTrigger(
+        processor = fireConfirmationProcessor,
+        scope = appScope,
+        fireLocationProvider = { DjiAircraftLocationProvider.current() },
+    )
     private val thermalHotspotMonitor = ThermalHotspotMonitor(
         client = backendClient,
         sessionManager = sessionManager,
@@ -106,6 +127,7 @@ class AppServices(
             missionHold = missionHoldControl,
         ),
         visibleConfirmationScope = appScope,
+        onConfirmedReport = fireConfirmationAutoTrigger::onConfirmedReport,
     )
     private val kmzHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -166,6 +188,7 @@ class AppServices(
     )
 
     init {
+        fireConfirmationRunnerBridge.runner = fireConfirmationProcessor::run
         thermalHotspotTriggerBridge.trigger = {
             activeThermalDroneSn()?.let { droneSn ->
                 thermalHotspotMonitor.onFrameHotspotCandidate(droneSn)
@@ -267,6 +290,16 @@ private class ThermalHotspotTriggerBridge : ThermalHotspotCandidateListener {
 
     override fun onThermalHotspotCandidate(regions: List<ThermalMeasureRegion>, timestampMs: Long) {
         trigger?.invoke()
+    }
+}
+
+private class FireConfirmationRunnerBridge {
+    @Volatile
+    var runner: (suspend (FireConfirmationRequest) -> FireConfirmationResult)? = null
+
+    suspend fun run(request: FireConfirmationRequest): FireConfirmationResult {
+        val delegate = runner ?: error("fire-confirmation-runner-not-wired")
+        return delegate(request)
     }
 }
 

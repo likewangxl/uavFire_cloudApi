@@ -497,13 +497,18 @@ class DualStreamMsdkCommandExecutor(
             "stop", "stop_stream", "stop-stream" -> "stop"
             "focus_visible", "focus-visible" -> "focus-visible"
             "focus_thermal", "focus-thermal" -> "focus-thermal"
+            "fire_confirmation_mission", "fire-confirmation-mission" -> "fire-confirmation-mission"
             else -> return MsdkCommandExecutionResult(
                 status = "FAILED",
                 message = "unsupported-msdk-command:${command.command}:executor-not-wired",
             )
         }
 
-        val result = dualStreamExecutor.executeCommand(aircraftSn, dualStreamAction)
+        val result = if (dualStreamAction == "fire-confirmation-mission") {
+            dualStreamExecutor.executeCommand(aircraftSn, dualStreamAction, command.params.orEmpty())
+        } else {
+            dualStreamExecutor.executeCommand(aircraftSn, dualStreamAction)
+        }
         return MsdkCommandExecutionResult(
             status = result.status.uppercase(Locale.US),
             message = result.message,

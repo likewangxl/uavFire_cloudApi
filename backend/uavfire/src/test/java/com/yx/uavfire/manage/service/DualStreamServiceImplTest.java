@@ -66,6 +66,7 @@ class DualStreamServiceImplTest {
         assertTrue(service.issueCommand("DRONE-FOCUS-THERMAL", "focus-thermal").getUrgent());
         assertTrue(service.issueCommand("DRONE-FOCUS-VISIBLE", "focus-visible").getUrgent());
         assertTrue(service.issueCommand("DRONE-MEASURE", "measure-thermal-region").getUrgent());
+        assertTrue(service.issueCommand("DRONE-FIRE-CONFIRM", "fire-confirmation-mission").getUrgent());
         assertNotEquals(Boolean.TRUE, service.issueCommand("DRONE-START", "start").getUrgent());
     }
 

@@ -1,6 +1,8 @@
 package com.yinxin.uavfir.session
 
 import com.yinxin.uavfir.api.AgentReporter
+import com.yinxin.uavfir.api.FireConfirmationRequest
+import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiDeviceState
 import com.yinxin.uavfir.stream.BoundStreamState
@@ -14,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class DualStreamSessionManager(
     private val streamProvider: StreamProvider,
+    private val fireConfirmationRunner: (suspend (FireConfirmationRequest) -> FireConfirmationResult)? = null,
 ) : DualStreamCommandExecutor {
     data class CommandExecutionResult(
         val status: String,
@@ -176,6 +179,36 @@ class DualStreamSessionManager(
         droneSn: String,
         action: String,
         thermalMeasureRegion: ThermalMeasureRegion?,
+    ): CommandExecutionResult = executeCommand(
+        droneSn = droneSn,
+        action = action,
+        thermalMeasureRegion = thermalMeasureRegion,
+        fireConfirmationRequest = null,
+    )
+
+    override suspend fun executeCommand(
+        droneSn: String,
+        action: String,
+        params: Map<String, Any?>,
+    ): CommandExecutionResult {
+        if (!action.equals("fire-confirmation-mission", ignoreCase = true)) {
+            return executeCommand(droneSn, action)
+        }
+        val request = params.toFireConfirmationRequest(droneSn)
+            ?: return CommandExecutionResult(status = "failed", message = "fire-confirmation-params-required")
+        return executeCommand(
+            droneSn = droneSn,
+            action = action,
+            thermalMeasureRegion = null,
+            fireConfirmationRequest = request,
+        )
+    }
+
+    suspend fun executeCommand(
+        droneSn: String,
+        action: String,
+        thermalMeasureRegion: ThermalMeasureRegion?,
+        fireConfirmationRequest: FireConfirmationRequest?,
     ): CommandExecutionResult = when (action.lowercase()) {
         "start" -> {
             start(droneSn)
@@ -310,11 +343,56 @@ class DualStreamSessionManager(
             },
         )
 
+        "fire-confirmation-mission" -> runCatching {
+            val runner = fireConfirmationRunner ?: error("fire-confirmation-runner-not-wired")
+            val request = fireConfirmationRequest ?: error("fire-confirmation-params-required")
+            runner(request)
+        }.fold(
+            onSuccess = { result ->
+                CommandExecutionResult(
+                    status = if (result.success) "applied" else "failed",
+                    message = result.failureReason ?: "fire-confirmation-${result.phaseReached.name.lowercase()}",
+                    thermalCenterTemperatureC = result.closeMeasureTemperatureC,
+                )
+            },
+            onFailure = {
+                CommandExecutionResult(
+                    status = "failed",
+                    message = it.message ?: "fire-confirmation-mission-failed",
+                )
+            },
+        )
+
         else -> CommandExecutionResult(
             status = "ignored",
             message = "unsupported-action:$action",
         )
     }
+}
+
+private fun Map<String, Any?>.toFireConfirmationRequest(droneSn: String): FireConfirmationRequest? {
+    val lat = this["lat"].asDoubleOrNull() ?: this["latitude"].asDoubleOrNull() ?: this["fireLat"].asDoubleOrNull()
+    val lng = this["lng"].asDoubleOrNull() ?: this["longitude"].asDoubleOrNull() ?: this["fireLng"].asDoubleOrNull()
+    if (lat == null || lng == null) {
+        return null
+    }
+    return FireConfirmationRequest(
+        droneSn = droneSn,
+        taskId = this["taskId"]?.toString()
+            ?: this["task_id"]?.toString()
+            ?: "fire-$droneSn",
+        fireLat = lat,
+        fireLng = lng,
+        fireAlt = this["alt"].asDoubleOrNull()
+            ?: this["altitude"].asDoubleOrNull()
+            ?: this["fireAlt"].asDoubleOrNull(),
+    )
+}
+
+private fun Any?.asDoubleOrNull(): Double? = when (this) {
+    is Number -> toDouble()
+    is String -> toDoubleOrNull()
+    else -> null
 }
 
 interface DualStreamCommandExecutor {
@@ -340,5 +418,11 @@ interface DualStreamCommandExecutor {
         droneSn: String,
         action: String,
         thermalMeasureRegion: ThermalMeasureRegion?,
+    ): DualStreamSessionManager.CommandExecutionResult = executeCommand(droneSn, action)
+
+    suspend fun executeCommand(
+        droneSn: String,
+        action: String,
+        params: Map<String, Any?>,
     ): DualStreamSessionManager.CommandExecutionResult = executeCommand(droneSn, action)
 }

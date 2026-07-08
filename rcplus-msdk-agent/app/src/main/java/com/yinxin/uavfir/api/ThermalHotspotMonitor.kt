@@ -28,6 +28,7 @@ class ThermalHotspotMonitor(
         sessionManager = sessionManager,
         missionHold = NoopMissionHoldControl,
     ),
+    private val onConfirmedReport: ((taskId: String, droneSn: String) -> Unit)? = null,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) : CommandPoller {
     private val probeMutex = Mutex()
@@ -160,6 +161,7 @@ class ThermalHotspotMonitor(
             thermalMeasurements = measurements,
             thermalImageUrl = thermalImageUrl,
         )
+        onConfirmedReport?.invoke(taskId, droneSn)
         if (thermalImageUrl.isNullOrBlank()) {
             launchThermalSnapshotRetry(
                 taskId = taskId,
