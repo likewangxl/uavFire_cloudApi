@@ -1,5 +1,9 @@
 package com.yx.uavfire.fc100.event.service.impl;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.dji.sdk.cloudapi.device.OsdDockDrone;
 import com.yx.uavfire.fc100.common.Clock;
@@ -24,6 +28,7 @@ import com.yx.uavfire.manage.service.IDeviceRedisService;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -136,6 +141,7 @@ class FireEventServiceImplMergeTest {
     @Test
     void create_skips_merge_when_window_expired() {
         FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163500000L - 1800001L);
+        existing.setStatus(FireEventStatus.CANDIDATE.name());
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
         when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
@@ -150,6 +156,188 @@ class FireEventServiceImplMergeTest {
         assertTrue(response.getCreated());
         assertFalse(response.getMerged());
         verify(events).insert(any(FireEventEntity.class));
+    }
+
+    @Test
+    void adaptive_radius_precise_pair_rejects_second_fire() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setGeoErrorRadiusM(5.0);
+        FireEventCreateParam preciseReport = param("precise-second-fire", 34.658825, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        preciseReport.setGeoErrorRadiusM(5.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        FireEventCreateResponse response = build().create(preciseReport);
+
+        assertEquals(2L, response.getFireEventId());
+        assertTrue(response.getCreated());
+        assertFalse(response.getMerged());
+        verify(events).insert(any(FireEventEntity.class));
+        verify(events, never()).updateById(any(FireEventEntity.class));
+    }
+
+    @Test
+    void adaptive_radius_coarse_pair_merges_wide() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setGeoErrorRadiusM(30.0);
+        FireEventCreateParam coarseReport = param("coarse-same-fire", 34.659049, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        coarseReport.setGeoErrorRadiusM(30.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FireEventCreateResponse response = build().create(coarseReport);
+
+        assertEquals(1L, response.getFireEventId());
+        assertTrue(response.getMerged());
+        assertFalse(response.getCreated());
+        verify(events).updateById(any(FireEventEntity.class));
+        verify(events, never()).insert(any(FireEventEntity.class));
+    }
+
+    @Test
+    void adaptive_radius_null_error_falls_back_to_base() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setGeoErrorRadiusM(null);
+        FireEventCreateParam reportWithoutError = param("base-radius-fallback", 34.658914, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        reportWithoutError.setGeoErrorRadiusM(5.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FireEventCreateResponse response = build().create(reportWithoutError);
+
+        assertEquals(1L, response.getFireEventId());
+        assertTrue(response.getMerged());
+        assertFalse(response.getCreated());
+        verify(events).updateById(any(FireEventEntity.class));
+        verify(events, never()).insert(any(FireEventEntity.class));
+    }
+
+    @Test
+    void adaptive_radius_clamped_to_max() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        existing.setGeoErrorRadiusM(50.0);
+        FireEventCreateParam distantReport = param("beyond-max-radius", 34.659229, 109.340600, "MEDIUM", "0.72", 1779163440000L);
+        distantReport.setGeoErrorRadiusM(50.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        FireEventCreateResponse response = build().create(distantReport);
+
+        assertEquals(2L, response.getFireEventId());
+        assertTrue(response.getCreated());
+        assertFalse(response.getMerged());
+        verify(events).insert(any(FireEventEntity.class));
+        verify(events, never()).updateById(any(FireEventEntity.class));
+    }
+
+    @Test
+    void mission_created_event_merges_beyond_window() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163500000L - 7200000L);
+        existing.setStatus(FireEventStatus.MISSION_CREATED.name());
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FireEventCreateResponse response = build().create(param("mission-created-recheck", 34.658780, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals(1L, response.getFireEventId());
+        assertTrue(response.getMerged());
+        assertFalse(response.getCreated());
+        verify(events).updateById(any(FireEventEntity.class));
+        verify(events, never()).insert(any(FireEventEntity.class));
+    }
+
+    @Test
+    void stale_new_event_outside_window_not_merged() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163500000L - 7200000L);
+        existing.setStatus(FireEventStatus.CANDIDATE.name());
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        FireEventCreateResponse response = build().create(param("stale-new-recheck", 34.658780, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertEquals(2L, response.getFireEventId());
+        assertTrue(response.getCreated());
+        assertFalse(response.getMerged());
+        verify(events).insert(any(FireEventEntity.class));
+        verify(events, never()).updateById(any(FireEventEntity.class));
+    }
+
+    @Test
+    void dedup_lock_acquired_and_released_for_created_path() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.acquireNamedLock("fire_event_dedup:DEFAULT", 3)).thenReturn(1);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+
+        FireEventCreateResponse response = build().create(param("lock-created", 34.658600, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertTrue(response.getCreated());
+        verify(events).acquireNamedLock("fire_event_dedup:DEFAULT", 3);
+        verify(events).releaseNamedLock("fire_event_dedup:DEFAULT");
+    }
+
+    @Test
+    void dedup_lock_acquired_and_released_for_merged_path() {
+        FireEventEntity existing = existingEvent(1L, 34.658600, 109.340600, "MEDIUM", "0.45", 1779163200000L);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.acquireNamedLock("fire_event_dedup:DEFAULT", 3)).thenReturn(1);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
+
+        FireEventCreateResponse response = build().create(param("lock-merged", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+
+        assertTrue(response.getMerged());
+        verify(events).acquireNamedLock("fire_event_dedup:DEFAULT", 3);
+        verify(events).releaseNamedLock("fire_event_dedup:DEFAULT");
+    }
+
+    @Test
+    void lock_timeout_proceeds_without_blocking() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.acquireNamedLock("fire_event_dedup:DEFAULT", 3)).thenReturn(0);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        Logger logger = (Logger) LoggerFactory.getLogger(FireEventServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+
+        FireEventCreateResponse response;
+        try {
+            response = build().create(param("lock-timeout", 34.658600, 109.340600, "MEDIUM", "0.72", 1779163440000L));
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        assertTrue(response.getCreated());
+        assertTrue(appender.list.stream().anyMatch(event ->
+            event.getLevel() == Level.WARN
+                && event.getFormattedMessage().contains("fire event spatial dedup lock not acquired")
+                && event.getFormattedMessage().contains("proceeding without lock")));
+        verify(events).acquireNamedLock("fire_event_dedup:DEFAULT", 3);
+        verify(events, never()).releaseNamedLock("fire_event_dedup:DEFAULT");
     }
 
     @Test

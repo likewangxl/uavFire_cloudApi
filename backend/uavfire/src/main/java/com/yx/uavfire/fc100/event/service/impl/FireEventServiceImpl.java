@@ -66,6 +66,8 @@ public class FireEventServiceImpl implements FireEventService {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String GEO_METHOD_LASER_RANGEFINDER = "LASER_RANGEFINDER";
     private static final String GEO_QUALITY_PRECISE = "PRECISE";
+    private static final String DEDUP_LOCK_PREFIX = "fire_event_dedup:";
+    private static final int DEDUP_LOCK_TIMEOUT_SECONDS = 3;
 
     /** 已绑定活跃任务的 mission 状态集合（用于同 eventId 去重） */
     private static final Set<String> ACTIVE_MISSION_STATUSES = Set.of(
@@ -113,6 +115,15 @@ public class FireEventServiceImpl implements FireEventService {
 
     @Value("${fc100.fire-event.dedup-radius-m:40}")
     private double fireEventDedupRadiusM = 40.0;
+
+    @Value("${fc100.fire-event.dedup-radius-margin-m:10}")
+    private double fireEventDedupRadiusMarginM = 10.0;
+
+    @Value("${fc100.fire-event.dedup-radius-min-m:15}")
+    private double fireEventDedupRadiusMinM = 15.0;
+
+    @Value("${fc100.fire-event.dedup-radius-max-m:60}")
+    private double fireEventDedupRadiusMaxM = 60.0;
 
     @Value("${fc100.fire-event.dedup-active-window-ms:1800000}")
     private long fireEventDedupActiveWindowMs = 30 * 60 * 1000L;
@@ -342,6 +353,38 @@ public class FireEventServiceImpl implements FireEventService {
         }
 
         long now = clock.now();
+        return createAfterEventIdDedup(param, eventTs, now, spatialDedupCoordinateEligible);
+
+    }
+
+    private FireEventCreateResponse createAfterEventIdDedup(
+        FireEventCreateParam param,
+        long eventTs,
+        long now,
+        boolean spatialDedupCoordinateEligible) {
+        if (fireEventDedupEnabled && spatialDedupCoordinateEligible) {
+            return createWithDedupLock(param, eventTs, now);
+        }
+        return createWithOptionalSpatialDedup(param, eventTs, now, spatialDedupCoordinateEligible);
+    }
+
+    private FireEventCreateResponse createWithDedupLock(FireEventCreateParam param, long eventTs, long now) {
+        String lockName = DEDUP_LOCK_PREFIX + workspaceIdOf(param);
+        boolean lockAcquired = acquireDedupLock(lockName);
+        try {
+            return createWithOptionalSpatialDedup(param, eventTs, now, true);
+        } finally {
+            if (lockAcquired) {
+                releaseDedupLock(lockName);
+            }
+        }
+    }
+
+    private FireEventCreateResponse createWithOptionalSpatialDedup(
+        FireEventCreateParam param,
+        long eventTs,
+        long now,
+        boolean spatialDedupCoordinateEligible) {
         FireEventEntity mergeCandidate = spatialDedupCoordinateEligible
             ? findNearbyActiveEvent(param, now)
             : null;
@@ -396,7 +439,40 @@ public class FireEventServiceImpl implements FireEventService {
 
         return createdResponse(e, new FireEventCreateResponse(e.getId(), e.getEventId(),
             false, null, e.getStatus(), true, false, true, "CREATED"));
+    }
 
+    private boolean acquireDedupLock(String lockName) {
+        try {
+            /*
+             * MySQL named locks are connection-scoped. create() is @Transactional, and MyBatis-Spring
+             * binds one SqlSession/Connection to that transaction, so GET_LOCK and RELEASE_LOCK run on
+             * the same pooled connection. Without this transaction boundary, separate mapper calls could
+             * borrow different connections and RELEASE_LOCK would not necessarily release the acquired lock.
+             * The lock lives in MySQL, so it also serializes future multi-instance deployments.
+             */
+            Integer acquired = eventMapper.acquireNamedLock(lockName, DEDUP_LOCK_TIMEOUT_SECONDS);
+            if (Integer.valueOf(1).equals(acquired)) {
+                return true;
+            }
+            log.warn("fire event spatial dedup lock not acquired lockName={} result={}, proceeding without lock",
+                lockName, acquired);
+        } catch (Exception e) {
+            log.warn("fire event spatial dedup lock acquire failed lockName={}, proceeding without lock",
+                lockName, e);
+        }
+        return false;
+    }
+
+    private void releaseDedupLock(String lockName) {
+        try {
+            Integer released = eventMapper.releaseNamedLock(lockName);
+            if (!Integer.valueOf(1).equals(released)) {
+                log.warn("fire event spatial dedup lock release returned non-success lockName={} result={}",
+                    lockName, released);
+            }
+        } catch (Exception e) {
+            log.warn("fire event spatial dedup lock release failed lockName={}", lockName, e);
+        }
     }
 
     private FireEventCreateResponse createdResponse(FireEventEntity event, FireEventCreateResponse response) {
@@ -558,22 +634,24 @@ public class FireEventServiceImpl implements FireEventService {
     }
 
     /**
-     * Single-instance deployment assumption: concurrent reporters can still race on multi-instance deployments,
-     * which would need a distributed lock. Future larger datasets can add idx_fire_event_workspace_lastseen.
+     * Future larger datasets can add idx_fire_event_workspace_lastseen.
      */
     private FireEventEntity findNearbyActiveEvent(FireEventCreateParam param, long now) {
         if (!fireEventDedupEnabled || param.getLat() == null || param.getLng() == null) {
             return null;
         }
-        double latDelta = fireEventDedupRadiusM / 111320.0;
+        double prefilterRadiusM = dedupPrefilterRadiusM();
+        double latDelta = prefilterRadiusM / 111320.0;
         double cos = Math.cos(Math.toRadians(param.getLat()));
-        double lngDelta = fireEventDedupRadiusM / (111320.0 * Math.max(Math.abs(cos), 1e-6));
+        double lngDelta = prefilterRadiusM / (111320.0 * Math.max(Math.abs(cos), 1e-6));
         long activeSince = now - fireEventDedupActiveWindowMs;
         List<FireEventEntity> candidates = eventMapper.selectList(new QueryWrapper<FireEventEntity>()
             .eq("workspace_id", workspaceIdOf(param))
             .eq("deleted", 0)
             .ne("status", FireEventStatus.IGNORED.name())
-            .ge("last_seen_time", activeSince)
+            .and(w -> w.ge("last_seen_time", activeSince)
+                .or()
+                .eq("status", FireEventStatus.MISSION_CREATED.name()))
             .isNotNull("lat")
             .isNotNull("lng")
             .between("lat", param.getLat() - latDelta, param.getLat() + latDelta)
@@ -592,17 +670,39 @@ public class FireEventServiceImpl implements FireEventService {
                 || !workspaceIdOf(param).equals(candidate.getWorkspaceId())) {
                 continue;
             }
+            boolean missionCreated = FireEventStatus.MISSION_CREATED.name().equals(candidate.getStatus());
             Long candidateLastSeen = candidate.getLastSeenTime();
-            if (candidateLastSeen == null || candidateLastSeen < activeSince) {
+            if (!missionCreated && (candidateLastSeen == null || candidateLastSeen < activeSince)) {
                 continue;
             }
             double distance = distanceMeters(param.getLat(), param.getLng(), candidate.getLat(), candidate.getLng());
-            if (distance <= fireEventDedupRadiusM && distance < bestDistance) {
+            double threshold = adaptiveDedupThresholdM(param, candidate);
+            if (distance <= threshold && distance < bestDistance) {
                 best = candidate;
                 bestDistance = distance;
             }
         }
         return best;
+    }
+
+    private double dedupPrefilterRadiusM() {
+        return Math.max(fireEventDedupRadiusM, fireEventDedupRadiusMaxM);
+    }
+
+    private double adaptiveDedupThresholdM(FireEventCreateParam param, FireEventEntity candidate) {
+        Double reportError = param.getGeoErrorRadiusM();
+        Double candidateError = candidate.getGeoErrorRadiusM();
+        if (reportError == null || candidateError == null) {
+            return fireEventDedupRadiusM;
+        }
+        return clamp(reportError + candidateError + fireEventDedupRadiusMarginM,
+            fireEventDedupRadiusMinM, fireEventDedupRadiusMaxM);
+    }
+
+    private double clamp(double value, double min, double max) {
+        double lower = Math.min(min, max);
+        double upper = Math.max(min, max);
+        return Math.max(lower, Math.min(upper, value));
     }
 
     private boolean mergeIntoExisting(FireEventEntity existing, FireEventCreateParam param, long now) {

@@ -234,6 +234,9 @@ fc100:
   fire-event:
     dedup-enabled: ${FIRE_EVENT_DEDUP_ENABLED:true}
     dedup-radius-m: ${FIRE_EVENT_DEDUP_RADIUS_M:40}
+    dedup-radius-margin-m: ${FIRE_EVENT_DEDUP_RADIUS_MARGIN_M:10}
+    dedup-radius-min-m: ${FIRE_EVENT_DEDUP_RADIUS_MIN_M:15}
+    dedup-radius-max-m: ${FIRE_EVENT_DEDUP_RADIUS_MAX_M:60}
     dedup-active-window-ms: ${FIRE_EVENT_DEDUP_WINDOW_MS:1800000}
     auto-approach-enabled: ${FIRE_EVENT_AUTO_APPROACH_ENABLED:false}
     auto-approach-cooldown-ms: ${FIRE_EVENT_AUTO_APPROACH_COOLDOWN_MS:600000}
