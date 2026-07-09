@@ -77,6 +77,84 @@ def test_build_thermal_analyzer_returns_hotspot_when_continuous_runner_enabled()
     assert isinstance(analyzer, HotSpotThermalAnalyzer)
 
 
+def test_build_thermal_analyzer_default_mode_stays_brightness_for_zero_behavior_change():
+    settings = Settings(use_continuous_runner=True)
+    assert settings.thermal_detector_mode == "brightness"
+
+    analyzer = _build_thermal_analyzer(settings)
+
+    from app.inference.thermal.analyzer import HotSpotThermalAnalyzer
+
+    assert isinstance(analyzer, HotSpotThermalAnalyzer)
+
+
+def test_build_thermal_analyzer_returns_yolo_when_mode_and_model_path_set(tmp_path):
+    model_path = tmp_path / "best.pt"
+    model_path.write_bytes(b"fake")
+    settings = Settings(
+        use_continuous_runner=True,
+        thermal_detector_mode="yolo",
+        thermal_yolo_model_path=str(model_path),
+        thermal_yolo_imgsz=512,
+        thermal_yolo_conf_threshold=0.33,
+    )
+
+    analyzer = _build_thermal_analyzer(settings)
+
+    from app.inference.thermal.analyzer import YoloThermalAnalyzer
+
+    assert isinstance(analyzer, YoloThermalAnalyzer)
+    assert analyzer._imgsz == 512
+    assert analyzer._conf_threshold == 0.33
+
+
+def test_build_thermal_analyzer_returns_max_when_mode_and_model_path_set(tmp_path):
+    model_path = tmp_path / "best.pt"
+    model_path.write_bytes(b"fake")
+    settings = Settings(
+        use_continuous_runner=True,
+        thermal_detector_mode="max",
+        thermal_yolo_model_path=str(model_path),
+    )
+
+    analyzer = _build_thermal_analyzer(settings)
+
+    from app.inference.thermal.analyzer import HotSpotThermalAnalyzer, MaxThermalAnalyzer, YoloThermalAnalyzer
+
+    assert isinstance(analyzer, MaxThermalAnalyzer)
+    assert any(isinstance(child, HotSpotThermalAnalyzer) for child in analyzer._analyzers)
+    assert any(isinstance(child, YoloThermalAnalyzer) for child in analyzer._analyzers)
+
+
+def test_build_thermal_analyzer_yolo_empty_path_warns_and_falls_back_to_brightness(caplog):
+    settings = Settings(use_continuous_runner=True, thermal_detector_mode="yolo", thermal_yolo_model_path="")
+
+    with caplog.at_level("WARNING"):
+        analyzer = _build_thermal_analyzer(settings)
+
+    from app.inference.thermal.analyzer import HotSpotThermalAnalyzer
+
+    assert isinstance(analyzer, HotSpotThermalAnalyzer)
+    assert "thermal_detector_mode=yolo requested but model path is empty" in caplog.text
+
+
+def test_build_thermal_analyzer_max_missing_path_warns_and_falls_back_to_brightness(tmp_path, caplog):
+    missing_path = tmp_path / "missing.pt"
+    settings = Settings(
+        use_continuous_runner=True,
+        thermal_detector_mode="max",
+        thermal_yolo_model_path=str(missing_path),
+    )
+
+    with caplog.at_level("WARNING"):
+        analyzer = _build_thermal_analyzer(settings)
+
+    from app.inference.thermal.analyzer import HotSpotThermalAnalyzer
+
+    assert isinstance(analyzer, HotSpotThermalAnalyzer)
+    assert "thermal_detector_mode=max requested but model path does not exist" in caplog.text
+
+
 def test_build_thermal_analyzer_returns_stub_when_continuous_runner_disabled():
     settings = Settings(use_continuous_runner=False)
     analyzer = _build_thermal_analyzer(settings)

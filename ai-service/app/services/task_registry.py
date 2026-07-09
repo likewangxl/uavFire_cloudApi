@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, TYPE_CHECKING
 
@@ -379,12 +380,56 @@ def _get_cached_visible_detector(settings: Settings):
 
 def _build_thermal_analyzer(settings: Settings):
     if settings.use_continuous_runner:
-        from app.inference.thermal.analyzer import HotSpotThermalAnalyzer
+        from app.inference.thermal.analyzer import (
+            HotSpotThermalAnalyzer,
+            MaxThermalAnalyzer,
+            YoloThermalAnalyzer,
+        )
 
-        return HotSpotThermalAnalyzer(
+        brightness = HotSpotThermalAnalyzer(
             intensity_threshold=settings.thermal_intensity_threshold,
             saturation_ratio=settings.thermal_saturation_ratio,
         )
+        mode = settings.thermal_detector_mode.lower()
+        if mode == "brightness":
+            return brightness
+        if mode not in {"yolo", "max"}:
+            logger.warning("unknown thermal_detector_mode=%s; falling back to brightness", settings.thermal_detector_mode)
+            return brightness
+        model_path = settings.thermal_yolo_model_path
+        if not model_path:
+            logger.warning(
+                "thermal_detector_mode=%s requested but model path is empty; falling back to brightness",
+                mode,
+            )
+            return brightness
+        if not Path(model_path).is_file():
+            logger.warning(
+                "thermal_detector_mode=%s requested but model path does not exist: %s; falling back to brightness",
+                mode,
+                model_path,
+            )
+            return brightness
+        yolo = YoloThermalAnalyzer(
+            model_path=model_path,
+            imgsz=settings.thermal_yolo_imgsz,
+            conf_threshold=settings.thermal_yolo_conf_threshold,
+        )
+        if mode == "yolo":
+            logger.info(
+                "thermal_analyzer=YoloThermalAnalyzer model=%s conf=%s imgsz=%s",
+                model_path,
+                settings.thermal_yolo_conf_threshold,
+                settings.thermal_yolo_imgsz,
+            )
+            return yolo
+        logger.info(
+            "thermal_analyzer=MaxThermalAnalyzer model=%s conf=%s imgsz=%s",
+            model_path,
+            settings.thermal_yolo_conf_threshold,
+            settings.thermal_yolo_imgsz,
+        )
+        return MaxThermalAnalyzer([brightness, yolo])
     from app.inference.thermal.analyzer import StubThermalAnalyzer
 
     return StubThermalAnalyzer()

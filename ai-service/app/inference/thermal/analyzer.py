@@ -1,7 +1,13 @@
-from typing import Any, Callable, Optional, Protocol, Tuple
+import logging
+from dataclasses import dataclass
+from threading import Lock
+from typing import Any, Callable, Iterable, Optional, Protocol, Tuple
 
 from app.models.event import ThermalMeasureRoi
 from app.models.frame import FramePacket
+
+
+logger = logging.getLogger(__name__)
 
 
 class ThermalAnalyzer(Protocol):
@@ -9,6 +15,17 @@ class ThermalAnalyzer(Protocol):
 
     def analyze(self, frame: FramePacket) -> float:
         ...
+
+
+@dataclass(frozen=True)
+class ThermalDetection:
+    """Normalized thermal detection box."""
+
+    cx: float
+    cy: float
+    w: float
+    h: float
+    conf: float
 
 
 class StubThermalAnalyzer:
@@ -58,6 +75,209 @@ class HotSpotThermalAnalyzer:
         if self._saturation_ratio <= 0:
             return 1.0 if hot_ratio > 0 else 0.0
         return min(hot_ratio / self._saturation_ratio, 1.0)
+
+
+class YoloThermalAnalyzer:
+    """ultralytics YOLO thermal fire detector implementing ThermalAnalyzer."""
+
+    def __init__(
+        self,
+        model_path: str,
+        imgsz: int = 640,
+        conf_threshold: float = 0.25,
+        predictor: Optional[Callable[..., Any]] = None,
+    ) -> None:
+        self._model_path = model_path
+        self._imgsz = int(imgsz)
+        self._conf_threshold = float(conf_threshold)
+        self._predictor = predictor
+        self._model: Optional[Any] = None
+        self._model_lock = Lock()
+        self._broken = False
+        self._last_detections: list[ThermalDetection] = []
+
+    def load(self) -> bool:
+        if self._broken:
+            return False
+        try:
+            self._ensure_predictor()
+            return True
+        except Exception:
+            self._mark_broken()
+            return False
+
+    def analyze(self, frame: FramePacket) -> float:
+        self._last_detections = []
+        if frame.channel != "thermal" or frame.frame is None or self._broken:
+            return 0.0
+        try:
+            predictor = self._ensure_predictor()
+            results = predictor(
+                frame.frame,
+                verbose=False,
+                conf=self._conf_threshold,
+                imgsz=self._imgsz,
+            )
+            detections = _thermal_detections_from_yolo_results(
+                results,
+                frame.frame,
+                confidence_floor=self._conf_threshold,
+            )
+            self._last_detections = detections
+            if not detections:
+                return 0.0
+            return max(det.conf for det in detections)
+        except Exception:
+            self._mark_broken()
+            return 0.0
+
+    @property
+    def last_detections(self) -> list[ThermalDetection]:
+        return list(self._last_detections)
+
+    def _ensure_predictor(self) -> Callable[..., Any]:
+        if self._predictor is not None:
+            return self._predictor
+        with self._model_lock:
+            if self._predictor is None:
+                factory = _default_thermal_yolo_model_factory()
+                self._model = factory(self._model_path)
+                self._predictor = self._model.predict
+        return self._predictor
+
+    def _mark_broken(self) -> None:
+        if not self._broken:
+            logger.warning(
+                "thermal YOLO inference failed; disabling analyzer model=%s",
+                self._model_path,
+                exc_info=True,
+            )
+        self._broken = True
+        self._last_detections = []
+
+
+class MaxThermalAnalyzer:
+    """Thermal analyzer composition that returns the maximum child score."""
+
+    def __init__(self, analyzers: Iterable[ThermalAnalyzer]) -> None:
+        self._analyzers = list(analyzers)
+
+    def analyze(self, frame: FramePacket) -> float:
+        peak = 0.0
+        for analyzer in self._analyzers:
+            peak = max(peak, float(analyzer.analyze(frame)))
+        return peak
+
+
+def _default_thermal_yolo_model_factory() -> Callable[[str], Any]:
+    from ultralytics import YOLO
+
+    return lambda path: YOLO(path)
+
+
+def _thermal_detections_from_yolo_results(
+    results: Any,
+    frame: Any,
+    confidence_floor: float,
+) -> list[ThermalDetection]:
+    detections: list[ThermalDetection] = []
+    for result in results or []:
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            continue
+        names = getattr(result, "names", {}) or {}
+        cls_seq = _to_python_iterable(getattr(boxes, "cls", []))
+        conf_seq = _to_python_iterable(getattr(boxes, "conf", []))
+        xywhn_seq = _to_python_iterable(getattr(boxes, "xywhn", None))
+        xywh_seq = _to_python_iterable(getattr(boxes, "xywh", []))
+        if xywhn_seq:
+            box_seq = xywhn_seq
+            normalized = True
+        else:
+            box_seq = xywh_seq
+            normalized = False
+        width, height = _result_dimensions(result, frame)
+        for cls_value, conf_value, box_value in zip(cls_seq, conf_seq, box_seq):
+            confidence = float(_unwrap_scalar(conf_value))
+            if confidence < confidence_floor:
+                continue
+            cls_idx = int(_unwrap_scalar(cls_value))
+            if not _is_fire_class(cls_idx, names):
+                continue
+            box = list(_to_python_iterable(box_value))
+            if len(box) < 4:
+                continue
+            cx = float(_unwrap_scalar(box[0]))
+            cy = float(_unwrap_scalar(box[1]))
+            w = float(_unwrap_scalar(box[2]))
+            h = float(_unwrap_scalar(box[3]))
+            if not normalized:
+                if width <= 0 or height <= 0:
+                    continue
+                cx /= width
+                w /= width
+                cy /= height
+                h /= height
+            detections.append(
+                ThermalDetection(
+                    cx=round(_clamp01(cx), 6),
+                    cy=round(_clamp01(cy), 6),
+                    w=round(_clamp01(w), 6),
+                    h=round(_clamp01(h), 6),
+                    conf=round(confidence, 6),
+                )
+            )
+    return detections
+
+
+def _is_fire_class(cls_idx: int, names: Any) -> bool:
+    if isinstance(names, dict):
+        if cls_idx in names:
+            return str(names[cls_idx]).lower() == "fire"
+        str_key = str(cls_idx)
+        if str_key in names:
+            return str(names[str_key]).lower() == "fire"
+        return cls_idx == 0
+    try:
+        return str(names[cls_idx]).lower() == "fire"
+    except Exception:
+        return cls_idx == 0
+
+
+def _result_dimensions(result: Any, frame: Any) -> Tuple[int, int]:
+    orig_shape = getattr(result, "orig_shape", None)
+    if orig_shape is not None and len(orig_shape) >= 2:
+        return int(orig_shape[1]), int(orig_shape[0])
+    shape = getattr(frame, "shape", None)
+    if shape is not None and len(shape) >= 2:
+        return int(shape[1]), int(shape[0])
+    return 0, 0
+
+
+def _clamp01(value: float) -> float:
+    return min(max(value, 0.0), 1.0)
+
+
+def _to_python_iterable(value: Any) -> Iterable[Any]:
+    if value is None:
+        return []
+    tolist = getattr(value, "tolist", None)
+    if callable(tolist):
+        try:
+            return tolist()
+        except Exception:
+            pass
+    return list(value)
+
+
+def _unwrap_scalar(value: Any) -> Any:
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except Exception:
+            pass
+    return value
 
 
 def _default_intensity_extractor() -> Callable[[Any], Any]:

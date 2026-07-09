@@ -111,6 +111,34 @@ cd ai-service
 
 脚本会下载 Wikimedia Commons 的 `Fire fire flames.jpg` 火焰图、`Amazon green forest.jpg` 森林图和 `Fire flames 9652 Nevit.ogv` 火焰视频到 `/tmp/uavfire-online-media`。如果本机有 `ffmpeg`，脚本会把 OGV 转成 5 秒 MP4 后作为 visible stream 创建任务，并打印 AI 服务事件与后端回传事件。
 
+## 热红外 YOLO 权重接入
+
+热红外检测默认仍使用原亮度启发式，零配置部署与基线行为一致：
+
+```dotenv
+AI_SERVICE_THERMAL_DETECTOR_MODE=brightness
+```
+
+可选模式：
+
+- `brightness`：只使用现有热像热点亮度分析器。
+- `yolo`：只使用热红外 YOLO 模型。
+- `max`：同时运行亮度分析器和 YOLO，取两者较大置信度。
+
+接入本轮 v2 热红外模型时，环境变量示例：
+
+```dotenv
+AI_SERVICE_USE_CONTINUOUS_RUNNER=true
+AI_SERVICE_THERMAL_DETECTOR_MODE=max
+AI_SERVICE_THERMAL_YOLO_MODEL_PATH=E:\uavfire-training\thermal\runs\thermal-fire-yolov8n-640-v2-20260708\weights\best.pt
+AI_SERVICE_THERMAL_YOLO_IMGSZ=640
+AI_SERVICE_THERMAL_YOLO_CONF_THRESHOLD=0.25
+```
+
+权重文件保留在训练输出目录，不复制进仓库。后续换新模型时保持模式不变，只需要把
+`AI_SERVICE_THERMAL_YOLO_MODEL_PATH` 改成新的 `best.pt` 路径。若 `yolo` 或 `max`
+模式下路径为空或文件不存在，服务会记录 warning 并降级到 `brightness`，保证进程可启动。
+
 ## ZLM RTSP 直播流跑火情识别
 
 `scripts/run-dev.sh` 现在会自动 `source .env`，所以可以把所有配置写在 `ai-service/.env` 里：
