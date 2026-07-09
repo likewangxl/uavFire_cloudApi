@@ -12,6 +12,7 @@ class ThermalDwellConfirmer(
     private val stabilizeMs: Long = DEFAULT_STABILIZE_MS,
     private val sampleCount: Int = DEFAULT_SAMPLE_COUNT,
     private val sampleIntervalMs: Long = DEFAULT_SAMPLE_INTERVAL_MS,
+    private val failureGraceAttempts: Int = DEFAULT_FAILURE_GRACE_ATTEMPTS,
     private val confirmMinHits: Int = DEFAULT_CONFIRM_MIN_HITS,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) {
@@ -39,11 +40,15 @@ class ThermalDwellConfirmer(
             delay(stabilizeMs)
 
             val additionalSamples = (sampleCount - 1).coerceAtLeast(0)
-            repeat(additionalSamples) { index ->
+            val maxAttempts = additionalSamples + failureGraceAttempts.coerceAtLeast(0)
+            var validAdditionalSamples = 0
+            var attempts = 0
+            while (validAdditionalSamples < additionalSamples && attempts < maxAttempts) {
+                attempts += 1
                 val result = runCatching {
                     sessionManager.measureThermalHotspot(droneSn, seedRegion)
                 }.getOrElse {
-                    warn("dwell measure threw drone=$droneSn sample=${index + 2} message=${it.message}", it)
+                    warn("dwell measure threw drone=$droneSn sample=${validAdditionalSamples + 2} attempt=$attempts message=${it.message}", it)
                     DualStreamSessionManager.CommandExecutionResult(
                         status = "failed",
                         message = it.message,
@@ -59,6 +64,7 @@ class ThermalDwellConfirmer(
                         atMs = clockMs(),
                     )
                     samples += sample
+                    validAdditionalSamples += 1
                     if (temperature >= thresholdC) {
                         hitCount += 1
                     }
@@ -66,8 +72,8 @@ class ThermalDwellConfirmer(
                 } else {
                     consecutiveFailures += 1
                     warn(
-                        "dwell sample failed drone=$droneSn sample=${index + 2} " +
-                            "status=${result.status} message=${result.message}",
+                        "dwell sample failed drone=$droneSn sample=${validAdditionalSamples + 2} " +
+                            "attempt=$attempts status=${result.status} message=${result.message}",
                     )
                     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
                         return buildResult(
@@ -79,7 +85,7 @@ class ThermalDwellConfirmer(
                     }
                 }
 
-                if (index + 1 < additionalSamples) {
+                if (validAdditionalSamples < additionalSamples && attempts < maxAttempts) {
                     delay(sampleIntervalMs)
                 }
             }
@@ -132,6 +138,7 @@ class ThermalDwellConfirmer(
         const val DEFAULT_STABILIZE_MS: Long = 2_000L
         const val DEFAULT_SAMPLE_COUNT: Int = 4
         const val DEFAULT_SAMPLE_INTERVAL_MS: Long = 1_500L
+        const val DEFAULT_FAILURE_GRACE_ATTEMPTS: Int = 2
         const val DEFAULT_CONFIRM_MIN_HITS: Int = 3
         private const val MAX_CONSECUTIVE_FAILURES: Int = 2
     }

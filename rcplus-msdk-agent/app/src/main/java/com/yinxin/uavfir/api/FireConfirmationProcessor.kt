@@ -4,6 +4,7 @@ import android.util.Log
 import com.yinxin.uavfir.session.DualStreamSessionManager
 import com.yinxin.uavfir.stream.ThermalMeasuredPoint
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
+import dji.sdk.keyvalue.key.BatteryKey
 import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.DJIKey
 import dji.sdk.keyvalue.key.FlightControllerKey
@@ -33,7 +34,6 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
-import kotlin.math.max
 import kotlin.math.sin
 
 enum class FireConfirmationPhase {
@@ -112,6 +112,14 @@ object NoopWindProvider : WindProvider {
     override suspend fun currentWind(): WindReading? = null
 }
 
+interface BatteryProvider {
+    fun currentPercent(): Int?
+}
+
+object NoopBatteryProvider : BatteryProvider {
+    override fun currentPercent(): Int? = null
+}
+
 class FireConfirmationProcessor(
     private val sessionManager: DualStreamSessionManager,
     private val flightControl: FlightControlActionClient,
@@ -127,8 +135,10 @@ class FireConfirmationProcessor(
     private val visibleZoomRatio: Double = DEFAULT_VISIBLE_ZOOM,
     private val resetRetryCount: Int = DEFAULT_RESET_RETRIES,
     private val visibleSnapshotConfirmer: VisibleSnapshotConfirmer = AiServiceVisibleSnapshotConfirmer(),
+    private val snapshotUploader: ThermalSnapshotUploader = AiServiceThermalSnapshotUploader(),
     private val laserRangefinder: LaserRangefinderClient = DjiLaserRangefinderClient(),
     private val windProvider: WindProvider = DjiWindProvider(),
+    private val batteryProvider: BatteryProvider = DjiBatteryProvider(),
     private val approachLegsM: List<Double> = DEFAULT_APPROACH_LEGS,
     private val orbitBearingCount: Int = DEFAULT_ORBIT_BEARING_COUNT,
     private val orbitPerPointLaserSamples: Int = DEFAULT_ORBIT_PER_POINT_LASER_SAMPLES,
@@ -145,6 +155,11 @@ class FireConfirmationProcessor(
     private val laserMinNormalSamples: Int = DEFAULT_LASER_MIN_NORMAL_SAMPLES,
     private val laserScatterLimitM: Double = DEFAULT_LASER_SCATTER_LIMIT_M,
     private val laserGeoErrorRadiusM: Double = DEFAULT_LASER_GEO_ERROR_RADIUS_M,
+    private val maxFixDisplacementM: Double = DEFAULT_MAX_FIX_DISPLACEMENT_M,
+    private val minBatteryPercentToStart: Int = DEFAULT_MIN_BATTERY_PERCENT_TO_START,
+    private val maxMissionDurationMs: Long = DEFAULT_MAX_MISSION_DURATION_MS,
+    private val divergenceAbortM: Double = DEFAULT_DIVERGENCE_ABORT_M,
+    private val visibleConfirmAtUpwind: Boolean = true,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) {
     private val running = AtomicBoolean(false)
@@ -175,19 +190,38 @@ class FireConfirmationProcessor(
         var legsCompleted = 0
         var thermalReported = false
         var resetCompleted = false
+        val missionStartMs = clockMs()
 
         val coreResult = try {
             sessionManager.thermalMonitoringEnabled = false
             runCatching { missionHold.holdForConfirmation() }
                 .onFailure { warn("mission hold failed task=${request.taskId} message=${it.message}", it) }
 
+            val batteryPercent = runCatching { batteryProvider.currentPercent() }
+                .onFailure { warn("battery read failed task=${request.taskId} message=${it.message}", it) }
+                .getOrNull()
+            if (batteryPercent != null && batteryPercent < minBatteryPercentToStart) {
+                failureReason = "battery-below-threshold"
+                throw FireConfirmationEarlyAbort()
+            }
+
             val legs = approachLegsM.filter { it > 0.0 }.ifEmpty { listOf(standoffHorizontalM) }
             var target = AircraftLocation(request.fireLat, request.fireLng, request.fireAlt ?: 0.0)
             var finalCloseMeasure: CloseMeasureResult? = null
             var finalThermalResult: DualStreamSessionManager.CommandExecutionResult? = null
             var aborted = false
+            var skipOrbit = false
 
             for ((index, legM) in legs.withIndex()) {
+                if (missionDurationExceeded(missionStartMs)) {
+                    failureReason = "mission-duration-exceeded"
+                    if (finalThermalResult != null) {
+                        skipOrbit = true
+                    } else {
+                        aborted = true
+                    }
+                    break
+                }
                 phaseReached = FireConfirmationPhase.FLY_TO
                 val flyToTarget = flyToStandoffPoint(target, legM)
                 if (flyToTarget == null) {
@@ -226,7 +260,12 @@ class FireConfirmationProcessor(
                     measureResult.thermalCenterTemperatureC == null ||
                     measureResult.thermalMeasureRegion == null
                 ) {
-                    if (finalLeg) {
+                    if (finalLeg && finalThermalResult != null) {
+                        warn("final-leg-measure-degraded task=${request.taskId} leg=${index + 1}")
+                        failureReason = "final-leg-measure-degraded"
+                        skipOrbit = true
+                        break
+                    } else if (finalLeg) {
                         failureReason = "thermal-close-measure-failed"
                         aborted = true
                         break
@@ -242,7 +281,7 @@ class FireConfirmationProcessor(
                     .onSuccess { fix ->
                         if (fix != null) {
                             laserFix = fix
-                            target = AircraftLocation(fix.latitude, fix.longitude, fix.altitude ?: target.altitudeM)
+                            target = AircraftLocation(fix.latitude, fix.longitude, target.altitudeM)
                             preciseLat = fix.latitude
                             preciseLng = fix.longitude
                             geoMethod = "laser-rangefinder"
@@ -258,12 +297,22 @@ class FireConfirmationProcessor(
             }
 
             if (!aborted && finalCloseMeasure != null && finalThermalResult != null) {
-                val orbitResult = runCatching { measureOrbitFix(request, target) }
-                    .onFailure { warn("orbit measure failed task=${request.taskId} message=${it.message}", it) }
-                    .getOrNull()
+                val orbitResult = if (skipOrbit) {
+                    null
+                } else if (missionDurationExceeded(missionStartMs)) {
+                    failureReason = "mission-duration-exceeded"
+                    null
+                } else {
+                    runCatching { measureOrbitFix(request, target, missionStartMs) }
+                        .onFailure { warn("orbit measure failed task=${request.taskId} message=${it.message}", it) }
+                        .getOrNull()
+                }
                 if (orbitResult != null) {
                     orbitFix = orbitResult.fix
                     orbitPointsVisited = orbitResult.pointsVisited
+                    if (orbitResult.failureReason != null && failureReason == null) {
+                        failureReason = orbitResult.failureReason
+                    }
                     if (orbitFix != null) {
                         preciseLat = orbitFix.latitude
                         preciseLng = orbitFix.longitude
@@ -275,6 +324,13 @@ class FireConfirmationProcessor(
                 val thermalEventId = "${request.taskId}-$sourceTs"
                 val reportLaserFix = (orbitFix ?: laserFix)?.takeIf { it.confidence == "HIGH" }
                 val measureResult = finalThermalResult
+                val thermalImageUrl = uploadThermalSnapshotWithRetries(thermalEventId, measureResult.thermalSnapshotPath)
+                if (thermalImageUrl.isNullOrBlank()) {
+                    warn(
+                        "approach-report-missing-thermal-image task=${request.taskId} " +
+                            "event=$thermalEventId path=${measureResult.thermalSnapshotPath}",
+                    )
+                }
                 client.recordThermalHotspotEvent(
                     taskId = request.taskId,
                     droneSn = request.droneSn,
@@ -282,7 +338,7 @@ class FireConfirmationProcessor(
                     temperatureC = measureResult.thermalCenterTemperatureC!!,
                     thermalMeasureRoi = measureResult.thermalMeasureRegion!!.toApiMap(),
                     thermalMeasurements = measureResult.thermalMeasurements.toPayload(),
-                    thermalImageUrl = null,
+                    thermalImageUrl = thermalImageUrl,
                     fireLat = reportLaserFix?.latitude,
                     fireLng = reportLaserFix?.longitude,
                     fireAlt = reportLaserFix?.altitude,
@@ -291,6 +347,9 @@ class FireConfirmationProcessor(
                 )
                 thermalReported = true
 
+                if (visibleConfirmAtUpwind && orbitResult != null) {
+                    returnToUpwindVisiblePointIfNeeded(request, orbitResult)
+                }
                 phaseReached = FireConfirmationPhase.VISIBLE_CONFIRM
                 val visibleFailure = runCatching {
                     confirmVisible(request, thermalEventId, sourceTs)
@@ -347,15 +406,28 @@ class FireConfirmationProcessor(
             center = target,
             bearingDeg = selectApproachBearingDeg(target, current),
             radiusM = standoffM,
-            altitudeM = max(current.altitudeM, target.altitudeM.takeIf { it.isFinite() } ?: current.altitudeM),
+            altitudeM = current.altitudeM,
         )
     }
 
     private suspend fun waitUntilArrived(target: AircraftLocation): Boolean {
+        var minDistanceM = Double.POSITIVE_INFINITY
         while (true) {
             val current = aircraftLocationProvider() ?: return false
-            if (horizontalDistanceM(current, target) <= ARRIVAL_RADIUS_M) {
+            val distanceM = horizontalDistanceM(current, target)
+            if (distanceM <= ARRIVAL_RADIUS_M) {
                 return true
+            }
+            if (distanceM.isFinite()) {
+                if (distanceM < minDistanceM) {
+                    minDistanceM = distanceM
+                } else if (minDistanceM.isFinite() && distanceM > minDistanceM + divergenceAbortM) {
+                    warn(
+                        "diverging-from-target targetLat=${target.latitude} targetLng=${target.longitude} " +
+                            "distanceM=$distanceM minDistanceM=$minDistanceM thresholdM=$divergenceAbortM",
+                    )
+                    return false
+                }
             }
             delay(pollIntervalMs)
         }
@@ -414,6 +486,7 @@ class FireConfirmationProcessor(
     ): RobustLaserFix? {
         val samples = collectLaserSamples(request, horizontalDistanceM, sampleCount)
         return samples.toRobustFix(centered, laserMinNormalSamples, laserScatterLimitM)
+            ?.takeIfWithinFixDisplacement(request, "leg")
     }
 
     private suspend fun collectLaserSamples(
@@ -459,6 +532,7 @@ class FireConfirmationProcessor(
     private suspend fun measureOrbitFix(
         request: FireConfirmationRequest,
         center: AircraftLocation,
+        missionStartMs: Long,
     ): OrbitMeasureResult {
         val count = orbitBearingCount.coerceAtLeast(0)
         if (count == 0) {
@@ -468,16 +542,31 @@ class FireConfirmationProcessor(
         val stepDeg = 360.0 / count
         val samples = mutableListOf<LaserFixSample>()
         var visited = 0
+        var firstVisitedPoint: AircraftLocation? = null
+        var lastVisitedPoint: AircraftLocation? = null
         repeat(count) { index ->
+            if (missionDurationExceeded(missionStartMs)) {
+                warn("mission duration exceeded during orbit task=${request.taskId} point=${index + 1}")
+                return OrbitMeasureResult(
+                    fix = samples.toRobustFix(centered = true, laserMinNormalSamples, laserScatterLimitM)
+                        ?.takeIfWithinFixDisplacement(request, "orbit"),
+                    pointsVisited = visited,
+                    firstVisitedPoint = firstVisitedPoint,
+                    lastVisitedPoint = lastVisitedPoint,
+                    failureReason = "mission-duration-exceeded",
+                )
+            }
             val current = aircraftLocationProvider()
             val target = pointAtBearing(
                 center = center,
                 bearingDeg = startBearing + stepDeg * index,
                 radiusM = orbitRadiusM,
-                altitudeM = max(current?.altitudeM ?: center.altitudeM, center.altitudeM),
+                altitudeM = current?.altitudeM ?: center.altitudeM,
             )
             val arrived = runCatching {
-                withTimeoutOrNull(flyToTimeoutMs) {
+                if (current != null && horizontalDistanceM(current, target) <= ARRIVAL_RADIUS_M) {
+                    true
+                } else withTimeoutOrNull(flyToTimeoutMs) {
                     flightControl.flyToPoint(target.latitude, target.longitude, target.altitudeM, DEFAULT_FLY_TO_SPEED_MPS)
                     waitUntilArrived(target)
                 } == true
@@ -492,6 +581,10 @@ class FireConfirmationProcessor(
                 return@repeat
             }
             visited += 1
+            if (firstVisitedPoint == null) {
+                firstVisitedPoint = target
+            }
+            lastVisitedPoint = target
             val closeMeasure = measureClose(request)
             val measureResult = closeMeasure.result
             if (!measureResult.status.equals("applied", ignoreCase = true) ||
@@ -502,16 +595,40 @@ class FireConfirmationProcessor(
                 return@repeat
             }
             val pointSamples = collectLaserSamples(request, orbitRadiusM, orbitPerPointLaserSamples)
-            if (pointSamples.hasScatterBeyondLimit(laserScatterLimitM)) {
-                warn("orbit laser samples rejected by scatter task=${request.taskId} point=${index + 1}")
-                return@repeat
-            }
             samples += pointSamples
         }
         return OrbitMeasureResult(
-            fix = samples.toRobustFix(centered = true, laserMinNormalSamples, laserScatterLimitM),
+            fix = samples.toRobustFix(centered = true, laserMinNormalSamples, laserScatterLimitM)
+                ?.takeIfWithinFixDisplacement(request, "orbit"),
             pointsVisited = visited,
+            firstVisitedPoint = firstVisitedPoint,
+            lastVisitedPoint = lastVisitedPoint,
         )
+    }
+
+    private suspend fun returnToUpwindVisiblePointIfNeeded(
+        request: FireConfirmationRequest,
+        orbitResult: OrbitMeasureResult,
+    ) {
+        val firstPoint = orbitResult.firstVisitedPoint ?: return
+        val lastPoint = orbitResult.lastVisitedPoint ?: return
+        if (orbitResult.pointsVisited < 1 || horizontalDistanceM(firstPoint, lastPoint) <= ARRIVAL_RADIUS_M) {
+            return
+        }
+        val arrived = runCatching {
+            withTimeoutOrNull(flyToTimeoutMs) {
+                flightControl.flyToPoint(firstPoint.latitude, firstPoint.longitude, firstPoint.altitudeM, DEFAULT_FLY_TO_SPEED_MPS)
+                waitUntilArrived(firstPoint)
+            } == true
+        }.getOrElse {
+            warn("visible upwind return failed task=${request.taskId} message=${it.message}", it)
+            false
+        }
+        if (!arrived) {
+            warn("visible upwind return skipped confirmation task=${request.taskId}")
+            runCatching { flightControl.stopFlyToPoint() }
+                .onFailure { warn("stop visible upwind return failed task=${request.taskId} message=${it.message}", it) }
+        }
     }
 
     private suspend fun selectApproachBearingDeg(target: AircraftLocation, current: AircraftLocation): Double {
@@ -558,6 +675,51 @@ class FireConfirmationProcessor(
         sessionManager.thermalMonitoringEnabled = previousMonitoring
         completed = retryResetStep("resume mission") { missionHold.resumeAfterConfirmation() } && completed
         return completed
+    }
+
+    private fun missionDurationExceeded(missionStartMs: Long): Boolean =
+        clockMs() - missionStartMs > maxMissionDurationMs
+
+    private suspend fun uploadThermalSnapshotWithRetries(eventId: String, snapshotPath: String?): String? {
+        if (snapshotPath.isNullOrBlank()) {
+            return null
+        }
+        repeat(THERMAL_SNAPSHOT_UPLOAD_ATTEMPTS) { attempt ->
+            val url = runCatching { snapshotUploader.upload(eventId, snapshotPath) }
+                .onFailure {
+                    warn(
+                        "thermal snapshot upload failed event=$eventId path=$snapshotPath " +
+                            "attempt=${attempt + 1} message=${it.message}",
+                        it,
+                    )
+                }
+                .getOrNull()
+            if (!url.isNullOrBlank()) {
+                return url
+            }
+            if (attempt + 1 < THERMAL_SNAPSHOT_UPLOAD_ATTEMPTS) {
+                delay(THERMAL_SNAPSHOT_UPLOAD_RETRY_DELAY_MS)
+            }
+        }
+        return null
+    }
+
+    private fun RobustLaserFix.takeIfWithinFixDisplacement(
+        request: FireConfirmationRequest,
+        label: String,
+    ): RobustLaserFix? {
+        val displacementM = horizontalDistanceM(
+            AircraftLocation(latitude, longitude, altitude ?: 0.0),
+            AircraftLocation(request.fireLat, request.fireLng, request.fireAlt ?: 0.0),
+        )
+        if (displacementM <= maxFixDisplacementM) {
+            return this
+        }
+        warn(
+            "laser fix rejected by displacement task=${request.taskId} source=$label " +
+                "displacementM=$displacementM thresholdM=$maxFixDisplacementM",
+        )
+        return null
     }
 
     private suspend fun retryResetStep(name: String, block: suspend () -> Unit): Boolean {
@@ -630,12 +792,18 @@ class FireConfirmationProcessor(
         private const val DEFAULT_LASER_MIN_NORMAL_SAMPLES = 3
         private const val DEFAULT_LASER_SCATTER_LIMIT_M = 15.0
         private const val DEFAULT_LASER_GEO_ERROR_RADIUS_M = 5.0
+        private const val DEFAULT_MAX_FIX_DISPLACEMENT_M = 80.0
+        private const val DEFAULT_MIN_BATTERY_PERCENT_TO_START = 30
+        private const val DEFAULT_MAX_MISSION_DURATION_MS = 360_000L
+        private const val DEFAULT_DIVERGENCE_ABORT_M = 40.0
         private val DEFAULT_APPROACH_LEGS = listOf(100.0, 60.0)
         private const val DEFAULT_ORBIT_BEARING_COUNT = 3
         private const val DEFAULT_ORBIT_PER_POINT_LASER_SAMPLES = 3
         private const val DEFAULT_UPWIND_MIN_WIND_SPEED_MPS = 2.0
         private const val LASER_GEO_METHOD = "LASER_RANGEFINDER"
         private const val DEFAULT_FLY_TO_SPEED_MPS = 5.0
+        private const val THERMAL_SNAPSHOT_UPLOAD_ATTEMPTS = 2
+        private const val THERMAL_SNAPSHOT_UPLOAD_RETRY_DELAY_MS = 250L
         private const val METERS_PER_LAT_DEG = 111_320.0
         private const val ARRIVAL_RADIUS_M = 5.0
         private const val FRAME_CENTER_FRAC = 0.5
@@ -657,7 +825,12 @@ private data class LaserFixSample(
 private data class OrbitMeasureResult(
     val fix: RobustLaserFix?,
     val pointsVisited: Int,
+    val firstVisitedPoint: AircraftLocation? = null,
+    val lastVisitedPoint: AircraftLocation? = null,
+    val failureReason: String? = null,
 )
+
+private class FireConfirmationEarlyAbort : RuntimeException()
 
 class FireConfirmationAutoTrigger(
     private val processor: FireConfirmationProcessor,
@@ -712,6 +885,19 @@ class DjiWindProvider : WindProvider {
             speedMps = (speedDmps ?: 0).toDouble() / 10.0,
             sourceBearingDeg = direction?.toSourceBearingDeg(),
         )
+    }
+}
+
+class DjiBatteryProvider : BatteryProvider {
+    override fun currentPercent(): Int? {
+        // MSDK v5 battery percentage matches the OSD path already used in
+        // OsdReporter and DjiDeviceSession:
+        // BatteryKey.KeyChargeRemainingInPercent.create().get(0).
+        // The aircraft battery is index 0; failures are tolerated as unknown
+        // so the safety guard does not block on disconnected simulator/test rigs.
+        return runCatching {
+            BatteryKey.KeyChargeRemainingInPercent.create().get(0)
+        }.getOrNull()
     }
 }
 
@@ -864,15 +1050,22 @@ private fun List<LaserFixSample>.toRobustFix(
     if (size < minNormalSamples) {
         return null
     }
-    if (hasScatterBeyondLimit(scatterLimitM)) {
+    val center = LaserFixSample(
+        latitude = map { it.latitude }.median(),
+        longitude = map { it.longitude }.median(),
+        altitude = null,
+        distanceM = null,
+    )
+    val trimmed = filter { horizontalDistanceM(it, center) <= scatterLimitM }
+    if (trimmed.size < minNormalSamples) {
         return null
     }
     return RobustLaserFix(
-        latitude = map { it.latitude }.median(),
-        longitude = map { it.longitude }.median(),
-        altitude = mapNotNull { it.altitude }.medianOrNull(),
-        distanceM = mapNotNull { it.distanceM }.medianOrNull(),
-        normalSampleCount = size,
+        latitude = trimmed.map { it.latitude }.median(),
+        longitude = trimmed.map { it.longitude }.median(),
+        altitude = trimmed.mapNotNull { it.altitude }.medianOrNull(),
+        distanceM = trimmed.mapNotNull { it.distanceM }.medianOrNull(),
+        normalSampleCount = trimmed.size,
         centered = centered,
         confidence = "HIGH",
     )

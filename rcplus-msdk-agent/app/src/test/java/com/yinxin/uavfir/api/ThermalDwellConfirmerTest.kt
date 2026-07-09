@@ -92,6 +92,34 @@ class ThermalDwellConfirmerTest {
     }
 
     @Test
+    fun dwell_failures_do_not_consume_budget() = runTest {
+        val provider = SequenceHotspotProvider(
+            listOf(
+                HotspotResult.failure(),
+                HotspotResult(46.0, REGION_2),
+                HotspotResult.failure(),
+                HotspotResult(48.0, REGION_3),
+                HotspotResult(47.0, REGION_4),
+            ),
+        )
+        val hold = RecordingMissionHoldControl()
+        val confirmer = confirmer(provider, hold)
+
+        val result = confirmer.confirm(
+            droneSn = "DRONE-001",
+            thresholdC = 45.0,
+            firstSample = DwellSample(45.5, REGION_1, 100L),
+            seedRegion = REGION_1,
+        )
+
+        assertTrue(result.confirmed)
+        assertFalse(result.degraded)
+        assertEquals(4, result.samples.size)
+        assertEquals(5, provider.measureHotspotCalls)
+        assertEquals(1, hold.resumeCalls)
+    }
+
+    @Test
     fun confirm_disabled_bypasses_hold() = runTest {
         val provider = SequenceHotspotProvider(listOf(HotspotResult(80.0, REGION_2)))
         val hold = RecordingMissionHoldControl()
