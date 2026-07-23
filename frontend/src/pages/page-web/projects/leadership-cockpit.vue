@@ -405,7 +405,7 @@
                     <span class="dot"></span>{{ flightHudData.isFixed ? '定点' : '浮动' }}
                   </span>
                   <span class="flight-hud-item">GPS {{ flightHudData.gps }}</span>
-                  <span class="flight-hud-item">R {{ flightHudData.rtk }}</span>
+                  <span class="flight-hud-item">RTK {{ flightHudData.rtk }}</span>
                 </div>
                 <div class="flight-hud-row">
                   <span class="flight-hud-item">ASL {{ flightHudData.asl }} m</span>
@@ -748,7 +748,7 @@ function toDeviceOsdFromMsdk (device: MsdkDeviceState) {
     elevation: String(device.elevation ?? 0),
     position_state: {
       gps_number: String(device.gpsCount ?? '--'),
-      is_fixed: device.positionFixed === false ? 0 : 1,
+      is_fixed: device.positionFixed === true ? 1 : 0,
       rtk_number: String(device.rtkCount ?? '--')
     },
     battery: {

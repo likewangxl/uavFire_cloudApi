@@ -28,6 +28,7 @@ data class DjiTelemetry(
     val batteryPercent: Int? = null,
     val gpsCount: Int? = null,
     val rtkCount: Int? = null,
+    val positionFixed: Boolean? = null,
 )
 
 data class DjiFlightLimit(

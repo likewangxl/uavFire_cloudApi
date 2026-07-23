@@ -4,6 +4,7 @@ import com.yinxin.uavfir.session.AgentConnectionState
 import dji.sdk.keyvalue.key.BatteryKey
 import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.RtkMobileStationKey
+import dji.sdk.keyvalue.value.rtkmobilestation.RTKPositioningSolution
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.common.Velocity3D
 import dji.v5.et.create
@@ -61,6 +62,9 @@ class DjiDeviceSession(
         val rtkCount: Int? = runCatching {
             RtkMobileStationKey.KeyRTKSatelliteCount.create().get()
         }.getOrNull()
+        val positionFixed: Boolean? = runCatching {
+            RtkMobileStationKey.KeyRTKLocation.create().get()?.positioningSolution
+        }.getOrNull()?.let { it == RTKPositioningSolution.FIXED_POINT }
         val horizontalSpeed = velocity?.let { sqrt(it.x * it.x + it.y * it.y) }
 
         return DjiTelemetry(
@@ -73,6 +77,7 @@ class DjiDeviceSession(
             batteryPercent = batteryPercent,
             gpsCount = gpsCount,
             rtkCount = rtkCount,
+            positionFixed = positionFixed,
         )
     }
 }

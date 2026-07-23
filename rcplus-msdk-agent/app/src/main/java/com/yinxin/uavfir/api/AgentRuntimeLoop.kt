@@ -231,6 +231,7 @@ class AgentRuntimeLoop(
                     batteryPercent = telemetry?.batteryPercent,
                     gpsCount = telemetry?.gpsCount,
                     rtkCount = telemetry?.rtkCount,
+                    positionFixed = telemetry?.positionFixed,
                     capabilities = mapOf(
                         "takeoff" to true,
                         "land" to true,
