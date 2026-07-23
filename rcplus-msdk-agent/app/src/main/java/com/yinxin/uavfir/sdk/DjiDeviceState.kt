@@ -26,6 +26,8 @@ data class DjiTelemetry(
     val horizontalSpeed: Double? = null,
     val verticalSpeed: Double? = null,
     val batteryPercent: Int? = null,
+    val gpsCount: Int? = null,
+    val rtkCount: Int? = null,
 )
 
 data class DjiFlightLimit(

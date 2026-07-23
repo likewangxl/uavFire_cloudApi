@@ -3,6 +3,7 @@ package com.yinxin.uavfir.sdk
 import com.yinxin.uavfir.session.AgentConnectionState
 import dji.sdk.keyvalue.key.BatteryKey
 import dji.sdk.keyvalue.key.FlightControllerKey
+import dji.sdk.keyvalue.key.RtkMobileStationKey
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.common.Velocity3D
 import dji.v5.et.create
@@ -54,6 +55,12 @@ class DjiDeviceSession(
         val batteryPercent: Int? = runCatching {
             BatteryKey.KeyChargeRemainingInPercent.create().get(0)
         }.getOrNull()
+        val gpsCount: Int? = runCatching {
+            FlightControllerKey.KeyGPSSatelliteCount.create().get()
+        }.getOrNull()
+        val rtkCount: Int? = runCatching {
+            RtkMobileStationKey.KeyRTKSatelliteCount.create().get()
+        }.getOrNull()
         val horizontalSpeed = velocity?.let { sqrt(it.x * it.x + it.y * it.y) }
 
         return DjiTelemetry(
@@ -64,6 +71,8 @@ class DjiDeviceSession(
             horizontalSpeed = horizontalSpeed,
             verticalSpeed = velocity?.z,
             batteryPercent = batteryPercent,
+            gpsCount = gpsCount,
+            rtkCount = rtkCount,
         )
     }
 }
