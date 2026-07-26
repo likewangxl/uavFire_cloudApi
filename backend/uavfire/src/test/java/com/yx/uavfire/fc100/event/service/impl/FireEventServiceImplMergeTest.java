@@ -430,6 +430,52 @@ class FireEventServiceImplMergeTest {
     }
 
     @Test
+    void auto_approach_skipped_when_aircraft_on_ground() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        // OSD 相对高度 0.3m = 未起飞：地面点火调试时不派抵近（否则 agent 白等 90s fly-to 超时）
+        OsdDockDrone grounded = new OsdDockDrone();
+        grounded.setHeight(0.3f);
+        when(redis.getDeviceOsd(eq("DRONE-1"), eq(OsdDockDrone.class))).thenReturn(Optional.of(grounded));
+        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock, redis);
+        ReflectionTestUtils.setField(dispatcher, "autoApproachEnabled", true);
+        ReflectionTestUtils.setField(dispatcher, "autoApproachCooldownMs", 600000L);
+
+        buildWithApproachDispatcher(dispatcher)
+            .create(param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
+
+        verify(dualStream, never()).issueCommand(any(), any(), any());
+    }
+
+    @Test
+    void auto_approach_dispatches_when_airborne_by_osd_height() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(2L);
+            return 1;
+        });
+        OsdDockDrone airborne = new OsdDockDrone();
+        airborne.setHeight(35.0f);
+        when(redis.getDeviceOsd(eq("DRONE-1"), eq(OsdDockDrone.class))).thenReturn(Optional.of(airborne));
+        when(dualStream.issueCommand(any(), any(), any())).thenReturn(new DualStreamCommandDTO());
+        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock, redis);
+        ReflectionTestUtils.setField(dispatcher, "autoApproachEnabled", true);
+        ReflectionTestUtils.setField(dispatcher, "autoApproachCooldownMs", 600000L);
+
+        buildWithApproachDispatcher(dispatcher)
+            .create(param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
+
+        verify(dualStream).issueCommand(eq("DRONE-1"), eq("fire-confirmation-mission"), any());
+    }
+
+    @Test
     void auto_approach_disabled_by_default() {
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
         when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of());
@@ -823,26 +869,26 @@ class FireEventServiceImplMergeTest {
     }
 
     @Test
-    void create_without_coordinates_skips_spatial_dedup() {
+    void create_without_coordinates_uses_osd_backfill_for_spatial_dedup() {
+        // 串行确认链的事件不带火点坐标（由 OSD 回填飞机位置）：回填后必须参与空间去重，
+        // 否则悬停在同一火点上每分钟建一个重复事件（2026-07-26 实飞同一盆火 10 连报）。
         OsdDockDrone osd = new OsdDockDrone();
         osd.setLatitude(34.65865f);
         osd.setLongitude(109.3406f);
         when(redis.getDeviceOsd(any(), any())).thenReturn(Optional.of(osd));
+        FireEventEntity existing = existingEvent(1L, 34.658650, 109.340600, "MEDIUM", "0.45", 1779163200000L);
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
-        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
-            FireEventEntity e = inv.getArgument(0);
-            e.setId(2L);
-            return 1;
-        });
+        when(events.selectList(any(QueryWrapper.class))).thenReturn(List.of(existing));
         FireEventCreateParam p = param("no-coordinates", 34.658650, 109.340600, "MEDIUM", "0.72", 1779163440000L);
         p.setLat(null);
         p.setLng(null);
 
         FireEventCreateResponse response = build().create(p);
 
-        assertEquals(2L, response.getFireEventId());
-        assertTrue(response.getCreated());
-        verify(events, never()).selectList(any(QueryWrapper.class));
+        assertEquals(1L, response.getFireEventId());
+        assertTrue(response.getMerged());
+        assertEquals("MERGED_NEARBY", response.getNotificationReason());
+        verify(events, never()).insert(any(FireEventEntity.class));
     }
 
     @Test

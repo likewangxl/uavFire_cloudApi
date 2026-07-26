@@ -332,8 +332,10 @@ public class FireEventServiceImpl implements FireEventService {
     public FireEventCreateResponse create(FireEventCreateParam param) {
         resolveFirePointFromGeoSnapshot(param);
         fillThermalRoiFromMeasureRoi(param);
-        boolean spatialDedupCoordinateEligible = param.getLat() != null && param.getLng() != null;
+        // 去重资格必须在 OSD 回填坐标之后判：串行确认链的事件不带火点坐标（回填飞机位置），
+        // 先判资格会让这类事件整体跳过空间去重——2026-07-26 实飞同一盆火 10 连报。
         fillPositionFromOsdIfMissing(param);
+        boolean spatialDedupCoordinateEligible = param.getLat() != null && param.getLng() != null;
         long eventTs = Instant.parse(param.getTimestamp()).toEpochMilli();
 
         // 1. 同 eventId 去重：已存在则返回已绑定的活跃任务
