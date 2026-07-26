@@ -5,6 +5,7 @@ import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSessionAdapter
 import com.yinxin.uavfir.session.AgentConnectionState
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
+import com.yinxin.uavfir.session.DualStreamSessionState
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,10 +27,14 @@ class AgentRuntimeLoop(
     private val gatewaySn: String = DEFAULT_GATEWAY_SN,
     private val onIdentityActivated: suspend (DjiDeviceIdentity) -> Unit = {},
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
+    private val sessionRetryIntervalMs: Long = DEFAULT_SESSION_RETRY_INTERVAL_MS,
+    private val clockMs: () -> Long = { System.currentTimeMillis() },
 ) {
     private var loopJob: Job? = null
     private var urgentCommandJob: Job? = null
     private var lastReportedCapability: CameraCapability? = null
+    // 哨兵取半个 Long 负区间：保证首次判定必然超过退避窗，且减法不溢出
+    private var lastSessionRetryAtMs: Long = Long.MIN_VALUE / 2
     @Volatile
     private var activeIdentity: DjiDeviceIdentity? = null
 
@@ -120,8 +125,41 @@ class AgentRuntimeLoop(
             }
         }
         safeReportMsdkDeviceState(identity, deviceState)
+        maybeRestartFailedSession(activeDroneSn, deviceState.connectionState)
         runCatching { commandPoller.pollOnce(activeDroneSn) }
             .onFailure { onError("command-poll", it) }
+    }
+
+    /**
+     * 起流失败自愈：飞机比 agent 晚上电时，identity 激活后的一次性自动起流常撞上
+     * 图传链路未就绪而 FAILED，且没人重试——需手工重启 App 才能恢复直播。
+     * 这里在会话 FAILED 且链路非 ERROR 时按固定退避重试 start。
+     */
+    private suspend fun maybeRestartFailedSession(
+        droneSn: String,
+        connectionState: AgentConnectionState,
+    ) {
+        if (sessionManager.sessionState != DualStreamSessionState.FAILED) {
+            return
+        }
+        if (connectionState == AgentConnectionState.ERROR) {
+            return
+        }
+        // 占位身份不起流：流名会挂 UNKNOWN-AIRCRAFT 前缀，前端按真机 SN 永远取不到。
+        if (droneSn.startsWith(DjiDeviceIdentity.UNKNOWN_AIRCRAFT_PREFIX)) {
+            return
+        }
+        val now = clockMs()
+        if (now - lastSessionRetryAtMs < sessionRetryIntervalMs) {
+            return
+        }
+        lastSessionRetryAtMs = now
+        debug("session FAILED, retrying stream start for $droneSn")
+        runCatching { sessionManager.executeCommand(droneSn, "start") }
+            .onSuccess { result ->
+                debug("session retry for $droneSn status=${result.status} message=${result.message ?: "(ok)"}")
+            }
+            .onFailure { onError("session-retry", it) }
     }
 
     private fun resolveIdentity(
@@ -284,6 +322,7 @@ class AgentRuntimeLoop(
         const val DEFAULT_GATEWAY_SN: String = "RC_PLUS_LOCAL"
         const val DEFAULT_INTERVAL_MS: Long = 5_000
         const val DEFAULT_URGENT_COMMAND_INTERVAL_MS: Long = 500
+        const val DEFAULT_SESSION_RETRY_INTERVAL_MS: Long = 15_000
     }
 }
 

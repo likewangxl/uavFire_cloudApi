@@ -132,13 +132,9 @@ class RealMsdkStreamProvider(
         thermalMeasureRegion: ThermalMeasureRegion,
     ): StreamStartResult {
         binder.focusThermal(droneSn)
+        // 混合测温：框内亮块优先（贴热核），框级区域测温兜底
         val thermalMeasurement = runCatching {
-            binder.measureThermalRegionTemperatureC(thermalMeasureRegion)?.let {
-                ThermalMeasurementResult(
-                    temperatureC = it,
-                    region = thermalMeasureRegion,
-                )
-            }
+            binder.measureThermalRegionHotspotC(thermalMeasureRegion)
         }.getOrNull()
         visibleState = BoundStreamState.BOUND
         thermalState = BoundStreamState.BOUND

@@ -12,13 +12,11 @@ import com.yinxin.uavfir.api.CompositeCommandPoller
 import com.yinxin.uavfir.api.DjiAircraftLocationProvider
 import com.yinxin.uavfir.api.DjiFlightControlActionClient
 import com.yinxin.uavfir.api.DualStreamMsdkCommandExecutor
-import com.yinxin.uavfir.api.FireConfirmationAutoTrigger
 import com.yinxin.uavfir.api.FireConfirmationProcessor
 import com.yinxin.uavfir.api.FireConfirmationRequest
 import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.api.LegacyCommandDeduplicator
 import com.yinxin.uavfir.api.MissionHoldControl
-import com.yinxin.uavfir.api.ThermalDwellConfirmer
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
@@ -26,6 +24,7 @@ import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
 import com.yinxin.uavfir.sdk.HmsReporter
 import com.yinxin.uavfir.sdk.OsdReporter
 import com.yinxin.uavfir.session.DualStreamSessionManager
+import com.yinxin.uavfir.session.DualStreamSessionState
 import com.yinxin.uavfir.stream.RealMsdkStreamProvider
 import com.yinxin.uavfir.stream.ThermalHotspotCandidateListener
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
@@ -114,20 +113,9 @@ class AppServices(
         client = backendClient,
         aircraftLocationProvider = { DjiAircraftLocationProvider.current() },
     )
-    private val fireConfirmationAutoTrigger = FireConfirmationAutoTrigger(
-        processor = fireConfirmationProcessor,
-        scope = appScope,
-        fireLocationProvider = { DjiAircraftLocationProvider.current() },
-    )
+    // 探针只喂 HUD 温度；火情触发/确认已串行化到后端（YOLO→实测温度→证据照）。
     private val thermalHotspotMonitor = ThermalHotspotMonitor(
-        client = backendClient,
         sessionManager = sessionManager,
-        dwellConfirmer = ThermalDwellConfirmer(
-            sessionManager = sessionManager,
-            missionHold = missionHoldControl,
-        ),
-        visibleConfirmationScope = appScope,
-        onConfirmedReport = fireConfirmationAutoTrigger::onConfirmedReport,
     )
     private val kmzHttpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
@@ -222,7 +210,23 @@ class AppServices(
             waypointExecutor.reattach()
             activeReporterIdentity = identity
         }
+        if (identity.isPlaceholderAircraft()) {
+            // 占位身份（飞机未上线）不起流：流名会挂 UNKNOWN-AIRCRAFT 前缀，
+            // 前端按真机 SN 取流永远取不到——2026-07-25 飞机关机重启实测踩坑。
+            return
+        }
         if (autoStartedStreamAircraft.add(identity.aircraftSn)) {
+            startDualStreamOnBoot(identity.aircraftSn)
+        } else if (sessionManager.sessionState == DualStreamSessionState.RUNNING
+            && sessionManager.activeStreamDroneSn != null
+            && sessionManager.activeStreamDroneSn != identity.aircraftSn
+        ) {
+            // 会话在别的身份（如占位身份）下推着流：真机身份回归时按真名重推，
+            // 否则驾驶舱按真机 SN 取流会一直加载失败。
+            Log.i(
+                TAG,
+                "restarting dual-stream for identity change ${sessionManager.activeStreamDroneSn} -> ${identity.aircraftSn}",
+            )
             startDualStreamOnBoot(identity.aircraftSn)
         }
     }

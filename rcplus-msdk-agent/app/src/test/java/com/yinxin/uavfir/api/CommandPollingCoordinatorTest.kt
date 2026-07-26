@@ -44,6 +44,54 @@ class CommandPollingCoordinatorTest {
     }
 
     @Test
+    fun poller_routesFireConfirmationParamsToRunner() = runTest {
+        // 此前 AgentCommandResponse 缺 params 字段，后端派的抵近命令参数被丢弃，
+        // agent 秒拒 fire-confirmation-params-required（2026-07-26 实飞抵近链首飞暴露）。
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-fire-approach",
+                    droneSn = "DRONE-001",
+                    action = "fire-confirmation-mission",
+                    status = "pending",
+                    urgent = true,
+                    params = mapOf(
+                        "lat" to 34.9604606,
+                        "lng" to 109.3163910,
+                        "alt" to 27.6,
+                        "taskId" to "fire-DRONE-001",
+                    ),
+                ),
+            ),
+        )
+        var received: FireConfirmationRequest? = null
+        val manager = DualStreamSessionManager(MockStreamProvider()) { request ->
+            received = request
+            FireConfirmationResult(
+                phaseReached = FireConfirmationPhase.IDLE,
+                success = true,
+                failureReason = null,
+                closeMeasureTemperatureC = 120.0,
+                preciseLat = request.fireLat,
+                preciseLng = request.fireLng,
+                resetCompleted = true,
+            )
+        }
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            pollMsdk = false,
+        )
+
+        coordinator.pollOnce("DRONE-001")
+
+        assertEquals("applied", api.lastAck?.status)
+        assertEquals(34.9604606, received?.fireLat)
+        assertEquals(109.3163910, received?.fireLng)
+        assertEquals("fire-DRONE-001", received?.taskId)
+    }
+
+    @Test
     fun urgentPoller_skipsLegacyDualStreamCommandWhenUrgentFieldIsMissing() = runTest {
         val api = RecordingDualStreamApi(
             nextCommand = AgentApiEnvelope(

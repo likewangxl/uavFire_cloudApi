@@ -22,9 +22,11 @@ import dji.v5.et.create
 import dji.v5.et.get
 import dji.v5.manager.KeyManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
@@ -394,7 +396,9 @@ class FireConfirmationProcessor(
                 legsCompleted,
             )
         } finally {
-            resetCompleted = reset(previousMonitoring)
+            // NonCancellable：协程被取消时 finally 里的挂起调用会立刻抛 CancellationException，
+            // 复位（含监测开关恢复）必须在取消场景下也完整执行
+            resetCompleted = withContext(NonCancellable) { reset(previousMonitoring) }
             running.set(false)
         }
         return coreResult.copy(resetCompleted = resetCompleted)
@@ -668,11 +672,13 @@ class FireConfirmationProcessor(
     }
 
     private suspend fun reset(previousMonitoring: Boolean): Boolean {
+        // 监测开关恢复必须是第一步且不可挂起——曾排在三个可失败/可取消的复位步骤之后，
+        // 任一步骤异常或协程取消都会让开关永久卡死（2026-07-24 实测：事件断流+确认照缺失）。
+        sessionManager.thermalMonitoringEnabled = previousMonitoring
         var completed = true
         completed = retryResetStep("set thermal stream") { cameraControl.setStreamSource("thermal") } && completed
         completed = retryResetStep("reset gimbal") { gimbalControl.resetGimbal() } && completed
         completed = retryResetStep("reset zoom") { cameraControl.setZoom(1.0) } && completed
-        sessionManager.thermalMonitoringEnabled = previousMonitoring
         completed = retryResetStep("resume mission") { missionHold.resumeAfterConfirmation() } && completed
         return completed
     }

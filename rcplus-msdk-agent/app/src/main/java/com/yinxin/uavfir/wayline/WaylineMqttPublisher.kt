@@ -119,6 +119,52 @@ class WaylineMqttPublisher(
     }
 
     /**
+     * Publish the Cloud SDK `update_topo` device-online announcement on
+     * `sys/product/{gatewaySn}/status`. Backend only subscribes per-device OSD
+     * topics after updateTopoOnline processes this message; the Redis online:*
+     * keys it creates expire when the backend restarts or the RC powers off, so
+     * OsdReporter re-sends it periodically to keep the subscription self-healing.
+     */
+    fun publishUpdateTopo(aircraftSn: String, gatewaySn: String) {
+        try {
+            connect()
+            val topic = "sys/product/$gatewaySn/status"
+            val envelope = mapOf(
+                "bid" to java.util.UUID.randomUUID().toString(),
+                "tid" to java.util.UUID.randomUUID().toString(),
+                "timestamp" to System.currentTimeMillis(),
+                "method" to "update_topo",
+                "data" to mapOf(
+                    "domain" to GATEWAY_DOMAIN_RC,
+                    "type" to GATEWAY_TYPE_RC_PLUS_2,
+                    "sub_type" to GATEWAY_SUB_TYPE_ZERO,
+                    "device_secret" to "",
+                    "nonce" to "",
+                    "thing_version" to THING_VERSION,
+                    "sub_devices" to listOf(
+                        mapOf(
+                            "sn" to aircraftSn,
+                            "domain" to DRONE_DOMAIN,
+                            "type" to DRONE_TYPE_M4_SERIES,
+                            "sub_type" to DRONE_SUB_TYPE_M4T,
+                            "index" to "A",
+                            "device_secret" to "",
+                            "nonce" to "",
+                            "thing_version" to THING_VERSION,
+                        )
+                    ),
+                ),
+            )
+            val bytes = gson.toJson(envelope).toByteArray()
+            val msg = MqttMessage(bytes).apply { qos = 1 }
+            client?.publish(topic, msg)
+            Log.i(TAG, "published update_topo gateway=$gatewaySn aircraft=$aircraftSn")
+        } catch (e: MqttException) {
+            Log.w(TAG, "publishUpdateTopo failed gateway=$gatewaySn", e)
+        }
+    }
+
+    /**
      * Publish an events payload (method=hms or others) to the Cloud SDK standard
      * topic `thing/product/{aircraftSn}/events`. See HmsReporter.
      */
@@ -150,6 +196,16 @@ class WaylineMqttPublisher(
 
     companion object {
         private const val TAG = "WaylineMqttPublisher"
+
+        // update_topo 设备注册三元组：沿用后端 manage_device 已验证的注册参数
+        // （RC Plus 2 网关 2/174/0 + M4T runtime 0/99/1，thing_version 1.2.0）。
+        private const val GATEWAY_DOMAIN_RC = 2
+        private const val GATEWAY_TYPE_RC_PLUS_2 = 174
+        private const val GATEWAY_SUB_TYPE_ZERO = 0
+        private const val DRONE_DOMAIN = 0
+        private const val DRONE_TYPE_M4_SERIES = 99
+        private const val DRONE_SUB_TYPE_M4T = 1
+        private const val THING_VERSION = "1.2.0"
 
         fun buildCloudOsdEnvelope(
             gatewaySn: String,

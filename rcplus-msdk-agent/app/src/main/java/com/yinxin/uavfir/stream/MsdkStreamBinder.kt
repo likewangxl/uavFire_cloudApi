@@ -13,6 +13,19 @@ interface MsdkStreamBinder {
 
     suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double?
 
+    /**
+     * 混合测温：YOLO 框内优先测帧探针的近饱和亮块（紧贴热核，读数接近真实最高温），
+     * 框本身作兜底候选。默认实现退化为纯框级区域测温。
+     */
+    suspend fun measureThermalRegionHotspotC(region: ThermalMeasureRegion): ThermalMeasurementResult? {
+        val temperature = measureThermalRegionTemperatureC(region) ?: return null
+        return ThermalMeasurementResult(
+            temperatureC = temperature,
+            region = region,
+            measurements = listOf(ThermalMeasuredPoint(temperature, region)),
+        )
+    }
+
     suspend fun measureThermalCenterTemperatureC(): Double?
 
     suspend fun locateAndMeasureThermalHotspotC(

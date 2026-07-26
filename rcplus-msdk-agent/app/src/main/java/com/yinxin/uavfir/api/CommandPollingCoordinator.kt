@@ -53,11 +53,16 @@ class CommandPollingCoordinator(
         try {
             val result = runCatching {
                 withTimeout(commandTimeoutMs) {
-                    sessionManager.executeCommand(
-                        droneSn,
-                        command.action,
-                        command.thermalMeasureRoi?.toThermalMeasureRegion(),
-                    )
+                    if (command.action.equals("fire-confirmation-mission", ignoreCase = true)) {
+                        // 抵近任务走参数重载：火点坐标在 command.params 里
+                        sessionManager.executeCommand(droneSn, command.action, command.params.orEmpty())
+                    } else {
+                        sessionManager.executeCommand(
+                            droneSn,
+                            command.action,
+                            command.thermalMeasureRoi?.toThermalMeasureRegion(),
+                        )
+                    }
                 }
             }.getOrElse { throwable ->
                 if (throwable is TimeoutCancellationException) {

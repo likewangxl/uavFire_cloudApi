@@ -47,8 +47,20 @@ class DualStreamSessionManager(
     @Volatile
     var thermalMonitoringEnabled: Boolean = false
 
+    // focus-visible（后端可见光二次确认窗）期间暂停热点监视器，防止它 10s 一次的
+    // focusThermal 抢回红外画面让确认窗永远凑不满；focus-thermal 时恢复。
+    @Volatile
+    private var thermalMonitoringPausedByVisibleFocus: Boolean = false
+
+    // 最近一次起流用的 SN（决定 ZLM 流名）。飞机关机窗口里流可能起在占位身份下，
+    // 真机身份回归时 AppServices 靠它判断是否需要换名重推。
+    @Volatile
+    var activeStreamDroneSn: String? = null
+        private set
+
     suspend fun start(droneSn: String) {
         _state.value = DualStreamSessionState.STARTING
+        activeStreamDroneSn = droneSn
         lastFailureMessage = null
         lastStartResult = null
         lastPlaybackStatus = null
@@ -245,11 +257,13 @@ class DualStreamSessionManager(
 
         "thermal-monitor-on" -> {
             thermalMonitoringEnabled = true
+            thermalMonitoringPausedByVisibleFocus = false
             CommandExecutionResult(status = "applied", message = "thermal-monitoring-enabled")
         }
 
         "thermal-monitor-off" -> {
             thermalMonitoringEnabled = false
+            thermalMonitoringPausedByVisibleFocus = false
             CommandExecutionResult(status = "applied", message = "thermal-monitoring-disabled")
         }
 
@@ -257,6 +271,10 @@ class DualStreamSessionManager(
             streamProvider.focusVisible(droneSn)
         }.fold(
             onSuccess = { result ->
+                if (thermalMonitoringEnabled) {
+                    thermalMonitoringPausedByVisibleFocus = true
+                    thermalMonitoringEnabled = false
+                }
                 lastStartResult = result
                 lastPlaybackStatus = result.playbackStatus
                 lastFailureMessage = null
@@ -284,6 +302,10 @@ class DualStreamSessionManager(
             streamProvider.focusThermal(droneSn, null)
         }.fold(
             onSuccess = { result ->
+                if (thermalMonitoringPausedByVisibleFocus) {
+                    thermalMonitoringPausedByVisibleFocus = false
+                    thermalMonitoringEnabled = true
+                }
                 lastStartResult = result
                 lastPlaybackStatus = result.playbackStatus
                 lastFailureMessage = result.thermalFailureMessage

@@ -16,6 +16,13 @@ data class DjiDeviceIdentity(
     val aircraftSn: String,
 ) {
     fun isValid(): Boolean = gatewaySn.isNotBlank() && aircraftSn.isNotBlank()
+
+    /** 飞机未上线时 MSDK 侧给出的占位身份（UNKNOWN-AIRCRAFT-<gatewaySn>）。 */
+    fun isPlaceholderAircraft(): Boolean = aircraftSn.startsWith(UNKNOWN_AIRCRAFT_PREFIX)
+
+    companion object {
+        const val UNKNOWN_AIRCRAFT_PREFIX = "UNKNOWN-AIRCRAFT-"
+    }
 }
 
 data class DjiTelemetry(

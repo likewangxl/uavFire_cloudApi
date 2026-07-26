@@ -218,6 +218,91 @@ class AgentRuntimeLoopTest {
         assertTrue(urgentPoller.pollCount >= 3)
     }
 
+    @Test
+    fun tickOnce_retriesStreamStartWithBackoffWhenSessionFailed() = runTest {
+        val api = RecordingDualStreamApi()
+        val executor = RecordingCommandExecutor(DualStreamSessionState.FAILED)
+        var now = 1_000L
+        val loop = AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(connectionState = AgentConnectionState.CAPABILITY_READY),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = RecordingCommandPoller(),
+            sessionManager = executor,
+            scope = backgroundScope,
+            sessionRetryIntervalMs = 15_000L,
+            clockMs = { now },
+        )
+
+        loop.tickOnce("DRONE-001")
+        now = 6_000L
+        loop.tickOnce("DRONE-001")
+        now = 16_000L
+        loop.tickOnce("DRONE-001")
+
+        // 首次立即重试，退避窗（15s）内不重试，窗满后再试
+        assertEquals(listOf("start", "start"), executor.executedActions)
+    }
+
+    @Test
+    fun tickOnce_doesNotRetryStreamStartForPlaceholderAircraftIdentity() = runTest {
+        val api = RecordingDualStreamApi()
+        val executor = RecordingCommandExecutor(DualStreamSessionState.FAILED)
+        val loop = AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(
+                    connectionState = AgentConnectionState.CAPABILITY_READY,
+                    identity = DjiDeviceIdentity(
+                        gatewaySn = "RC_PLUS_LOCAL",
+                        aircraftSn = "UNKNOWN-AIRCRAFT-8L5CM9C00102ML",
+                    ),
+                ),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = RecordingCommandPoller(),
+            sessionManager = executor,
+            scope = backgroundScope,
+            clockMs = { 1_000L },
+        )
+
+        loop.tickOnce("")
+
+        // 占位身份下起流会把流名推成 UNKNOWN-AIRCRAFT-*，前端按真机 SN 永远取不到
+        assertEquals(emptyList<String>(), executor.executedActions)
+    }
+
+    @Test
+    fun tickOnce_doesNotRetryStreamStartWhenSessionNotFailedOrLinkDown() = runTest {
+        val api = RecordingDualStreamApi()
+        val runningExecutor = RecordingCommandExecutor(DualStreamSessionState.RUNNING)
+        AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(connectionState = AgentConnectionState.CAPABILITY_READY),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = RecordingCommandPoller(),
+            sessionManager = runningExecutor,
+            scope = backgroundScope,
+            clockMs = { 1_000L },
+        ).tickOnce("DRONE-001")
+        assertEquals(emptyList<String>(), runningExecutor.executedActions)
+
+        val failedExecutor = RecordingCommandExecutor(DualStreamSessionState.FAILED)
+        AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(connectionState = AgentConnectionState.ERROR),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = RecordingCommandPoller(),
+            sessionManager = failedExecutor,
+            scope = backgroundScope,
+            clockMs = { 1_000L },
+        ).tickOnce("DRONE-001")
+        // 链路 ERROR 时不做无谓重试
+        assertEquals(emptyList<String>(), failedExecutor.executedActions)
+    }
+
     private class FakeDeviceSession(
         private val state: DjiDeviceState,
     ) : DjiDeviceSessionAdapter {
@@ -252,6 +337,20 @@ class AgentRuntimeLoopTest {
         ): DualStreamSessionManager.CommandExecutionResult = DualStreamSessionManager.CommandExecutionResult(
             status = "ignored",
         )
+    }
+
+    private class RecordingCommandExecutor(
+        override val sessionState: DualStreamSessionState,
+    ) : DualStreamCommandExecutor {
+        val executedActions = mutableListOf<String>()
+
+        override suspend fun executeCommand(
+            droneSn: String,
+            action: String,
+        ): DualStreamSessionManager.CommandExecutionResult {
+            executedActions += action
+            return DualStreamSessionManager.CommandExecutionResult(status = "applied")
+        }
     }
 
     private class RecordingCommandPoller : CommandPoller {

@@ -65,7 +65,18 @@ class OsdReporter(
         this.aircraftSn = aircraftSn
         this.gatewaySn = gatewaySn
         job = scope.launch(Dispatchers.IO) {
+            var ticks = 0L
             while (isActive) {
+                // 周期性重发 update_topo：后端重启/online 键过期后需靠它恢复 OSD 订阅链。
+                if (ticks % UPDATE_TOPO_EVERY_TICKS == 0L) {
+                    val aircraft = this@OsdReporter.aircraftSn
+                    val gateway = this@OsdReporter.gatewaySn
+                    if (aircraft != null && gateway != null) {
+                        runCatching { publisher.publishUpdateTopo(aircraft, gateway) }
+                            .onFailure { Log.w(TAG, "publishUpdateTopo failed: ${it.message}", it) }
+                    }
+                }
+                ticks++
                 runCatching { publishOnce() }
                     .onFailure { Log.w(TAG, "publishOnce failed: ${it.message}", it) }
                 delay(intervalMs)
@@ -143,5 +154,8 @@ class OsdReporter(
     companion object {
         private const val TAG = "OsdReporter"
         const val DEFAULT_INTERVAL_MS: Long = 1_000
+
+        /** 每 60 个 OSD tick（约 60s）重发一次 update_topo 上线通告。 */
+        const val UPDATE_TOPO_EVERY_TICKS: Long = 60
     }
 }

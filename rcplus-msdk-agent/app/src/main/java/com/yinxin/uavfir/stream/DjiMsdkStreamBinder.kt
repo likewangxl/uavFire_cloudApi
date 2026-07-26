@@ -6,9 +6,11 @@ import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.value.camera.CameraVideoStreamSourceType
 import dji.sdk.keyvalue.value.camera.ThermalDisplayMode
+import dji.sdk.keyvalue.value.camera.ThermalGainMode
 import dji.sdk.keyvalue.value.camera.ThermalTemperatureMeasureMode
 import dji.sdk.keyvalue.value.common.CameraLensType
 import dji.sdk.keyvalue.value.common.ComponentIndexType
+import dji.sdk.keyvalue.value.common.DoublePoint2D
 import dji.sdk.keyvalue.value.common.DoubleRect
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
@@ -137,20 +139,127 @@ class DjiMsdkStreamBinder(
 
     override suspend fun measureThermalRegionTemperatureC(region: ThermalMeasureRegion): Double? {
         val msdkRegion = region.toDoubleRect()
-        return runCatching {
-            measureThermalRegionTemperatureWithLensKey(msdkRegion)
-        }.recoverCatching { lensError ->
-            Log.w(tag, "thermal region temperature lens-key measurement failed: ${lensError.message}", lensError)
-            measureThermalRegionTemperatureWithCameraKey(msdkRegion)
-        }.onSuccess { temperature ->
-            if (temperature != null) {
-                Log.i(tag, "thermal region temperature measured: ${temperature}C region=$region")
-            } else {
-                Log.w(tag, "thermal region temperature unavailable: empty MSDK temperature value")
-            }
-        }.onFailure {
-            Log.w(tag, "thermal region temperature measurement failed: ${it.message}", it)
-        }.getOrNull()
+        // 测温数据总开关是前置条件：未开启时固件对一切测温设置返回 SYSTEM_ERROR(-7)。
+        ensureThermalTemperatureDataEnabled()
+        // 设置步骤降级后失败返回 null 而非抛异常，用空值链逐级回退：
+        // 区域测温(lens) -> 点测温(lens) -> 全局最高温(lens,只读) -> 区域测温(camera)。
+        val temperature = measureThermalRegionTemperatureWithLensKey(msdkRegion)
+            ?: measureThermalSpotTemperatureWithLensKey(msdkRegion)
+            ?: measureThermalGlobalMaxTemperature()
+            ?: measureThermalRegionTemperatureWithCameraKey(msdkRegion)
+        if (temperature != null) {
+            Log.i(tag, "thermal region temperature measured: ${temperature}C region=$region")
+        } else {
+            Log.w(tag, "thermal region temperature unavailable after lens+camera key attempts region=$region")
+        }
+        return temperature
+    }
+
+    @Volatile
+    private var thermalCapabilityProbed = false
+
+    /** 一次性能力探针：区分“测温功能族被固件关闭”与“红外镜头 key 整体不可用”。 */
+    private suspend fun probeThermalCapabilityOnce() {
+        if (thermalCapabilityProbed) {
+            return
+        }
+        thermalCapabilityProbed = true
+        fun <T> lensKey(key: dji.sdk.keyvalue.key.DJIKeyInfo<T>) = KeyTools.createCameraKey(
+            key,
+            ComponentIndexType.LEFT_OR_MAIN,
+            CameraLensType.CAMERA_LENS_THERMAL,
+        )
+        val measureParamExisted =
+            getValueAsync(lensKey(DJICameraKey.KeyThermalMeasureParamExisted), "probe-measure-param-existed")
+        val paletteExisted =
+            getValueAsync(lensKey(DJICameraKey.KeyThermalPaletteExisted), "probe-palette-existed")
+        val palette = getValueAsync(lensKey(DJICameraKey.KeyThermalPalette), "probe-palette")
+        val gainMode = getValueAsync(lensKey(DJICameraKey.KeyThermalGainMode), "probe-gain-mode")
+        val displayMode = getValueAsync(lensKey(DJICameraKey.KeyThermalDisplayMode), "probe-display-mode")
+        val temperatureDataEnabled =
+            getValueAsync(lensKey(DJICameraKey.KeyThermalTemperatureDataEnabled), "probe-temp-data-enabled")
+        Log.i(
+            tag,
+            "thermal capability probe: measureParamExisted=$measureParamExisted paletteExisted=$paletteExisted " +
+                "palette=$palette gainMode=$gainMode displayMode=$displayMode tempDataEnabled=$temperatureDataEnabled",
+        )
+    }
+
+    private suspend fun ensureThermalTemperatureDataEnabled() {
+        probeThermalCapabilityOnce()
+        // 超清(SUPER_CLEAR)增益模式下固件禁用测温（2026-07-24 实测：一切测温 set 返回 -7）。
+        // 火情任务里测温优先于显示效果：发现超清就自动切回 AUTO。
+        val gainMode = getValueAsync(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyThermalGainMode,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_THERMAL,
+            ),
+            "thermal-gain-mode(lens)",
+        )
+        if (gainMode == ThermalGainMode.SUPER_CLEAR) {
+            Log.w(tag, "thermal gain mode is SUPER_CLEAR (blocks measurement); switching to AUTO")
+            setValueBestEffort(
+                KeyTools.createCameraKey(
+                    DJICameraKey.KeyThermalGainMode,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                    CameraLensType.CAMERA_LENS_THERMAL,
+                ),
+                ThermalGainMode.AUTO,
+                "thermal-gain-mode-auto(lens)",
+            )
+        }
+        setValueBestEffort(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyThermalTemperatureDataEnabled,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_THERMAL,
+            ),
+            true,
+            "thermal-temperature-data-enabled(lens)",
+        )
+    }
+
+    private suspend fun measureThermalGlobalMaxTemperature(): Double? {
+        // 全画面最高温：只读、无需设置测温区域，对“画面里有没有高温物”这一仲裁足够。
+        return validTemperature(
+            getValueAsync(
+                KeyTools.createCameraKey(
+                    DJICameraKey.KeyThermalGlobalMaxTemperature,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                    CameraLensType.CAMERA_LENS_THERMAL,
+                ),
+                "thermal-global-max-temperature(lens)",
+            ),
+        )
+    }
+
+    private fun validTemperature(value: Double?): Double? {
+        // 设置未生效时固件会回 0.0 占位值；夏季场景 0.0°C 视为无效读数。
+        if (value == null || kotlin.math.abs(value) < INVALID_TEMPERATURE_EPSILON) {
+            return null
+        }
+        return value
+    }
+
+    override suspend fun measureThermalRegionHotspotC(
+        region: ThermalMeasureRegion,
+    ): ThermalMeasurementResult? {
+        val requestedAtMs = System.currentTimeMillis()
+        // 混合测温：框级区域 max 被大框/坐标偏差稀释（2026-07-26 实飞盆火只读 39~68°C，
+        // 亮块紧贴热核读 153°C）。帧探针近饱和亮块落在 YOLO 框内的优先测，
+        // 框本身作兜底候选；≥120°C 走快速确认短路。
+        val inRoiHotspots = thermalFrameProbe.latestHotspotRegions()
+            .filter { it.centerWithinRegion(region, HOTSPOT_IN_ROI_MARGIN) }
+        return measureThermalHotspotCandidates(
+            requestedAtMs = requestedAtMs,
+            latestFrameHotspotRegions = inRoiHotspots,
+            seedRegion = region,
+            measureTemperatureC = { candidate -> measureThermalRegionTemperatureC(candidate) },
+            latestSnapshotPath = { minTimestampMs ->
+                thermalFrameProbe.latestSnapshotPath(minTimestampMs = minTimestampMs)
+            },
+        )
     }
 
     override suspend fun locateAndMeasureThermalHotspotC(
@@ -188,54 +297,101 @@ class DjiMsdkStreamBinder(
     }
 
     private suspend fun measureThermalRegionTemperatureWithLensKey(region: DoubleRect): Double? {
-        setValue(
+        // 模式/区域设置失败不再中断：部分机型固件对这两个 set 返回错误但区域测温读数仍可用。
+        setValueBestEffort(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalTemperatureMeasureMode,
                 ComponentIndexType.LEFT_OR_MAIN,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             ThermalTemperatureMeasureMode.REGION,
+            "thermal-measure-mode(lens)",
         )
-        setValue(
+        setValueBestEffort(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalRegionMetersureArea,
                 ComponentIndexType.LEFT_OR_MAIN,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             region,
+            "thermal-measure-area(lens)",
         )
         delay(THERMAL_MEASURE_SETTLE_MS)
-        return keyManager.getValue(
+        return validTemperature(
+            getValueAsync(
+                KeyTools.createCameraKey(
+                    DJICameraKey.KeyThermalRegionMetersureTemperature,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                    CameraLensType.CAMERA_LENS_THERMAL,
+                ),
+                "thermal-region-temperature(lens)",
+            )?.maxAreaTemperature,
+        )
+    }
+
+    private suspend fun measureThermalSpotTemperatureWithLensKey(region: DoubleRect): Double? {
+        setValueBestEffort(
             KeyTools.createCameraKey(
-                DJICameraKey.KeyThermalRegionMetersureTemperature,
+                DJICameraKey.KeyThermalTemperatureMeasureMode,
                 ComponentIndexType.LEFT_OR_MAIN,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
-        )?.maxAreaTemperature
+            ThermalTemperatureMeasureMode.SPOT,
+            "thermal-measure-mode-spot(lens)",
+        )
+        val center = DoublePoint2D(
+            (region.x + region.width / 2.0).coerceIn(0.0, 1.0),
+            (region.y + region.height / 2.0).coerceIn(0.0, 1.0),
+        )
+        setValueBestEffort(
+            KeyTools.createCameraKey(
+                DJICameraKey.KeyThermalSpotMetersurePoint,
+                ComponentIndexType.LEFT_OR_MAIN,
+                CameraLensType.CAMERA_LENS_THERMAL,
+            ),
+            center,
+            "thermal-spot-point(lens)",
+        )
+        delay(THERMAL_MEASURE_SETTLE_MS)
+        return validTemperature(
+            getValueAsync(
+                KeyTools.createCameraKey(
+                    DJICameraKey.KeyThermalSpotMetersureTemperature,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                    CameraLensType.CAMERA_LENS_THERMAL,
+                ),
+                "thermal-spot-temperature(lens)",
+            ),
+        )
     }
 
     private suspend fun measureThermalRegionTemperatureWithCameraKey(region: DoubleRect): Double? {
-        setValue(
+        setValueBestEffort(
             KeyTools.createKey(
                 DJICameraKey.KeyThermalTemperatureMeasureMode,
                 ComponentIndexType.LEFT_OR_MAIN,
             ),
             ThermalTemperatureMeasureMode.REGION,
+            "thermal-measure-mode(camera)",
         )
-        setValue(
+        setValueBestEffort(
             KeyTools.createKey(
                 DJICameraKey.KeyThermalRegionMetersureArea,
                 ComponentIndexType.LEFT_OR_MAIN,
             ),
             region,
+            "thermal-measure-area(camera)",
         )
         delay(THERMAL_MEASURE_SETTLE_MS)
-        return keyManager.getValue(
-            KeyTools.createKey(
-                DJICameraKey.KeyThermalRegionMetersureTemperature,
-                ComponentIndexType.LEFT_OR_MAIN,
-            ),
-        )?.maxAreaTemperature
+        return validTemperature(
+            getValueAsync(
+                KeyTools.createKey(
+                    DJICameraKey.KeyThermalRegionMetersureTemperature,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                ),
+                "thermal-region-temperature(camera)",
+            )?.maxAreaTemperature,
+        )
     }
 
     override suspend fun unbindAll() {
@@ -318,16 +474,61 @@ class DjiMsdkStreamBinder(
 
                     override fun onFailure(error: IDJIError) {
                         continuation.takeIf { it.isActive }
-                            ?.resumeWithException(IllegalStateException(error.description()))
+                            ?.resumeWithException(IllegalStateException(formatDjiError(error)))
                     }
                 })
             }
         }
     }
 
+    private suspend fun <T> setValueBestEffort(
+        key: dji.sdk.keyvalue.key.DJIKey<T>,
+        value: T,
+        action: String,
+    ): Boolean {
+        return runCatching { setValue(key, value) }
+            .onFailure { Log.w(tag, "$action set failed: ${it.message}") }
+            .isSuccess
+    }
+
+    private suspend fun <T> getValueAsync(key: dji.sdk.keyvalue.key.DJIKey<T>, action: String): T? {
+        // 同步 getValue 读的是本地缓存，测温这类持续推送值大概率拿到 null；用异步回调取实时值。
+        return runCatching {
+            withTimeout(MSDK_CALLBACK_TIMEOUT_MS) {
+                suspendCancellableCoroutine<T?> { continuation ->
+                    keyManager.getValue(key, object : CommonCallbacks.CompletionCallbackWithParam<T> {
+                        override fun onSuccess(value: T?) {
+                            continuation.takeIf { it.isActive }?.resume(value)
+                        }
+
+                        override fun onFailure(error: IDJIError) {
+                            Log.w(tag, "$action get failed: ${formatDjiError(error)}")
+                            continuation.takeIf { it.isActive }?.resume(null)
+                        }
+                    })
+                }
+            }
+        }.onFailure { Log.w(tag, "$action get error: ${it.message}") }.getOrNull()
+    }
+
+    private fun formatDjiError(error: IDJIError?): String {
+        if (error == null) {
+            return "unknown-dji-error"
+        }
+        val parts = listOfNotNull(
+            runCatching { error.errorType()?.toString() }.getOrNull(),
+            runCatching { error.errorCode() }.getOrNull(),
+            runCatching { error.innerCode() }.getOrNull(),
+            runCatching { error.description() }.getOrNull(),
+            runCatching { error.hint() }.getOrNull(),
+        ).filter { it.isNotBlank() }
+        return if (parts.isEmpty()) "unknown-dji-error" else parts.joinToString(" | ")
+    }
+
     companion object {
         private const val DEFAULT_VISIBLE_ZOOM_RATIO: Double = 1.0
         private const val MSDK_CALLBACK_TIMEOUT_MS: Long = 8_000
+        private const val INVALID_TEMPERATURE_EPSILON: Double = 0.001
         private const val THERMAL_MEASURE_SETTLE_MS: Long = 400
         private const val VISIBLE_SNAPSHOT_POLL_MS: Long = 100
         private const val VISIBLE_SNAPSHOT_WAIT_ATTEMPTS: Int = 12
@@ -463,6 +664,16 @@ private fun ThermalMeasureRegion.centerX(): Double = x + width / 2
 
 private fun ThermalMeasureRegion.centerY(): Double = y + height / 2
 
+internal fun ThermalMeasureRegion.centerWithinRegion(
+    roi: ThermalMeasureRegion,
+    margin: Double,
+): Boolean {
+    val cx = x + width / 2
+    val cy = y + height / 2
+    return cx >= roi.x - margin && cx <= roi.x + roi.width + margin &&
+        cy >= roi.y - margin && cy <= roi.y + roi.height + margin
+}
+
 private fun ThermalMeasureRegion.centerDistanceTo(other: ThermalMeasureRegion): Double {
     val dx = centerX() - other.centerX()
     val dy = centerY() - other.centerY()
@@ -485,6 +696,8 @@ private fun roundMeasureCoordinate(value: Double): Double =
 private const val HOTSPOT_CLUSTER_DISTANCE = 0.075
 private const val MAX_FRAME_HOTSPOT_MEASUREMENTS = 3
 private const val FAST_CONFIRM_TEMPERATURE_C = 120.0
+// YOLO 框与探针亮块的坐标各有换算误差，框沿外扩一点再判"亮块在框内"
+internal const val HOTSPOT_IN_ROI_MARGIN = 0.05
 private const val THERMAL_SNAPSHOT_CLOCK_SKEW_MS: Long = 1_000
 
 private fun ThermalMeasureRegion.toDoubleRect(): DoubleRect {
