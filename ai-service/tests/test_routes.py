@@ -333,3 +333,148 @@ def test_msdk_visible_snapshot_reports_backend_when_local_task_is_missing(tmp_pa
     assert payload["thermalSourceEventId"] == "thermal-source-001"
     assert payload["thermal_image_url"] == "http://ai/snapshots/thermal-source-001-annotated.jpg"
     assert payload["thermalImageUrl"] == "http://ai/snapshots/thermal-source-001-annotated.jpg"
+
+
+def test_thermal_annotation_refresh_draws_yolo_boxes(monkeypatch, tmp_path):
+    import numpy as np
+
+    from types import SimpleNamespace
+
+    from app.services.snapshot_writer import SnapshotWriter
+
+    monkeypatch.setenv("AI_SERVICE_SNAPSHOT_DIR", str(tmp_path))
+    monkeypatch.setenv("AI_SERVICE_SNAPSHOT_PUBLIC_BASE_URL", "http://snapshots")
+    writer = SnapshotWriter(str(tmp_path), "http://snapshots")
+    writer.write_pair("evt-yolo-1", np.zeros((100, 200, 3), dtype=np.uint8), boxes=None)
+
+    class FakeAnalyzer:
+        last_detections = [SimpleNamespace(cx=0.5, cy=0.5, w=0.2, h=0.2, conf=0.9)]
+
+        def analyze(self, packet):
+            return 0.9
+
+    monkeypatch.setattr(
+        "app.api.routes._get_thermal_annotation_analyzer",
+        lambda settings: FakeAnalyzer(),
+    )
+
+    captured = {}
+    original_refresh = SnapshotWriter.refresh_thermal_annotation
+
+    def spy_refresh(self, event_id, **kwargs):
+        captured["boxes"] = kwargs.get("boxes")
+        return original_refresh(self, event_id, **kwargs)
+
+    monkeypatch.setattr(SnapshotWriter, "refresh_thermal_annotation", spy_refresh)
+
+    response = client.post(
+        "/api/v1/snapshots/evt-yolo-1/thermal-annotation",
+        json={"thermal_temperature": 153.0},
+    )
+
+    assert response.status_code == 200
+    assert captured["boxes"] == [
+        {"x1": 80, "y1": 40, "x2": 120, "y2": 60, "conf": 0.9, "label": "fire"}
+    ]
+
+
+def test_thermal_annotation_refresh_gates_boxes_by_measure_roi(monkeypatch, tmp_path):
+    import numpy as np
+
+    from types import SimpleNamespace
+
+    from app.services.snapshot_writer import SnapshotWriter
+
+    monkeypatch.setenv("AI_SERVICE_SNAPSHOT_DIR", str(tmp_path))
+    monkeypatch.setenv("AI_SERVICE_SNAPSHOT_PUBLIC_BASE_URL", "http://snapshots")
+    writer = SnapshotWriter(str(tmp_path), "http://snapshots")
+    writer.write_pair("evt-gate-1", np.zeros((100, 200, 3), dtype=np.uint8), boxes=None)
+
+    class FakeAnalyzer:
+        last_detections = [SimpleNamespace(cx=0.5, cy=0.5, w=0.2, h=0.2, conf=0.9)]
+
+        def analyze(self, packet):
+            return 0.9
+
+    monkeypatch.setattr(
+        "app.api.routes._get_thermal_annotation_analyzer",
+        lambda settings: FakeAnalyzer(),
+    )
+
+    captured = {}
+    original_refresh = SnapshotWriter.refresh_thermal_annotation
+
+    def spy_refresh(self, event_id, **kwargs):
+        captured["boxes"] = kwargs.get("boxes")
+        return original_refresh(self, event_id, **kwargs)
+
+    monkeypatch.setattr(SnapshotWriter, "refresh_thermal_annotation", spy_refresh)
+
+    # 测温区与识别框重叠 → 识别框保留
+    response = client.post(
+        "/api/v1/snapshots/evt-gate-1/thermal-annotation",
+        json={
+            "thermal_temperature": 153.0,
+            "thermal_measure_roi": {"x": 0.45, "y": 0.45, "width": 0.1, "height": 0.1},
+        },
+    )
+    assert response.status_code == 200
+    assert captured["boxes"] == [
+        {"x1": 80, "y1": 40, "x2": 120, "y2": 60, "conf": 0.9, "label": "fire"}
+    ]
+
+    # 测温区远离所有识别框 → 识别框按误报丢弃；黑帧无饱和热点 → 无兜底框
+    response = client.post(
+        "/api/v1/snapshots/evt-gate-1/thermal-annotation",
+        json={
+            "thermal_temperature": 153.0,
+            "thermal_measure_roi": {"x": 0.02, "y": 0.02, "width": 0.04, "height": 0.04},
+        },
+    )
+    assert response.status_code == 200
+    assert captured["boxes"] is None
+
+
+def test_thermal_annotation_refresh_drops_oversized_boxes(monkeypatch, tmp_path):
+    import numpy as np
+
+    from types import SimpleNamespace
+
+    from app.services.snapshot_writer import SnapshotWriter
+
+    monkeypatch.setenv("AI_SERVICE_SNAPSHOT_DIR", str(tmp_path))
+    monkeypatch.setenv("AI_SERVICE_SNAPSHOT_PUBLIC_BASE_URL", "http://snapshots")
+    writer = SnapshotWriter(str(tmp_path), "http://snapshots")
+    writer.write_pair("evt-oversize-1", np.zeros((100, 200, 3), dtype=np.uint8), boxes=None)
+
+    class FakeAnalyzer:
+        # 面积占比 0.42：能过 runner 的 0.5 退化阈值，但对标注没有指示意义
+        last_detections = [SimpleNamespace(cx=0.5, cy=0.5, w=0.7, h=0.6, conf=0.31)]
+
+        def analyze(self, packet):
+            return 0.31
+
+    monkeypatch.setattr(
+        "app.api.routes._get_thermal_annotation_analyzer",
+        lambda settings: FakeAnalyzer(),
+    )
+
+    captured = {}
+    original_refresh = SnapshotWriter.refresh_thermal_annotation
+
+    def spy_refresh(self, event_id, **kwargs):
+        captured["boxes"] = kwargs.get("boxes")
+        return original_refresh(self, event_id, **kwargs)
+
+    monkeypatch.setattr(SnapshotWriter, "refresh_thermal_annotation", spy_refresh)
+
+    response = client.post(
+        "/api/v1/snapshots/evt-oversize-1/thermal-annotation",
+        json={
+            "thermal_temperature": 81.7,
+            "thermal_measure_roi": {"x": 0.45, "y": 0.45, "width": 0.1, "height": 0.1},
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["boxes"] is None

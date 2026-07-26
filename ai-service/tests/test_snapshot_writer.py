@@ -252,3 +252,46 @@ def test_snapshot_writer_can_refresh_existing_thermal_annotation(monkeypatch, tm
 
     assert refreshed_url == "http://snapshots/thermal-event-annotated.jpg"
     assert ("57.6C", (146, 35)) in drawn_text
+
+
+def test_load_raw_reads_existing_snapshot_and_none_when_missing(tmp_path):
+    writer = SnapshotWriter(str(tmp_path), "http://snapshots")
+    frame = np.full((10, 20, 3), 128, dtype=np.uint8)
+    writer.write_pair("load-raw-event", frame, boxes=None)
+
+    loaded = writer.load_raw("load-raw-event")
+
+    assert loaded is not None
+    assert loaded.shape == (10, 20, 3)
+    assert writer.load_raw("no-such-event") is None
+
+
+def test_refresh_thermal_annotation_draws_detection_boxes(monkeypatch, tmp_path):
+    drawn_text = []
+    drawn_rectangles = []
+
+    def fake_put_text(image, text, org, font_face, font_scale, color, thickness, line_type=None):
+        drawn_text.append((text, org))
+        return image
+
+    def fake_rectangle(image, pt1, pt2, color, thickness=None, line_type=None, shift=None):
+        drawn_rectangles.append((pt1, pt2, color, thickness))
+        return image
+
+    monkeypatch.setattr("app.services.snapshot_writer.cv2.putText", fake_put_text)
+    monkeypatch.setattr("app.services.snapshot_writer.cv2.rectangle", fake_rectangle)
+
+    writer = SnapshotWriter(str(tmp_path), "http://snapshots")
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+    writer.write_pair("thermal-boxes-event", frame, boxes=None)
+
+    refreshed_url = writer.refresh_thermal_annotation(
+        "thermal-boxes-event",
+        thermal_temperature=153.0,
+        thermal_measure_roi={"x": 0.10, "y": 0.20, "width": 0.06, "height": 0.06},
+        boxes=[{"x1": 20, "y1": 30, "x2": 60, "y2": 70, "conf": 0.68, "label": "fire"}],
+    )
+
+    assert refreshed_url == "http://snapshots/thermal-boxes-event-annotated.jpg"
+    assert ((20, 30), (60, 70), (0, 0, 255), 2) in drawn_rectangles
+    assert any(text == "fire 0.68" for text, _ in drawn_text)

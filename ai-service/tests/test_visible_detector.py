@@ -230,3 +230,36 @@ class _FakeBoxes:
     def __init__(self, classes, confidences):
         self.cls = classes
         self.conf = confidences
+
+
+def test_yolo_detector_filters_low_confidence_boxes_from_display(monkeypatch):
+    # 展示阈值与检测灵敏度解耦：score 用低 floor 保灵敏，
+    # 但低置信框不上图（2026-07-24 实测 0.24 的框把行人标成 fire）
+    fake_yolo = _FakeYolo(
+        results=[
+            _FakeResult(
+                names={0: "fire"},
+                classes=[0],
+                confidences=[0.6],
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.snapshot_writer.boxes_from_yolo_results",
+        lambda results, target_class_names, confidence_floor: [
+            {"x1": 1, "y1": 2, "x2": 3, "y2": 4, "conf": 0.24, "label": "fire"},
+            {"x1": 5, "y1": 6, "x2": 7, "y2": 8, "conf": 0.6, "label": "fire"},
+        ],
+    )
+    detector = YoloVisibleDetector(
+        model_path="fake.pt",
+        confidence_floor=0.05,
+        box_display_floor=0.35,
+        model_factory=lambda path: fake_yolo,
+    )
+    packet = FramePacket(source_ts=1, channel="visible", frame=object())
+
+    assert detector.detect(packet) == 0.6
+    assert detector.last_boxes == [
+        {"x1": 5, "y1": 6, "x2": 7, "y2": 8, "conf": 0.6, "label": "fire"}
+    ]

@@ -77,12 +77,16 @@ class YoloVisibleDetector:
         target_class_names: Iterable[str] = ("fire", "smoke"),
         confidence_floor: float = 0.25,
         imgsz: int = 1280,
+        box_display_floor: float = 0.25,
         model_factory: Optional[Callable[[str], Any]] = None,
     ) -> None:
         self._model_path = model_path
         self._target_class_names: Set[str] = {name.lower() for name in target_class_names}
         self._confidence_floor = float(confidence_floor)
         self._imgsz = int(imgsz)
+        # 展示阈值与 confidence_floor 解耦：floor(0.05) 保灵敏度供评分/上报，display 只管"画不画"。
+        # 0.25 是实测折中：行人误报 0.24 排除，夜间小火焰低谷帧 0.26-0.28 保留（0.35 会把真火滤掉）
+        self._box_display_floor = float(box_display_floor)
         self._model_factory = model_factory
         self._model: Optional[Any] = None
         self._model_lock = Lock()
@@ -97,11 +101,15 @@ class YoloVisibleDetector:
         results = model.predict(frame.frame, verbose=False, conf=self._confidence_floor, imgsz=self._imgsz)
         from app.services.snapshot_writer import boxes_from_yolo_results
 
-        self.last_boxes = boxes_from_yolo_results(
-            results,
-            target_class_names=self._target_class_names,
-            confidence_floor=self._confidence_floor,
-        )
+        self.last_boxes = [
+            box
+            for box in boxes_from_yolo_results(
+                results,
+                target_class_names=self._target_class_names,
+                confidence_floor=self._confidence_floor,
+            )
+            if float(box.get("conf", 0.0)) >= self._box_display_floor
+        ]
         return _peak_target_confidence(
             results,
             target_class_names=self._target_class_names,

@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 _visible_detector_cache: Dict[Tuple[Any, ...], Any] = {}
 _visible_detector_cache_lock = Lock()
 
+_thermal_annotation_analyzer_cache: Dict[Tuple[Any, ...], Any] = {}
+_thermal_annotation_analyzer_cache_lock = Lock()
+
 
 class SupportsBackendEventReporting(Protocol):
     def report_event(self, task_id: str, payload: Dict[str, object]) -> None:
@@ -131,6 +134,7 @@ class TaskRegistry:
         visible_frame: Optional[Any] = None,
         visible_boxes: Optional[list] = None,
         thermal_frame: Optional[Any] = None,
+        thermal_boxes: Optional[list] = None,
     ) -> EventRecord:
         task = self.get(task_id)
         visible_image_url, thermal_image_url = self._write_detection_snapshot(
@@ -139,6 +143,7 @@ class TaskRegistry:
             visible_frame=visible_frame,
             visible_boxes=visible_boxes,
             thermal_frame=thermal_frame,
+            thermal_boxes=thermal_boxes,
         )
         visible_image_url = visible_image_url or event.visible_image_url
         thermal_image_url = thermal_image_url or event.thermal_image_url
@@ -206,6 +211,7 @@ class TaskRegistry:
                     visible_frame=visible_frame,
                     visible_boxes=visible_boxes,
                     thermal_frame=thermal_frame,
+                    thermal_boxes=thermal_boxes,
                 )
             except Exception:
                 logger.exception(
@@ -221,6 +227,7 @@ class TaskRegistry:
         visible_frame: Optional[Any],
         visible_boxes: Optional[list],
         thermal_frame: Optional[Any],
+        thermal_boxes: Optional[list] = None,
     ) -> Tuple[Optional[str], Optional[str]]:
         if self._detection_snapshot_writer is None:
             return None, None
@@ -242,7 +249,7 @@ class TaskRegistry:
                 event.source_ts,
             )
             return None, None
-        boxes = None if is_thermal else visible_boxes
+        boxes = thermal_boxes if is_thermal else visible_boxes
         event_id = f"{task_id}-{event.source_ts}"
         try:
             _, snapshot_url = self._detection_snapshot_writer.write_pair(
@@ -329,6 +336,7 @@ def _build_visible_detector(settings: Settings):
             ],
             confidence_floor=settings.visible_confidence_floor,
             imgsz=settings.visible_yolo_imgsz,
+            box_display_floor=settings.visible_box_display_floor,
         )
         logger.info(
             "visible_detector=YoloVisibleDetector model=%s floor=%s imgsz=%s classes=%s",
@@ -362,6 +370,7 @@ def _visible_detector_cache_key(settings: Settings) -> Tuple[Any, ...]:
         settings.visible_yolo_model_path,
         int(settings.visible_yolo_imgsz),
         float(settings.visible_confidence_floor),
+        float(settings.visible_box_display_floor),
         target_classes,
         float(settings.visible_fire_saturation_ratio),
     )
@@ -376,6 +385,30 @@ def _get_cached_visible_detector(settings: Settings):
             _visible_detector_cache.clear()
             _visible_detector_cache[key] = detector
         return detector
+
+
+def _thermal_annotation_analyzer_cache_key(settings: Settings) -> Tuple[Any, ...]:
+    return (
+        bool(settings.use_continuous_runner),
+        settings.thermal_detector_mode.lower(),
+        settings.thermal_yolo_model_path,
+        int(settings.thermal_yolo_imgsz),
+        float(settings.thermal_yolo_conf_threshold),
+        int(settings.thermal_intensity_threshold),
+        float(settings.thermal_saturation_ratio),
+    )
+
+
+def _get_cached_thermal_annotation_analyzer(settings: Settings):
+    """标注重绘专用 analyzer 缓存——不与 runner 共享实例，避免并发 analyze 竞写 last_detections。"""
+    key = _thermal_annotation_analyzer_cache_key(settings)
+    with _thermal_annotation_analyzer_cache_lock:
+        analyzer = _thermal_annotation_analyzer_cache.get(key)
+        if analyzer is None:
+            analyzer = _build_thermal_analyzer(settings)
+            _thermal_annotation_analyzer_cache.clear()
+            _thermal_annotation_analyzer_cache[key] = analyzer
+        return analyzer
 
 
 def _build_thermal_analyzer(settings: Settings):

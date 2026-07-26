@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     visible_yolo_model_path: str = ""
     visible_yolo_imgsz: int = 1280
     visible_confidence_floor: float = 0.25
+    visible_box_display_floor: float = 0.25
     visible_target_classes: str = "fire,smoke"
     visible_fire_saturation_ratio: float = 0.01
     thermal_detector_mode: str = "brightness"

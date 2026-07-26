@@ -222,17 +222,26 @@ def test_run_calls_open_then_close_on_provided_sources_and_stops_via_predicate()
     assert len(detection_events) == 2
 
 
-def test_run_breaks_after_max_consecutive_read_failures():
+def test_run_enters_slow_retry_instead_of_exiting_when_reconnect_budget_is_zero():
     registry = _registry_with_task()
+    sleeps = []
+    stop = {"flag": False}
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        if seconds >= 30.0:
+            stop["flag"] = True
+
     runner = ContinuousTaskRunner(
         registry=registry,
         visible_detector=_FakeDetector(score=0.9),
         thermal_analyzer=_FakeAnalyzer(score=0.0),
         fusion_service=DualStreamFusionService(),
-        sleep=lambda _: None,
+        sleep=fake_sleep,
         poll_interval_s=0.0,
         max_consecutive_read_failures=3,
         max_reconnect_attempts=0,
+        stale_retry_interval_s=30.0,
     )
     visible_source = _StubVideoSource(packets=[])
 
@@ -240,11 +249,14 @@ def test_run_breaks_after_max_consecutive_read_failures():
         task_id="task-CR-1",
         visible_source=visible_source,
         thermal_source=None,
-        stop_predicate=lambda: False,
+        stop_predicate=lambda: stop["flag"],
     )
 
+    # 断流不再自杀：预算用完转入慢速重试（30s 间隔），任务保持存活
+    assert 30.0 in sleeps
     assert visible_source.read_calls == 3
     assert visible_source.closed
+    assert registry.get("task-CR-1").status.value != "failed"
 
 
 def test_run_reopens_source_after_read_failure_burst_and_continues():
@@ -284,28 +296,45 @@ def test_run_reopens_source_after_read_failure_burst_and_continues():
     assert len(detection_events) == 1
 
 
-def test_run_marks_task_failed_when_reconnect_budget_is_exhausted():
+def test_run_recovers_via_slow_retry_after_reconnect_budget_is_exhausted():
     registry = _registry_with_task()
+    sleeps = []
     runner = ContinuousTaskRunner(
         registry=registry,
         visible_detector=_FakeDetector(score=0.9),
         thermal_analyzer=_FakeAnalyzer(score=0.0),
         fusion_service=DualStreamFusionService(),
-        sleep=lambda _: None,
+        sleep=sleeps.append,
         poll_interval_s=0.0,
         max_consecutive_read_failures=2,
         max_reconnect_attempts=1,
+        stale_retry_interval_s=30.0,
     )
-    visible_source = _ReopenablePatternVideoSource(cycles=[[None, None], [None, None]])
+    # 快速预算(1次)用完后仍断流 → 慢速重试第 3 个周期流恢复 → 自愈出检测
+    visible_source = _ReopenablePatternVideoSource(
+        cycles=[
+            [None, None],
+            [None, None],
+            [FramePacket(source_ts=10, channel="visible", frame=object())],
+        ]
+    )
+
+    def stop_predicate():
+        return any(e.event_type == "detection" for e in registry.list_events("task-CR-1"))
 
     runner.run(
         task_id="task-CR-1",
         visible_source=visible_source,
         thermal_source=None,
-        stop_predicate=lambda: False,
+        stop_predicate=stop_predicate,
     )
 
-    assert registry.get("task-CR-1").status.value == "failed"
+    assert 30.0 in sleeps
+    assert registry.get("task-CR-1").status.value != "failed"
+    detection_events = [
+        e for e in registry.list_events("task-CR-1") if e.event_type == "detection"
+    ]
+    assert len(detection_events) == 1
 
 
 def test_run_resets_consecutive_failure_count_after_a_successful_tick():
@@ -328,7 +357,8 @@ def test_run_resets_consecutive_failure_count_after_a_successful_tick():
         task_id="task-CR-1",
         visible_source=visible_source,
         thermal_source=None,
-        stop_predicate=lambda: False,
+        # 断流路径不再自行退出，用读取次数收口：成功帧重置计数后再攒满 2 次失败
+        stop_predicate=lambda: visible_source.read_calls >= 4,
     )
 
     assert visible_source.read_calls == 4
@@ -464,3 +494,116 @@ class _RaisingVideoSource:
 
     def close(self):
         return None
+
+
+class _BoxAnalyzer(_FakeAnalyzer):
+    """YoloThermalAnalyzer 形状的假 analyzer：暴露归一化 last_detections。"""
+
+    @property
+    def last_detections(self):
+        from app.inference.thermal.analyzer import ThermalDetection
+
+        return [ThermalDetection(cx=0.5, cy=0.5, w=0.5, h=0.5, conf=0.8)]
+
+
+def test_tick_passes_thermal_yolo_boxes_in_pixel_coords():
+    registry = _registry_with_task()
+    captured = {}
+    original = registry.record_detection_event
+
+    def capture(task_id, event, **kwargs):
+        captured.update(kwargs)
+        return original(task_id, event, **kwargs)
+
+    registry.record_detection_event = capture
+    runner = ContinuousTaskRunner(
+        registry=registry,
+        visible_detector=_FakeDetector(score=0.0),
+        thermal_analyzer=_BoxAnalyzer(score=0.8),
+        fusion_service=DualStreamFusionService(),
+    )
+
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+    runner.tick(
+        task_id="task-CR-1",
+        visible_source=None,
+        thermal_source=_StubVideoSource(
+            packets=[FramePacket(source_ts=1900, channel="thermal", frame=frame)]
+        ),
+    )
+
+    assert captured["thermal_boxes"] == [
+        {"x1": 50, "y1": 25, "x2": 150, "y2": 75, "conf": 0.8, "label": "fire"}
+    ]
+
+
+class _DegenerateBoxAnalyzer(_FakeAnalyzer):
+    """整幅退化框（定位无效）的红外 YOLO 假实现。"""
+
+    @property
+    def last_detections(self):
+        from app.inference.thermal.analyzer import ThermalDetection
+
+        return [ThermalDetection(cx=0.5, cy=0.5, w=0.95, h=0.95, conf=0.7)]
+
+
+def test_tick_replaces_degenerate_thermal_boxes_with_hotspot_fallback():
+    registry = _registry_with_task()
+    captured = {}
+    original = registry.record_detection_event
+
+    def capture(task_id, event, **kwargs):
+        captured.update(kwargs)
+        return original(task_id, event, **kwargs)
+
+    registry.record_detection_event = capture
+    runner = ContinuousTaskRunner(
+        registry=registry,
+        visible_detector=_FakeDetector(score=0.0),
+        thermal_analyzer=_DegenerateBoxAnalyzer(score=0.7),
+        fusion_service=DualStreamFusionService(),
+    )
+
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+    frame[40:60, 90:110] = 255  # 白热火点
+    runner.tick(
+        task_id="task-CR-1",
+        visible_source=None,
+        thermal_source=_StubVideoSource(
+            packets=[FramePacket(source_ts=1901, channel="thermal", frame=frame)]
+        ),
+    )
+
+    boxes = captured["thermal_boxes"]
+    assert boxes is not None and len(boxes) == 1
+    box = boxes[0]
+    # 退化框被丢弃，兜底框应落在亮斑附近而不是整幅
+    assert (box["x2"] - box["x1"]) < 100 and (box["y2"] - box["y1"]) < 60
+    assert box["x1"] <= 90 and box["x2"] >= 110 - 1
+    assert box["conf"] == 0.7
+
+
+def test_tick_emits_measure_roi_from_hotspot_when_analyzer_has_none():
+    registry = _registry_with_task()
+    runner = ContinuousTaskRunner(
+        registry=registry,
+        visible_detector=_FakeDetector(score=0.0),
+        thermal_analyzer=_BoxAnalyzer(score=0.8),
+        fusion_service=DualStreamFusionService(),
+    )
+
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+    frame[40:60, 90:110] = 255
+    record = runner.tick(
+        task_id="task-CR-1",
+        visible_source=None,
+        thermal_source=_StubVideoSource(
+            packets=[FramePacket(source_ts=1902, channel="thermal", frame=frame)]
+        ),
+    )
+
+    roi = record.thermal_measure_roi
+    assert roi is not None
+    # ROI 归一化后应覆盖亮斑（90-110 / 200, 40-60 / 100，含 10px pad）
+    assert roi.x <= 90 / 200 and roi.x + roi.width >= 110 / 200
+    assert roi.y <= 40 / 100 and roi.y + roi.height >= 60 / 100

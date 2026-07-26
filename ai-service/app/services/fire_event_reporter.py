@@ -54,6 +54,7 @@ class FireEventReporter:
         visible_frame: Optional[Any] = None,
         visible_boxes: Optional[list] = None,
         thermal_frame: Optional[Any] = None,
+        thermal_boxes: Optional[list] = None,
     ) -> bool:
         risk = (event.risk_level or "").upper()
         score = max(float(event.visible_score), float(event.thermal_score))
@@ -74,8 +75,8 @@ class FireEventReporter:
         # 按分析通道路由图片字段：visible -> visible_image_url, thermal -> thermal_image_url
         # 这样前端列表 / 驾驶舱 notification 能拿到正确语义的图。
         snapshot_frame = thermal_frame if is_thermal else visible_frame
-        # 热成像通道没有 YOLO 框（HotSpotAnalyzer 不暴露 box），boxes=None 时 annotated 图等同 raw。
-        snapshot_boxes = None if is_thermal else visible_boxes
+        # 红外走 YoloThermalAnalyzer 时有像素框；HotSpot/Stub 场景 thermal_boxes 为 None，annotated 图等同 raw。
+        snapshot_boxes = thermal_boxes if is_thermal else visible_boxes
         snapshot_url: Optional[str] = None
         if self._snapshot_writer is not None and snapshot_frame is not None:
             should_write_snapshot = True

@@ -15,6 +15,7 @@ from app.models.task import TaskCreateRequest, TaskRecord
 from app.services.snapshot_writer import SnapshotWriter
 from app.services.task_registry import (
     _build_backend_client,
+    _get_cached_thermal_annotation_analyzer,
     _get_cached_visible_detector,
     _looks_like_thermal_frame,
     _thermal_frame_stats,
@@ -308,6 +309,90 @@ async def upload_msdk_visible_snapshot(
     }
 
 
+def _get_thermal_annotation_analyzer(settings: Settings):
+    return _get_cached_thermal_annotation_analyzer(settings)
+
+
+def _thermal_annotation_boxes(
+    writer: SnapshotWriter,
+    event_id: str,
+    settings: Settings,
+    measure_roi: Optional[dict] = None,
+) -> Optional[list]:
+    """重绘前在 raw 上重跑红外识别，让识别框（红）与测温框（黄）并存。
+
+    此前 refresh 固定 boxes=None，backend 每次重绘都会抹掉 YOLO 识别框，
+    用户在火情事件里只能看到偏粗的测温采样区。
+
+    有测温 ROI 时只保留其邻域内的识别框：火情事件图是"该测温点"的证据，
+    远离测温区的检测按误报处理（弱火/黄昏帧上模型会把暗色植被误报成 fire），
+    丢弃后退回饱和热点兜底框。
+    """
+    frame = writer.load_raw(event_id)
+    if frame is None:
+        return None
+    try:
+        from app.services.continuous_runner import (
+            _hotspot_fallback_boxes,
+            _thermal_boxes_from_detections,
+        )
+
+        analyzer = _get_thermal_annotation_analyzer(settings)
+        score = float(analyzer.analyze(FramePacket(channel="thermal", frame=frame, source_ts=0)))
+        boxes = _thermal_boxes_from_detections(getattr(analyzer, "last_detections", None), frame)
+        if boxes:
+            boxes = [b for b in boxes if not _box_oversized(b, frame)] or None
+        if boxes and measure_roi is not None:
+            boxes = [b for b in boxes if _box_near_measure_roi(b, measure_roi, frame)] or None
+        if boxes is None and score > 0.0:
+            boxes = _hotspot_fallback_boxes(frame, score)
+        return boxes
+    except Exception:
+        logger.exception("thermal annotation box inference failed event_id=%s", event_id)
+        return None
+
+
+_MEASURE_ROI_NEIGHBORHOOD_MARGIN = 0.10
+
+# runner 的退化阈值(0.5)对标注太宽松：残火帧上模型会给出盖住大半画面的
+# 低置信松散框，作为"识别证据框"没有指示意义 → 丢弃后由热点兜底框补位
+_ANNOTATION_BOX_MAX_AREA_RATIO = 0.20
+
+
+def _box_oversized(box: dict, frame: Any) -> bool:
+    try:
+        height, width = int(frame.shape[0]), int(frame.shape[1])
+        if width <= 0 or height <= 0:
+            return True
+        area = max(0.0, float(box["x2"]) - float(box["x1"])) * max(0.0, float(box["y2"]) - float(box["y1"]))
+        return area / float(width * height) > _ANNOTATION_BOX_MAX_AREA_RATIO
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
+def _box_near_measure_roi(box: dict, measure_roi: dict, frame: Any) -> bool:
+    """识别框与测温区邻域（各方向外扩 10% 帧宽/高）是否相交。
+
+    外扩量同时吸收测温 ROI 与识别框之间的坐标空间差（黑边/传感器空间换算）。
+    """
+    try:
+        height, width = int(frame.shape[0]), int(frame.shape[1])
+        margin_x = width * _MEASURE_ROI_NEIGHBORHOOD_MARGIN
+        margin_y = height * _MEASURE_ROI_NEIGHBORHOOD_MARGIN
+        roi_x1 = float(measure_roi["x"]) * width - margin_x
+        roi_y1 = float(measure_roi["y"]) * height - margin_y
+        roi_x2 = (float(measure_roi["x"]) + float(measure_roi["width"])) * width + margin_x
+        roi_y2 = (float(measure_roi["y"]) + float(measure_roi["height"])) * height + margin_y
+        return (
+            float(box["x1"]) < roi_x2
+            and float(box["x2"]) > roi_x1
+            and float(box["y1"]) < roi_y2
+            and float(box["y2"]) > roi_y1
+        )
+    except (KeyError, TypeError, ValueError):
+        return True
+
+
 @router.post("/api/v1/snapshots/{event_id}/thermal-annotation")
 async def refresh_thermal_annotation(event_id: str, request: Request) -> Dict[str, str]:
     raw_body = await request.body()
@@ -322,12 +407,19 @@ async def refresh_thermal_annotation(event_id: str, request: Request) -> Dict[st
         snapshot_dir=settings.snapshot_dir,
         public_base_url=settings.snapshot_public_base_url,
     )
+    boxes = _thermal_annotation_boxes(
+        writer,
+        event_id,
+        settings,
+        measure_roi=annotation.thermal_measure_roi,
+    )
     url = writer.refresh_thermal_annotation(
         event_id,
         thermal_temperature=annotation.thermal_temperature,
         thermal_measure_roi=annotation.thermal_measure_roi,
         thermal_detect_roi=annotation.thermal_detect_roi,
         thermal_measurements=annotation.thermal_measurements,
+        boxes=boxes,
     )
     if not url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Snapshot not found")

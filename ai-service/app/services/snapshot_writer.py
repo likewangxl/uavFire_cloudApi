@@ -64,6 +64,15 @@ class SnapshotWriter:
             annotated_name = raw_name
         return self._url(raw_name), self._url(annotated_name)
 
+    def load_raw(self, event_id: str) -> Optional[np.ndarray]:
+        raw_path = self._dir / f"{event_id}-raw.jpg"
+        if not raw_path.exists():
+            return None
+        frame = cv2.imread(str(raw_path))
+        if frame is None or getattr(frame, "size", 0) == 0:
+            return None
+        return frame
+
     def refresh_thermal_annotation(
         self,
         event_id: str,
@@ -71,18 +80,15 @@ class SnapshotWriter:
         thermal_measure_roi: Optional[Any] = None,
         thermal_detect_roi: Optional[Any] = None,
         thermal_measurements: Optional[Iterable[Any]] = None,
+        boxes: Optional[Iterable[dict]] = None,
     ) -> Optional[str]:
-        raw_name = f"{event_id}-raw.jpg"
         annotated_name = f"{event_id}-annotated.jpg"
-        raw_path = self._dir / raw_name
-        if not raw_path.exists():
-            return None
-        frame = cv2.imread(str(raw_path))
-        if frame is None or getattr(frame, "size", 0) == 0:
+        frame = self.load_raw(event_id)
+        if frame is None:
             return None
         annotated = self._annotate(
             frame,
-            boxes=None,
+            boxes=boxes,
             thermal_temperature=thermal_temperature,
             thermal_measure_roi=thermal_measure_roi,
             thermal_detect_roi=thermal_detect_roi,
