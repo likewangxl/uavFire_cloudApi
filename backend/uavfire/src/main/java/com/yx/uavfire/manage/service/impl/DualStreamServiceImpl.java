@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -46,13 +47,14 @@ import java.util.function.Consumer;
 public class DualStreamServiceImpl implements IDualStreamService {
 
     private static final double FIRE_DETECTION_FLOOR = 0.01;
-    private static final double VISIBLE_CONFIRMATION_FLOOR = 0.5;
     private static final double HIGH_TEMPERATURE_VISIBLE_CONFIRMATION_FLOOR = 0.1;
     private static final double THERMAL_WEAK_IMAGE_FLOOR = 0.006;
-    private static final double THERMAL_WARM_TEMPERATURE_C = 45.0;
     private static final double THERMAL_MEDIUM_TEMPERATURE_C = 60.0;
     private static final double THERMAL_HIGH_TEMPERATURE_C = 80.0;
     private static final long CONFIRMED_FIRE_EVENT_DEBOUNCE_MS = 60_000L;
+    // 切换期间 group 报 DUAL 模式会骗过 shouldIssueFocus 去重，每帧补发 focus-visible
+    // 会让 agent 反复 restartLiveStream；确认流程内按时间节流。
+    private static final long VISIBLE_FOCUS_REISSUE_MIN_INTERVAL_MS = 10_000L;
     private static final long VISIBLE_ATTACHMENT_WINDOW_MS = 60_000L;
     private static final String COMMAND_STATUS_PENDING = "pending";
     private static final String COMMAND_STATUS_DISPATCHED = "dispatched";
@@ -61,7 +63,6 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private static final String REVIEW_STATUS_THERMAL_MEASUREMENT_TIMEOUT = "THERMAL_MEASUREMENT_TIMEOUT";
     private static final String REVIEW_STATUS_THERMAL_IMAGE_MISSING = "THERMAL_IMAGE_MISSING";
     private static final String REVIEW_STATUS_THERMAL_REJECTED = "THERMAL_REJECTED";
-    private static final String REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM = "THERMAL_NEEDS_VISIBLE_CONFIRM";
     private static final String REVIEW_STATUS_VISIBLE_PENDING = "VISIBLE_PENDING";
     private static final String REVIEW_STATUS_VISIBLE_CONFIRMED = "VISIBLE_CONFIRMED";
     private static final String REVIEW_STATUS_VISIBLE_REJECTED = "VISIBLE_REJECTED";
@@ -85,7 +86,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private final Map<String, DualStreamEventDTO> visibleTriggerByTask = new ConcurrentHashMap<>();
     private final Map<String, Long> confirmedFireEventByTask = new ConcurrentHashMap<>();
     private final Map<String, Long> lastThermalMeasurementCompletedAtByDrone = new ConcurrentHashMap<>();
-    private final Map<String, DualStreamEventDTO> thermalTriggerByTask = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastVisibleFocusIssuedAtByDrone = new ConcurrentHashMap<>();
     private final Map<String, DualStreamEventDTO> confirmedThermalEventByTask = new ConcurrentHashMap<>();
     private final Map<String, String> confirmedThermalFireEventIdByTask = new ConcurrentHashMap<>();
 
@@ -101,8 +102,29 @@ public class DualStreamServiceImpl implements IDualStreamService {
     @Value("${dual-stream.thermal-measurement-timeout-ms:20000}")
     private long thermalMeasurementTimeoutMs = 20_000L;
 
+    // 火情确认线：串行链唯一裁决口径——红外 YOLO 命中后对检出框实测温度，达线才确认。
+    // 夏季日晒地面实测 33~48°C，测试盆火基准 57.6°C；默认 57，可按季节在 application.yml 调整。
+    @Value("${dual-stream.thermal-warm-floor-c:57}")
+    private double thermalWarmFloorC = 57.0;
+
+    // 可见光佐证标注线：确认后证据照上可见光 YOLO 达线记 VISIBLE_CONFIRMED、
+    // 未达线记 VISIBLE_REJECTED，只影响标注不影响事件存废。
+    // 字段初始化兜底，保证单测 new 实例与 Spring 注入默认一致。
+    @Value("${dual-stream.visible-confirm-floor:0.2}")
+    private double visibleConfirmFloor = 0.2;
+
     @Value("${dual-stream.thermal-measurement-cooldown-ms:5000}")
     private long thermalMeasurementCooldownMs = 5_000L;
+
+    // 实测温度确认后切可见光补证据照；宽限期内压制自动 focus-thermal 与测温指令，
+    // 避免抢在证据照（ai-service 可见光帧快照）落地前把镜头切回红外。
+    // 证据照挂接成功或 agent 报终态即提前解除。
+    @Value("${dual-stream.visible-confirmation-grace-ms:30000}")
+    private long visibleConfirmationGraceMs = 30_000L;
+
+    private final Map<String, Long> visibleConfirmationGraceUntilByDrone = new ConcurrentHashMap<>();
+    // 宽限期内我们主动下发过 thermal-monitor-off 的机器：解除时要对称地 thermal-monitor-on 恢复探针
+    private final Set<String> confirmationMonitorPausedByDrone = ConcurrentHashMap.newKeySet();
 
     private final HttpClient aiHttpClient = HttpClient.newHttpClient();
 
@@ -717,22 +739,14 @@ public class DualStreamServiceImpl implements IDualStreamService {
             return reviewed;
         }
 
-        if ("visible".equals(channel) && thermalTriggerByTask.containsKey(reviewed.getTaskId())) {
-            DualStreamEventDTO thermalTrigger = thermalTriggerByTask.remove(reviewed.getTaskId());
-            if (!hasThermalImage(thermalTrigger)) {
-                reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_IMAGE_MISSING);
-                requestThermalFocusAfterVisibleReview(droneSn);
-                return reviewed;
-            }
-            if (hasVisibleFireDetection(reviewed, thermalTrigger)) {
-                reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_CONFIRMED);
-                visibleTriggerByTask.put(reviewed.getTaskId(), copyEvent(reviewed));
-                createConfirmedFireEvent(thermalTrigger, priorEvents);
-            } else {
-                reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_REJECTED);
-            }
-            requestThermalFocusAfterVisibleReview(droneSn);
-            return reviewed;
+        if ("visible".equals(channel)
+                && StringUtils.hasText(reviewed.getVisibleImageUrl())
+                && StringUtils.hasText(reviewed.getThermalSourceEventId())) {
+            // agent 确认照（唯一携带 thermalSourceEventId 的可见光事件）：先挂证据再走复核，
+            // 复核结论（CONFIRMED/REJECTED/PENDING）不该决定"照片存不存"。
+            attachVisibleConfirmationEvidence(reviewed);
+            // 照片已到手，确认宽限期结束——恢复探针，后续复核可立即恢复"拍完切回红外"
+            liftVisibleConfirmationGrace(droneSn);
         }
 
         if ("visible".equals(channel) && REVIEW_STATUS_VISIBLE_PENDING.equals(reviewed.getReviewStatus())) {
@@ -742,20 +756,26 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
         if ("visible".equals(channel) && isVisibleTerminalStatus(reviewed.getReviewStatus())) {
             recordVisibleStatusForRecentThermalConfirmation(reviewed, reviewed.getReviewStatus());
+            // agent 已报确认终态（成功/失败都算结束），解除宽限让镜头回红外
+            liftVisibleConfirmationGrace(droneSn);
             requestThermalFocusAfterVisibleReview(droneSn);
             return reviewed;
         }
 
         if ("visible".equals(channel) && confirmedThermalEventByTask.containsKey(reviewed.getTaskId())) {
+            // 证据照挂接：事件存废已由实测温度裁决。达佐证线的照片挂为事件主图，
+            // 未达线的照片连同 VISIBLE_REJECTED 标注记入事件履历——只标注不拦截。
             if (hasVisibleFireDetection(reviewed, confirmedThermalEventByTask.get(reviewed.getTaskId()))) {
                 if (attachVisibleImageToRecentThermalConfirmation(reviewed)) {
                     reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_CONFIRMED);
+                    liftVisibleConfirmationGrace(droneSn);
                     requestThermalFocusAfterVisibleReview(droneSn);
                     return reviewed;
                 }
             } else if (StringUtils.hasText(reviewed.getVisibleImageUrl())) {
                 reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_REJECTED);
                 recordVisibleStatusForRecentThermalConfirmation(reviewed, REVIEW_STATUS_VISIBLE_REJECTED);
+                liftVisibleConfirmationGrace(droneSn);
                 requestThermalFocusAfterVisibleReview(droneSn);
                 return reviewed;
             }
@@ -764,7 +784,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
         if ("visible".equals(channel)) {
             reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_SKIPPED_THERMAL_FIRST);
             rememberVisibleTrigger(reviewed, droneSn);
-            if (isFireDetectionActiveForAutoFocus(droneSn) && shouldIssueFocus(droneSn, "focus-thermal")) {
+            if (isFireDetectionActiveForAutoFocus(droneSn)
+                    && !isWithinVisibleConfirmationGrace(droneSn)
+                    && shouldIssueFocus(droneSn, "focus-thermal")) {
                 issueCommand(droneSn, "focus-thermal");
             }
             return reviewed;
@@ -772,6 +794,16 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
         if ("thermal".equals(channel)) {
             if (shouldMeasureThermalRegion(reviewed) && isFireDetectionActiveForAutoFocus(droneSn)) {
+                if (isWithinVisibleConfirmationGrace(droneSn)) {
+                    // 宽限期内测温指令也要安静——measure-thermal-region 会切镜头打断确认照拍摄
+                    reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_REJECTED);
+                    log.info(
+                            "dual-stream thermal measurement skipped by visible-confirmation grace task={} drone={} ts={}",
+                            reviewed.getTaskId(),
+                            droneSn,
+                            reviewed.getSourceTs());
+                    return reviewed;
+                }
                 if (isInThermalMeasurementCooldown(droneSn)) {
                     reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_REJECTED);
                     log.info(
@@ -794,25 +826,30 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 issueThermalMeasurementCommand(reviewed);
                 return reviewed;
             }
-            boolean thermalConfirmed = hasThermalConfirmation(reviewed);
-            if (thermalConfirmed && !hasThermalImage(reviewed)) {
-                reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_IMAGE_MISSING);
-                confirmedThermalEventByTask.put(reviewed.getTaskId(), copyEvent(reviewed));
-                confirmedThermalFireEventIdByTask.remove(reviewed.getTaskId());
-                log.warn(
-                        "dual-stream thermal confirmation skipped without thermal image task={} drone={} ts={}",
-                        reviewed.getTaskId(),
-                        droneSn,
-                        reviewed.getSourceTs());
+            // 串行链：只有真实测温（后端测温 ack 回填或任务确认流程随事件携带）达线才确认；
+            // YOLO 分数只负责触发测温，不再单独建事件，HUD 中心温度不参与判定。
+            Double measuredTemperature = reviewed.getThermalTemperature();
+            if (isTemperatureAtLeast(measuredTemperature, thermalWarmFloorC)) {
+                if (!hasThermalImage(reviewed)) {
+                    reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_IMAGE_MISSING);
+                    confirmedThermalEventByTask.put(reviewed.getTaskId(), copyEvent(reviewed));
+                    confirmedThermalFireEventIdByTask.remove(reviewed.getTaskId());
+                    log.warn(
+                            "dual-stream thermal confirmation skipped without thermal image task={} drone={} ts={}",
+                            reviewed.getTaskId(),
+                            droneSn,
+                            reviewed.getSourceTs());
+                    return reviewed;
+                }
+                reviewed.setReviewStatus("THERMAL_CONFIRMED");
+                beginVisibleConfirmationGrace(droneSn);
+                createConfirmedFireEvent(reviewed, priorEvents);
+                if (shouldIssueVisibleFocusForThermalEvent(reviewed)) {
+                    issueVisibleFocusThrottled(droneSn);
+                }
                 return reviewed;
             }
-            reviewed.setReviewStatus(thermalConfirmed ? "THERMAL_CONFIRMED" : "THERMAL_REJECTED");
-            if ("THERMAL_CONFIRMED".equals(reviewed.getReviewStatus())) {
-                createConfirmedFireEvent(reviewed, priorEvents);
-            }
-            if (shouldIssueVisibleFocusForThermalEvent(reviewed)) {
-                issueCommand(droneSn, "focus-visible");
-            }
+            reviewed.setReviewStatus(REVIEW_STATUS_THERMAL_REJECTED);
         }
         return reviewed;
     }
@@ -830,6 +867,8 @@ public class DualStreamServiceImpl implements IDualStreamService {
     }
 
     private boolean shouldMeasureThermalRegion(DualStreamEventDTO event) {
+        // 串行链唯一触发口径：红外 YOLO 有检出框（弱分即可，保小火灵敏度）就实测一次温度；
+        // 测温不切镜头，误报由温度裁决兜住，5s 冷却限频。
         return event != null
                 && event.getThermalTemperature() == null
                 && event.getThermalMeasureRoi() != null
@@ -932,18 +971,12 @@ public class DualStreamServiceImpl implements IDualStreamService {
                         event.getReviewStatus());
                 refreshThermalSnapshotAnnotation(event);
                 if ("THERMAL_CONFIRMED".equals(event.getReviewStatus())) {
+                    beginVisibleConfirmationGrace(event.getDroneSn());
                     createConfirmedFireEvent(event, events);
                     if (!thermalMeasurementAckRestoredVisible(ack)
                             && shouldIssueVisibleFocusForThermalEvent(event)) {
-                        issueCommand(event.getDroneSn(), "focus-visible");
+                        issueVisibleFocusThrottled(event.getDroneSn());
                     }
-                } else if (REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM.equals(event.getReviewStatus())) {
-                    thermalTriggerByTask.put(taskId, copyEvent(event));
-                }
-                if (REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM.equals(event.getReviewStatus())
-                        && !thermalMeasurementAckRestoredVisible(ack)
-                        && shouldIssueVisibleFocusForThermalEvent(event)) {
-                    issueCommand(event.getDroneSn(), "focus-visible");
                 }
                 break;
             }
@@ -959,30 +992,23 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private boolean shouldIssueVisibleFocusForThermalEvent(DualStreamEventDTO event) {
         return event != null
                 && StringUtils.hasText(event.getDroneSn())
-                && !isMsdkLocalVisibleSnapshotThermalEvent(event)
                 && shouldIssueFocus(event.getDroneSn(), "focus-visible");
     }
 
-    private boolean isMsdkLocalVisibleSnapshotThermalEvent(DualStreamEventDTO event) {
-        if (event == null
-                || !"thermal".equals(normalize(event.getAnalysisChannel()))
-                || !hasThermalImage(event)
-                || !StringUtils.hasText(event.getTaskId())
-                || !StringUtils.hasText(event.getDroneSn())
-                || !event.getTaskId().equals("fire-" + event.getDroneSn())) {
-            return false;
+    private void issueVisibleFocusThrottled(String droneSn) {
+        long now = System.currentTimeMillis();
+        Long last = lastVisibleFocusIssuedAtByDrone.get(droneSn);
+        boolean focusThrottled = last != null && now - last < VISIBLE_FOCUS_REISSUE_MIN_INTERVAL_MS;
+        if (!focusThrottled) {
+            lastVisibleFocusIssuedAtByDrone.put(droneSn, now);
+            issueCommand(droneSn, "focus-visible");
         }
-        DualStreamLiveGroupDTO group = groups.get(event.getDroneSn());
-        if (group == null) {
-            group = restoreGroupFromRedis(event.getDroneSn());
+        // 确认宽限期内暂停 agent 自主测温探针（它每 2s 会 focusThermal 抢镜头）；
+        // 排在 focus-visible 之后下发，保持"确认后队首命令是切可见光"的既有契约
+        if (visibleConfirmationGraceUntilByDrone.containsKey(droneSn)
+                && confirmationMonitorPausedByDrone.add(droneSn)) {
+            issueCommand(droneSn, "thermal-monitor-off");
         }
-        if (group == null) {
-            return false;
-        }
-        String playbackStatus = normalize(group.getPlaybackStatus());
-        String statusReason = normalize(group.getStatusReason());
-        return "shared-side-by-side-preview".equals(playbackStatus)
-                || statusReason.contains("single-liveview-source-shared-side-by-side-preview");
     }
 
     private void createConfirmedFireEvent(DualStreamEventDTO event, List<DualStreamEventDTO> priorEvents) {
@@ -1039,6 +1065,58 @@ public class DualStreamServiceImpl implements IDualStreamService {
                     response != null && StringUtils.hasText(response.getEventId())
                             ? response.getEventId()
                             : param.getEventId());
+        }
+    }
+
+    /**
+     * agent 可见光确认照证据挂接：确认照携带 thermalSourceEventId（= fire_event.event_id 精确外键），
+     * 不依赖内存关联与 60s 时间窗（镜头拉锯常让确认照晚 74s+ 才上传成功，旧路径全部拒挂）。
+     * 精确 id 对应行可能已被空间合并吞并，失败时回退到合并后的 fire event id。
+     */
+    private void attachVisibleConfirmationEvidence(DualStreamEventDTO visibleEvent) {
+        if (fireEventService == null || visibleEvent.getSourceTs() == null) {
+            return;
+        }
+        String preciseEventId = visibleEvent.getThermalSourceEventId();
+        String sourceEventId = visibleEvent.getTaskId() + "-" + visibleEvent.getSourceTs();
+        String timestamp = Instant.ofEpochMilli(visibleEvent.getSourceTs()).toString();
+        String thermalImageUrl = visibleEvent.getThermalImageUrl();
+        if (!StringUtils.hasText(thermalImageUrl)) {
+            DualStreamEventDTO thermalEvent = confirmedThermalEventByTask.get(visibleEvent.getTaskId());
+            thermalImageUrl = thermalEvent != null ? thermalEvent.getThermalImageUrl() : null;
+        }
+        try {
+            boolean attached = fireEventService.attachVisibleImage(
+                    preciseEventId,
+                    sourceEventId,
+                    visibleEvent.getVisibleImageUrl(),
+                    timestamp,
+                    preciseEventId,
+                    thermalImageUrl);
+            if (!attached) {
+                String mergedEventId = confirmedThermalFireEventIdByTask.get(visibleEvent.getTaskId());
+                if (StringUtils.hasText(mergedEventId) && !mergedEventId.equals(preciseEventId)) {
+                    attached = fireEventService.attachVisibleImage(
+                            mergedEventId,
+                            sourceEventId,
+                            visibleEvent.getVisibleImageUrl(),
+                            timestamp,
+                            preciseEventId,
+                            thermalImageUrl);
+                }
+            }
+            if (!attached) {
+                log.warn(
+                        "visible confirmation evidence attach failed task={} thermalSourceEventId={}",
+                        visibleEvent.getTaskId(),
+                        preciseEventId);
+            }
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "visible confirmation evidence attach error task={} thermalSourceEventId={}",
+                    visibleEvent.getTaskId(),
+                    preciseEventId,
+                    ex);
         }
     }
 
@@ -1153,17 +1231,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
     }
 
     private Double resolveThermalTemperature(DualStreamEventDTO event) {
-        if (event.getThermalTemperature() != null) {
-            return event.getThermalTemperature();
-        }
-        if (!StringUtils.hasText(event.getDroneSn())) {
-            return null;
-        }
-        DualStreamLiveGroupDTO group = groups.get(event.getDroneSn());
-        if (group == null) {
-            group = restoreGroupFromRedis(event.getDroneSn());
-        }
-        return group == null ? null : group.getThermalCenterTemperatureC();
+        // 只认随事件携带的实测温度。group 的 HUD 中心温度是探针对"画面最热点"的瞬时读数，
+        // 日晒金属可到 80°C+，曾把 YOLO 零检出帧连环确认成火情（2026-07-25 实测），不再参与判定。
+        return event == null ? null : event.getThermalTemperature();
     }
 
     private void refreshThermalSnapshotAnnotation(DualStreamEventDTO event) {
@@ -1388,6 +1458,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
         if (!StringUtils.hasText(droneSn) || !isFireDetectionActiveForAutoFocus(droneSn)) {
             return;
         }
+        if (isWithinVisibleConfirmationGrace(droneSn)) {
+            return;
+        }
         DualStreamCommandDTO existing = commandByDrone.get(droneSn);
         if (existing != null
                 && "focus-thermal".equals(existing.getAction())
@@ -1396,6 +1469,36 @@ public class DualStreamServiceImpl implements IDualStreamService {
         }
         if (!isFocusActionCurrentlyActive(droneSn, "focus-thermal")) {
             issueCommand(droneSn, "focus-thermal");
+        }
+    }
+
+    private boolean isWithinVisibleConfirmationGrace(String droneSn) {
+        Long until = visibleConfirmationGraceUntilByDrone.get(droneSn);
+        if (until == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() >= until) {
+            liftVisibleConfirmationGrace(droneSn);
+            return false;
+        }
+        return true;
+    }
+
+    private void beginVisibleConfirmationGrace(String droneSn) {
+        if (StringUtils.hasText(droneSn) && visibleConfirmationGraceMs > 0) {
+            visibleConfirmationGraceUntilByDrone.put(
+                    droneSn, System.currentTimeMillis() + visibleConfirmationGraceMs);
+        }
+    }
+
+    /** 解除确认宽限期并恢复 agent 测温探针（若是我们暂停的且火情监测仍激活）。 */
+    private void liftVisibleConfirmationGrace(String droneSn) {
+        if (!StringUtils.hasText(droneSn)) {
+            return;
+        }
+        visibleConfirmationGraceUntilByDrone.remove(droneSn);
+        if (confirmationMonitorPausedByDrone.remove(droneSn) && isFireDetectionActiveForAutoFocus(droneSn)) {
+            issueCommand(droneSn, "thermal-monitor-on");
         }
     }
 
@@ -1423,37 +1526,15 @@ public class DualStreamServiceImpl implements IDualStreamService {
         return true;
     }
 
-    private boolean isRiskAtLeastMedium(DualStreamEventDTO event) {
-        String riskLevel = normalize(event.getRiskLevel());
-        if ("high".equals(riskLevel) || "medium".equals(riskLevel)) {
-            return true;
-        }
-        Double fusionScore = event.getFusionScore();
-        return fusionScore != null && fusionScore >= 0.4;
-    }
-
-    private boolean hasThermalConfirmation(DualStreamEventDTO event) {
-        double thermalImageScore = resolveThermalImageScore(event);
-        Double temperature = resolveThermalTemperature(event);
-        if (temperature != null) {
-            return isTemperatureAtLeast(temperature, THERMAL_MEDIUM_TEMPERATURE_C)
-                    || (thermalImageScore >= THERMAL_WEAK_IMAGE_FLOOR
-                        && isTemperatureAtLeast(temperature, THERMAL_WARM_TEMPERATURE_C));
-        }
-        return thermalImageScore >= FIRE_DETECTION_FLOOR;
-    }
-
     private String resolveThermalPostMeasurementReviewStatus(DualStreamEventDTO event) {
-        if (!hasThermalConfirmation(event)) {
+        // 串行链裁决：实测温度达确认线即确认，未达线即拒绝，无中间态。
+        if (!isTemperatureAtLeast(event.getThermalTemperature(), thermalWarmFloorC)) {
             return REVIEW_STATUS_THERMAL_REJECTED;
         }
         if (!hasThermalImage(event)) {
             return REVIEW_STATUS_THERMAL_IMAGE_MISSING;
         }
-        if (isTemperatureAtLeast(resolveThermalTemperature(event), THERMAL_HIGH_TEMPERATURE_C)) {
-            return "THERMAL_CONFIRMED";
-        }
-        return REVIEW_STATUS_THERMAL_NEEDS_VISIBLE_CONFIRM;
+        return "THERMAL_CONFIRMED";
     }
 
     private boolean hasThermalImage(DualStreamEventDTO event) {
@@ -1471,7 +1552,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private boolean hasVisibleFireDetection(DualStreamEventDTO event, DualStreamEventDTO thermalContext) {
         double floor = isTemperatureAtLeast(resolveThermalTemperature(thermalContext), THERMAL_HIGH_TEMPERATURE_C)
                 ? HIGH_TEMPERATURE_VISIBLE_CONFIRMATION_FLOOR
-                : VISIBLE_CONFIRMATION_FLOOR;
+                : visibleConfirmFloor;
         return event != null
                 && event.getVisibleScore() != null
                 && clampConfidence(event.getVisibleScore()) >= floor;
@@ -1486,11 +1567,8 @@ public class DualStreamServiceImpl implements IDualStreamService {
         if (isTemperatureAtLeast(temperature, THERMAL_MEDIUM_TEMPERATURE_C)
                 || thermalImageScore >= 0.4
                 || (thermalImageScore >= FIRE_DETECTION_FLOOR
-                    && isTemperatureAtLeast(temperature, THERMAL_WARM_TEMPERATURE_C))) {
+                    && isTemperatureAtLeast(temperature, thermalWarmFloorC))) {
             return "MEDIUM";
-        }
-        if (hasThermalConfirmation(event)) {
-            return "LOW";
         }
         return StringUtils.hasText(event.getRiskLevel()) ? event.getRiskLevel() : "UNKNOWN";
     }
@@ -1507,7 +1585,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
     }
 
     private double temperatureConfidence(Double temperature) {
-        if (temperature == null || temperature < THERMAL_WARM_TEMPERATURE_C) {
+        if (temperature == null || temperature < thermalWarmFloorC) {
             return 0.0;
         }
         if (temperature >= THERMAL_HIGH_TEMPERATURE_C) {

@@ -20,7 +20,7 @@ spring:
     druid:
       type: com.alibaba.druid.pool.DruidDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://192.168.50.254:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true
+      url: jdbc:mysql://127.0.0.1:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true
       username: g_byzt
       password: g_byzt
       initial-size: 10
@@ -56,7 +56,7 @@ mqtt:
   # BASIC parameters are required.
   BASIC:
     protocol: MQTT # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.50.200
+    host: 192.168.50.10
     port: 1883
     username: JavaServer
     password: 123456
@@ -65,7 +65,7 @@ mqtt:
     path:
   DRC:
     protocol: WS # @see com.yx.uavfire.component.mqtt.model.MqttProtocolEnum
-    host: 192.168.50.200
+    host: 192.168.50.10
     port: 8083
     path: /mqtt
     username: JavaServer
@@ -99,7 +99,7 @@ url:
 wayline-agent:
   shared-secret: change-me-in-production
   token-ttl-seconds: 86400
-  server-url: http://192.168.50.200:6789
+  server-url: http://192.168.50.10:6789
   mqtt:
     event-topic: uavfire/agent/+/events/#
   storage:
@@ -159,7 +159,7 @@ logging:
 pilot2:
   # Pilot 2 设备通过此 URL 跳转到 frontend pilot 入口。
   # 注意:Pilot 上的 localhost 指向 Pilot 自己,必须用 server 实际可达 IP。
-  web-entry: http://192.168.50.200:5174/pilot-login
+  web-entry: http://192.168.50.10:5174/pilot-login
 
 ntp:
   server:
@@ -178,7 +178,7 @@ cloud-server:
 
 livestream:
   playback:
-    webrtc-host: ${LIVESTREAM_WEBRTC_HOST:localhost}
+    webrtc-host: ${LIVESTREAM_WEBRTC_HOST:192.168.50.10}
     webrtc-port: ${LIVESTREAM_WEBRTC_PORT:58925}
   url:
     # RTMP  Note: This IP is the address of the streaming server. If you want to see livestream on web page, you need to convert the RTMP stream to WebRTC stream.
@@ -228,6 +228,10 @@ ai-service:
 dual-stream:
   thermal-measurement-cooldown-ms: ${DUAL_STREAM_THERMAL_COOLDOWN_MS:5000}
   thermal-measurement-timeout-ms: ${DUAL_STREAM_THERMAL_TIMEOUT_MS:20000}
+  # 火情确认线。80 线配套 agent 端"YOLO 框内亮点扫描测温"使用（贴热核读数，
+  # 盆火实测 153°C 量级）；框级区域测温读数只有 39~68°C（2026-07-26 实飞），
+  # 混合测温 APK 未上机前 80 线会漏检——临时回退用环境变量降到 50。
+  thermal-warm-floor-c: ${DUAL_STREAM_THERMAL_WARM_FLOOR_C:80}
 
 fc100:
   enabled: true
@@ -238,6 +242,8 @@ fc100:
     dedup-radius-min-m: ${FIRE_EVENT_DEDUP_RADIUS_MIN_M:15}
     dedup-radius-max-m: ${FIRE_EVENT_DEDUP_RADIUS_MAX_M:60}
     dedup-active-window-ms: ${FIRE_EVENT_DEDUP_WINDOW_MS:1800000}
+    # 2026-07-26 首飞暴露:DJI FlyTo 固件转场剖面会先爬到 Pilot 配置的安全/返航高度(~90m),
+    # 我方"保持当前高度"的目标被固件覆盖——抵近高度策略修好前保持关闭。
     auto-approach-enabled: ${FIRE_EVENT_AUTO_APPROACH_ENABLED:false}
     auto-approach-cooldown-ms: ${FIRE_EVENT_AUTO_APPROACH_COOLDOWN_MS:600000}
   thermal:

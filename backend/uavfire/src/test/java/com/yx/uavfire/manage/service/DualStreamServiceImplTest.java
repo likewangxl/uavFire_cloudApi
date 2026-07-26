@@ -211,11 +211,13 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void confirmedThermalEventUsesLatestAgentCenterTemperatureWhenEventHasNoTemperature() {
+    void hudCenterTemperatureAloneDoesNotConfirmThermalEvent() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
 
+        // 探针 HUD 中心温度是全画面最热点的瞬时值（日晒金属可到 80°C+），
+        // 串行链只认对检出框的实测温度：无 ROI 无实测的高分帧直接拒绝。
         service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
                 .setDroneSn("DRONE-001")
                 .setThermalState("running")
@@ -230,10 +232,10 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.82)
                 .setThermalImageUrl("http://snapshots/thermal-center.jpg"));
 
-        ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-        verify(fireEventService).create(captor.capture());
-        assertEquals(86.3, captor.getValue().getThermalTemperature(), 1e-6);
-        assertEquals("C", captor.getValue().getTemperatureUnit());
+        List<DualStreamEventDTO> events = service.listEvents("task-001");
+        assertEquals("THERMAL_REJECTED", events.get(0).getReviewStatus());
+        assertNull(service.pollCommand("DRONE-001"));
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
     @Test
@@ -351,6 +353,8 @@ class DualStreamServiceImplTest {
                 .setRiskLevel("HIGH")
                 .setThermalScore(1.0)
                 .setFusionScore(1.0)
+                // 高温直通路径（>=80°C 直接确认），几何映射无需等可见光二次确认
+                .setThermalTemperature(85.0)
                 .setThermalImageUrl("http://snapshots/thermal.jpg")
                 .setFireLat(34.658650)
                 .setFireLng(109.340600)
@@ -369,7 +373,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void thermalMeasurementAck_requestsVisibleConfirmationForNonHighThermalHotspot() {
+    void thermalMeasurementAck_confirmsWarmHotspotAndSwitchesVisibleForEvidence() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -399,18 +403,23 @@ class DualStreamServiceImplTest {
                 .setThermalTemperature(62.0)
                 .setThermalMeasureRoi(roi));
 
+        // 串行链：实测温度达确认线（57°C）即确认建事件，切可见光只为补证据照
         List<DualStreamEventDTO> events = service.listEvents("task-001");
         DualStreamCommandDTO visibleCommand = service.pollCommand("DRONE-001");
-        assertEquals("THERMAL_NEEDS_VISIBLE_CONFIRM", events.get(0).getReviewStatus());
+        assertEquals("THERMAL_CONFIRMED", events.get(0).getReviewStatus());
         assertNotNull(visibleCommand);
         assertEquals("focus-visible", visibleCommand.getAction());
-        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
+        ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
+        verify(fireEventService).create(captor.capture());
+        assertEquals("MEDIUM", captor.getValue().getFireLevel());
+        assertEquals(62.0, captor.getValue().getThermalTemperature(), 1e-6);
     }
 
     @Test
-    void visibleEvent_confirmsPendingThermalHotspotAndCreatesFireEvent() {
+    void visibleEvent_afterWarmConfirmationAttachesEvidence() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.attachVisibleImage(any(), any(), any(), any(), any(), any())).thenReturn(true);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
         Map<String, Double> roi = Map.of(
                 "x", 0.25,
@@ -451,17 +460,22 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.71)
                 .setVisibleImageUrl("http://snapshots/visible.jpg"));
 
+        // 串行链：实测 62°C 已确认建事件；可见光帧只作证据挂接，随后切回红外
         List<DualStreamEventDTO> events = service.listEvents("task-001");
-        assertEquals("THERMAL_NEEDS_VISIBLE_CONFIRM", events.get(0).getReviewStatus());
+        assertEquals("THERMAL_CONFIRMED", events.get(0).getReviewStatus());
         assertEquals("VISIBLE_CONFIRMED", events.get(1).getReviewStatus());
-        DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
-        assertNotNull(thermalCommand);
-        assertEquals("focus-thermal", thermalCommand.getAction());
         ArgumentCaptor<FireEventCreateParam> fireEventCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
         verify(fireEventService).create(fireEventCaptor.capture());
         assertEquals("http://snapshots/thermal.jpg", fireEventCaptor.getValue().getThermalImageUrl());
-        assertEquals("http://snapshots/visible.jpg", fireEventCaptor.getValue().getVisibleImageUrl());
+        assertNull(fireEventCaptor.getValue().getVisibleImageUrl());
         assertEquals(62.0, fireEventCaptor.getValue().getThermalTemperature());
+        verify(fireEventService).attachVisibleImage(
+                eq("task-001-1779163200000"),
+                eq("task-001-1779163205000"),
+                eq("http://snapshots/visible.jpg"),
+                eq("2026-05-19T04:00:05Z"),
+                eq("task-001-1779163200000"),
+                eq("http://snapshots/thermal.jpg"));
     }
 
     @Test
@@ -789,9 +803,10 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void visibleEvent_rejectsPendingThermalHotspotWhenYoloDoesNotConfirm() {
+    void visibleEvent_zeroScoreEvidenceAfterWarmConfirmationKeepsFireEvent() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.recordVisibleConfirmationStatus(any(), any(), any(), any(), any(), any(), any())).thenReturn(true);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
         Map<String, Double> roi = Map.of(
                 "x", 0.25,
@@ -832,11 +847,42 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.0)
                 .setVisibleImageUrl("http://snapshots/visible.jpg"));
 
+        // 证据照零检出：事件不撤销，照片与 VISIBLE_REJECTED 标注记入履历——只标注不拦截
         List<DualStreamEventDTO> events = service.listEvents("task-001");
+        assertEquals("THERMAL_CONFIRMED", events.get(0).getReviewStatus());
         assertEquals("VISIBLE_REJECTED", events.get(1).getReviewStatus());
-        DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
-        assertNotNull(thermalCommand);
-        assertEquals("focus-thermal", thermalCommand.getAction());
+        verify(fireEventService).create(any(FireEventCreateParam.class));
+        verify(fireEventService).recordVisibleConfirmationStatus(
+                eq("task-001-1779163200000"),
+                eq("task-001-1779163205000"),
+                eq("VISIBLE_REJECTED"),
+                eq("http://snapshots/visible.jpg"),
+                eq("2026-05-19T04:00:05Z"),
+                eq("task-001-1779163200000"),
+                eq("http://snapshots/thermal.jpg"));
+    }
+
+    @Test
+    void thermalYoloHitWithoutMeasurableRoiIsRejectedAndNeverSwitchesVisible() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        // 高分红外命中但无 ROI 无实测温度：串行链无从测温，直接拒绝——
+        // 不建事件、不下发任何镜头切换（修复盛夏日晒场景反复切可见光）。
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("HIGH")
+                .setThermalScore(0.82)
+                .setFusionScore(0.82)
+                .setThermalImageUrl("http://snapshots/thermal-high.jpg"));
+
+        List<DualStreamEventDTO> events = service.listEvents("task-001");
+        assertEquals("THERMAL_REJECTED", events.get(0).getReviewStatus());
+        assertNull(service.pollCommand("DRONE-001"));
         verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
@@ -1025,7 +1071,8 @@ class DualStreamServiceImplTest {
                 .setStatus("applied")
                 .setTaskId("task-001")
                 .setSourceTs(1779163200000L)
-                .setThermalTemperature(90.0)
+                // 不达确认线：只验证测温冷却本身，避免确认路径往队列里排证据照命令
+                .setThermalTemperature(30.0)
                 .setThermalMeasureRoi(roi));
 
         service.acceptEvent("task-001", new DualStreamEventDTO()
@@ -1127,7 +1174,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void acknowledgeRegionMeasurementBackfillsEventAndRequestsVisibleConfirmationForWarmTemperature() {
+    void acknowledgeRegionMeasurementBackfillsEventAndConfirmsWarmTemperature() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -1157,14 +1204,15 @@ class DualStreamServiceImplTest {
                 .setThermalTemperature(57.6)
                 .setThermalMeasureRoi(roi));
 
+        // 57.6°C 达确认线（57）：回填温度、直接确认建事件，切可见光补证据照
         List<DualStreamEventDTO> events = service.listEvents("task-001");
-        assertEquals("THERMAL_NEEDS_VISIBLE_CONFIRM", events.get(0).getReviewStatus());
+        assertEquals("THERMAL_CONFIRMED", events.get(0).getReviewStatus());
         assertEquals(57.6, events.get(0).getThermalTemperature(), 1e-6);
 
         DualStreamCommandDTO visibleCommand = service.pollCommand("DRONE-001");
         assertNotNull(visibleCommand);
         assertEquals("focus-visible", visibleCommand.getAction());
-        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
+        verify(fireEventService).create(any(FireEventCreateParam.class));
     }
 
     @Test
@@ -1309,7 +1357,8 @@ class DualStreamServiceImplTest {
             assertTrue(requestBody.get().contains("\"thermal_temperature\":57.6"));
             assertTrue(requestBody.get().contains("\"thermal_measure_roi\""));
 
-            verify(fireEventService, never()).create(any(FireEventCreateParam.class));
+            // 57.6°C 达确认线：串行链在标注刷新后建事件
+            verify(fireEventService).create(any(FireEventCreateParam.class));
         } finally {
             server.stop(0);
         }
@@ -1398,36 +1447,6 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void thermalConfirmationUsesMeasuredTemperatureEvenWhenHotspotScoreIsWeak() {
-        DualStreamServiceImpl service = new DualStreamServiceImpl();
-        FireEventService fireEventService = mock(FireEventService.class);
-        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
-        service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
-                .setDroneSn("DRONE-001")
-                .setThermalState("running")
-                .setThermalCenterTemperatureC(66.0));
-
-        service.acceptEvent("task-001", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setAnalysisChannel("thermal")
-                .setSourceTs(1779163200000L)
-                .setThermalScore(0.009)
-                .setFusionScore(0.009)
-                .setRiskLevel("LOW")
-                .setThermalImageUrl("http://snapshots/thermal-measured.jpg"));
-
-        List<DualStreamEventDTO> events = service.listEvents("task-001");
-        assertEquals("THERMAL_CONFIRMED", events.get(0).getReviewStatus());
-
-        ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-        verify(fireEventService).create(captor.capture());
-        assertEquals("MEDIUM", captor.getValue().getFireLevel());
-        assertEquals(66.0, captor.getValue().getThermalTemperature(), 1e-6);
-        assertEquals(0, captor.getValue().getConfidence()
-                .compareTo(java.math.BigDecimal.valueOf(0.7)));
-    }
-
-    @Test
     void acknowledgeRegionMeasurementRejectsThermalHotspotWhenMeasuredTemperatureIsLow() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
@@ -1460,32 +1479,6 @@ class DualStreamServiceImplTest {
         List<DualStreamEventDTO> events = service.listEvents("task-001");
         assertEquals("THERMAL_REJECTED", events.get(0).getReviewStatus());
         verify(fireEventService, never()).create(any(FireEventCreateParam.class));
-    }
-
-    @Test
-    void thermalConfirmationCombinesWeakHotspotWithWarmMeasuredTemperature() {
-        DualStreamServiceImpl service = new DualStreamServiceImpl();
-        FireEventService fireEventService = mock(FireEventService.class);
-        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
-        service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
-                .setDroneSn("DRONE-001")
-                .setThermalState("running")
-                .setThermalCenterTemperatureC(48.0));
-
-        service.acceptEvent("task-001", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setAnalysisChannel("thermal")
-                .setSourceTs(1779163200000L)
-                .setThermalScore(0.007)
-                .setFusionScore(0.007)
-                .setRiskLevel("LOW")
-                .setThermalImageUrl("http://snapshots/thermal-warm.jpg"));
-
-        ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-        verify(fireEventService).create(captor.capture());
-        assertEquals("LOW", captor.getValue().getFireLevel());
-        assertEquals(0, captor.getValue().getConfidence()
-                .compareTo(java.math.BigDecimal.valueOf(0.3)));
     }
 
     @Test
@@ -1670,7 +1663,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void acceptEvent_issuesVisibleFocusAndMarksConfirmedAfterThermalHighRisk() {
+    void acceptEvent_confirmsViaMeasuredTemperatureThenSwitchesVisibleForEvidence() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -1688,6 +1681,11 @@ class DualStreamServiceImplTest {
                 .setCommandId(thermalCommand.getCommandId())
                 .setStatus("applied"));
 
+        Map<String, Double> roi = Map.of(
+                "x", 0.25,
+                "y", 0.30,
+                "width", 0.20,
+                "height", 0.15);
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
                 .setAnalysisChannel("thermal")
@@ -1696,15 +1694,32 @@ class DualStreamServiceImplTest {
                 .setThermalScore(0.82)
                 .setFusionScore(0.82)
                 .setRiskLevel("HIGH")
-                .setThermalImageUrl("http://snapshots/high-thermal.jpg"));
+                .setThermalImageUrl("http://snapshots/high-thermal.jpg")
+                .setThermalMeasureRoi(roi));
 
-        DualStreamCommandDTO command = service.pollCommand("DRONE-001");
+        // 串行链：红外命中先测温，不直接切可见光
         List<DualStreamEventDTO> events = service.listEvents("task-001");
+        assertEquals("THERMAL_MEASURING", events.get(1).getReviewStatus());
+        DualStreamCommandDTO measureCommand = service.pollCommand("DRONE-001");
+        assertNotNull(measureCommand);
+        assertEquals("measure-thermal-region", measureCommand.getAction());
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
 
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(measureCommand.getCommandId())
+                .setStatus("applied")
+                .setTaskId("task-001")
+                .setSourceTs(1779163200000L)
+                .setThermalTemperature(90.0)
+                .setThermalMeasureRoi(roi));
+
+        // 实测 90°C 达线：确认建事件，随后切可见光补证据照
+        events = service.listEvents("task-001");
+        assertEquals("THERMAL_CONFIRMED", events.get(1).getReviewStatus());
+        DualStreamCommandDTO command = service.pollCommand("DRONE-001");
         assertNotNull(command);
         assertEquals("focus-visible", command.getAction());
         assertEquals("pending", command.getStatus());
-        assertEquals("THERMAL_CONFIRMED", events.get(1).getReviewStatus());
         ArgumentCaptor<FireEventCreateParam> fireEventCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
         verify(fireEventService).create(fireEventCaptor.capture());
         FireEventCreateParam fireEvent = fireEventCaptor.getValue();
@@ -1712,11 +1727,15 @@ class DualStreamServiceImplTest {
         assertEquals("M4T", fireEvent.getSource());
         assertEquals("DRONE-001", fireEvent.getDeviceSn());
         assertEquals("HIGH", fireEvent.getFireLevel());
-        assertEquals(0, fireEvent.getConfidence().compareTo(java.math.BigDecimal.valueOf(0.82)));
+        assertEquals(90.0, fireEvent.getThermalTemperature(), 1e-6);
+        assertEquals("http://snapshots/high-thermal.jpg", fireEvent.getThermalImageUrl());
+        assertNull(fireEvent.getVisibleImageUrl());
     }
 
     @Test
-    void acceptEvent_doesNotIssueVisibleFocusForMsdkLocalThermalSnapshot() {
+    void acceptEvent_issuesVisibleFocusEvenInSharedSideBySidePreview() {
+        // 旧行为在 shared-side-by-side-preview 下压制 focus-visible 并直接确认建事件；
+        // 该压制已移除：实测温度确认后，共享预览模式下同样切可见光补证据照。
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -1736,18 +1755,20 @@ class DualStreamServiceImplTest {
                 .setThermalScore(0.82)
                 .setFusionScore(0.82)
                 .setRiskLevel("HIGH")
+                .setThermalTemperature(90.0)
                 .setThermalImageUrl("http://snapshots/msdk-local-thermal.jpg"));
 
         DualStreamCommandDTO command = service.pollCommand("RC_PLUS_LOCAL");
         List<DualStreamEventDTO> events = service.listEvents("fire-RC_PLUS_LOCAL");
 
-        assertNull(command);
+        assertNotNull(command);
+        assertEquals("focus-visible", command.getAction());
         assertEquals("THERMAL_CONFIRMED", events.get(0).getReviewStatus());
         verify(fireEventService).create(any(FireEventCreateParam.class));
     }
 
     @Test
-    void acceptEvent_confirmsLowRiskSingleStreamScoreAfterThermalFocusApplied() {
+    void acceptEvent_rejectsLowRiskThermalScoreWithoutTemperature() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -1781,17 +1802,11 @@ class DualStreamServiceImplTest {
         DualStreamCommandDTO command = service.pollCommand("DRONE-001");
         List<DualStreamEventDTO> events = service.listEvents("task-001");
 
-        assertNotNull(command);
-        assertEquals("focus-visible", command.getAction());
+        // 新流程：LOW 风险且无测温的红外帧不再确认建事件，也不触发可见光二次确认
+        assertNull(command);
         assertEquals("thermal", events.get(1).getAnalysisChannel());
-        assertEquals("THERMAL_CONFIRMED", events.get(1).getReviewStatus());
-        ArgumentCaptor<FireEventCreateParam> fireEventCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-        verify(fireEventService).create(fireEventCaptor.capture());
-        assertEquals("LOW", fireEventCaptor.getValue().getFireLevel());
-        assertNull(fireEventCaptor.getValue().getVisibleImageUrl());
-        assertEquals("http://snapshots/thermal-confirmation.jpg", fireEventCaptor.getValue().getThermalImageUrl());
-        assertEquals(0, fireEventCaptor.getValue().getConfidence()
-                .compareTo(java.math.BigDecimal.valueOf(0.17)));
+        assertEquals("THERMAL_REJECTED", events.get(1).getReviewStatus());
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
     @Test
@@ -1834,78 +1849,27 @@ class DualStreamServiceImplTest {
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
 
+        // 两次实测确认相隔 2s：createConfirmedFireEvent 自身的 60s 去抖只放行第一次
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
                 .setAnalysisChannel("thermal")
                 .setSourceTs(1779163200000L)
-                .setThermalScore(0.04)
-                .setFusionScore(0.04)
-                .setRiskLevel("LOW")
+                .setThermalScore(0.6)
+                .setFusionScore(0.6)
+                .setRiskLevel("MEDIUM")
+                .setThermalTemperature(90.0)
                 .setThermalImageUrl("http://snapshots/thermal-1.jpg"));
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
                 .setAnalysisChannel("thermal")
-                .setSourceTs(1779163201000L)
-                .setThermalScore(0.05)
-                .setFusionScore(0.05)
-                .setRiskLevel("LOW")
+                .setSourceTs(1779163202000L)
+                .setThermalScore(0.65)
+                .setFusionScore(0.65)
+                .setRiskLevel("MEDIUM")
+                .setThermalTemperature(91.0)
                 .setThermalImageUrl("http://snapshots/thermal-2.jpg"));
 
         verify(fireEventService, org.mockito.Mockito.times(1)).create(any(FireEventCreateParam.class));
-    }
-
-    @Test
-    void acceptEvent_usesThermalFocusTriggerFrameAsVisibleImage() {
-        DualStreamServiceImpl service = new DualStreamServiceImpl();
-        FireEventService fireEventService = mock(FireEventService.class);
-        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
-        service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
-                .setDroneSn("DRONE-001")
-                .setCurrentMode("VISIBLE")
-                .setVisibleState("running"));
-        service.acceptEvent("task-001", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setAnalysisChannel("visible")
-                .setFusionScore(0.4)
-                .setVisibleScore(0.4)
-                .setRiskLevel("MEDIUM")
-                .setVisibleImageUrl("http://snapshots/real-visible-trigger.jpg"));
-        DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
-        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
-                .setCommandId(thermalCommand.getCommandId())
-                .setStatus("applied"));
-        service.acceptEvent("task-001", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setAnalysisChannel("thermal")
-                .setSourceTs(1779163200000L)
-                .setFusionScore(0.6)
-                .setVisibleScore(0.6)
-                .setRiskLevel("MEDIUM")
-                .setThermalImageUrl("http://snapshots/thermal-confirmation.jpg"));
-        DualStreamCommandDTO visibleCommand = service.pollCommand("DRONE-001");
-
-        service.acceptEvent("task-001", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setAnalysisChannel("visible")
-                .setFusionScore(0.7)
-                .setVisibleScore(0.7)
-                .setRiskLevel("HIGH")
-                .setVisibleImageUrl("http://snapshots/thermal-window-mislabeled-visible.jpg"));
-        service.acceptEvent("task-001", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setAnalysisChannel("thermal")
-                .setSourceTs(1779163261000L)
-                .setFusionScore(0.8)
-                .setVisibleScore(0.8)
-                .setRiskLevel("HIGH")
-                .setThermalImageUrl("http://snapshots/thermal-confirmation-2.jpg"));
-
-        assertEquals("focus-visible", visibleCommand.getAction());
-        ArgumentCaptor<FireEventCreateParam> fireEventCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-        verify(fireEventService, org.mockito.Mockito.times(2)).create(fireEventCaptor.capture());
-        FireEventCreateParam secondEvent = fireEventCaptor.getAllValues().get(1);
-        assertNull(secondEvent.getVisibleImageUrl());
-        assertEquals("http://snapshots/thermal-confirmation-2.jpg", secondEvent.getThermalImageUrl());
     }
 
     @Test
@@ -1929,6 +1893,7 @@ class DualStreamServiceImplTest {
                 .setCommandId(thermalCommand.getCommandId())
                 .setStatus("applied"));
 
+        // 红外触发帧上混着可见光 URL：实测确认建事件时不得把它挪作视觉证据
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
                 .setAnalysisChannel("thermal")
@@ -1936,6 +1901,7 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.6)
                 .setVisibleScore(0.6)
                 .setRiskLevel("MEDIUM")
+                .setThermalTemperature(90.0)
                 .setVisibleImageUrl("http://snapshots/visible-frame-during-thermal-step.jpg")
                 .setThermalImageUrl("http://snapshots/thermal-frame-during-thermal-step.jpg"));
 
@@ -1969,6 +1935,7 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.6)
                 .setVisibleScore(0.6)
                 .setRiskLevel("MEDIUM")
+                .setThermalTemperature(90.0)
                 .setVisibleImageUrl("http://snapshots/thermal-confirmation.jpg")
                 .setThermalImageUrl("http://snapshots/thermal-confirmation.jpg"));
 
@@ -1979,7 +1946,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void acceptEvent_issuesVisibleFocusAndMarksRejectedAfterThermalNoise() {
+    void acceptEvent_staysOnThermalAfterThermalNoiseRejected() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -2003,14 +1970,14 @@ class DualStreamServiceImplTest {
         DualStreamCommandDTO command = service.pollCommand("DRONE-001");
         List<DualStreamEventDTO> events = service.listEvents("task-001");
 
-        assertNotNull(command);
-        assertEquals("focus-visible", command.getAction());
+        // 新流程红外是常驻监测通道：噪声帧直接否决，不再切回可见光
+        assertNull(command);
         assertEquals("THERMAL_REJECTED", events.get(1).getReviewStatus());
         verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
     @Test
-    void acceptEvent_confirmsThermalReferenceFrameAtLowScoreAndKeepsThermalImage() {
+    void acceptEvent_rejectsThermalReferenceFrameAtLowScore() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -2040,44 +2007,44 @@ class DualStreamServiceImplTest {
 
         List<DualStreamEventDTO> events = service.listEvents("task-001");
 
-        assertEquals("THERMAL_CONFIRMED", events.get(1).getReviewStatus());
-        ArgumentCaptor<FireEventCreateParam> fireEventCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-        verify(fireEventService).create(fireEventCaptor.capture());
-        assertNull(fireEventCaptor.getValue().getVisibleImageUrl());
-        assertEquals("http://snapshots/thermal-reference.jpg", fireEventCaptor.getValue().getThermalImageUrl());
-        assertEquals(0, fireEventCaptor.getValue().getConfidence()
-                .compareTo(java.math.BigDecimal.valueOf(0.011)));
+        // 新流程：无测温的 LOW 分红外帧不再确认建事件
+        assertEquals("THERMAL_REJECTED", events.get(1).getReviewStatus());
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
     @Test
-    void acceptEvent_doesNotIssueThermalFocusWhileVisibleFocusIsPending() {
+    void acceptEvent_doesNotDuplicateVisibleFocusWhileConfirmPending() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+        // 命令超时复用 thermalMeasurementTimeoutMs，为 0 时 pending 命令 1ms 即过期造成误重发
+        ReflectionTestUtils.setField(service, "thermalMeasurementTimeoutMs", 20000L);
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
-                .setAnalysisChannel("visible")
-                .setFusionScore(0.7)
-                .setRiskLevel("HIGH"));
-        DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
-        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
-                .setCommandId(thermalCommand.getCommandId())
-                .setStatus("applied"));
+                .setAnalysisChannel("thermal")
+                .setSourceTs(1779163200000L)
+                .setThermalScore(0.6)
+                .setFusionScore(0.6)
+                .setRiskLevel("MEDIUM")
+                .setThermalTemperature(90.0)
+                .setThermalImageUrl("http://snapshots/thermal-trigger.jpg"));
+        // 焦点切换尚未执行前，后续实测确认帧走 10s 节流，不重复排队 focus-visible
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
-                .setFusionScore(0.1)
-                .setRiskLevel("LOW")
-                .setThermalImageUrl("http://snapshots/inferred-thermal.jpg"));
-        DualStreamCommandDTO visibleCommand = service.pollCommand("DRONE-001");
-
-        service.acceptEvent("task-001", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setAnalysisChannel("visible")
-                .setFusionScore(0.9)
-                .setRiskLevel("HIGH"));
+                .setAnalysisChannel("thermal")
+                .setSourceTs(1779163201000L)
+                .setThermalScore(0.65)
+                .setFusionScore(0.65)
+                .setRiskLevel("MEDIUM")
+                .setThermalTemperature(91.0)
+                .setThermalImageUrl("http://snapshots/thermal-trigger-2.jpg"));
 
         DualStreamCommandDTO command = service.pollCommand("DRONE-001");
-
+        assertNotNull(command);
         assertEquals("focus-visible", command.getAction());
-        assertEquals(visibleCommand.getCommandId(), command.getCommandId());
+        // 未 ack 前重复 poll 返回同一条命令，而不是新排队的重复命令
+        DualStreamCommandDTO repolled = service.pollCommand("DRONE-001");
+        assertEquals(command.getCommandId(), repolled.getCommandId());
     }
 
     @Test
@@ -2139,5 +2106,265 @@ class DualStreamServiceImplTest {
         assertEquals(1, restored.size());
         assertEquals("task-redis", restored.get(0).getTaskId());
         assertEquals("HIGH", restored.get(0).getRiskLevel());
+    }
+
+    @Test
+    void confirmationPhotoWithThermalSourceEventIdAttachesEvidenceEvenWhenLate() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.attachVisibleImage(any(), any(), any(), any(), any(), any())).thenReturn(true);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        // 没有任何触发/确认上下文（模拟 backend 重启或超窗后关联丢失），只凭精确外键也要能挂接
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163600000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0)
+                .setVisibleImageUrl("http://snapshots/late-visible-confirmation.jpg")
+                .setThermalSourceEventId("task-001-1779163200000")
+                .setThermalImageUrl("http://snapshots/source-thermal.jpg"));
+
+        verify(fireEventService).attachVisibleImage(
+                eq("task-001-1779163200000"),
+                eq("task-001-1779163600000"),
+                eq("http://snapshots/late-visible-confirmation.jpg"),
+                eq("2026-05-19T04:06:40Z"),
+                eq("task-001-1779163200000"),
+                eq("http://snapshots/source-thermal.jpg"));
+    }
+
+    @Test
+    void confirmationPhotoFallsBackToMergedFireEventIdWhenPreciseIdMissing() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.create(any(FireEventCreateParam.class)))
+                .thenReturn(new FireEventCreateResponse(1L, "merged-fire-event", true, "MISSION-001", "WAITING_REVIEW"));
+        // 精确 event_id 对应行不存在（被空间合并）→ 第一次挂接失败，回退到合并后的 fire event id
+        when(fireEventService.attachVisibleImage(eq("task-001-1779163200000"), any(), any(), any(), any(), any()))
+                .thenReturn(false);
+        when(fireEventService.attachVisibleImage(eq("merged-fire-event"), any(), any(), any(), any(), any()))
+                .thenReturn(true);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("HIGH")
+                .setThermalScore(0.8)
+                .setFusionScore(0.8)
+                .setThermalTemperature(90.0)
+                .setThermalImageUrl("http://snapshots/high-thermal.jpg"));
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163600000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0)
+                .setVisibleImageUrl("http://snapshots/merged-visible-confirmation.jpg")
+                .setThermalSourceEventId("task-001-1779163200000")
+                .setThermalImageUrl("http://snapshots/high-thermal.jpg"));
+
+        verify(fireEventService).attachVisibleImage(
+                eq("task-001-1779163200000"), any(), any(), any(), any(), any());
+        verify(fireEventService).attachVisibleImage(
+                eq("merged-fire-event"), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void confirmationPhotoAttachesEvidenceEvenWhenTriggerReviewRejectsIt() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.attachVisibleImage(any(), any(), any(), any(), any(), any())).thenReturn(true);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        // 夜间确认照 score=0：证据挂接不依赖任何复核结论——照片是证据，结论是结论
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("MEDIUM")
+                .setThermalScore(0.6)
+                .setFusionScore(0.6)
+                .setThermalImageUrl("http://snapshots/trigger-thermal.jpg"));
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163205000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0)
+                .setVisibleImageUrl("http://snapshots/night-visible-confirmation.jpg")
+                .setThermalSourceEventId("fire-DRONE-001-1779163199000")
+                .setThermalImageUrl("http://snapshots/agent-thermal.jpg"));
+
+        verify(fireEventService).attachVisibleImage(
+                eq("fire-DRONE-001-1779163199000"),
+                eq("task-001-1779163205000"),
+                eq("http://snapshots/night-visible-confirmation.jpg"),
+                eq("2026-05-19T04:00:05Z"),
+                eq("fire-DRONE-001-1779163199000"),
+                eq("http://snapshots/agent-thermal.jpg"));
+        List<DualStreamEventDTO> events = service.listEvents("task-001");
+        assertEquals("VISIBLE_SKIPPED_THERMAL_FIRST", events.get(1).getReviewStatus());
+    }
+
+    @Test
+    void thermalConfirmationGraceSuppressesAutoThermalFocus() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.create(any(FireEventCreateParam.class)))
+                .thenReturn(new FireEventCreateResponse(1L, "merged-fire-event", true, "MISSION-001", "WAITING_REVIEW"));
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        // 红外测温确认 → agent 将切可见光拍确认照，宽限期开启
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("HIGH")
+                .setThermalScore(0.8)
+                .setFusionScore(0.8)
+                .setThermalTemperature(90.0)
+                .setThermalImageUrl("http://snapshots/high-thermal.jpg"));
+
+        // 宽限开启：确认切换在队首，随后暂停 agent 自主测温探针
+        DualStreamCommandDTO first = service.pollCommand("DRONE-001");
+        assertNotNull(first);
+        assertEquals("focus-visible", first.getAction());
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(first.getCommandId())
+                .setStatus("applied"));
+        DualStreamCommandDTO monitorOff = service.pollCommand("DRONE-001");
+        assertNotNull(monitorOff);
+        assertEquals("thermal-monitor-off", monitorOff.getAction());
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(monitorOff.getCommandId())
+                .setStatus("applied"));
+
+        // 宽限期内：识别循环的可见光帧事件不得触发自动 focus-thermal（否则抢在确认照拍摄前切回红外）
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163203000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0));
+
+        assertNull(service.pollCommand("DRONE-001"));
+    }
+
+    @Test
+    void confirmationPhotoArrivalLiftsGraceAndResumesThermalFocus() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.create(any(FireEventCreateParam.class)))
+                .thenReturn(new FireEventCreateResponse(1L, "merged-fire-event", true, "MISSION-001", "WAITING_REVIEW"));
+        when(fireEventService.attachVisibleImage(any(), any(), any(), any(), any(), any())).thenReturn(true);
+        when(fireEventService.recordVisibleConfirmationStatus(any(), any(), any(), any(), any(), any(), any())).thenReturn(true);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("HIGH")
+                .setThermalScore(0.8)
+                .setFusionScore(0.8)
+                .setThermalTemperature(90.0)
+                .setThermalImageUrl("http://snapshots/high-thermal.jpg"));
+
+        DualStreamCommandDTO first = service.pollCommand("DRONE-001");
+        assertNotNull(first);
+        assertEquals("focus-visible", first.getAction());
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(first.getCommandId())
+                .setStatus("applied"));
+        DualStreamCommandDTO monitorOff = service.pollCommand("DRONE-001");
+        assertNotNull(monitorOff);
+        assertEquals("thermal-monitor-off", monitorOff.getAction());
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(monitorOff.getCommandId())
+                .setStatus("applied"));
+
+        // 确认照到达（带精确外键）→ 宽限解除，复核路径立即恢复"拍完切回红外"
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163205000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0)
+                .setVisibleImageUrl("http://snapshots/confirmation.jpg")
+                .setThermalSourceEventId("task-001-1779163200000")
+                .setThermalImageUrl("http://snapshots/high-thermal.jpg"));
+
+        // 解除次序：先恢复探针（monitor-on），再切回红外
+        DualStreamCommandDTO monitorOn = service.pollCommand("DRONE-001");
+        assertNotNull(monitorOn);
+        assertEquals("thermal-monitor-on", monitorOn.getAction());
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(monitorOn.getCommandId())
+                .setStatus("applied"));
+        DualStreamCommandDTO second = service.pollCommand("DRONE-001");
+        assertNotNull(second);
+        assertEquals("focus-thermal", second.getAction());
+    }
+
+    @Test
+    void zeroGraceKeepsLegacyAutoThermalFocusBehavior() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        when(fireEventService.create(any(FireEventCreateParam.class)))
+                .thenReturn(new FireEventCreateResponse(1L, "merged-fire-event", true, "MISSION-001", "WAITING_REVIEW"));
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+        ReflectionTestUtils.setField(service, "visibleConfirmationGraceMs", 0L);
+
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163200000L)
+                .setAnalysisChannel("thermal")
+                .setRiskLevel("HIGH")
+                .setThermalScore(0.8)
+                .setFusionScore(0.8)
+                .setThermalTemperature(90.0)
+                .setThermalImageUrl("http://snapshots/high-thermal.jpg"));
+
+        DualStreamCommandDTO first = service.pollCommand("DRONE-001");
+        assertNotNull(first);
+        assertEquals("focus-visible", first.getAction());
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(first.getCommandId())
+                .setStatus("applied"));
+
+        // 宽限置 0 = 旧行为：确认切换后可见光事件立刻把镜头抢回红外
+        service.acceptEvent("task-001", new DualStreamEventDTO()
+                .setTaskId("task-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1779163203000L)
+                .setAnalysisChannel("visible")
+                .setRiskLevel("LOW")
+                .setVisibleScore(0.0)
+                .setFusionScore(0.0));
+
+        DualStreamCommandDTO second = service.pollCommand("DRONE-001");
+        assertNotNull(second);
+        assertEquals("focus-thermal", second.getAction());
     }
 }
