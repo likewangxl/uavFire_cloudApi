@@ -124,6 +124,23 @@ export function shouldAutoRestoreVisibleFocus ({
   return lastWasThermal || thermalMode
 }
 
+export const LIVE_RECONNECT_MAX_ATTEMPTS = 8
+export const LIVE_RECONNECT_DELAY_MS = 2500
+
+// 断流自愈：agent 切镜头（focus-thermal/focus-visible）会 restartLiveStream 重建推流，
+// ZLM 随之踢掉播放端 WebRTC 会话，播放器定格在最后一帧。
+// 策略：播通过的会话断开 → 自动重连；重连尝试自身失败（推流还没回来）→ 继续重试到上限。
+// 从未播通的首次失败不自动重试——那是流还不存在，由轮询拿到 url 变化时经 playbackKey 重建。
+export function shouldReconnectLivePlayer ({ hasPlayed, attempts }) {
+  if (attempts >= LIVE_RECONNECT_MAX_ATTEMPTS) {
+    return false
+  }
+  return Boolean(hasPlayed) || attempts > 0
+}
+
+// 命令流转（focus-*/measure-thermal-region 的 pending/sent/applied）不进 key：
+// 识别期间后端命令流水不断，进 key 会让播放器被反复销毁重建、一直卡在加载态。
+// 只有画面来源真正变化（kind/url/crop/相机当前模式）才值得重建播放器。
 export function buildLivePlaybackKey ({
   primaryKind,
   primaryUrl,
@@ -131,8 +148,6 @@ export function buildLivePlaybackKey ({
   previewKind,
   previewUrl,
   previewCrop,
-  lastCommandAction,
-  lastCommandStatus,
   currentMode
 }) {
   return [
@@ -142,8 +157,6 @@ export function buildLivePlaybackKey ({
     previewKind || '',
     previewUrl || '',
     JSON.stringify(previewCrop || null),
-    lastCommandAction || '',
-    (lastCommandStatus || '').toLowerCase(),
     currentMode || ''
   ].join('|')
 }

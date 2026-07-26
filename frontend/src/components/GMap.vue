@@ -979,6 +979,11 @@ export default defineComponent({
   height: 100%;
   width: 100%;
 
+  // 隔离地图内部 marker 的 z-index（航点序号 105-130 等），防止其逃逸到页面级压过弹窗/面板
+  #g-container {
+    isolation: isolate;
+  }
+
   .g-action-panel {
     position: absolute;
     top: 16px;

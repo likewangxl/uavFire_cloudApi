@@ -406,6 +406,7 @@
                   </span>
                   <span class="flight-hud-item">GPS {{ flightHudData.gps }}</span>
                   <span class="flight-hud-item">RTK {{ flightHudData.rtk }}</span>
+                  <span class="flight-hud-item">热点 {{ hudHotspotTemp }}℃</span>
                 </div>
                 <div class="flight-hud-row">
                   <span class="flight-hud-item">ASL {{ flightHudData.asl }} m</span>
@@ -712,11 +713,13 @@ import CockpitDeliveryExecutionPanel from '/@/components/cockpit/CockpitDelivery
 import CockpitFlightControlPanel from '/@/components/cockpit/CockpitFlightControlPanel.vue'
 import CockpitSituationMap from './CockpitSituationMap.vue'
 import {
+  LIVE_RECONNECT_DELAY_MS,
   buildDualStreamCandidateSns,
   buildLivePaneState,
   buildLivePlaybackKey,
   resolveAppliedFocusPreference,
   shouldAutoRestoreVisibleFocus,
+  shouldReconnectLivePlayer,
   swapPrimaryPreference
 } from './leadership-cockpit-live-layout.mjs'
 import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
@@ -792,6 +795,7 @@ const flightHud = computed(() => {
     ? '等待 OSD 数据'
     : (mode != null && EModeCode[mode] ? EModeCode[mode].replace(/_/g, ' ') : '—')
   const modeWarn = !hasOsd || mode === EModeCode.Disconnected || mode === EModeCode.Forced_Landing
+  const hasFix = Number(osd?.latitude ?? 0) !== 0 || Number(osd?.longitude ?? 0) !== 0
   return {
     sn,
     hasOsd,
@@ -804,12 +808,20 @@ const flightHud = computed(() => {
     asl: fmtHud(osd?.elevation),
     height: fmtHud(osd?.height),
     homeDist: fmtHud(osd?.home_distance),
-    lat: fmtHud(osd?.latitude, 6),
-    lng: fmtHud(osd?.longitude, 6),
+    // (0,0) 是 MSDK 无定位解时的原生占位值，显示成 0.000000 会被误读为真坐标
+    lat: hasFix ? fmtHud(osd?.latitude, 6) : '—',
+    lng: hasFix ? fmtHud(osd?.longitude, 6) : '—',
     hSpeed: fmtHud(osd?.horizontal_speed),
     vSpeed: fmtHud(osd?.vertical_speed),
     wSpeed: fmtHud(osd?.wind_speed),
   }
+})
+
+// 左下角 HUD 的红外热点温度：探针每 2s 测画面最热点，经 dual-stream group 透传。
+// 仅火情监测开启时持续刷新，其余时间为最近一次起流/测温的静态值。
+const hudHotspotTemp = computed(() => {
+  const t = Number(dualStreamState.group?.thermalCenterTemperatureC)
+  return Number.isFinite(t) ? t.toFixed(1) : '—'
 })
 const flightHudData = computed(() => flightHud.value || {
   modeText: '等待 OSD 数据',
@@ -1135,6 +1147,8 @@ let msdkHudTimer: number | undefined
 let aiRiskEventTimer: number | undefined
 let fireDetectionStatusTimer: number | undefined
 let livePlayerRetryTimer: number | undefined
+let liveReconnectTimer: number | undefined
+let liveReconnectAttempts = 0
 let primaryPlayer: any = null
 let previewPlayer: any = null
 let zlmClientLoader: Promise<any> | null = null
@@ -1208,6 +1222,10 @@ const destroyPlayerInstance = (
   state: PlayerRuntimeState,
   shell: HTMLElement | null
 ) => {
+  if (player) {
+    // 主动销毁会触发 endpoint 的 closed 事件，不能被断流看门狗当成需要重连的断开
+    player.__cockpitDisposed = true
+  }
   if (player?.close) {
     player.close()
   } else if (player?.destroy) {
@@ -1218,6 +1236,30 @@ const destroyPlayerInstance = (
     shell.innerHTML = ''
   }
   return null
+}
+
+const cancelLiveReconnect = () => {
+  if (liveReconnectTimer != null) {
+    window.clearTimeout(liveReconnectTimer)
+    liveReconnectTimer = undefined
+  }
+}
+
+// 断流看门狗：agent 切镜头会 restartLiveStream，ZLM 踢掉 WebRTC 会话后画面定格，
+// 这里统一调度重建（syncLivePlayers 会同时重建两个画面）。
+const scheduleLiveReconnect = (hasPlayed: boolean, reason: string) => {
+  if (activeVisualTab.value !== 'fire-monitor') return
+  if (liveReconnectTimer != null) return
+  if (!shouldReconnectLivePlayer({ hasPlayed, attempts: liveReconnectAttempts })) return
+  liveReconnectAttempts += 1
+  console.warn('[cockpit] live stream broken, scheduling reconnect', reason, 'attempt', liveReconnectAttempts)
+  liveReconnectTimer = window.setTimeout(() => {
+    liveReconnectTimer = undefined
+    const primaryHealthy = !livePaneState.value.primary.url || primaryPlayerState.playing
+    const previewHealthy = !livePaneState.value.preview.url || previewPlayerState.playing
+    if (primaryHealthy && previewHealthy) return
+    syncLivePlayers()
+  }, LIVE_RECONNECT_DELAY_MS)
 }
 
 const applyFullFrameStyles = (video: HTMLVideoElement) => {
@@ -1278,6 +1320,13 @@ const mountPlayerInstance = async (
       state.loading = false
       state.playing = true
       state.error = ''
+      // 两路都健康才清零重试计数：单路持续失败时不能被另一路的成功无限续命，
+      // 否则重试上限失效，健康画面会被反复陪跑重建
+      const primaryHealthy = !livePaneState.value.primary.url || primaryPlayerState.playing
+      const previewHealthy = !livePaneState.value.preview.url || previewPlayerState.playing
+      if (primaryHealthy && previewHealthy) {
+        liveReconnectAttempts = 0
+      }
     }
 
     video.addEventListener('loadeddata', markPlaying, { once: true })
@@ -1289,6 +1338,7 @@ const mountPlayerInstance = async (
         return
       }
       state.error = 'zlm-video-element-error'
+      scheduleLiveReconnect(false, 'zlm-video-element-error')
     }, { once: true })
 
     const endpoint = new ZLMRTCClient.Endpoint({
@@ -1301,6 +1351,7 @@ const mountPlayerInstance = async (
     })
 
     endpoint.on?.(ZLMRTCClient.Events.WEBRTC_ON_CONNECTION_STATE_CHANGE, (connectionState: string) => {
+      if (endpoint.__cockpitDisposed) return
       if (connectionState === 'connected') {
         markPlaying()
         return
@@ -1308,20 +1359,26 @@ const mountPlayerInstance = async (
       if (connectionState === 'failed' || connectionState === 'disconnected' || connectionState === 'closed') {
         state.loading = false
         if (state.playing) {
-          console.warn('[cockpit] ignore transient zlm connection state after playback started', connectionState, url)
+          // 播通后断开 = 推流重建/网络中断，ZLM 已踢掉本会话，不重连画面会定格在最后一帧
+          state.playing = false
+          state.loading = true
+          scheduleLiveReconnect(true, `zlm-connection-${connectionState}`)
           return
         }
         state.error = `zlm-connection-${connectionState}`
+        scheduleLiveReconnect(false, `zlm-connection-${connectionState}`)
       }
     })
 
     endpoint.on?.(ZLMRTCClient.Events.WEBRTC_OFFER_ANWSER_EXCHANGE_FAILED, (payload: any) => {
+      if (endpoint.__cockpitDisposed) return
       state.loading = false
       if (state.playing) {
         console.warn('[cockpit] ignore late zlm offer/answer error after playback started', payload)
         return
       }
       state.error = payload?.msg || payload?.message || 'zlm-offer-answer-exchange-failed'
+      scheduleLiveReconnect(false, 'zlm-offer-answer-exchange-failed')
     })
     return endpoint
   } catch (error: any) {
@@ -1339,6 +1396,7 @@ const destroyAllPlayers = () => {
     window.clearTimeout(livePlayerRetryTimer)
     livePlayerRetryTimer = undefined
   }
+  cancelLiveReconnect()
 }
 
 const syncLivePlayers = async () => {
@@ -1346,6 +1404,7 @@ const syncLivePlayers = async () => {
     window.clearTimeout(livePlayerRetryTimer)
     livePlayerRetryTimer = undefined
   }
+  cancelLiveReconnect()
   primaryPlayer = destroyPlayerInstance(primaryPlayer, primaryPlayerState, primaryPlayerShell.value)
   previewPlayer = destroyPlayerInstance(previewPlayer, previewPlayerState, previewPlayerShell.value)
 
@@ -2009,8 +2068,6 @@ const livePlaybackKey = computed(() => buildLivePlaybackKey({
   previewKind: livePaneState.value.preview.kind,
   previewUrl: livePaneState.value.preview.url,
   previewCrop: livePaneState.value.preview.crop,
-  lastCommandAction: dualStreamState.group?.lastCommandAction,
-  lastCommandStatus: dualStreamState.group?.lastCommandStatus,
   currentMode: dualStreamState.group?.currentMode
 }))
 

@@ -1341,6 +1341,12 @@ function onPlannedWaylinesScroll (e: any) {
 }
 
 function onPreviewPlannedWayline (record: PlannedWaylineRecord) {
+  // 点击预览别的航线时收起任务类弹窗（下发/执行/投放），避免弹窗残留指向旧航线
+  const openTaskRecord = [prepareTargetModal, executeTargetModal, deliveryTaskModal]
+    .find(m => m.visible)?.record
+  if (openTaskRecord && openTaskRecord.plannedWaylineId !== record.plannedWaylineId) {
+    closeWaylineTaskPopovers()
+  }
   resetPlanningDraft()
   const recordAircraftSn = getRecordAircraftSn(record)
   if (recordAircraftSn && onlineAircraftMap[recordAircraftSn]) {
@@ -1968,6 +1974,7 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
 }
 .prepare-target-popover {
   width: 300px;
+  background: rgba(13, 17, 23, 0.93); // 与高度剖面(ElevationProfile)底色一致
 }
 .prepare-target-head-icon {
   margin-right: 6px;
