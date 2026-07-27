@@ -692,6 +692,34 @@ class FireConfirmationProcessorTest {
     }
 
     @Test
+    fun waituntil_altitude_runaway_aborts() = runTest {
+        val locations = ArrayDeque(
+            listOf(
+                AircraftLocation(34.0, 108.0, 120.0),
+                AircraftLocation(34.0, 108.0, 120.0),
+                AircraftLocation(34.0, 108.0, 200.0),
+            ),
+        )
+        val flight = RecordingFlightControl()
+        val processor = processor(
+            sessionManager = runningSession(ConfirmationStreamProvider()),
+            flight = flight,
+            aircraftLocationProvider = { locations.removeFirstOrNull() ?: AircraftLocation(34.0, 108.0, 200.0) },
+            approachLegsM = listOf(0.1),
+            flyToTimeoutMs = 5_000,
+            pollIntervalMs = 100,
+        )
+
+        val result = processor.run(defaultRequest())
+
+        assertFalse(result.success)
+        assertEquals(FireConfirmationPhase.FLY_TO, result.phaseReached)
+        assertEquals("fly-to-timeout", result.failureReason)
+        assertTrue(flight.stopFlyToPointCalled)
+        assertEquals(0, processorApi(processor).taskEvents.size)
+    }
+
+    @Test
     fun report_uploads_thermal_snapshot_and_carries_url() = runTest {
         val uploader = RecordingThermalSnapshotUploader("http://ai/thermal.jpg")
         val processor = processorWithArrivingAircraft(

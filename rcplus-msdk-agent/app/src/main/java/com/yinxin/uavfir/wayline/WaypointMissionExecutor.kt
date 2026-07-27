@@ -205,6 +205,6 @@ class WaypointMissionExecutor(
 
     companion object {
         private const val TAG = "WaypointMissionExecutor"
-        private const val NADIR_GIMBAL_PITCH_DEGREES: Double = -90.0
+        private const val NADIR_GIMBAL_PITCH_DEGREES: Double = -45.0
     }
 }

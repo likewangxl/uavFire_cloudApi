@@ -7,6 +7,7 @@ import dji.sdk.keyvalue.key.DJIGimbalKey
 import dji.sdk.keyvalue.key.DJIKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.key.FlightControllerKey
+import dji.sdk.keyvalue.key.RtkMobileStationKey
 import dji.sdk.keyvalue.value.camera.CameraNightSceneMode
 import dji.sdk.keyvalue.value.camera.CameraVideoStreamSourceType
 import dji.sdk.keyvalue.value.common.CameraLensType
@@ -14,6 +15,7 @@ import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
+import dji.sdk.keyvalue.value.flightcontroller.FlyToMode
 import dji.sdk.keyvalue.value.flightcontroller.FlyToOperationType
 import dji.sdk.keyvalue.value.flightcontroller.FlyToPointInfo
 import dji.sdk.keyvalue.value.flightcontroller.FlyToResult
@@ -173,13 +175,33 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         height: Double,
         speed: Double,
     ) {
+        // 固件默认 SMART_HEIGHT 转场剖面会自行爬升到返航高度（2026-07-26 实飞 20m→90m），
+        // 必须先锁 SET_HEIGHT + 巡航高度；两个 set 失败则中止，否则又是失控剖面。
+        setValue(FlightControllerKey.KeyFlyToMode.create(), FlyToMode.SET_HEIGHT)
+        setValue(FlightControllerKey.KeyFlyToHeight.create(), height)
+        // KeyFlyToPointEx 的目标高度是椭球绝对高：官方 FlyToMissionIndustryDelegate
+        // 用 相对高 + RTK 起飞点海拔 换算后下发，这里对齐同一口径。
+        val takeoffAltitudeM = readTakeoffAltitudeM()
+            ?: throw IllegalStateException("takeoff-altitude-unavailable")
         val target = FlyToPointInfo(
             FlyToOperationType.NEW_ORDER,
-            LocationCoordinate3D(latitude, longitude, height),
+            LocationCoordinate3D(latitude, longitude, height + takeoffAltitudeM),
             speed.coerceIn(MIN_FLY_TO_SPEED_MPS, MAX_FLY_TO_SPEED_MPS),
             height,
         )
         performFlyToAction(FlightControllerKey.KeyFlyToPointEx.create(), target)
+    }
+
+    private suspend fun readTakeoffAltitudeM(): Double? {
+        val rtkAltitude = runCatching {
+            getValue(RtkMobileStationKey.KeyRTKTakeoffAltitudeInfo.create())?.altitude
+        }.getOrNull()
+        if (rtkAltitude != null && rtkAltitude.isFinite()) {
+            return rtkAltitude
+        }
+        return runCatching { getValue(FlightControllerKey.KeyTakeoffLocationAltitude.create()) }
+            .getOrNull()
+            ?.takeIf { it.isFinite() }
     }
 
     override suspend fun setNavigationLight(enabled: Boolean) {
@@ -357,6 +379,23 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
                         }
                     },
                 )
+            }
+        }
+    }
+
+    private suspend fun <T> getValue(key: DJIKey<T>): T? {
+        return withTimeout(MSDK_ACTION_TIMEOUT_MS) {
+            suspendCancellableCoroutine { continuation ->
+                keyManager.getValue(key, object : CommonCallbacks.CompletionCallbackWithParam<T> {
+                    override fun onSuccess(result: T?) {
+                        continuation.takeIf { it.isActive }?.resume(result)
+                    }
+
+                    override fun onFailure(error: IDJIError) {
+                        continuation.takeIf { it.isActive }
+                            ?.resumeWithException(IllegalStateException(error.description()))
+                    }
+                })
             }
         }
     }

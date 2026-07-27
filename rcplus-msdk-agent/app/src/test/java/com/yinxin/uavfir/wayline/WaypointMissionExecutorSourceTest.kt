@@ -29,8 +29,8 @@ class WaypointMissionExecutorSourceTest {
             callbackBody.contains("tiltGimbalToNadir(missionId)"),
         )
         assertTrue(
-            "nadir gimbal pitch should be fixed at -90 degrees",
-            source.contains("NADIR_GIMBAL_PITCH_DEGREES: Double = -90.0"),
+            "monitoring gimbal pitch should be fixed at -45 degrees",
+            source.contains("NADIR_GIMBAL_PITCH_DEGREES: Double = -45.0"),
         )
     }
 }

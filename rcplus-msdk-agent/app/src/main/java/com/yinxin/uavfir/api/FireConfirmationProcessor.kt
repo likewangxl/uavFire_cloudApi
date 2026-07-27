@@ -418,6 +418,15 @@ class FireConfirmationProcessor(
         var minDistanceM = Double.POSITIVE_INFINITY
         while (true) {
             val current = aircraftLocationProvider() ?: return false
+            // 高度失控看门狗：固件转场剖面若无视 SET_HEIGHT 自行爬升（2026-07-26 实飞 20m→90m），
+            // 立即中止而不是等 fly-to 超时。
+            if (current.altitudeM > target.altitudeM + ALTITUDE_RUNAWAY_ABORT_M) {
+                warn(
+                    "altitude-runaway currentAltM=${current.altitudeM} targetAltM=${target.altitudeM} " +
+                        "thresholdM=$ALTITUDE_RUNAWAY_ABORT_M",
+                )
+                return false
+            }
             val distanceM = horizontalDistanceM(current, target)
             if (distanceM <= ARRIVAL_RADIUS_M) {
                 return true
@@ -802,6 +811,7 @@ class FireConfirmationProcessor(
         private const val DEFAULT_MIN_BATTERY_PERCENT_TO_START = 30
         private const val DEFAULT_MAX_MISSION_DURATION_MS = 360_000L
         private const val DEFAULT_DIVERGENCE_ABORT_M = 40.0
+        private const val ALTITUDE_RUNAWAY_ABORT_M = 15.0
         private val DEFAULT_APPROACH_LEGS = listOf(100.0, 60.0)
         private const val DEFAULT_ORBIT_BEARING_COUNT = 3
         private const val DEFAULT_ORBIT_PER_POINT_LASER_SAMPLES = 3
