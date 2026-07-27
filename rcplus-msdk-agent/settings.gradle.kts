@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "rcplus-msdk-agent"
 include(":app")
+include(":fire-detector-benchmark")
 
 include(":uxsdk")
 val uxSdkDir = file("../Mobile-SDK-Android-V5/SampleCode-V5/android-sdk-v5-uxsdk")
