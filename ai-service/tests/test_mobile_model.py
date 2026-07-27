@@ -178,3 +178,44 @@ def test_exporter_cleans_staging_when_ultralytics_fails(tmp_path, monkeypatch):
 
     assert not source.with_suffix(".onnx").exists()
     assert not list(output.glob(".export-staging-*"))
+
+
+def test_benchmark_cli_accepts_the_mandated_gate_values():
+    import importlib.util
+
+    script = Path(__file__).parents[1] / "scripts" / "build_mobile_benchmark_set.py"
+    spec = importlib.util.spec_from_file_location("build_mobile_benchmark_set", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    args = module.parse_arguments([
+        "--dataset", "mobile-model/source-validation",
+        "--output", "mobile-model/benchmark-set",
+        "--positive-count", "200",
+        "--negative-count", "200",
+        "--seed", "20260727",
+    ])
+
+    assert args.positive_count == 200
+    assert args.negative_count == 200
+    assert args.seed == 20260727
+
+
+def test_benchmark_cli_rejects_non_mandated_gate_values():
+    import importlib.util
+
+    script = Path(__file__).parents[1] / "scripts" / "build_mobile_benchmark_set.py"
+    spec = importlib.util.spec_from_file_location("build_mobile_benchmark_set", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    with pytest.raises(SystemExit):
+        module.parse_arguments([
+            "--dataset", "mobile-model/source-validation",
+            "--output", "mobile-model/benchmark-set",
+            "--positive-count", "199",
+            "--negative-count", "200",
+            "--seed", "20260727",
+        ])
