@@ -142,7 +142,7 @@ def test_exporter_stages_outputs_away_from_the_deployed_checkpoint(tmp_path, mon
     source.write_bytes(b"checkpoint")
     output = tmp_path / "mobile-model"
 
-    def create_staged_onnx(command, check):
+    def create_staged_onnx(command, check, *, cwd):
         staged_model = Path(next(argument.split("=", 1)[1] for argument in command if argument.startswith("model=")))
         staged_model.with_suffix(".onnx").write_bytes(b"onnx")
 
@@ -154,6 +154,32 @@ def test_exporter_stages_outputs_away_from_the_deployed_checkpoint(tmp_path, mon
     assert exported.read_bytes() == b"onnx"
     assert not source.with_suffix(".onnx").exists()
     assert not list(output.glob(".export-staging-*"))
+
+
+def test_exporter_runs_ultralytics_inside_the_staging_directory(tmp_path, monkeypatch):
+    import importlib.util
+
+    script = Path(__file__).parents[1] / "scripts" / "export_mobile_thermal_model.py"
+    spec = importlib.util.spec_from_file_location("export_mobile_thermal_model", script)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    source = tmp_path / "deployed.pt"
+    source.write_bytes(b"checkpoint")
+    output = tmp_path / "mobile-model"
+    captured = {}
+
+    def create_staged_onnx(command, check, *, cwd):
+        captured["cwd"] = Path(cwd)
+        staged_model = Path(next(argument.split("=", 1)[1] for argument in command if argument.startswith("model=")))
+        staged_model.with_suffix(".onnx").write_bytes(b"onnx")
+
+    monkeypatch.setattr(module.subprocess, "run", create_staged_onnx)
+
+    module._export(source, output, "onnx")
+
+    assert captured["cwd"].parent == output
+    assert captured["cwd"].name.startswith(".export-staging-")
 
 
 def test_exporter_cleans_staging_when_ultralytics_fails(tmp_path, monkeypatch):
@@ -168,7 +194,7 @@ def test_exporter_cleans_staging_when_ultralytics_fails(tmp_path, monkeypatch):
     source.write_bytes(b"checkpoint")
     output = tmp_path / "mobile-model"
 
-    def fail_export(command, check):
+    def fail_export(command, check, *, cwd):
         raise subprocess.CalledProcessError(1, command)
 
     monkeypatch.setattr(module.subprocess, "run", fail_export)

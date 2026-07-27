@@ -22,12 +22,12 @@ def yolo_executable() -> Path:
 def _export(model: Path, output: Path, export_format: str, simplify: bool = False) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".export-staging-", dir=output) as staging_directory:
-        staging_model = Path(staging_directory) / model.name
+        staging_model = (Path(staging_directory) / model.name).resolve()
         shutil.copy2(model, staging_model)
         command = [str(yolo_executable()), "export", f"model={staging_model}", f"format={export_format}", "imgsz=640"]
         if simplify:
             command.append("simplify=True")
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True, cwd=staging_model.parent)
         stem = staging_model.with_suffix("")
         source = {
             "onnx": stem.with_suffix(".onnx"),
