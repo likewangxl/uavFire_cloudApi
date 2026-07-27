@@ -14,9 +14,7 @@ else()
     message(FATAL_ERROR "Official NCNN package did not export an NCNN target")
 endif()
 
-get_target_property(NCNN_COMPILE_DEFINITIONS ${NCNN_TARGET} INTERFACE_COMPILE_DEFINITIONS)
-string(JOIN ";" NCNN_COMPILE_DEFINITIONS_TEXT ${NCNN_COMPILE_DEFINITIONS})
-if(NOT NCNN_COMPILE_DEFINITIONS_TEXT MATCHES "NCNN_VULKAN=1")
+if(NOT NCNN_VULKAN)
     message(FATAL_ERROR "The provisioned official NCNN CMake package is not Vulkan-capable")
 endif()
 

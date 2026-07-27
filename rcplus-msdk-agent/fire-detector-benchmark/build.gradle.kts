@@ -1,4 +1,6 @@
 import java.util.zip.ZipFile
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import java.security.MessageDigest
 
 plugins {
@@ -61,6 +63,18 @@ android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("ge
 tasks.named("preBuild").configure { dependsOn(stageBenchmarkAssets) }
 
 val measurementApkDir = layout.buildDirectory.dir("apk-delta-input")
+val apkDeltaFixtureDir = layout.buildDirectory.dir("apk-delta-fixture")
+val repositoryModelManifest = layout.projectDirectory.file("../../ai-service/mobile-model/model-candidates.json")
+val expectedCandidateModels = mapOf(
+    "onnx" to listOf("thermal-fire-yolov8n-640-gt-20260709.onnx"),
+    "tflite" to listOf("thermal-fire-yolov8n-640-gt-20260709_float32.tflite"),
+    "ncnn" to listOf("thermal-fire-yolov8n-640-gt-20260709_ncnn_model/metadata.yaml", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.bin", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.param", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model_ncnn.py"),
+)
+val expectedCandidateRuntimes = mapOf(
+    "onnx" to listOf("lib/arm64-v8a/libonnxruntime4j_jni.so"),
+    "tflite" to listOf("lib/arm64-v8a/libtensorflowlite_jni.so"),
+    "ncnn" to listOf("lib/arm64-v8a/libncnn.so", "lib/arm64-v8a/libfire_detector_ncnn.so"),
+)
 tasks.register<Copy>("captureCandidateMeasurementApk") {
     dependsOn("assembleDebug")
     from(layout.buildDirectory.file("outputs/apk/debug/fire-detector-benchmark-debug.apk"))
@@ -71,28 +85,74 @@ tasks.register<Copy>("captureCandidateMeasurementApk") {
 val ncnnPackageDir = providers.gradleProperty("ncnnPackageDir")
 val ncnnRuntimeLibrary = providers.gradleProperty("ncnnRuntimeLibrary")
 val ncnnBridgeDir = providers.gradleProperty("ncnnBridgeDir")
-val stageNcnnRuntime = tasks.register<Sync>("stageNcnnRuntime") {
-    onlyIf { measurementCandidate in setOf("ncnn", "benchmark") && ncnnPackageDir.isPresent && ncnnRuntimeLibrary.isPresent && ncnnBridgeDir.isPresent }
-    doFirst {
-        check(ncnnPackageDir.isPresent && ncnnRuntimeLibrary.isPresent && ncnnBridgeDir.isPresent) {
+val requiresNcnnRuntime = measurementCandidate in setOf("ncnn", "benchmark")
+val ncnnIsProvisioned = ncnnPackageDir.isPresent && ncnnRuntimeLibrary.isPresent && ncnnBridgeDir.isPresent
+val ncnnJniOutputDir = layout.buildDirectory.dir("generated/ncnnJni")
+val stageNcnnRuntime = tasks.register("stageNcnnRuntime") {
+    outputs.dir(ncnnJniOutputDir)
+    // Always execute so a baseline/ONNX/TFLite build removes JNI files left by an NCNN build.
+    outputs.upToDateWhen { false }
+    doLast {
+        val outputDirectory = ncnnJniOutputDir.get().asFile
+        check(outputDirectory.deleteRecursively() || !outputDirectory.exists()) { "Cannot clear staged NCNN JNI libraries" }
+        if (!requiresNcnnRuntime) return@doLast
+        check(ncnnIsProvisioned) {
             "NCNN packaging requires -PncnnPackageDir, -PncnnRuntimeLibrary, and -PncnnBridgeDir; see fire-detector-benchmark/README.md"
         }
         val ncnnConfig = file(ncnnPackageDir.get()).resolve("ncnnConfig.cmake")
         check(ncnnConfig.isFile) { "Official ncnnConfig.cmake package is missing" }
-        check(ncnnConfig.readText().contains("NCNN_VULKAN=1")) { "Official NCNN package is not Vulkan-capable" }
         check(file(ncnnRuntimeLibrary.get()).isFile) { "Official NCNN arm64 runtime library is missing" }
         check(file(ncnnBridgeDir.get()).resolve("libfire_detector_ncnn.so").isFile) { "Built NCNN JNI bridge is missing" }
+        copy {
+            from(file(ncnnRuntimeLibrary.get()))
+            from(file(ncnnBridgeDir.get()).resolve("libfire_detector_ncnn.so"))
+            into(outputDirectory.resolve("arm64-v8a"))
+        }
     }
-    from(ncnnRuntimeLibrary.map(::file))
-    from(ncnnBridgeDir.map { file(it).resolve("libfire_detector_ncnn.so") })
-    into(layout.buildDirectory.dir("generated/ncnnJni/arm64-v8a"))
 }
-android.sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("generated/ncnnJni"))
+android.sourceSets.getByName("main").jniLibs.srcDir(ncnnJniOutputDir)
 tasks.named("preBuild").configure { dependsOn(stageNcnnRuntime) }
 
+val fixtureVerificationRequested = gradle.startParameter.taskNames.any {
+    it.substringAfterLast(':') == "verifyWriteApkDeltaMetadataFixture"
+}
+val apkDeltaInputDirectory = providers.gradleProperty("apkDeltaInputDir")
+    .map(::file)
+    .orElse(if (fixtureVerificationRequested) apkDeltaFixtureDir.map { it.asFile } else measurementApkDir.map { it.asFile })
+
+val createApkDeltaMetadataFixture = tasks.register("createApkDeltaMetadataFixture") {
+    inputs.file(repositoryModelManifest)
+    outputs.dir(apkDeltaFixtureDir)
+    doLast {
+        val fixtureDirectory = apkDeltaFixtureDir.get().asFile
+        check(fixtureDirectory.deleteRecursively() || !fixtureDirectory.exists()) { "Cannot clear APK delta fixture directory" }
+        check(fixtureDirectory.mkdirs()) { "Cannot create APK delta fixture directory" }
+        val manifestBytes = repositoryModelManifest.asFile.readBytes()
+
+        fun writeFixtureApk(name: String, entries: Map<String, ByteArray>) {
+            ZipOutputStream(fixtureDirectory.resolve("$name-arm64.apk").outputStream().buffered()).use { zip ->
+                entries.forEach { (path, contents) ->
+                    zip.putNextEntry(ZipEntry(path))
+                    zip.write(contents)
+                    zip.closeEntry()
+                }
+            }
+        }
+
+        writeFixtureApk("baseline", mapOf("assets/model-candidates.json" to manifestBytes))
+        expectedCandidateModels.keys.forEach { candidate ->
+            val entries = linkedMapOf("assets/model-candidates.json" to manifestBytes)
+            expectedCandidateRuntimes.getValue(candidate).forEach { path -> entries[path] = "fixture runtime $path".toByteArray() }
+            expectedCandidateModels.getValue(candidate).forEach { path -> entries["assets/$path"] = "fixture model $path".toByteArray() }
+            writeFixtureApk(candidate, entries)
+        }
+    }
+}
+
 val writeApkDeltaMetadata = tasks.register("writeApkDeltaMetadata") {
-    val inputDirectory = measurementApkDir.get().asFile
+    val inputDirectory = apkDeltaInputDirectory.get()
     inputs.dir(inputDirectory)
+    inputs.file(repositoryModelManifest)
     outputs.file(layout.buildDirectory.file("generated/apkDeltaMetadata/apk-delta.json"))
     doLast {
         fun sha256(file: java.io.File) = file.inputStream().use { input ->
@@ -106,18 +166,9 @@ val writeApkDeltaMetadata = tasks.register("writeApkDeltaMetadata") {
             digest.digest().joinToString("") { "%02x".format(it) }
         }
         fun apk(name: String) = inputDirectory.resolve("$name-arm64.apk").also { check(it.isFile) { "Missing $name arm64 measurement APK; run captureCandidateMeasurementApk with -PfireDetectorCandidate=$name" } }
-        val modelManifest = file("../ai-service/mobile-model/model-candidates.json")
+        val modelManifest = repositoryModelManifest.asFile
+        check(modelManifest.isFile) { "Repository model manifest is missing: $modelManifest" }
         val modelManifestSha256 = sha256(modelManifest)
-        val expectedModels = mapOf(
-            "onnx" to listOf("thermal-fire-yolov8n-640-gt-20260709.onnx"),
-            "tflite" to listOf("thermal-fire-yolov8n-640-gt-20260709_float32.tflite"),
-            "ncnn" to listOf("thermal-fire-yolov8n-640-gt-20260709_ncnn_model/metadata.yaml", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.bin", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.param", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model_ncnn.py"),
-        )
-        val expectedRuntimes = mapOf(
-            "onnx" to listOf("lib/arm64-v8a/libonnxruntime4j_jni.so"),
-            "tflite" to listOf("lib/arm64-v8a/libtensorflowlite_jni.so"),
-            "ncnn" to listOf("lib/arm64-v8a/libncnn.so", "lib/arm64-v8a/libfire_detector_ncnn.so"),
-        )
         fun archiveSha256(zip: ZipFile, entry: String): String = zip.getInputStream(zip.getEntry(entry) ?: error("Missing APK entry $entry")).use { input ->
             val digest = MessageDigest.getInstance("SHA-256")
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -126,9 +177,9 @@ val writeApkDeltaMetadata = tasks.register("writeApkDeltaMetadata") {
         }
         fun provenance(name: String, apk: java.io.File): String = ZipFile(apk).use { zip ->
             check(archiveSha256(zip, "assets/model-candidates.json") == modelManifestSha256) { "$apk has a stale model-candidates manifest" }
-            val runtimeEntries = expectedRuntimes.getValue(name)
+            val runtimeEntries = expectedCandidateRuntimes.getValue(name)
             runtimeEntries.forEach { check(zip.getEntry(it) != null) { "$apk is mislabeled: missing $it" } }
-            val modelEntries = expectedModels.getValue(name)
+            val modelEntries = expectedCandidateModels.getValue(name)
             modelEntries.forEach { check(zip.getEntry("assets/$it") != null) { "$apk is mislabeled: missing model $it" } }
             val models = modelEntries.joinToString(",") { path -> "{\"path\":\"$path\",\"sha256\":\"${archiveSha256(zip, "assets/$path")}\"}" }
             "{\"apkSha256\":\"${sha256(apk)}\",\"runtimeEntries\":[${runtimeEntries.joinToString(",") { "\"$it\"" }}],\"modelEntries\":[$models]}"
@@ -156,6 +207,21 @@ val writeApkDeltaMetadata = tasks.register("writeApkDeltaMetadata") {
         val output = layout.buildDirectory.file("generated/apkDeltaMetadata/apk-delta.json").get().asFile
         output.parentFile.mkdirs()
         output.writeText(json)
+    }
+}
+
+writeApkDeltaMetadata.configure { mustRunAfter(createApkDeltaMetadataFixture) }
+tasks.register("verifyWriteApkDeltaMetadataFixture") {
+    dependsOn(createApkDeltaMetadataFixture, writeApkDeltaMetadata)
+    doLast {
+        val metadata = layout.buildDirectory.file("generated/apkDeltaMetadata/apk-delta.json").get().asFile
+        val expectedManifestSha256 = MessageDigest.getInstance("SHA-256")
+            .digest(repositoryModelManifest.asFile.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        check(metadata.isFile) { "APK delta fixture did not produce metadata" }
+        check(metadata.readText().contains("\"modelCandidatesSha256\": \"$expectedManifestSha256\"")) {
+            "APK delta fixture metadata is not bound to the repository model manifest"
+        }
     }
 }
 

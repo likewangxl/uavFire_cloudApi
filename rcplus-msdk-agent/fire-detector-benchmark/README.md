@@ -66,8 +66,9 @@ The JNI library must reject a non-direct buffer, invalid handle, or output whose
 is not 42,000. The benchmark applies the shared confidence threshold, NMS, and source
 coordinate mapping in Kotlin. Until both files are present, the NCNN adapter fails
 before any measurements are recorded and no engine can be selected.
-The CMake package must export the official NCNN target with `NCNN_VULKAN=1`; the
-bridge enables Vulkan compute and rejects provisioning when no Vulkan GPU is available.
+The official CMake package must set `NCNN_VULKAN` to `ON`; the bridge validates that
+value after `find_package`, enables Vulkan compute, and rejects provisioning when no
+Vulkan GPU is available.
 
 ## APK delta metadata
 
@@ -84,6 +85,13 @@ with its selected runtime/model only, capture its APK, then write metadata:
   -PncnnRuntimeLibrary=/absolute/path/to/checksum-recorded-ncnn-package/lib/arm64-v8a/libncnn.so \
   -PncnnBridgeDir=/absolute/path/to/build/local-ncnn
 ./gradlew :fire-detector-benchmark:writeApkDeltaMetadata
+```
+
+For a local, synthetic contract check that executes the metadata task against
+generated arm64 APK fixtures, run:
+
+```bash
+./gradlew :fire-detector-benchmark:verifyWriteApkDeltaMetadataFixture
 ```
 
 The metadata task rejects missing APKs, non-arm64 native entries, candidate APKs
