@@ -20,6 +20,9 @@ CLASS_NAMES = ["fire"]
 CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.7
 OUTPUT_LAYOUT = "xywh, class scores; postprocess with NMS"
+BENCHMARK_POSITIVE_COUNT = 200
+BENCHMARK_NEGATIVE_COUNT = 200
+BENCHMARK_SEED = 20260727
 
 
 def sha256_file(path: Path) -> str:
@@ -38,7 +41,7 @@ def _candidate_artifacts(path: Path) -> list[dict[str, str]]:
     files = [path] if path.is_file() else sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
     if not files:
         raise ValueError(f"Exported artifact is empty: {path}")
-    return [{"path": str(file), "sha256": sha256_file(file)} for file in files]
+    return [{"path": str(file.relative_to(path.parent)), "sha256": sha256_file(file)} for file in files]
 
 
 def build_candidate_manifest(source_model: Path, exported_files: Iterable[tuple[str, Path]]) -> dict[str, Any]:
@@ -148,19 +151,19 @@ def build_benchmark_manifest(source_dataset: Path, samples: Iterable[tuple[Path,
     return {"sourceDataset": str(source_dataset), "seed": seed, "samples": entries}
 
 
-def build_benchmark_set(dataset: Path, output: Path, positive_count: int, negative_count: int, seed: int) -> dict[str, Any]:
+def build_benchmark_set(dataset: Path, output: Path) -> dict[str, Any]:
     images = _validation_images(Path(dataset))
     positives = [item for item in images if item[2]]
     negatives = [item for item in images if not item[2]]
-    if len(positives) < positive_count or len(negatives) < negative_count:
+    if len(positives) < BENCHMARK_POSITIVE_COUNT or len(negatives) < BENCHMARK_NEGATIVE_COUNT:
         raise ValueError(
-            f"Validation split needs {positive_count} positive and {negative_count} negative images; "
+            f"Validation split needs {BENCHMARK_POSITIVE_COUNT} positive and {BENCHMARK_NEGATIVE_COUNT} negative images; "
             f"found {len(positives)} positive and {len(negatives)} negative"
         )
-    selector = random.Random(seed)
-    selected = selector.sample(positives, positive_count) + selector.sample(negatives, negative_count)
+    selector = random.Random(BENCHMARK_SEED)
+    selected = selector.sample(positives, BENCHMARK_POSITIVE_COUNT) + selector.sample(negatives, BENCHMARK_NEGATIVE_COUNT)
     selected.sort(key=lambda item: str(item[0]))
-    manifest = build_benchmark_manifest(Path(dataset), selected, seed)
+    manifest = build_benchmark_manifest(Path(dataset), selected, BENCHMARK_SEED)
 
     output = Path(output)
     images_output = output / "images"

@@ -35,12 +35,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--positive-count", required=True, type=int)
-    parser.add_argument("--negative-count", required=True, type=int)
-    parser.add_argument("--seed", required=True, type=int)
     parser.add_argument("--model", type=Path, default=Path("weights/thermal-fire-yolov8n-640-gt-20260709.pt"))
     args = parser.parse_args()
-    build_benchmark_set(args.dataset, args.output, args.positive_count, args.negative_count, args.seed)
+    build_benchmark_set(args.dataset, args.output)
     if not args.model.is_file():
         raise SystemExit(f"Baseline model does not exist: {args.model}")
     run_pytorch_baseline(args.model, args.output)

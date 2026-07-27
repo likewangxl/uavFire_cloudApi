@@ -7,6 +7,7 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -19,25 +20,29 @@ def yolo_executable() -> Path:
 
 
 def _export(model: Path, output: Path, export_format: str, simplify: bool = False) -> Path:
-    command = [str(yolo_executable()), "export", f"model={model}", f"format={export_format}", "imgsz=640"]
-    if simplify:
-        command.append("simplify=True")
-    subprocess.run(command, check=True)
-    stem = model.with_suffix("")
-    source = {
-        "onnx": stem.with_suffix(".onnx"),
-        "tflite": stem.parent / f"{stem.name}_saved_model" / f"{stem.name}_float32.tflite",
-        "ncnn": stem.parent / f"{stem.name}_ncnn_model",
-    }[export_format]
-    if not source.exists():
-        raise FileNotFoundError(f"Ultralytics did not produce {export_format} output: {source}")
-    destination = output / source.name
-    if source.is_dir():
-        shutil.rmtree(destination, ignore_errors=True)
-        shutil.copytree(source, destination)
-    else:
-        shutil.copy2(source, destination)
-    return destination
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".export-staging-", dir=output) as staging_directory:
+        staging_model = Path(staging_directory) / model.name
+        shutil.copy2(model, staging_model)
+        command = [str(yolo_executable()), "export", f"model={staging_model}", f"format={export_format}", "imgsz=640"]
+        if simplify:
+            command.append("simplify=True")
+        subprocess.run(command, check=True)
+        stem = staging_model.with_suffix("")
+        source = {
+            "onnx": stem.with_suffix(".onnx"),
+            "tflite": stem.parent / f"{stem.name}_saved_model" / f"{stem.name}_float32.tflite",
+            "ncnn": stem.parent / f"{stem.name}_ncnn_model",
+        }[export_format]
+        if not source.exists():
+            raise FileNotFoundError(f"Ultralytics did not produce {export_format} output: {source}")
+        destination = output / source.name
+        if source.is_dir():
+            shutil.rmtree(destination, ignore_errors=True)
+            shutil.copytree(source, destination)
+        else:
+            shutil.copy2(source, destination)
+        return destination
 
 
 def main() -> None:
