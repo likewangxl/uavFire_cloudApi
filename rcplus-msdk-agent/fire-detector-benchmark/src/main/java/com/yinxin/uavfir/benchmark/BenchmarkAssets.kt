@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.benchmark
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -9,14 +10,12 @@ internal class BenchmarkAssets(private val context: Context) {
     private val assets = context.assets
     val manifest = JSONObject(read("benchmark-set/manifest.json"))
     val baseline = JSONObject(read("benchmark-set/pytorch-baseline.json"))
+    val modelManifest = ModelManifestParser.parse(read("model-candidates.json"))
 
     fun verifyIntegrity() {
-        val candidates = JSONObject(read("model-candidates.json")).getJSONArray("candidates")
-        for (candidateIndex in 0 until candidates.length()) {
-            val artifacts = candidates.getJSONObject(candidateIndex).getJSONArray("artifacts")
-            for (artifactIndex in 0 until artifacts.length()) {
-                val artifact = artifacts.getJSONObject(artifactIndex)
-                verifyHash(artifact.getString("path"), artifact.getString("sha256"))
+        for (engine in Engine.entries) {
+            for (artifact in modelManifest.artifact(engine)) {
+                verifyHash(artifact.path, artifact.sha256)
             }
         }
         val samples = manifest.getJSONArray("samples")
@@ -27,9 +26,13 @@ internal class BenchmarkAssets(private val context: Context) {
     }
 
     fun samples(): List<BenchmarkSample> = manifest.getJSONArray("samples").mapObjects { sample ->
+        val imageAsset = "benchmark-set/${sample.getString("image")}"
+        val dimensions = imageDimensions(imageAsset)
         BenchmarkSample(
             id = sample.getString("id"),
-            imageAsset = "benchmark-set/${sample.getString("image")}",
+            imageAsset = imageAsset,
+            sourceWidth = dimensions.first,
+            sourceHeight = dimensions.second,
             expected = sample.getJSONArray("expectedBoxes").mapObjects { expected ->
                 Detection(
                     left = (expected.getDouble("x") - expected.getDouble("width") / 2.0).toFloat(),
@@ -42,18 +45,18 @@ internal class BenchmarkAssets(private val context: Context) {
         )
     }
 
-    fun pytorchDetections(): Map<String, List<Detection>> = baseline.getJSONArray("samples").mapObjects { sample ->
-        sample.getString("id") to sample.getJSONArray("detections").mapObjects { detection ->
+    fun pytorchDetections(sample: BenchmarkSample): List<Detection> {
+        val baselineSample = baseline.getJSONArray("samples").mapObjects { it }.single { it.getString("id") == sample.id }
+        return baselineSample.getJSONArray("detections").mapObjects { detection ->
             val xyxy = detection.getJSONArray("xyxy")
-            Detection(
-                left = (xyxy.getDouble(0) / 640.0).toFloat(),
-                top = (xyxy.getDouble(1) / 640.0).toFloat(),
-                right = (xyxy.getDouble(2) / 640.0).toFloat(),
-                bottom = (xyxy.getDouble(3) / 640.0).toFloat(),
+            BaselineNormalizer.normalize(
+                xyxy = floatArrayOf(xyxy.getDouble(0).toFloat(), xyxy.getDouble(1).toFloat(), xyxy.getDouble(2).toFloat(), xyxy.getDouble(3).toFloat()),
+                sourceWidth = sample.sourceWidth,
+                sourceHeight = sample.sourceHeight,
                 confidence = detection.getDouble("confidence").toFloat(),
             )
         }
-    }.toMap()
+    }
 
     fun openImage(asset: String) = assets.open(asset)
 
@@ -72,11 +75,20 @@ internal class BenchmarkAssets(private val context: Context) {
     }
 
     private fun read(asset: String): String = assets.open(asset).bufferedReader().use { it.readText() }
+
+    private fun imageDimensions(asset: String): Pair<Int, Int> {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        assets.open(asset).use { BitmapFactory.decodeStream(it, null, options) }
+        check(options.outWidth > 0 && options.outHeight > 0) { "Unable to determine source dimensions for $asset" }
+        return options.outWidth to options.outHeight
+    }
 }
 
 internal data class BenchmarkSample(
     val id: String,
     val imageAsset: String,
+    val sourceWidth: Int,
+    val sourceHeight: Int,
     val expected: List<Detection>,
 )
 

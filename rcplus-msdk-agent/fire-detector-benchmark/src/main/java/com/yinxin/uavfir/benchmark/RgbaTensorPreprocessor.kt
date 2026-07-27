@@ -3,45 +3,51 @@ package com.yinxin.uavfir.benchmark
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** Converts an existing RGBA frame directly into the model tensors. */
-internal object RgbaTensorPreprocessor {
-    private const val INPUT_SIZE = 640
-    private const val CHANNELS = 3
+/** Reuses direct tensor buffers and converts an existing RGBA frame without Bitmap allocation. */
+internal class RgbaTensorPreprocessor(private val manifest: ModelManifest) {
+    private val pixelCount = manifest.inputWidth * manifest.inputHeight
+    private val nhwc = ByteBuffer.allocateDirect(pixelCount * 3 * Float.SIZE_BYTES).order(ByteOrder.nativeOrder())
+    private val nchw = ByteBuffer.allocateDirect(pixelCount * 3 * Float.SIZE_BYTES).order(ByteOrder.nativeOrder())
 
     fun prepare(frame: RgbaFrame): PreparedInput {
-        val scale = minOf(INPUT_SIZE.toFloat() / frame.width, INPUT_SIZE.toFloat() / frame.height)
-        val resizedWidth = frame.width * scale
-        val resizedHeight = frame.height * scale
-        val padX = (INPUT_SIZE - resizedWidth) / 2f
-        val padY = (INPUT_SIZE - resizedHeight) / 2f
-        val elementCount = INPUT_SIZE * INPUT_SIZE * CHANNELS
-        val nhwc = ByteBuffer.allocateDirect(elementCount * Float.SIZE_BYTES).order(ByteOrder.nativeOrder())
-        val nchw = ByteBuffer.allocateDirect(elementCount * Float.SIZE_BYTES).order(ByteOrder.nativeOrder())
-        for (y in 0 until INPUT_SIZE) {
-            for (x in 0 until INPUT_SIZE) {
+        val scale = minOf(manifest.inputWidth.toFloat() / frame.width, manifest.inputHeight.toFloat() / frame.height)
+        val padX = (manifest.inputWidth - frame.width * scale) / 2f
+        val padY = (manifest.inputHeight - frame.height * scale) / 2f
+        nhwc.clear()
+        for (y in 0 until manifest.inputHeight) {
+            for (x in 0 until manifest.inputWidth) {
                 val sourceX = ((x - padX) / scale).toInt()
                 val sourceY = ((y - padY) / scale).toInt()
-                val rgb = if (sourceX in 0 until frame.width && sourceY in 0 until frame.height) {
-                    val pixelOffset = (sourceY * frame.width + sourceX) * 4
-                    intArrayOf(
-                        frame.pixels[pixelOffset].toInt() and 0xff,
-                        frame.pixels[pixelOffset + 1].toInt() and 0xff,
-                        frame.pixels[pixelOffset + 2].toInt() and 0xff,
-                    )
+                val pixelOffset = (sourceY * frame.width + sourceX) * 4
+                val red: Int
+                val green: Int
+                val blue: Int
+                if (sourceX in 0 until frame.width && sourceY in 0 until frame.height) {
+                    red = frame.pixels[pixelOffset].toInt() and 0xff
+                    green = frame.pixels[pixelOffset + 1].toInt() and 0xff
+                    blue = frame.pixels[pixelOffset + 2].toInt() and 0xff
                 } else {
-                    intArrayOf(114, 114, 114)
+                    red = 114
+                    green = 114
+                    blue = 114
                 }
-                val position = y * INPUT_SIZE + x
-                for (channel in 0 until CHANNELS) {
-                    val value = rgb[channel] / 255f
-                    nhwc.putFloat(value)
-                    nchw.putFloat((channel * INPUT_SIZE * INPUT_SIZE + position) * Float.SIZE_BYTES, value)
-                }
+                val position = y * manifest.inputWidth + x
+                putRgb(position, red, green, blue)
             }
         }
         nhwc.rewind()
         nchw.rewind()
         return PreparedInput(nhwc, nchw, scale, padX, padY, frame.width, frame.height)
+    }
+
+    private fun putRgb(position: Int, red: Int, green: Int, blue: Int) {
+        val scale = manifest.normalizationScale
+        nhwc.putFloat(red * scale)
+        nhwc.putFloat(green * scale)
+        nhwc.putFloat(blue * scale)
+        nchw.putFloat(position * Float.SIZE_BYTES, red * scale)
+        nchw.putFloat((pixelCount + position) * Float.SIZE_BYTES, green * scale)
+        nchw.putFloat((2 * pixelCount + position) * Float.SIZE_BYTES, blue * scale)
     }
 
     fun mapToSource(prepared: PreparedInput, cx: Float, cy: Float, width: Float, height: Float): Detection? {

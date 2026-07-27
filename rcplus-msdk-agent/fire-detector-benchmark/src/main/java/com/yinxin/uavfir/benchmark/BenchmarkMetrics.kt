@@ -4,8 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import android.os.Debug
-import java.util.zip.ZipFile
+import java.io.File
 
 internal data class CorrectnessMetrics(
     val recall: Double,
@@ -40,7 +39,11 @@ internal object CorrectnessEvaluator {
 }
 
 internal object DeviceMetrics {
-    fun rssKilobytes(): Long = Debug.getPss()
+    fun rssKilobytes(): Long {
+        val line = File("/proc/self/status").useLines { lines -> lines.firstOrNull { it.startsWith("VmRSS:") } }
+            ?: error("VmRSS is unavailable")
+        return line.substringAfter(':').trim().substringBefore(' ').toLong()
+    }
 
     fun temperatureCelsius(context: Context): Double? {
         val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
@@ -49,19 +52,15 @@ internal object DeviceMetrics {
     }
 }
 
-internal object ApkDeltaCalculator {
-    fun bytesFor(context: Context, engine: Engine, modelAssets: List<String>): Long {
-        val nativeName = when (engine) {
-            Engine.ONNX -> "onnxruntime"
-            Engine.TFLITE -> "tensorflowlite"
-            Engine.NCNN -> "ncnn"
-        }
-        val nativeBytes = ZipFile(context.applicationInfo.sourceDir).use { apk ->
-            apk.entries().asSequence()
-                .filter { it.name.startsWith("lib/") && it.name.contains(nativeName, ignoreCase = true) }
-                .sumOf { it.size.coerceAtLeast(0L) }
-        }
-        val modelBytes = modelAssets.sumOf { asset -> context.assets.openFd(asset).use { it.length } }
-        return nativeBytes + modelBytes
+internal object BaselineNormalizer {
+    fun normalize(xyxy: FloatArray, sourceWidth: Int, sourceHeight: Int, confidence: Float): Detection {
+        require(xyxy.size == 4 && sourceWidth > 0 && sourceHeight > 0)
+        return Detection(
+            left = (xyxy[0] / sourceWidth).coerceIn(0f, 1f),
+            top = (xyxy[1] / sourceHeight).coerceIn(0f, 1f),
+            right = (xyxy[2] / sourceWidth).coerceIn(0f, 1f),
+            bottom = (xyxy[3] / sourceHeight).coerceIn(0f, 1f),
+            confidence = confidence,
+        )
     }
 }

@@ -10,7 +10,7 @@ Run the JVM gate with:
 ./gradlew :fire-detector-benchmark:testDebugUnitTest
 ```
 
-Run the RC Plus gate only after the official NCNN bridge has been provisioned:
+Run the RC Plus gate only after the official NCNN bridge and candidate APK-delta metadata have been provisioned:
 
 ```bash
 export ADB_SERIAL=192.168.50.141:5555
@@ -31,12 +31,25 @@ NCNN has no supported Maven Android runtime. Before a device run, obtain an offi
 checksum-recorded arm64-v8a build and provision these files locally, without committing
 them:
 
-```text
-fire-detector-benchmark/src/main/jniLibs/arm64-v8a/libncnn.so
-fire-detector-benchmark/src/main/jniLibs/arm64-v8a/libfire_detector_ncnn.so
+Build the committed bridge source against a locally provisioned official SDK:
+
+```bash
+cmake -S src/main/cpp -B build/local-ncnn \
+  -DANDROID_ABI=arm64-v8a \
+  -DANDROID_PLATFORM=android-26 \
+  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+  -DNCNN_SDK_DIR=/absolute/path/to/checksum-recorded-ncnn-sdk
+cmake --build build/local-ncnn
 ```
 
-`libfire_detector_ncnn.so` must export JNI methods for Kotlin object
+Use the SDK and bridge locations only as local Gradle properties, never source files:
+
+```text
+ncnnSdkDir=/absolute/path/to/checksum-recorded-ncnn-sdk
+ncnnBridgeDir=/absolute/path/to/build/local-ncnn
+```
+
+`libfire_detector_ncnn.so` is built from `src/main/cpp/ncnn_bridge.cpp` and exports JNI methods for Kotlin object
 `com.yinxin.uavfir.benchmark.NcnnBridge`:
 
 ```text
@@ -52,3 +65,24 @@ The JNI library must reject a non-direct buffer, invalid handle, or output whose
 is not 42,000. The benchmark applies the shared confidence threshold, NMS, and source
 coordinate mapping in Kotlin. Until both files are present, the NCNN adapter fails
 before any measurements are recorded and no engine can be selected.
+
+## APK delta metadata
+
+The device gate accepts only `apk-delta.json` produced from whole arm64-only APKs,
+not a sum of entries from the benchmark APK. Build each production-like candidate
+with its selected runtime/model only, capture its APK, then write metadata:
+
+```bash
+./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=baseline
+./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=onnx
+./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=tflite
+./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=ncnn \
+  -PncnnSdkDir=/absolute/path/to/checksum-recorded-ncnn-sdk \
+  -PncnnBridgeDir=/absolute/path/to/build/local-ncnn
+./gradlew :fire-detector-benchmark:writeApkDeltaMetadata
+```
+
+The metadata task rejects missing APKs, non-arm64 native entries, candidate APKs
+without native runtime code, and any candidate smaller than the runtime-free
+baseline. It writes `build/generated/apkDeltaMetadata/apk-delta.json`; the device
+test fails closed when that file is not packaged.

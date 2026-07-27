@@ -24,13 +24,14 @@ class FireDetectorBenchmarkInstrumentedTest {
         BenchmarkRunContract.validateSampleCount(samples.size)
 
         val pytorchMetrics = CorrectnessEvaluator.evaluate(
-            samples.map { sample -> sample to assets.pytorchDetections().getValue(sample.id) },
+            samples.map { sample -> sample to assets.pytorchDetections(sample) },
         )
-        val reports = listOf(
-            runEngine(OnnxEngineAdapter(context), samples),
-            runEngine(TfliteEngineAdapter(context), samples),
-            runEngine(NcnnEngineAdapter(context), samples),
+        val adapters = listOf(
+            OnnxEngineAdapter(context, assets.modelManifest),
+            TfliteEngineAdapter(context, assets.modelManifest),
+            NcnnEngineAdapter(context, assets.modelManifest),
         )
+        val reports = adapters.map { adapter -> runEngine(adapter, samples) }
         val selected = EngineSelectionPolicy.select(pytorchMetrics.recall, reports.map(EngineReport::selectionInput))
         writeResult(pytorchMetrics, reports, selected?.engine)
         assertNotNull("No engine passed the immutable production gate", selected)
@@ -70,7 +71,7 @@ class FireDetectorBenchmarkInstrumentedTest {
             p95Millis = percentile(observations.map(InferenceObservation::inferenceMillis)),
             firstWindowP95Millis = percentile(firstWindow),
             finalWindowP95Millis = percentile(finalWindow),
-            apkDeltaBytes = ApkDeltaCalculator.bytesFor(context, adapter.engine, modelAssets(adapter.engine)),
+            apkDeltaBytes = ApkDeltaMetadata.load(context).getValue(adapter.engine),
             observations = observations,
         )
     }
@@ -100,12 +101,6 @@ class FireDetectorBenchmarkInstrumentedTest {
             .put("engines", JSONArray(reports.map(EngineReport::toJson)))
         val output = File(context.getExternalFilesDir(null), "fire-detector-benchmark.json")
         output.writeText(result.toString(2))
-    }
-
-    private fun modelAssets(engine: Engine): List<String> = when (engine) {
-        Engine.ONNX -> listOf(ONNX_ASSET)
-        Engine.TFLITE -> listOf(TFLITE_ASSET)
-        Engine.NCNN -> listOf(NCNN_PARAM_ASSET, NCNN_BIN_ASSET)
     }
 
     private fun percentile(values: List<Double>): Double {
