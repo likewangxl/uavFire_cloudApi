@@ -10,7 +10,8 @@ internal class BenchmarkAssets(private val context: Context) {
     private val assets = context.assets
     val manifest = JSONObject(read("benchmark-set/manifest.json"))
     val baseline = JSONObject(read("benchmark-set/pytorch-baseline.json"))
-    val modelManifest = ModelManifestParser.parse(read("model-candidates.json"))
+    private val modelManifestJson = read("model-candidates.json")
+    val modelManifest = ModelManifestParser.parse(modelManifestJson)
 
     fun verifyIntegrity() {
         for (engine in Engine.entries) {

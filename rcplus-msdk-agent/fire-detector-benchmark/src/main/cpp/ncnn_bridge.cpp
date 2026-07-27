@@ -14,6 +14,9 @@ jlong create(JNIEnv* env, jstring param_path, jstring bin_path) {
     const char* param = env->GetStringUTFChars(param_path, nullptr);
     const char* bin = env->GetStringUTFChars(bin_path, nullptr);
     auto model = std::make_unique<Model>();
+    ncnn::create_gpu_instance();
+    if (ncnn::get_gpu_count() == 0) return 0;
+    model->net.opt.use_vulkan_compute = true;
     const int param_status = model->net.load_param(param);
     const int bin_status = param_status == 0 ? model->net.load_model(bin) : -1;
     env->ReleaseStringUTFChars(param_path, param);
@@ -38,7 +41,7 @@ jfloatArray infer(JNIEnv* env, jlong handle, jobject input) {
     return result;
 }
 
-void close(jlong handle) { delete reinterpret_cast<Model*>(handle); }
+void close(jlong handle) { delete reinterpret_cast<Model*>(handle); ncnn::destroy_gpu_instance(); }
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL

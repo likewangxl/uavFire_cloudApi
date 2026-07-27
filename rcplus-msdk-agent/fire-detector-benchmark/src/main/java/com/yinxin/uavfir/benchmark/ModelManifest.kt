@@ -6,6 +6,7 @@ import org.json.JSONObject
 internal data class ModelArtifact(val path: String, val sha256: String)
 
 internal data class ModelManifest(
+    val sha256: String,
     val inputWidth: Int,
     val inputHeight: Int,
     val normalizationScale: Float,
@@ -35,6 +36,7 @@ internal object ModelManifestParser {
             "Unsupported normalization mean/std"
         }
         return ModelManifest(
+            sha256 = java.security.MessageDigest.getInstance("SHA-256").digest(json.toByteArray()).joinToString("") { "%02x".format(it) },
             inputWidth = inputSize.getInt(0),
             inputHeight = inputSize.getInt(1),
             normalizationScale = normalization.getDouble("scale").toFloat(),

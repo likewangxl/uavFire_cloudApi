@@ -22,6 +22,7 @@ class FireDetectorBenchmarkInstrumentedTest {
         assets.verifyIntegrity()
         val samples = assets.samples()
         BenchmarkRunContract.validateSampleCount(samples.size)
+        val apkDeltas = ApkDeltaMetadata.load(context, assets.modelManifest)
 
         val pytorchMetrics = CorrectnessEvaluator.evaluate(
             samples.map { sample -> sample to assets.pytorchDetections(sample) },
@@ -31,13 +32,13 @@ class FireDetectorBenchmarkInstrumentedTest {
             TfliteEngineAdapter(context, assets.modelManifest),
             NcnnEngineAdapter(context, assets.modelManifest),
         )
-        val reports = adapters.map { adapter -> runEngine(adapter, samples) }
+        val reports = adapters.map { adapter -> runEngine(adapter, samples, apkDeltas.getValue(adapter.engine).apkDeltaBytes) }
         val selected = EngineSelectionPolicy.select(pytorchMetrics.recall, reports.map(EngineReport::selectionInput))
         writeResult(pytorchMetrics, reports, selected?.engine)
         assertNotNull("No engine passed the immutable production gate", selected)
     }
 
-    private fun runEngine(adapter: EngineAdapter, samples: List<BenchmarkSample>): EngineReport = adapter.use {
+    private fun runEngine(adapter: EngineAdapter, samples: List<BenchmarkSample>, apkDeltaBytes: Long): EngineReport = adapter.use {
         repeat(BenchmarkRunContract.WARM_UP_FRAMES) { index -> adapter.infer(decode(samples[index % samples.size])) }
         val correctness = samples.map { sample -> sample to adapter.infer(decode(sample)) }
         val correctnessMetrics = CorrectnessEvaluator.evaluate(correctness)
@@ -71,7 +72,7 @@ class FireDetectorBenchmarkInstrumentedTest {
             p95Millis = percentile(observations.map(InferenceObservation::inferenceMillis)),
             firstWindowP95Millis = percentile(firstWindow),
             finalWindowP95Millis = percentile(finalWindow),
-            apkDeltaBytes = ApkDeltaMetadata.load(context).getValue(adapter.engine),
+            apkDeltaBytes = apkDeltaBytes,
             observations = observations,
         )
     }

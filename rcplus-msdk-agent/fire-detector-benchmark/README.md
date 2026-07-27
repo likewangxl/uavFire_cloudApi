@@ -38,14 +38,15 @@ cmake -S src/main/cpp -B build/local-ncnn \
   -DANDROID_ABI=arm64-v8a \
   -DANDROID_PLATFORM=android-26 \
   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-  -DNCNN_SDK_DIR=/absolute/path/to/checksum-recorded-ncnn-sdk
+  -Dncnn_DIR=/absolute/path/to/checksum-recorded-ncnn-package/lib/cmake/ncnn
 cmake --build build/local-ncnn
 ```
 
 Use the SDK and bridge locations only as local Gradle properties, never source files:
 
 ```text
-ncnnSdkDir=/absolute/path/to/checksum-recorded-ncnn-sdk
+ncnnPackageDir=/absolute/path/to/checksum-recorded-ncnn-package/lib/cmake/ncnn
+ncnnRuntimeLibrary=/absolute/path/to/checksum-recorded-ncnn-package/lib/arm64-v8a/libncnn.so
 ncnnBridgeDir=/absolute/path/to/build/local-ncnn
 ```
 
@@ -65,6 +66,8 @@ The JNI library must reject a non-direct buffer, invalid handle, or output whose
 is not 42,000. The benchmark applies the shared confidence threshold, NMS, and source
 coordinate mapping in Kotlin. Until both files are present, the NCNN adapter fails
 before any measurements are recorded and no engine can be selected.
+The CMake package must export the official NCNN target with `NCNN_VULKAN=1`; the
+bridge enables Vulkan compute and rejects provisioning when no Vulkan GPU is available.
 
 ## APK delta metadata
 
@@ -77,7 +80,8 @@ with its selected runtime/model only, capture its APK, then write metadata:
 ./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=onnx
 ./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=tflite
 ./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=ncnn \
-  -PncnnSdkDir=/absolute/path/to/checksum-recorded-ncnn-sdk \
+  -PncnnPackageDir=/absolute/path/to/checksum-recorded-ncnn-package/lib/cmake/ncnn \
+  -PncnnRuntimeLibrary=/absolute/path/to/checksum-recorded-ncnn-package/lib/arm64-v8a/libncnn.so \
   -PncnnBridgeDir=/absolute/path/to/build/local-ncnn
 ./gradlew :fire-detector-benchmark:writeApkDeltaMetadata
 ```
