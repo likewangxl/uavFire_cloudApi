@@ -40,6 +40,8 @@ msdk_assets_pack/
 .env
 ai-service/data/
 ai-service/.env
+ai-service/mobile-model/*
+!ai-service/mobile-model/README.md
 sample-run*.out.log
 sample-run*.err.log
 vite-*.out.log
