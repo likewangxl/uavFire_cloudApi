@@ -140,7 +140,7 @@ Agent 稳定 ACK 后继续悬停。AI 推理不中断，并继续把最新可见
 
 ### 4. AIMING
 
-Agent 收到 `visible-fire-laser-measure` 后，将重新锁定框中心移到激光目标位置。优先调用 MSDK `KeyTapZoomAtTarget`；设备不支持时使用现有云台相对角度控制。每次调整后读取激光屏幕位置，最多迭代三次。只有激光屏幕点位于传入的火焰 ROI 内才进入采样。
+Agent 收到 `visible-fire-laser-measure` 后，将重新锁定框中心移到激光目标位置，调用 MSDK `KeyTapZoomAtTarget`。每次调整后，Agent 通过后端查询 AI 在云台动作之后生成的最新 ROI，并读取激光屏幕位置；只有新 ROI 不超过 `1500 ms` 且包含激光屏幕点才算对准。最多迭代三次。设备不支持、ROI 过期或三次后仍未包含激光点均判定失败，不使用减速前或云台动作前的旧框采样。
 
 ### 5. MEASURING
 
