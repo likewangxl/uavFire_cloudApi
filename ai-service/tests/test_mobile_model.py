@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.mobile_model import (
+    _validation_images,
     build_benchmark_manifest,
     build_candidate_manifest,
     build_benchmark_set,
@@ -103,6 +104,30 @@ def test_build_benchmark_set_rejects_missing_labeled_validation_data(tmp_path):
 def test_build_benchmark_set_does_not_allow_smaller_counts_or_a_different_seed(tmp_path):
     with pytest.raises(TypeError):
         build_benchmark_set(tmp_path / "missing", tmp_path / "output", 1, 1, 20260727)
+
+
+def test_validation_images_rebases_windows_dataset_path_to_staged_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    dataset = Path("source-validation")
+    image = dataset / "images" / "val" / "frame.jpg"
+    label = dataset / "labels" / "val" / "frame.txt"
+    image.parent.mkdir(parents=True)
+    label.parent.mkdir(parents=True)
+    image.write_bytes(b"thermal frame")
+    label.write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+    (dataset / "data.yaml").write_text(
+        "path: E:/uavfire-training/thermal/datasets/thermal-fireman-multiclass-gt-20260709\n"
+        "val: images/val\n",
+        encoding="utf-8",
+    )
+
+    images = _validation_images(dataset)
+
+    assert images == [(
+        image.resolve(),
+        label.resolve(),
+        [{"class": 0, "x": 0.5, "y": 0.5, "width": 0.2, "height": 0.2}],
+    )]
 
 
 def test_export_script_runs_directly_from_project_root():

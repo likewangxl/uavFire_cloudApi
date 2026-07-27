@@ -8,7 +8,7 @@ import os
 import random
 import shutil
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Iterable
 
 import yaml
@@ -99,9 +99,11 @@ def _validation_images(dataset: Path) -> list[tuple[Path, Path, list[dict[str, f
     if not isinstance(config, dict) or "val" not in config:
         raise ValueError(f"Dataset YAML must define a validation split: {yaml_files[0]}")
 
-    root = yaml_files[0].parent
+    root = yaml_files[0].parent.resolve()
     if config.get("path"):
-        root = (root / str(config["path"])).resolve()
+        configured_root = str(config["path"])
+        if not PureWindowsPath(configured_root).drive:
+            root = (root / configured_root).resolve()
     validation = config["val"]
     validation_paths = validation if isinstance(validation, list) else [validation]
     images: list[tuple[Path, Path, list[dict[str, float | int]]]] = []
