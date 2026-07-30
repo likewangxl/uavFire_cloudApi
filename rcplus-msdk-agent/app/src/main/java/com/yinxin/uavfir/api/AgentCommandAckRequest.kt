@@ -8,4 +8,11 @@ data class AgentCommandAckRequest(
     val sourceTs: Long? = null,
     val thermalTemperature: Double? = null,
     val thermalMeasureRoi: Map<String, Double>? = null,
+    val eventId: String? = null,
+    val fireLat: Double? = null,
+    val fireLng: Double? = null,
+    val fireAlt: Double? = null,
+    val geoMethod: String? = null,
+    val geoQuality: String? = null,
+    val geoErrorRadiusM: Double? = null,
 )

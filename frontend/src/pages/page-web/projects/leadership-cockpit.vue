@@ -724,6 +724,7 @@ import {
 } from './leadership-cockpit-live-layout.mjs'
 import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
 import { buildSituationLayers } from './leadership-cockpit-situation.mjs'
+import { formatFireLocation, isUsableFireLocation } from './fire/fire-event-location.mjs'
 
 const store = useMyStore()
 const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
@@ -1485,7 +1486,9 @@ const onToggleFireDetection = async () => {
       fireDetectionState.running = false
       fireDetectionState.phase = 'idle'
       primaryPreference.value = 'visible'
-      await switchFireMonitorFocus('focus-visible', { bestEffort: true })
+      if (isThermalFocusActive()) {
+        await switchFireMonitorFocus('focus-visible', { bestEffort: true })
+      }
     } else {
       fireDetectionState.phase = 'starting'
       const res = await requestFireDetectionStart(fireDetectionState.droneSn)
@@ -1493,9 +1496,15 @@ const onToggleFireDetection = async () => {
         throw new Error(res.message || 'ai-service start failed')
       }
       fireDetectionState.running = true
-      fireDetectionState.phase = 'switching'
-      const switched = await switchFireMonitorFocus('focus-thermal')
-      fireDetectionState.phase = switched ? 'running' : 'switch_failed'
+      // 纯可见光识别：镜头本来就在可见光时不发 focus-visible——
+      // agent 收到镜头命令会 restartLiveStream，无操作切换也会让直播卡一下。
+      if (isThermalFocusActive()) {
+        fireDetectionState.phase = 'switching'
+        const switched = await switchFireMonitorFocus('focus-visible', { bestEffort: true })
+        fireDetectionState.phase = switched ? 'running' : 'switch_failed'
+      } else {
+        fireDetectionState.phase = 'running'
+      }
     }
   } catch (e) {
     console.warn('[cockpit] fire-detection toggle failed', e)
@@ -1507,6 +1516,11 @@ const onToggleFireDetection = async () => {
   } finally {
     fireDetectionState.loading = false
   }
+}
+
+// agent 上报的当前镜头模式：只有真在红外时才需要切回可见光。
+const isThermalFocusActive = () => {
+  return String(dualStreamState.group?.currentMode || '').toLowerCase().includes('thermal')
 }
 
 // 轮询后端真实监测状态，让按钮同步航线自动启停（第一航点自动开、返航完成自动关）。
@@ -1945,7 +1959,7 @@ async function loadNewFireEvents (): Promise<void> {
         h('div', { style: 'font-size:12px;line-height:1.6' }, [
           h('div', `事件: ${evt.eventId}`),
           h('div', `置信度: ${conf.toFixed(2)}`),
-          h('div', `位置: ${evt.lat?.toFixed(4) ?? '-'}, ${evt.lng?.toFixed(4) ?? '-'}`),
+          h('div', `位置: ${formatFireLocation(evt, 4, '-')}`),
           h('div', `状态: ${evt.status}`),
           h('div', `通知版本: ${evt.notificationVersion ?? 1}`),
           h('a', {
@@ -2176,27 +2190,24 @@ const formatFireStatusLabel = (status?: string | null) => {
 }
 
 const formatFireEventLocation = (event: FireEventDTO) => {
-  const lat = Number(event.lat)
-  const lng = Number(event.lng)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '位置未返回'
+  if (!isUsableFireLocation(event)) return formatFireLocation(event)
   const errorRadius = Number(event.geoErrorRadiusM)
   const errorText = Number.isFinite(errorRadius) ? ` · 误差 ${errorRadius.toFixed(1)}m` : ''
-  return `${lat.toFixed(5)}, ${lng.toFixed(5)}${errorText}`
+  return `${formatFireLocation(event)}${errorText}`
 }
 
 const formatFireLocationSummary = (event: FireEventDTO) => {
-  const lat = Number(event.lat)
-  const lng = Number(event.lng)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '位置未返回'
-  return `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+  return formatFireLocation(event, 4)
 }
 
 const formatFireLatitude = (event: FireEventDTO) => {
+  if (!isUsableFireLocation(event)) return '--'
   const lat = Number(event.lat)
   return Number.isFinite(lat) ? lat.toFixed(5) : '--'
 }
 
 const formatFireLongitude = (event: FireEventDTO) => {
+  if (!isUsableFireLocation(event)) return '--'
   const lng = Number(event.lng)
   return Number.isFinite(lng) ? lng.toFixed(5) : '--'
 }

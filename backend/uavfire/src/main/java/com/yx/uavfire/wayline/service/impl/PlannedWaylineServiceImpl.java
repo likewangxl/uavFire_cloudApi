@@ -1325,7 +1325,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
             int index = 0;
             for (PlannedWaypointDTO wp : waypoints) {
-                writeWaylinePlacemark(w, wp, index++, flightSpeed);
+                writeWaylinePlacemark(w, wp, index, flightSpeed, maxTurnDampingAt(waypoints, index));
+                index++;
             }
 
             w.writeEndElement(); // /Folder
@@ -1397,7 +1398,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return wp.getHeadingMode() != null || wp.getHeadingAngle() != null || wp.getPoiLng() != null;
     }
 
-    private void writeWaylinePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index, double defaultSpeed) throws XMLStreamException {
+    private void writeWaylinePlacemark(XMLStreamWriter w, PlannedWaypointDTO wp, int index, double defaultSpeed, double maxTurnDamping) throws XMLStreamException {
         w.writeStartElement("Placemark");
         w.writeStartElement("Point");
         elem(w, NS_KML, "coordinates", wp.getWgsLng() + "," + wp.getWgsLat());
@@ -1423,13 +1424,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         w.writeStartElement(NS_WPML, "waypointTurnParam");
         elem(w, "waypointTurnMode",
                 wp.getTurnMode() != null ? wp.getTurnMode() : "toPointAndPassWithContinuityCurvature");
-        elem(w, "waypointTurnDampingDist", formatNumeric(
-                wp.getTurnDamping() != null ? wp.getTurnDamping() : 10.0));
+        elem(w, "waypointTurnDampingDist", formatNumeric(Math.min(
+                wp.getTurnDamping() != null ? wp.getTurnDamping() : 10.0, maxTurnDamping)));
         w.writeEndElement();
         elem(w, "useStraightLine", "1");
         w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
+        // 未显式设置俯仰角的航点默认 -30°：航线飞行时相机前下视，供纯可见光火情识别取景。
         elem(w, "waypointGimbalPitchAngle", formatNumeric(
-                wp.getGimbalPitch() != null ? wp.getGimbalPitch() : 0.0));
+                wp.getGimbalPitch() != null ? wp.getGimbalPitch() : -30.0));
         elem(w, "waypointGimbalYawAngle", formatNumeric(
                 wp.getGimbalYaw() != null ? wp.getGimbalYaw() : 0.0));
         w.writeEndElement();
@@ -1508,6 +1510,29 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     /** Haversine distance sum in meters between consecutive WGS84 waypoints. */
+    /**
+     * DJI 固件要求转弯截距小于相邻航段长度的一半，超限拒飞
+     * (TRAJ_DAMP_DIS_OUT_OF_RANGE)。按航点取前后最短航段套用
+     * resolveM4tRuntimeTurnDamping 同款公式 min(10, max(0.5, 段长/4))。
+     */
+    private static double maxTurnDampingAt(List<PlannedWaypointDTO> wps, int index) {
+        double minSegment = Double.POSITIVE_INFINITY;
+        if (index > 0) {
+            minSegment = haversineMeters(
+                    wps.get(index - 1).getWgsLat(), wps.get(index - 1).getWgsLng(),
+                    wps.get(index).getWgsLat(), wps.get(index).getWgsLng());
+        }
+        if (index < wps.size() - 1) {
+            minSegment = Math.min(minSegment, haversineMeters(
+                    wps.get(index).getWgsLat(), wps.get(index).getWgsLng(),
+                    wps.get(index + 1).getWgsLat(), wps.get(index + 1).getWgsLng()));
+        }
+        if (!Double.isFinite(minSegment)) {
+            return 10.0;
+        }
+        return Math.min(10.0, Math.max(0.5, minSegment / 4.0));
+    }
+
     private static double totalDistanceMeters(List<PlannedWaypointDTO> wps) {
         if (wps == null || wps.size() < 2) return 0;
         double total = 0;

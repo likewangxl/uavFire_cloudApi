@@ -11,6 +11,7 @@ import com.yx.uavfire.manage.service.impl.DualStreamServiceImpl;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
 import com.yx.uavfire.firedetection.FireDetectionActivityTracker;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireLaserLocationParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -84,7 +85,143 @@ class DualStreamServiceImplTest {
         assertTrue(service.issueCommand("DRONE-FOCUS-VISIBLE", "focus-visible").getUrgent());
         assertTrue(service.issueCommand("DRONE-MEASURE", "measure-thermal-region").getUrgent());
         assertTrue(service.issueCommand("DRONE-FIRE-CONFIRM", "fire-confirmation-mission").getUrgent());
+        assertTrue(service.issueCommand("DRONE-VISIBLE-HOLD", "visible-fire-hold").getUrgent());
+        assertTrue(service.issueCommand("DRONE-VISIBLE-LASER", "visible-fire-laser-measure").getUrgent());
         assertNotEquals(Boolean.TRUE, service.issueCommand("DRONE-START", "start").getUrgent());
+    }
+
+    @Test
+    void startVisibleLaserLocalization_dispatchesOneUrgentHold() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        Map<String, Double> roi = Map.of("x", 0.4, "y", 0.3, "width", 0.2, "height", 0.2);
+
+        service.startVisibleLaserLocalization(
+                "fire-event-1", "task-1", "DRONE-001", 1_000L, roi);
+        service.startVisibleLaserLocalization(
+                "fire-event-1", "task-1", "DRONE-001", 1_000L, roi);
+
+        DualStreamCommandDTO hold = service.pollCommand("DRONE-001");
+        assertNotNull(hold);
+        assertEquals("visible-fire-hold", hold.getAction());
+        assertTrue(hold.getUrgent());
+        assertEquals("fire-event-1", hold.getParams().get("eventId"));
+        assertEquals("task-1", hold.getParams().get("taskId"));
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(hold.getCommandId())
+                .setStatus("failed")
+                .setMessage("test-cleanup")
+                .setEventId("fire-event-1"));
+        assertNull(service.pollCommand("DRONE-001"));
+    }
+
+    @Test
+    void stableHoldAck_waitsForPostHoldRoiThenDispatchesLaserMeasure() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        Map<String, Double> original = Map.of("x", 0.4, "y", 0.3, "width", 0.2, "height", 0.2);
+        service.startVisibleLaserLocalization(
+                "fire-event-1", "task-1", "DRONE-001", 1_000L, original);
+        DualStreamCommandDTO hold = service.pollCommand("DRONE-001");
+
+        service.acceptEvent("task-1", new DualStreamEventDTO()
+                .setDroneSn("DRONE-001")
+                .setSourceTs(hold.getIssuedAt() - 1)
+                .setAnalysisChannel("visible")
+                .setVisibleScore(0.9)
+                .setVisibleRoi(original));
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(hold.getCommandId())
+                .setStatus("applied")
+                .setMessage("HOVER_STABLE")
+                .setEventId("fire-event-1"));
+        assertNull(service.pollCommand("DRONE-001"));
+
+        Map<String, Double> fresh = Map.of("x", 0.42, "y", 0.31, "width", 0.18, "height", 0.19);
+        service.acceptEvent("task-1", new DualStreamEventDTO()
+                .setDroneSn("DRONE-001")
+                .setSourceTs(hold.getIssuedAt() + 1)
+                .setAnalysisChannel("visible")
+                .setVisibleScore(0.91)
+                .setVisibleRoi(fresh));
+
+        DualStreamCommandDTO measure = service.pollCommand("DRONE-001");
+        assertNotNull(measure);
+        assertEquals("visible-fire-laser-measure", measure.getAction());
+        assertTrue(measure.getUrgent());
+        assertEquals(fresh, measure.getParams().get("visibleRoi"));
+        assertEquals("fire-event-1", measure.getParams().get("eventId"));
+    }
+
+    @Test
+    void stableHoldAck_usesFreshRoiAfterNormalHoverFrameShift() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        Map<String, Double> original =
+                Map.of("x", 0.476, "y", 0.345, "width", 0.047, "height", 0.061);
+        service.startVisibleLaserLocalization(
+                "fire-event-shifted", "task-shifted", "DRONE-SHIFTED", 1_000L, original);
+        DualStreamCommandDTO hold = service.pollCommand("DRONE-SHIFTED");
+
+        service.acknowledgeCommand("DRONE-SHIFTED", new DualStreamCommandAckDTO()
+                .setCommandId(hold.getCommandId())
+                .setStatus("applied")
+                .setMessage("HOVER_STABLE")
+                .setEventId("fire-event-shifted"));
+
+        Map<String, Double> fresh =
+                Map.of("x", 0.461, "y", 0.683, "width", 0.069, "height", 0.150);
+        service.acceptEvent("task-shifted", new DualStreamEventDTO()
+                .setDroneSn("DRONE-SHIFTED")
+                .setSourceTs(hold.getIssuedAt() + 1)
+                .setAnalysisChannel("visible")
+                .setVisibleScore(0.63)
+                .setVisibleRoi(fresh));
+
+        DualStreamCommandDTO measure = service.pollCommand("DRONE-SHIFTED");
+        assertNotNull(measure);
+        assertEquals("visible-fire-laser-measure", measure.getAction());
+        assertEquals(fresh, measure.getParams().get("visibleRoi"));
+    }
+
+    @Test
+    void successfulLaserAck_updatesOriginalEvent() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+        Map<String, Double> roi = Map.of("x", 0.4, "y", 0.3, "width", 0.2, "height", 0.2);
+        service.startVisibleLaserLocalization(
+                "fire-event-1", "task-1", "DRONE-001", 1_000L, roi);
+        DualStreamCommandDTO hold = service.pollCommand("DRONE-001");
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(hold.getCommandId())
+                .setStatus("applied")
+                .setMessage("HOVER_STABLE")
+                .setEventId("fire-event-1"));
+        service.acceptEvent("task-1", new DualStreamEventDTO()
+                .setDroneSn("DRONE-001")
+                .setSourceTs(hold.getIssuedAt() + 1)
+                .setAnalysisChannel("visible")
+                .setVisibleScore(0.91)
+                .setVisibleRoi(roi));
+        DualStreamCommandDTO measure = service.pollCommand("DRONE-001");
+
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(measure.getCommandId())
+                .setStatus("applied")
+                .setMessage("LASER_LOCATED")
+                .setEventId("fire-event-1")
+                .setFireLat(34.960123)
+                .setFireLng(109.316456)
+                .setFireAlt(530.0)
+                .setGeoMethod("LASER_RANGEFINDER")
+                .setGeoQuality("PRECISE")
+                .setGeoErrorRadiusM(5.0)
+                .setSourceTs(measure.getIssuedAt() + 100));
+
+        ArgumentCaptor<FireLaserLocationParam> captor =
+                ArgumentCaptor.forClass(FireLaserLocationParam.class);
+        verify(fireEventService).applyLaserLocation(eq("fire-event-1"), captor.capture());
+        assertEquals(34.960123, captor.getValue().getFireLat(), 1e-9);
+        assertEquals(109.316456, captor.getValue().getFireLng(), 1e-9);
+        assertEquals(5.0, captor.getValue().getGeoErrorRadiusM(), 1e-9);
     }
 
     @Test
@@ -887,7 +1024,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void visibleEvent_withoutThermalContextRequestsThermalFirstEvenWithoutYoloDetection() {
+    void visibleEvent_doesNotAutoRequestThermalFocus() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
 
         service.acceptEvent("task-001", new DualStreamEventDTO()
@@ -903,8 +1040,8 @@ class DualStreamServiceImplTest {
         List<DualStreamEventDTO> events = service.listEvents("task-001");
         DualStreamCommandDTO command = service.pollCommand("DRONE-001");
         assertEquals("VISIBLE_SKIPPED_THERMAL_FIRST", events.get(0).getReviewStatus());
-        assertNotNull(command);
-        assertEquals("focus-thermal", command.getAction());
+        // 纯可见光模式：可见光事件不再自动下发 focus-thermal
+        assertNull(command);
     }
 
     @Test
@@ -928,7 +1065,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void acceptEvent_issuesAutoThermalFocusWhenFireDetectionActive() {
+    void acceptEvent_doesNotAutoIssueThermalFocusEvenWhenFireDetectionActive() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireDetectionActivityTracker tracker = new FireDetectionActivityTracker();
         tracker.markActive("DRONE-001");
@@ -944,9 +1081,8 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.0)
                 .setVisibleImageUrl("http://snapshots/visible.jpg"));
 
-        DualStreamCommandDTO command = service.pollCommand("DRONE-001");
-        assertNotNull(command);
-        assertEquals("focus-thermal", command.getAction());
+        // 纯可见光模式：即使监测激活，可见光事件也不再自动切红外
+        assertNull(service.pollCommand("DRONE-001"));
     }
 
     @Test
@@ -1593,7 +1729,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void acceptEvent_issuesThermalFocusWhenVisibleRiskIsSuspected() {
+    void acceptEvent_doesNotIssueThermalFocusWhenVisibleRiskIsSuspected() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -1613,11 +1749,9 @@ class DualStreamServiceImplTest {
         DualStreamLiveGroupDTO group = service.getGroup("DRONE-001");
         List<DualStreamEventDTO> events = service.listEvents("task-001");
 
-        assertNotNull(command);
-        assertEquals("focus-thermal", command.getAction());
-        assertEquals("pending", command.getStatus());
-        assertEquals("focus-thermal", group.getLastCommandAction());
-        assertEquals("pending", group.getLastCommandStatus());
+        // 纯可见光模式：可疑可见光帧不再切红外复核，事件由 ai-service 直接上报
+        assertNull(command);
+        assertNull(group.getLastCommandAction());
         assertEquals("VISIBLE_SKIPPED_THERMAL_FIRST", events.get(0).getReviewStatus());
         verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
@@ -1638,14 +1772,14 @@ class DualStreamServiceImplTest {
         DualStreamCommandDTO command = service.pollCommand("DRONE-001");
         List<DualStreamEventDTO> events = service.listEvents("task-001");
 
-        assertNotNull(command);
-        assertEquals("focus-thermal", command.getAction());
+        // 纯可见光模式：不再自动切红外，但通道推断逻辑仍然生效
+        assertNull(command);
         assertEquals("visible", events.get(0).getAnalysisChannel());
         assertEquals("VISIBLE_SKIPPED_THERMAL_FIRST", events.get(0).getReviewStatus());
     }
 
     @Test
-    void acceptEvent_issuesThermalFocusForVisibleLowRiskDuringTesting() {
+    void acceptEvent_doesNotIssueThermalFocusForVisibleLowRisk() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setDroneSn("DRONE-001")
@@ -1657,8 +1791,8 @@ class DualStreamServiceImplTest {
         DualStreamCommandDTO command = service.pollCommand("DRONE-001");
         List<DualStreamEventDTO> events = service.listEvents("task-001");
 
-        assertNotNull(command);
-        assertEquals("focus-thermal", command.getAction());
+        // 纯可见光模式：LOW 风险可见光帧同样不切红外
+        assertNull(command);
         assertEquals("VISIBLE_SKIPPED_THERMAL_FIRST", events.get(0).getReviewStatus());
     }
 
@@ -1676,6 +1810,8 @@ class DualStreamServiceImplTest {
                 .setAnalysisChannel("visible")
                 .setFusionScore(0.7)
                 .setRiskLevel("HIGH"));
+        // 纯可见光模式下可见光事件不再自动下发 focus-thermal，显式下发以进入红外分支
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(thermalCommand.getCommandId())
@@ -1783,6 +1919,8 @@ class DualStreamServiceImplTest {
                 .setVisibleScore(0.17)
                 .setRiskLevel("LOW")
                 .setVisibleImageUrl("http://snapshots/visible-suspected.jpg"));
+        // 纯可见光模式下可见光事件不再自动下发 focus-thermal，显式下发以进入红外分支
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(thermalCommand.getCommandId())
@@ -1824,6 +1962,8 @@ class DualStreamServiceImplTest {
                 .setVisibleScore(0.17)
                 .setFusionScore(0.17)
                 .setRiskLevel("LOW"));
+        // 纯可见光模式下可见光事件不再自动下发 focus-thermal，显式下发以进入红外分支
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(thermalCommand.getCommandId())
@@ -1888,6 +2028,8 @@ class DualStreamServiceImplTest {
                 .setVisibleScore(0.4)
                 .setRiskLevel("MEDIUM")
                 .setVisibleImageUrl("http://snapshots/real-visible-trigger.jpg"));
+        // 纯可见光模式下可见光事件不再自动下发 focus-thermal，显式下发以进入红外分支
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(thermalCommand.getCommandId())
@@ -1923,6 +2065,8 @@ class DualStreamServiceImplTest {
                 .setVisibleScore(0.4)
                 .setRiskLevel("MEDIUM")
                 .setVisibleImageUrl("http://snapshots/unknown-mode-frame.jpg"));
+        // 纯可见光模式下可见光事件不再自动下发 focus-thermal，显式下发以进入红外分支
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(thermalCommand.getCommandId())
@@ -1955,6 +2099,8 @@ class DualStreamServiceImplTest {
                 .setAnalysisChannel("visible")
                 .setFusionScore(0.7)
                 .setRiskLevel("HIGH"));
+        // 纯可见光模式下可见光事件不再自动下发 focus-thermal，显式下发以进入红外分支
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(thermalCommand.getCommandId())
@@ -1991,6 +2137,8 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.7)
                 .setRiskLevel("HIGH")
                 .setVisibleImageUrl("http://snapshots/visible.jpg"));
+        // 纯可见光模式下可见光事件不再自动下发 focus-thermal，显式下发以进入红外分支
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO thermalCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(thermalCommand.getCommandId())
@@ -2048,7 +2196,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void acceptEvent_reissuesThermalFocusWhenPreviousAppliedCommandNoLongerMatchesRuntimeState() {
+    void acceptEvent_doesNotReissueThermalFocusAfterAppliedCommand() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
                 .setDroneSn("DRONE-001")
@@ -2060,6 +2208,7 @@ class DualStreamServiceImplTest {
                 .setAnalysisChannel("visible")
                 .setFusionScore(0.7)
                 .setRiskLevel("HIGH"));
+        service.issueCommand("DRONE-001", "focus-thermal");
         DualStreamCommandDTO firstCommand = service.pollCommand("DRONE-001");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
                 .setCommandId(firstCommand.getCommandId())
@@ -2076,11 +2225,9 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.8)
                 .setRiskLevel("HIGH"));
 
-        DualStreamCommandDTO command = service.pollCommand("DRONE-001");
-
-        assertNotEquals(firstCommand.getCommandId(), command.getCommandId());
-        assertEquals("focus-thermal", command.getAction());
-        assertEquals("pending", command.getStatus());
+        // 纯可见光模式：后续可见光事件不再自动重发 focus-thermal
+        assertNotNull(firstCommand);
+        assertNull(service.pollCommand("DRONE-001"));
     }
 
     @Test
@@ -2327,7 +2474,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void zeroGraceKeepsLegacyAutoThermalFocusBehavior() {
+    void zeroGraceStillDoesNotAutoThermalFocus() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         when(fireEventService.create(any(FireEventCreateParam.class)))
@@ -2353,7 +2500,7 @@ class DualStreamServiceImplTest {
                 .setCommandId(first.getCommandId())
                 .setStatus("applied"));
 
-        // 宽限置 0 = 旧行为：确认切换后可见光事件立刻把镜头抢回红外
+        // 纯可见光模式：即使宽限置 0，可见光事件也不再把镜头抢回红外
         service.acceptEvent("task-001", new DualStreamEventDTO()
                 .setTaskId("task-001")
                 .setDroneSn("DRONE-001")
@@ -2363,8 +2510,6 @@ class DualStreamServiceImplTest {
                 .setVisibleScore(0.0)
                 .setFusionScore(0.0));
 
-        DualStreamCommandDTO second = service.pollCommand("DRONE-001");
-        assertNotNull(second);
-        assertEquals("focus-thermal", second.getAction());
+        assertNull(service.pollCommand("DRONE-001"));
     }
 }

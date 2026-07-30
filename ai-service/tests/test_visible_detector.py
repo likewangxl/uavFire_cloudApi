@@ -230,6 +230,8 @@ class _FakeBoxes:
     def __init__(self, classes, confidences):
         self.cls = classes
         self.conf = confidences
+        # score 现在从检出框（boxes_from_yolo_results）计算，fake 必须带坐标
+        self.xyxy = [[0, 0, 10, 10] for _ in classes]
 
 
 def test_yolo_detector_filters_low_confidence_boxes_from_display(monkeypatch):

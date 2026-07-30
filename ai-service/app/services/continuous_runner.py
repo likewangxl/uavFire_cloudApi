@@ -5,7 +5,7 @@ from typing import Callable, Optional, TYPE_CHECKING
 from app.fusion.service import DualStreamFusionService
 from app.inference.thermal.analyzer import ThermalAnalyzer
 from app.inference.visible.detector import VisibleDetector
-from app.models.event import EventRecord, ThermalMeasureRoi
+from app.models.event import EventRecord, NormalizedRoi, ThermalMeasureRoi
 from app.models.frame import FramePacket
 from app.video.source import VideoSource
 
@@ -66,6 +66,7 @@ class ContinuousTaskRunner:
         visible_packet, thermal_packet = _route_mislabeled_thermal_packet(
             visible_packet,
             thermal_packet,
+            allow_thermal_reroute=thermal_source is not None,
         )
         if visible_packet is None and thermal_packet is None:
             return None
@@ -102,6 +103,12 @@ class ContinuousTaskRunner:
             source_ts=source_ts,
             analysis_channel=analysis_channel,
         )
+        visible_roi = _visible_roi_from_boxes(
+            visible_boxes,
+            visible_packet.frame if visible_packet is not None else None,
+        )
+        if visible_roi is not None:
+            event = event.model_copy(update={"visible_roi": visible_roi})
         thermal_measure_roi = _validated_measure_roi(
             getattr(self._thermal_analyzer, "last_measure_roi", None)
         )
@@ -118,6 +125,7 @@ class ContinuousTaskRunner:
             thermal_frame=thermal_packet.frame if thermal_packet is not None else None,
             thermal_boxes=thermal_boxes,
         )
+
 
     def run(
         self,
@@ -225,6 +233,33 @@ class ContinuousTaskRunner:
             logger.exception("task=%s failed to mark task failed reason=%s", task_id, reason)
 
 
+def _visible_roi_from_boxes(boxes: object, frame: object) -> Optional[NormalizedRoi]:
+    if not boxes or frame is None:
+        return None
+    shape = getattr(frame, "shape", None)
+    if not shape or len(shape) < 2:
+        return None
+    height, width = int(shape[0]), int(shape[1])
+    if height <= 0 or width <= 0:
+        return None
+    try:
+        top = max(boxes, key=lambda item: float(item.get("conf", 0.0)))
+        x1 = max(0.0, min(float(width), float(top["x1"])))
+        y1 = max(0.0, min(float(height), float(top["y1"])))
+        x2 = max(x1, min(float(width), float(top["x2"])))
+        y2 = max(y1, min(float(height), float(top["y2"])))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return NormalizedRoi(
+            x=x1 / width,
+            y=y1 / height,
+            width=(x2 - x1) / width,
+            height=(y2 - y1) / height,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _resolve_analysis_channel(
     visible_packet: Optional[FramePacket],
     thermal_packet: Optional[FramePacket],
@@ -239,6 +274,7 @@ def _resolve_analysis_channel(
 def _route_mislabeled_thermal_packet(
     visible_packet: Optional[FramePacket],
     thermal_packet: Optional[FramePacket],
+    allow_thermal_reroute: bool = True,
 ) -> tuple[Optional[FramePacket], Optional[FramePacket]]:
     if visible_packet is None or thermal_packet is not None:
         return visible_packet, thermal_packet
@@ -250,6 +286,12 @@ def _route_mislabeled_thermal_packet(
         looks_thermal = False
     if not looks_thermal:
         return visible_packet, thermal_packet
+    if not allow_thermal_reroute:
+        logger.warning(
+            "visible-only source yielded thermal-looking frame ts=%s; dropping frame",
+            visible_packet.source_ts,
+        )
+        return None, None
     logger.info(
         "visible source yielded thermal-looking frame ts=%s; routing to thermal analyzer",
         visible_packet.source_ts,

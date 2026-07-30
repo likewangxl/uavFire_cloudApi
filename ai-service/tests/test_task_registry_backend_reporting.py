@@ -41,7 +41,40 @@ def test_record_detection_event_appends_local_event_and_reports_to_backend():
     assert backend.fire_event_payloads == []
 
 
-def test_record_detection_event_does_not_report_visible_low_fire_event_before_thermal_confirmation():
+def test_record_detection_event_reports_visible_roi_with_both_aliases():
+    backend = RecordingBackendClient()
+    registry = TaskRegistry(backend_client=backend)
+    registry.create(
+        TaskCreateRequest(
+            task_id="task-visible-roi",
+            drone_sn="DRONE-ROI",
+            visible_stream_url="rtsp://visible",
+            thermal_stream_url="",
+        )
+    )
+
+    record = registry.record_detection_event(
+        "task-visible-roi",
+        DualStreamEvent(
+            source_ts=1710000001,
+            visible_score=0.81,
+            thermal_score=0.0,
+            fusion_score=0.81,
+            risk_level="HIGH",
+            analysis_channel="visible",
+            visible_roi={"x": 0.5, "y": 0.2, "width": 0.4, "height": 0.4},
+        ),
+    )
+
+    expected = {"x": 0.5, "y": 0.2, "width": 0.4, "height": 0.4}
+    assert record.visible_roi is not None
+    assert record.visible_roi.model_dump() == expected
+    assert backend.last_payload["visible_roi"] == expected
+    assert backend.last_payload["visibleRoi"] == expected
+
+
+def test_record_detection_event_reports_visible_low_fire_event_after_two_frames():
+    # 纯可见光模式：连续两帧达线即建火情事件，不再等红外确认。
     backend = RecordingBackendClient()
     from app.services.fire_event_reporter import FireEventReporter
 
@@ -62,19 +95,22 @@ def test_record_detection_event_does_not_report_visible_low_fire_event_before_th
     thermal_palette_frame[:, :, 1] = 95
     thermal_palette_frame[:, :, 2] = 220
 
-    registry.record_detection_event(
-        "task-low",
-        DualStreamEvent(
-            source_ts=1710000000,
-            visible_score=0.33,
-            thermal_score=0.0,
-            fusion_score=0.33,
-            risk_level="LOW",
-            analysis_channel="visible",
-        ),
-    )
+    for source_ts in (1710000000, 1710001500):
+        registry.record_detection_event(
+            "task-low",
+            DualStreamEvent(
+                source_ts=source_ts,
+                visible_score=0.33,
+                thermal_score=0.0,
+                fusion_score=0.33,
+                risk_level="LOW",
+                analysis_channel="visible",
+            ),
+        )
 
-    assert backend.fire_event_payloads == []
+    assert len(backend.fire_event_payloads) == 1
+    assert backend.fire_event_payloads[0]["fireLevel"] == "LOW"
+    assert backend.fire_event_payloads[0]["confidence"] == 0.33
 
 
 def test_record_detection_event_reports_visible_snapshot_url_for_backend_confirmation():

@@ -231,6 +231,7 @@ import type { FireEventCreateRequest } from '/@/api/fire/event'
 import type { FireMissionDTO } from '/@/types/fire/mission'
 import { ELocalStorageKey } from '/@/types'
 import StatusTag from '/@/components/fire/StatusTag.vue'
+import { formatFireLocation } from './fire-event-location.mjs'
 
 const events = ref<FireEventDTO[]>([])
 // 火情事件 id -> 其关联的灭火任务（最新一次）。用于在事件列表展示审核状态并就地审批。
@@ -458,6 +459,9 @@ function displayEventStatus (status: string | null | undefined) {
 function displayGeoQuality (record: FireEventDTO | FireEventHistoryDTO) {
   const labels: Record<string, string> = {
     AUTO_WAYPOINT_READY: '可自动航线',
+    PRECISE: '激光精确定位',
+    LASER_LOCATING: '正在精确定位',
+    LASER_FAILED: '激光定位失败',
     DEM_MISSING: '缺DEM',
     RTK_NOT_FIXED: 'RTK未固定',
     GEO_SNAPSHOT_INCOMPLETE: '快照不完整',
@@ -643,7 +647,7 @@ const columns = [
     key: 'coord',
     width: 160,
     customRender: ({ record }: { record: FireEventDTO }) =>
-      `${record.lat.toFixed(4)}, ${record.lng.toFixed(4)}`,
+      formatFireLocation(record, 4),
   },
   {
     title: '测绘质量',
@@ -736,7 +740,7 @@ const historyColumns = [
     key: 'coord',
     width: 150,
     customRender: ({ record }: { record: FireEventHistoryDTO }) =>
-      `${record.lat.toFixed(4)}, ${record.lng.toFixed(4)}`,
+      formatFireLocation(record, 4),
   },
   {
     title: '测绘质量',

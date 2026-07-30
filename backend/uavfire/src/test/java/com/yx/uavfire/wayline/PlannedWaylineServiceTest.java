@@ -1302,7 +1302,7 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "wayline placemark turn mode"),
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist>"), "wayline placemark damping=10"),
                 () -> assertTrue(waylines.contains("<wpml:waypointGimbalHeadingParam>"), "waypointGimbalHeadingParam block"),
-                () -> assertTrue(waylines.contains("<wpml:waypointGimbalPitchAngle>0</wpml:waypointGimbalPitchAngle>"), "gimbal pitch"),
+                () -> assertTrue(waylines.contains("<wpml:waypointGimbalPitchAngle>-30</wpml:waypointGimbalPitchAngle>"), "gimbal pitch default -30"),
                 () -> assertTrue(waylines.contains("<wpml:waypointGimbalYawAngle>0</wpml:waypointGimbalYawAngle>"), "gimbal yaw"),
                 () -> assertTrue(waylines.contains("<wpml:waypointWorkType>0</wpml:waypointWorkType>"), "waypointWorkType"),
                 () -> assertTrue(waylines.contains("<wpml:useStraightLine>1</wpml:useStraightLine>"), "useStraightLine=1"),
@@ -1526,6 +1526,59 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "wp[1] default turnMode"),
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist>"), "wp[1] default turnDamping = 10"),
                 () -> assertTrue(waylines.contains("<wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>"), "wp[1] default headingMode"));
+    }
+
+    @Test
+    void shortSegmentsClampTurnDampingBelowHalfSegmentLength() throws Exception {
+        // 面状航线场景：相邻航点仅 ~7.8m，默认截距 10m 超过段长一半会触发
+        // TRAJ_DAMP_DIS_OUT_OF_RANGE 拒飞，必须被钳制到段长/4 以内。
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2004)
+                .plannedWaylineId("pw-shortseg")
+                .workspaceId("workspace-001")
+                .name("Short Segment Test")
+                .aircraftModelKey("M4T")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[" +
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}," +
+                        "{\"order\":2,\"gcjLng\":113.001,\"gcjLat\":22.00108,\"wgsLng\":113.0,\"wgsLat\":22.00007,\"height\":30.0}," +
+                        "{\"order\":3,\"gcjLng\":113.001,\"gcjLat\":22.00115,\"wgsLng\":113.0,\"wgsLat\":22.00014,\"height\":30.0}]")
+                .status("draft")
+                .creator("alice")
+                .createTime(1000L)
+                .updateTime(1000L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(waylineFileService.createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("wayline-shortseg")
+                        .name("Short Segment Test")
+                        .objectKey("custom-prefix/pw-shortseg.kmz")
+                        .build());
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
+
+        service.publish("workspace-001", "pw-shortseg", "bob");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(waylineFileService).createPublishedWayline(org.mockito.ArgumentMatchers.eq("workspace-001"), createCaptor.capture());
+        String waylines = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+
+        Matcher damping = Pattern.compile("<wpml:waypointTurnDampingDist>([^<]+)</wpml:waypointTurnDampingDist>")
+                .matcher(waylines);
+        int count = 0;
+        while (damping.find()) {
+            double value = Double.parseDouble(damping.group(1));
+            // 段长 ~7.8m，固件红线为段长一半 (~3.9m)
+            assertTrue(value > 0 && value < 3.9,
+                    "damping " + value + " 必须小于最短航段长度的一半");
+            count++;
+        }
+        assertEquals(3, count, "每个航点都应写出钳制后的截距");
     }
 
     @Test

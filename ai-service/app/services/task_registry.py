@@ -161,6 +161,7 @@ class TaskRegistry:
             thermal_source_event_id=event.thermal_source_event_id,
             thermal_temperature=event.thermal_temperature,
             thermal_measure_roi=event.thermal_measure_roi,
+            visible_roi=event.visible_roi,
         )
         self._events[task_id].append(record)
         logger.info(
@@ -195,6 +196,8 @@ class TaskRegistry:
                         "thermalTemperature": event.thermal_temperature,
                         "thermal_measure_roi": _roi_payload(event.thermal_measure_roi),
                         "thermalMeasureRoi": _roi_payload(event.thermal_measure_roi),
+                        "visible_roi": _roi_payload(event.visible_roi),
+                        "visibleRoi": _roi_payload(event.visible_roi),
                     },
                 )
             except Exception:
@@ -337,13 +340,15 @@ def _build_visible_detector(settings: Settings):
             confidence_floor=settings.visible_confidence_floor,
             imgsz=settings.visible_yolo_imgsz,
             box_display_floor=settings.visible_box_display_floor,
+            device=settings.visible_yolo_device,
         )
         logger.info(
-            "visible_detector=YoloVisibleDetector model=%s floor=%s imgsz=%s classes=%s",
+            "visible_detector=YoloVisibleDetector model=%s floor=%s imgsz=%s classes=%s device=%s",
             settings.visible_yolo_model_path,
             settings.visible_confidence_floor,
             settings.visible_yolo_imgsz,
             settings.visible_target_classes,
+            settings.visible_yolo_device,
         )
         return det
     if settings.visible_detector_mode.lower() == "stub":
@@ -368,6 +373,7 @@ def _visible_detector_cache_key(settings: Settings) -> Tuple[Any, ...]:
     return (
         settings.visible_detector_mode.lower(),
         settings.visible_yolo_model_path,
+        settings.visible_yolo_device.lower(),
         int(settings.visible_yolo_imgsz),
         float(settings.visible_confidence_floor),
         float(settings.visible_box_display_floor),
@@ -503,9 +509,15 @@ def build_registry() -> TaskRegistry:
             snapshot_dir=settings.snapshot_dir,
             public_base_url=settings.snapshot_public_base_url,
         )
+    fire_event_reporter = None
+    if backend_client is not None:
+        from app.services.fire_event_reporter import FireEventReporter
+
+        # 纯可见光模式：火情事件由 reporter 直接 POST 建立（原红外串行链由后端建事件）。
+        fire_event_reporter = FireEventReporter(backend_client, snapshot_writer=snapshot_writer)
     registry = TaskRegistry(
         backend_client=backend_client,
-        fire_event_reporter=None,
+        fire_event_reporter=fire_event_reporter,
         detection_snapshot_writer=snapshot_writer,
     )
     fusion = DualStreamFusionService()
@@ -525,6 +537,8 @@ def build_registry() -> TaskRegistry:
                     visible_detector=_get_cached_visible_detector(settings),
                     thermal_analyzer=_build_thermal_analyzer(settings),
                     fusion_service=fusion,
+                    # MPS 推理 ~53ms/帧，轮询从 0.5s 压到 0.2s，检测节奏 ~0.3s/帧。
+                    poll_interval_s=0.2,
                 ),
             ),
             source_factory=opencv_source_factory_from_task,

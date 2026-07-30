@@ -81,6 +81,8 @@ data class LaserRangefinderResult(
     val altitude: Double? = null,
     val distanceM: Double?,
     val state: String,
+    val targetX: Double? = null,
+    val targetY: Double? = null,
 )
 
 data class RobustLaserFix(
@@ -95,6 +97,8 @@ data class RobustLaserFix(
 
 interface LaserRangefinderClient {
     suspend fun measure(): LaserRangefinderResult?
+
+    suspend fun disable() = Unit
 }
 
 object NoopLaserRangefinderClient : LaserRangefinderClient {
@@ -932,6 +936,10 @@ class DjiLaserRangefinderClient(
         return information.toResult()
     }
 
+    override suspend fun disable() {
+        setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
+    }
+
     private fun <T> laserKey(keyInfo: dji.sdk.keyvalue.key.DJIKeyInfo<T>): DJIKey<T> =
         KeyTools.createCameraKey(keyInfo, ComponentIndexType.LEFT_OR_MAIN, CameraLensType.CAMERA_LENS_ZOOM)
 
@@ -991,8 +999,13 @@ private fun LaserMeasureInformation.toResult(): LaserRangefinderResult {
         altitude = location3D?.altitude,
         distanceM = distance,
         state = state.name,
+        targetX = targetPoint?.x?.normalizeLaserTargetCoordinate(),
+        targetY = targetPoint?.y?.normalizeLaserTargetCoordinate(),
     )
 }
+
+private fun Double.normalizeLaserTargetCoordinate(): Double =
+    if (this > 1.0) this / 100.0 else this
 
 private fun List<ThermalMeasuredPoint>.toPayload(): List<ThermalMeasurementPayload> = map {
     ThermalMeasurementPayload(

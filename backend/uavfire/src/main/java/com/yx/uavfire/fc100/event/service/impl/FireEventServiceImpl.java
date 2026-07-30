@@ -21,6 +21,7 @@ import com.yx.uavfire.fc100.event.model.entity.FireEventHistoryEntity;
 import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
 import com.yx.uavfire.fc100.event.model.param.FireEventActionParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireLaserLocationParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventRecheckResultParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.yx.uavfire.fc100.event.service.FireGeoLocationResult;
@@ -66,6 +67,8 @@ public class FireEventServiceImpl implements FireEventService {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final String GEO_METHOD_LASER_RANGEFINDER = "LASER_RANGEFINDER";
     private static final String GEO_QUALITY_PRECISE = "PRECISE";
+    private static final String GEO_QUALITY_LASER_LOCATING = "LASER_LOCATING";
+    private static final String GEO_QUALITY_LASER_FAILED = "LASER_FAILED";
     private static final String DEDUP_LOCK_PREFIX = "fire_event_dedup:";
     private static final int DEDUP_LOCK_TIMEOUT_SECONDS = 3;
 
@@ -109,6 +112,9 @@ public class FireEventServiceImpl implements FireEventService {
     private final IncidentStateMachine incidentStateMachine;
     private final Fc100ThermalProperties thermalProperties;
     private final FireApproachDispatcher fireApproachDispatcher;
+
+    @Autowired(required = false)
+    private VisibleFireLocalizationDispatcher visibleFireLocalizationDispatcher;
 
     @Value("${fc100.fire-event.dedup-enabled:true}")
     private boolean fireEventDedupEnabled = true;
@@ -335,7 +341,9 @@ public class FireEventServiceImpl implements FireEventService {
         // 去重资格必须在 OSD 回填坐标之后判：串行确认链的事件不带火点坐标（回填飞机位置），
         // 先判资格会让这类事件整体跳过空间去重——2026-07-26 实飞同一盆火 10 连报。
         fillPositionFromOsdIfMissing(param);
-        boolean spatialDedupCoordinateEligible = param.getLat() != null && param.getLng() != null;
+        boolean spatialDedupCoordinateEligible = param.getLat() != null
+            && param.getLng() != null
+            && !isUnresolvedLaserQuality(param.getGeoQuality());
         long eventTs = Instant.parse(param.getTimestamp()).toEpochMilli();
 
         // 1. 同 eventId 去重：已存在则返回已绑定的活跃任务
@@ -357,6 +365,51 @@ public class FireEventServiceImpl implements FireEventService {
         long now = clock.now();
         return createAfterEventIdDedup(param, eventTs, now, spatialDedupCoordinateEligible);
 
+    }
+
+    @Override
+    @Transactional
+    public synchronized boolean applyLaserLocation(String eventId, FireLaserLocationParam param) {
+        if (eventId == null || eventId.isBlank() || param == null) {
+            return false;
+        }
+        FireEventEntity existing = eventMapper.selectOne(
+            new QueryWrapper<FireEventEntity>().eq("event_id", eventId));
+        if (existing == null || !GEO_QUALITY_LASER_LOCATING.equalsIgnoreCase(existing.getGeoQuality())) {
+            return false;
+        }
+        existing.setLat(param.getFireLat());
+        existing.setLng(param.getFireLng());
+        existing.setAlt(param.getFireAlt());
+        existing.setGeoMethod(GEO_METHOD_LASER_RANGEFINDER);
+        existing.setGeoQuality(GEO_QUALITY_PRECISE);
+        existing.setGeoErrorRadiusM(
+            param.getGeoErrorRadiusM() != null ? param.getGeoErrorRadiusM() : 5.0);
+        existing.setGeoSourceTs(param.getSourceTs());
+        existing.setUpdateTime(clock.now());
+        eventMapper.updateById(existing);
+        insertLaserLocationHistory(existing, param.getSourceTs(), "LASER_LOCATED");
+        return true;
+    }
+
+    @Override
+    @Transactional
+    public synchronized boolean markLaserLocationFailed(String eventId, String reason, long sourceTs) {
+        if (eventId == null || eventId.isBlank()) {
+            return false;
+        }
+        FireEventEntity existing = eventMapper.selectOne(
+            new QueryWrapper<FireEventEntity>().eq("event_id", eventId));
+        if (existing == null || !GEO_QUALITY_LASER_LOCATING.equalsIgnoreCase(existing.getGeoQuality())) {
+            return false;
+        }
+        existing.setGeoQuality(GEO_QUALITY_LASER_FAILED);
+        existing.setGeoSourceTs(sourceTs);
+        existing.setUpdateTime(clock.now());
+        eventMapper.updateById(existing);
+        insertLaserLocationHistory(existing, sourceTs, "LASER_FAILED");
+        log.warn("laser fire location failed eventId={} reason={}", eventId, reason);
+        return true;
     }
 
     private FireEventCreateResponse createAfterEventIdDedup(
@@ -438,9 +491,43 @@ public class FireEventServiceImpl implements FireEventService {
         }
         eventMapper.insert(e);
         insertHistory(e, param, eventTs, now, "CREATED");
+        dispatchVisibleLaserLocalization(e, param, eventTs);
 
         return createdResponse(e, new FireEventCreateResponse(e.getId(), e.getEventId(),
             false, null, e.getStatus(), true, false, true, "CREATED"));
+    }
+
+    private void dispatchVisibleLaserLocalization(
+            FireEventEntity event,
+            FireEventCreateParam param,
+            long eventTs) {
+        if (visibleFireLocalizationDispatcher == null
+                || !GEO_QUALITY_LASER_LOCATING.equalsIgnoreCase(event.getGeoQuality())
+                || param.getVisibleRoi() == null
+                || param.getVisibleRoi().isEmpty()
+                || event.getDeviceSn() == null
+                || event.getDeviceSn().isBlank()) {
+            return;
+        }
+        visibleFireLocalizationDispatcher.dispatch(
+                event.getEventId(),
+                taskIdForLaserEvent(event.getEventId(), event.getDeviceSn()),
+                event.getDeviceSn(),
+                eventTs,
+                param.getVisibleRoi());
+    }
+
+    private String taskIdForLaserEvent(String eventId, String deviceSn) {
+        if (eventId != null && !eventId.isBlank()) {
+            int split = eventId.lastIndexOf('-');
+            if (split > 0 && split < eventId.length() - 1) {
+                String suffix = eventId.substring(split + 1);
+                if (suffix.length() >= 10 && suffix.chars().allMatch(Character::isDigit)) {
+                    return eventId.substring(0, split);
+                }
+            }
+        }
+        return "fire-" + deviceSn;
     }
 
     private boolean acquireDedupLock(String lockName) {
@@ -478,10 +565,15 @@ public class FireEventServiceImpl implements FireEventService {
     }
 
     private FireEventCreateResponse createdResponse(FireEventEntity event, FireEventCreateResponse response) {
-        if (fireApproachDispatcher != null) {
+        if (fireApproachDispatcher != null && !isUnresolvedLaserQuality(event.getGeoQuality())) {
             fireApproachDispatcher.dispatchIfEligible(event);
         }
         return response;
+    }
+
+    private boolean isUnresolvedLaserQuality(String quality) {
+        return GEO_QUALITY_LASER_LOCATING.equalsIgnoreCase(quality)
+            || GEO_QUALITY_LASER_FAILED.equalsIgnoreCase(quality);
     }
 
     @Override
@@ -794,6 +886,36 @@ public class FireEventServiceImpl implements FireEventService {
         historyMapper.insert(history);
     }
 
+    private void insertLaserLocationHistory(FireEventEntity event, long sourceTs, String action) {
+        FireEventCreateParam snapshot = new FireEventCreateParam();
+        snapshot.setEventId(event.getEventId());
+        snapshot.setWorkspaceId(event.getWorkspaceId());
+        snapshot.setSource(event.getSource());
+        snapshot.setDeviceSn(event.getDeviceSn());
+        snapshot.setConfidence(event.getConfidence());
+        snapshot.setFireLevel(event.getFireLevel());
+        snapshot.setLat(event.getLat());
+        snapshot.setLng(event.getLng());
+        snapshot.setAlt(event.getAlt());
+        snapshot.setAltitudeReference(event.getAltitudeReference());
+        snapshot.setGeoMethod(event.getGeoMethod());
+        snapshot.setGeoErrorRadiusM(event.getGeoErrorRadiusM());
+        snapshot.setGeoQuality(event.getGeoQuality());
+        snapshot.setGeoSourceTs(event.getGeoSourceTs());
+        snapshot.setAircraftLat(event.getAircraftLat());
+        snapshot.setAircraftLng(event.getAircraftLng());
+        snapshot.setAircraftAlt(event.getAircraftAlt());
+        snapshot.setGimbalPitch(event.getGimbalPitch());
+        snapshot.setGimbalYaw(event.getGimbalYaw());
+        snapshot.setGimbalRoll(event.getGimbalRoll());
+        snapshot.setThermalRoi(event.getThermalRoi());
+        snapshot.setThermalTemperature(event.getThermalTemperature());
+        snapshot.setTemperatureUnit(event.getTemperatureUnit());
+        snapshot.setThermalImageUrl(event.getThermalImageUrl());
+        snapshot.setVisibleImageUrl(event.getVisibleImageUrl());
+        insertHistory(event, snapshot, sourceTs, clock.now(), action);
+    }
+
     private String workspaceIdOf(FireEventCreateParam param) {
         return param.getWorkspaceId() != null ? param.getWorkspaceId() : "DEFAULT";
     }
@@ -838,6 +960,7 @@ public class FireEventServiceImpl implements FireEventService {
         return param != null
             && param.getLat() != null
             && param.getLng() != null
+            && !isUnresolvedLaserQuality(param.getGeoQuality())
             && GEO_METHOD_LASER_RANGEFINDER.equalsIgnoreCase(param.getGeoMethod());
     }
 
@@ -996,6 +1119,11 @@ public class FireEventServiceImpl implements FireEventService {
         if (param.getLng() == null) param.setLng(lng.doubleValue());
         if (param.getAlt() == null && height != null) {
             param.setAlt(height.doubleValue());
+        }
+        if (param.getAircraftLat() == null) param.setAircraftLat(lat.doubleValue());
+        if (param.getAircraftLng() == null) param.setAircraftLng(lng.doubleValue());
+        if (param.getAircraftAlt() == null && height != null) {
+            param.setAircraftAlt(height.doubleValue());
         }
     }
 

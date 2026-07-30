@@ -1,7 +1,11 @@
+import os
 from threading import Lock
 from typing import Any, Callable, Iterable, Optional, Protocol, Set
-
 from app.models.frame import FramePacket
+
+# torchvision::nms 在 MPS 上未实现，需要 CPU fallback；必须在 torch 首次加载前设置。
+# detector 模块在 ultralytics 懒加载之前就会被 import，放这里能保证时序。
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 
 class VisibleDetector(Protocol):
@@ -78,12 +82,17 @@ class YoloVisibleDetector:
         confidence_floor: float = 0.25,
         imgsz: int = 1280,
         box_display_floor: float = 0.25,
+        device: str = "auto",
         model_factory: Optional[Callable[[str], Any]] = None,
     ) -> None:
         self._model_path = model_path
         self._target_class_names: Set[str] = {name.lower() for name in target_class_names}
         self._confidence_floor = float(confidence_floor)
         self._imgsz = int(imgsz)
+        # "auto" 在首次推理时解析：Apple Silicon 上用 MPS（实测 273ms→53ms），否则默认设备。
+        self._device = (device or "auto").lower()
+        self._resolved_device: Optional[str] = None
+        self._device_resolved = False
         # 展示阈值与 confidence_floor 解耦：floor(0.05) 保灵敏度供评分/上报，display 只管"画不画"。
         # 0.25 是实测折中：行人误报 0.24 排除，夜间小火焰低谷帧 0.26-0.28 保留（0.35 会把真火滤掉）
         self._box_display_floor = float(box_display_floor)
@@ -98,23 +107,43 @@ class YoloVisibleDetector:
             self.last_boxes = []
             return 0.0
         model = self._ensure_model()
-        results = model.predict(frame.frame, verbose=False, conf=self._confidence_floor, imgsz=self._imgsz)
+        predict_kwargs: dict = {}
+        device = self._resolve_device()
+        if device:
+            predict_kwargs["device"] = device
+        results = model.predict(
+            frame.frame, verbose=False, conf=self._confidence_floor, imgsz=self._imgsz, **predict_kwargs
+        )
         from app.services.snapshot_writer import boxes_from_yolo_results
 
-        self.last_boxes = [
+        candidates = [
             box
             for box in boxes_from_yolo_results(
                 results,
                 target_class_names=self._target_class_names,
                 confidence_floor=self._confidence_floor,
             )
-            if float(box.get("conf", 0.0)) >= self._box_display_floor
+            # 夜间暗部噪声兜底：fire 框内一个火色像素都没有的检出直接否决
+            # （真火必有橙红发光像素；实测黑暗树丛噪声框可打到 0.78）。smoke 类无火色，不校验。
+            if _box_passes_fire_color_check(frame.frame, box)
         ]
-        return _peak_target_confidence(
-            results,
-            target_class_names=self._target_class_names,
-            confidence_floor=self._confidence_floor,
-        )
+        self.last_boxes = [
+            box for box in candidates if float(box.get("conf", 0.0)) >= self._box_display_floor
+        ]
+        return max((float(box.get("conf", 0.0)) for box in candidates), default=0.0)
+
+    def _resolve_device(self) -> Optional[str]:
+        if self._device != "auto":
+            return self._device or None
+        if not self._device_resolved:
+            self._device_resolved = True
+            try:
+                import torch
+
+                self._resolved_device = "mps" if torch.backends.mps.is_available() else None
+            except Exception:
+                self._resolved_device = None
+        return self._resolved_device
 
     def _ensure_model(self) -> Any:
         if self._model is None:
@@ -174,49 +203,27 @@ def _fire_colored_ratio(
     return hot / len(pixels), len(pixels)
 
 
-def _peak_target_confidence(
-    results: Any,
-    target_class_names: Set[str],
-    confidence_floor: float,
-) -> float:
-    peak = 0.0
-    for result in results or []:
-        boxes = getattr(result, "boxes", None)
-        if boxes is None:
-            continue
-        names = getattr(result, "names", {}) or {}
-        cls_seq = _to_python_iterable(getattr(boxes, "cls", []))
-        conf_seq = _to_python_iterable(getattr(boxes, "conf", []))
-        for cls_value, conf_value in zip(cls_seq, conf_seq):
-            confidence = float(_unwrap_scalar(conf_value))
-            if confidence < confidence_floor:
-                continue
-            cls_idx = int(_unwrap_scalar(cls_value))
-            class_name = str(names.get(cls_idx, "")).lower()
-            if class_name not in target_class_names:
-                continue
-            if confidence > peak:
-                peak = confidence
-    return peak
+# fire 框内至少要有这么多个火色像素才算真火（防单像素噪声）。
+_FIRE_COLOR_MIN_PIXELS = 5
 
 
-def _to_python_iterable(value: Any) -> Iterable[Any]:
-    if value is None:
-        return []
-    tolist = getattr(value, "tolist", None)
-    if callable(tolist):
-        try:
-            return tolist()
-        except Exception:
-            pass
-    return list(value)
+def _box_passes_fire_color_check(frame: Any, box: dict) -> bool:
+    if str(box.get("label", "")).lower() != "fire":
+        return True
+    try:
+        import numpy as np
 
-
-def _unwrap_scalar(value: Any) -> Any:
-    item = getattr(value, "item", None)
-    if callable(item):
-        try:
-            return item()
-        except Exception:
-            pass
-    return value
+        arr = np.asarray(frame)
+        if arr.ndim < 3:
+            return True
+        height, width = int(arr.shape[0]), int(arr.shape[1])
+        x1 = max(0, min(int(box["x1"]), width - 1))
+        x2 = max(x1 + 1, min(int(box["x2"]), width))
+        y1 = max(0, min(int(box["y1"]), height - 1))
+        y2 = max(y1 + 1, min(int(box["y2"]), height))
+        crop = arr[y1:y2, x1:x2]
+        ratio, total = _fire_colored_ratio(crop, red_min=180, green_min=80, blue_max=120)
+        return ratio * total >= _FIRE_COLOR_MIN_PIXELS
+    except Exception:
+        # 校验自身出错不拦检出——宁可放过误报也不能吞掉真火。
+        return True

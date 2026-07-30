@@ -103,20 +103,33 @@ def _default_thread_factory(target, name, daemon):
 
 
 def opencv_source_factory_from_task(task: TaskRecord) -> Tuple[Optional[VideoSource], Optional[VideoSource]]:
-    """Default factory: build OpenCvVideoSource from task URL fields.
+    """Default factory: build latest-frame wrapped OpenCvVideoSource from task URLs.
 
     URLs that are empty or look like placeholders ("visible", "thermal") yield
     `None` so the runner can degrade to a single channel.
+
+    LatestFrameVideoSource：后台线程满速抓帧，检测循环永不阻塞在网络上
+    （FFMPEG 在推流暂停时可无限阻塞，实测造成 453s 检测盲区）。
+    内层 max_reads_before_reopen=0：满速消费无缓冲积压，不再需要周期性重开连接。
     """
-    from app.video.source import OpenCvVideoSource
+    from app.video.source import LatestFrameVideoSource, OpenCvVideoSource
+
+    def _wrapped(url: str, channel):
+        return LatestFrameVideoSource(
+            source_factory=lambda: OpenCvVideoSource(
+                url=url, channel=channel, max_reads_before_reopen=0
+            ),
+            url=url,
+            channel=channel,
+        )
 
     visible = (
-        OpenCvVideoSource(url=task.visible_stream_url, channel="visible")
+        _wrapped(task.visible_stream_url, "visible")
         if _looks_like_real_url(task.visible_stream_url)
         else None
     )
     thermal = (
-        OpenCvVideoSource(url=task.thermal_stream_url, channel="thermal")
+        _wrapped(task.thermal_stream_url, "thermal")
         if _looks_like_real_url(task.thermal_stream_url)
         else None
     )

@@ -7,6 +7,7 @@ import com.yx.uavfire.fc100.event.model.dto.FireEventHistoryDTO;
 import com.yx.uavfire.fc100.event.model.dto.FireEventRecheckResultDTO;
 import com.yx.uavfire.fc100.event.model.param.FireEventActionParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireLaserLocationParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventRecheckResultParam;
 
 import javax.servlet.http.HttpServletRequest;
@@ -24,6 +25,10 @@ public interface FireEventService {
      * 同 eventId 重复上报：返回已存在事件的任务（去重）。
      */
     FireEventCreateResponse create(FireEventCreateParam param);
+
+    boolean applyLaserLocation(String eventId, FireLaserLocationParam param);
+
+    boolean markLaserLocationFailed(String eventId, String reason, long sourceTs);
 
     FireEventDecisionResult confirm(String eventId, FireEventActionParam param, HttpServletRequest request);
 

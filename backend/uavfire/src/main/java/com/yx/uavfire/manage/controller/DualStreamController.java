@@ -7,6 +7,7 @@ import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
+import com.yx.uavfire.manage.model.dto.VisibleRoiSnapshotDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import com.dji.sdk.common.HttpResultResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +66,13 @@ public class DualStreamController {
     @GetMapping("/tasks/{task_id}/events")
     public HttpResultResponse<List<DualStreamEventDTO>> listEvents(@PathVariable("task_id") String taskId) {
         return HttpResultResponse.success(dualStreamService.listEvents(taskId));
+    }
+
+    @GetMapping("/tasks/{task_id}/latest-visible-roi")
+    public HttpResultResponse<VisibleRoiSnapshotDTO> latestVisibleRoi(
+            @PathVariable("task_id") String taskId,
+            @RequestParam(name = "after_source_ts", defaultValue = "0") long afterSourceTs) {
+        return HttpResultResponse.success(dualStreamService.latestVisibleRoi(taskId, afterSourceTs));
     }
 
     @GetMapping("/groups/{drone_sn}")

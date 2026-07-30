@@ -92,8 +92,7 @@ export function buildCockpitSummary ({
   const batteryCardNote = buildBatteryCardNote(msdkDevices, deliveryTargets)
 
   const geoReadyCount = activeFireEvents.filter(event => {
-    const quality = String(event?.geoQuality || '').toUpperCase()
-    return quality === 'AUTO_WAYPOINT_READY' || quality === 'READY' || quality === 'OK'
+    return isRouteReadyFireLocation(event)
   }).length
   const geoKnownCount = activeFireEvents.filter(event => event?.geoQuality).length
   const geoReadyRate = geoKnownCount > 0 ? (geoReadyCount / geoKnownCount) * 100 : null
@@ -547,8 +546,7 @@ function buildFireQueueStats (activeFireEvents) {
   }).length
   const missionLinked = activeFireEvents.filter(event => event?.missionNo).length
   const routeReady = activeFireEvents.filter(event => {
-    const quality = String(event?.geoQuality || '').toUpperCase()
-    return quality === 'AUTO_WAYPOINT_READY' || quality === 'READY' || quality === 'OK'
+    return isRouteReadyFireLocation(event)
   }).length
 
   return [
@@ -911,25 +909,20 @@ function formatFireDetail (event) {
 
 function formatFireActionNote (event) {
   if (!event) return ''
-  const quality = String(event.geoQuality || '').toUpperCase()
   if (event.missionNo) return `已关联任务 ${event.missionNo}`
-  if (['AUTO_WAYPOINT_READY', 'READY', 'OK'].includes(quality)) return '定位满足航线生成条件'
+  if (isRouteReadyFireLocation(event)) return '定位满足航线生成条件'
   return `定位质量 ${event.geoQuality || '未知'}，建议先人工复核`
 }
 
 function formatCoordinate (event) {
-  const lat = event.latitude ?? event.lat
-  const lng = event.longitude ?? event.lng
-  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return '坐标未知'
-  return `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`
+  return formatFireLocation(event, 5, '坐标未知')
 }
 
 function buildFireNextAction (event, fireEventsError) {
   if (fireEventsError) return '检查火情接口'
   if (!event) return '等待火情上报'
   if (event.missionNo) return '跟踪投放任务'
-  const quality = String(event.geoQuality || '').toUpperCase()
-  if (['AUTO_WAYPOINT_READY', 'READY', 'OK'].includes(quality)) return '可生成航线'
+  if (isRouteReadyFireLocation(event)) return '可生成航线'
   return '人工复核定位'
 }
 
@@ -1020,3 +1013,7 @@ function summarizeDeliveryTask (task) {
   const progress = task.progressPercent == null ? '' : ` · ${formatPercent(task.progressPercent)}`
   return `${phase}${progress}`
 }
+import {
+  formatFireLocation,
+  isRouteReadyFireLocation
+} from './fire/fire-event-location.mjs'

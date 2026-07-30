@@ -9,15 +9,112 @@ from app.services.fire_event_reporter import (
 import numpy as np
 
 
-def test_visible_low_above_noise_floor_does_not_post_before_thermal_confirmation():
+def test_visible_posts_fire_event_after_two_consecutive_frames():
+    # 纯可见光模式：连续两帧达线才建事件（单帧噪声误报不报）。
     backend = RecordingBackend()
     reporter = FireEventReporter(backend)
     task = _task()
 
-    posted = reporter.maybe_report(task, _event(risk="LOW", visible=0.33))
+    first = reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=1779163200000))
+    second = reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=1779163201500))
+
+    assert first is False
+    assert second is True
+    assert len(backend.posts) == 1
+    assert backend.posts[0]["fireLevel"] == "LOW"
+    assert backend.posts[0]["confidence"] == 0.33
+
+
+def test_visible_single_frame_does_not_post():
+    backend = RecordingBackend()
+    reporter = FireEventReporter(backend)
+    task = _task()
+
+    posted = reporter.maybe_report(task, _event(risk="HIGH", visible=0.78))
 
     assert posted is False
     assert backend.posts == []
+
+
+def test_visible_debounce_is_ten_seconds(monkeypatch):
+    # 可见光短去抖 10s：同一处火 POST 限频交给它，事件独立性交给后端空间合并
+    now = 1000.0
+    monkeypatch.setattr("app.services.fire_event_reporter.time.monotonic", lambda: now)
+    backend = RecordingBackend()
+    reporter = FireEventReporter(backend)
+    task = _task()
+
+    reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=1000))
+    assert reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=2000)) is True
+
+    now = 1005.0
+    assert reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=3000)) is False
+
+    # 过窗后第一帧重新累计两帧确认，第二帧放行
+    now = 1011.0
+    assert reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=4000)) is False
+    now = 1012.0
+    assert reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=5000)) is True
+    assert len(backend.posts) == 2
+
+
+def test_visible_confirmation_resets_when_score_drops_below_floor():
+    # 达线帧之间夹了噪声低分帧：连续性被打断，需重新累计两帧
+    backend = RecordingBackend()
+    reporter = FireEventReporter(backend)
+    task = _task()
+
+    reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=1000))
+    reporter.maybe_report(task, _event(risk="LOW", visible=0.02, ts=2000))
+    posted = reporter.maybe_report(task, _event(risk="LOW", visible=0.33, ts=3000))
+
+    assert posted is False
+    assert backend.posts == []
+
+
+def test_visible_confirmation_rejects_far_apart_boxes():
+    # 两帧框中心相距过远（>0.3 归一化距离）视为不同目标/噪声，不确认
+    backend = RecordingBackend()
+    reporter = FireEventReporter(backend)
+    task = _task()
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+
+    reporter.maybe_report(
+        task,
+        _event(risk="LOW", visible=0.33, ts=1000),
+        visible_frame=frame,
+        visible_boxes=[{"x1": 0, "y1": 0, "x2": 10, "y2": 10, "conf": 0.33, "label": "fire"}],
+    )
+    posted = reporter.maybe_report(
+        task,
+        _event(risk="LOW", visible=0.33, ts=2000),
+        visible_frame=frame,
+        visible_boxes=[{"x1": 80, "y1": 80, "x2": 95, "y2": 95, "conf": 0.33, "label": "fire"}],
+    )
+
+    assert posted is False
+    assert backend.posts == []
+
+
+def test_visible_report_attaches_visible_snapshot():
+    backend = RecordingBackend()
+    reporter = FireEventReporter(backend, snapshot_writer=FakeSnapshotWriter("http://snapshots/visible.jpg"))
+    task = _task()
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    frame[:, :, 0] = 115
+    frame[:, :, 1] = 105
+    frame[:, :, 2] = 95
+
+    reporter.maybe_report(task, _event(risk="MEDIUM", visible=0.45, ts=1779163200000), visible_frame=frame)
+    posted = reporter.maybe_report(
+        task,
+        _event(risk="MEDIUM", visible=0.45, ts=1779163201500),
+        visible_frame=frame,
+    )
+
+    assert posted is True
+    assert backend.posts[0]["visibleImageUrl"] == "http://snapshots/visible.jpg"
+    assert "thermalImageUrl" not in backend.posts[0]
 
 
 def test_thermal_low_above_noise_floor_posts_for_operator_prompt():
@@ -280,6 +377,37 @@ def test_build_fire_event_payload_shape():
     assert payload["timestamp"] == "2026-05-19T04:00:00.000Z"
 
 
+def test_visible_fire_payload_requests_laser_location_when_roi_exists():
+    task = _task()
+    event = _event(
+        risk="HIGH",
+        visible=0.81,
+        visible_roi={"x": 0.5, "y": 0.2, "width": 0.4, "height": 0.4},
+    )
+
+    payload = build_fire_event_payload(task, event)
+
+    expected = {"x": 0.5, "y": 0.2, "width": 0.4, "height": 0.4}
+    assert payload["visible_roi"] == expected
+    assert payload["visibleRoi"] == expected
+    assert payload["geo_method"] == "LASER_RANGEFINDER"
+    assert payload["geoMethod"] == "LASER_RANGEFINDER"
+    assert payload["geo_quality"] == "LASER_LOCATING"
+    assert payload["geoQuality"] == "LASER_LOCATING"
+
+
+def test_visible_fire_payload_without_roi_marks_laser_failed():
+    payload = build_fire_event_payload(
+        _task(),
+        _event(risk="HIGH", visible=0.81),
+    )
+
+    assert "visible_roi" not in payload
+    assert "visibleRoi" not in payload
+    assert payload["geo_method"] == "LASER_RANGEFINDER"
+    assert payload["geo_quality"] == "LASER_FAILED"
+
+
 def test_confidence_uses_thermal_when_higher():
     task = _task()
     event = _event(risk="MEDIUM", visible=0.3, thermal=0.62)
@@ -320,6 +448,7 @@ def _event(
     thermal_temperature: float | None = None,
     thermal_measure_roi: dict | None = None,
     geo_snapshot: dict | None = None,
+    visible_roi: dict | None = None,
 ) -> DualStreamEvent:
     fusion = round(visible * 0.6 + thermal * 0.4, 3)
     return DualStreamEvent(
@@ -332,6 +461,7 @@ def _event(
         thermal_temperature=thermal_temperature,
         thermal_measure_roi=thermal_measure_roi,
         geo_snapshot=geo_snapshot,
+        visible_roi=visible_roi,
     )
 
 

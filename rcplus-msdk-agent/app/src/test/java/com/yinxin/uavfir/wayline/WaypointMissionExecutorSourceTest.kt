@@ -6,6 +6,16 @@ import org.junit.Test
 
 class WaypointMissionExecutorSourceTest {
     @Test
+    fun progressListenerImplementsDjiInterruptReasonCallback() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
+
+        assertTrue(
+            "DJI 5.18 may invoke the interrupt callback as an abstract interface method at runtime",
+            source.contains("override fun onWaylineExecutingInterruptReasonUpdate(error: IDJIError)"),
+        )
+    }
+
+    @Test
     fun attachInitializesWaypointMissionManagerBeforeRegisteringListeners() {
         val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
         val attachBody = source.substringAfter("fun attach()").substringBefore("fun detach()")

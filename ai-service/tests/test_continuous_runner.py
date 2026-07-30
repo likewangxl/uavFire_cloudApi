@@ -86,6 +86,40 @@ def test_tick_emits_event_with_visible_only_when_thermal_source_is_none():
     assert record.analysis_channel == "visible"
 
 
+def test_tick_emits_normalized_top_visible_box_roi():
+    registry = _registry_with_task()
+    runner = ContinuousTaskRunner(
+        registry=registry,
+        visible_detector=_BoxDetector(
+            score=0.81,
+            boxes=[
+                {"x1": 10, "y1": 10, "x2": 30, "y2": 30, "conf": 0.4},
+                {"x1": 100, "y1": 20, "x2": 180, "y2": 60, "conf": 0.81},
+            ],
+        ),
+        thermal_analyzer=_FakeAnalyzer(score=0.0),
+        fusion_service=DualStreamFusionService(),
+    )
+    frame = np.zeros((100, 200, 3), dtype=np.uint8)
+
+    record = runner.tick(
+        task_id="task-CR-1",
+        visible_source=_StubVideoSource(
+            packets=[FramePacket(source_ts=1850, channel="visible", frame=frame)]
+        ),
+        thermal_source=None,
+    )
+
+    assert record is not None
+    assert record.visible_roi is not None
+    assert record.visible_roi.model_dump() == {
+        "x": 0.5,
+        "y": 0.2,
+        "width": 0.4,
+        "height": 0.4,
+    }
+
+
 def test_tick_emits_event_with_thermal_channel_when_only_thermal_packet_available():
     registry = _registry_with_task()
     runner = ContinuousTaskRunner(
@@ -135,7 +169,7 @@ def test_tick_carries_thermal_measure_roi_from_analyzer():
     }
 
 
-def test_tick_routes_thermal_looking_visible_packet_to_thermal_analysis():
+def test_tick_drops_thermal_looking_packet_from_visible_only_source():
     registry = _registry_with_task()
     runner = ContinuousTaskRunner(
         registry=registry,
@@ -162,11 +196,9 @@ def test_tick_routes_thermal_looking_visible_packet_to_thermal_analysis():
         thermal_source=None,
     )
 
-    assert record is not None
-    assert record.analysis_channel == "thermal"
-    assert record.fusion_score == 0.9
+    assert record is None
     assert runner._visible_detector.calls == 0
-    assert runner._thermal_analyzer.channels == ["thermal"]
+    assert runner._thermal_analyzer.channels == []
 
 
 def test_tick_swallows_read_exception_and_treats_as_no_packet():
@@ -403,6 +435,12 @@ class _FakeAnalyzer:
 
     def analyze(self, frame: FramePacket) -> float:
         return self._score
+
+
+class _BoxDetector(_FakeDetector):
+    def __init__(self, score: float, boxes: list[dict]) -> None:
+        super().__init__(score)
+        self.last_boxes = boxes
 
 
 class _RecordingDetector(_FakeDetector):

@@ -47,7 +47,7 @@ public class PlannedWaypointDTO {
     /** 覆盖全局自动飞行速度(m/s);null = 用 entity.maxSpeed。 */
     private Double speed;
 
-    /** 云台俯仰角度(绝对角,°,范围 -90~30);null = 0。 */
+    /** 云台俯仰角度(绝对角,°,范围 -90~30);null = -30(航线火情识别默认前下视)。 */
     private Double gimbalPitch;
 
     /** 云台偏航角度(绝对角,°,范围 -180~180);null = 跟随机头。 */

@@ -92,6 +92,122 @@ class CommandPollingCoordinatorTest {
     }
 
     @Test
+    fun poller_routesVisibleFireHoldAndAcknowledgesOwningEvent() = runTest {
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-visible-hold",
+                    droneSn = "DRONE-001",
+                    action = "visible-fire-hold",
+                    status = "pending",
+                    urgent = true,
+                    params = mapOf("eventId" to "fire-visible-1"),
+                ),
+            ),
+        )
+        val flight = RecordingFlightControlActionClient()
+        var now = 0L
+        val locator = VisibleFireLaserLocator(
+            missionHold = object : MissionHoldControl {
+                override suspend fun holdForConfirmation(): Boolean = false
+                override suspend fun resumeAfterConfirmation() = Unit
+            },
+            flightControl = flight,
+            velocityProvider = AircraftVelocityProvider { VelocitySample(0.1, 0.1) },
+            time = object : VisibleFireTime {
+                override fun nowMs(): Long = now
+                override suspend fun delayMs(durationMs: Long) {
+                    now += durationMs
+                }
+            },
+        )
+        val manager = DualStreamSessionManager(
+            streamProvider = MockStreamProvider(),
+            visibleFireLaserLocator = locator,
+        )
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            pollMsdk = false,
+        )
+
+        coordinator.pollOnce("DRONE-001")
+
+        assertEquals("applied", api.lastAck?.status)
+        assertEquals("HOVER_STABLE", api.lastAck?.message)
+        assertEquals("fire-visible-1", api.lastAck?.eventId)
+        assertEquals(listOf("hover"), flight.actions)
+    }
+
+    @Test
+    fun pollerAcknowledgesLaserCoordinatesForOriginalVisibleFireEvent() = runTest {
+        val roi = mapOf("x" to 0.4, "y" to 0.3, "width" to 0.2, "height" to 0.2)
+        val api = RecordingDualStreamApi(
+            nextCommand = AgentApiEnvelope(
+                data = AgentCommandResponse(
+                    commandId = "cmd-visible-laser",
+                    droneSn = "DRONE-001",
+                    action = "visible-fire-laser-measure",
+                    status = "pending",
+                    urgent = true,
+                    params = mapOf(
+                        "eventId" to "fire-visible-1",
+                        "taskId" to "task-1",
+                        "visibleRoi" to roi,
+                    ),
+                ),
+            ),
+        )
+        var now = 0L
+        val laserValues = ArrayDeque(
+            listOf(
+                LaserRangefinderResult(34.960120, 109.316450, 530.0, 60.0, "NORMAL"),
+                LaserRangefinderResult(34.960123, 109.316456, 531.0, 60.2, "NORMAL"),
+                LaserRangefinderResult(34.960126, 109.316462, 532.0, 59.9, "NORMAL"),
+            ),
+        )
+        val locator = VisibleFireLaserLocator(
+            missionHold = object : MissionHoldControl {
+                override suspend fun holdForConfirmation(): Boolean = true
+                override suspend fun resumeAfterConfirmation() = Unit
+            },
+            flightControl = RecordingFlightControlActionClient(),
+            velocityProvider = AircraftVelocityProvider { VelocitySample(0.1, 0.1) },
+            time = object : VisibleFireTime {
+                override fun nowMs(): Long = now
+                override suspend fun delayMs(durationMs: Long) {
+                    now += durationMs
+                }
+            },
+            targetAimer = VisibleTargetAimer { _, _ -> true },
+            laserRangefinder = object : LaserRangefinderClient {
+                override suspend fun measure(): LaserRangefinderResult? =
+                    laserValues.removeFirstOrNull()
+            },
+        )
+        locator.hold("fire-visible-1")
+        val manager = DualStreamSessionManager(
+            streamProvider = MockStreamProvider(),
+            visibleFireLaserLocator = locator,
+        )
+        val coordinator = CommandPollingCoordinator(
+            client = AgentBackendClient(api),
+            sessionManager = manager,
+            pollMsdk = false,
+        )
+
+        coordinator.pollOnce("DRONE-001")
+
+        assertEquals("applied", api.lastAck?.status)
+        assertEquals("fire-visible-1", api.lastAck?.eventId)
+        assertEquals(34.960123, api.lastAck?.fireLat)
+        assertEquals(109.316456, api.lastAck?.fireLng)
+        assertEquals("LASER_RANGEFINDER", api.lastAck?.geoMethod)
+        assertEquals("PRECISE", api.lastAck?.geoQuality)
+        assertEquals(5.0, api.lastAck?.geoErrorRadiusM)
+    }
+
+    @Test
     fun urgentPoller_skipsLegacyDualStreamCommandWhenUrgentFieldIsMissing() = runTest {
         val api = RecordingDualStreamApi(
             nextCommand = AgentApiEnvelope(

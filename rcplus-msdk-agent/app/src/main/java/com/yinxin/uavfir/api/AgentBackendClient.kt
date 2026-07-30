@@ -174,6 +174,12 @@ class AgentBackendClient(
         return response
     }
 
+    suspend fun latestVisibleRoi(
+        taskId: String,
+        afterSourceTs: Long,
+    ): VisibleRoiSnapshotResponse? =
+        api.latestVisibleRoi(taskId, afterSourceTs)?.data
+
     suspend fun ackCommand(
         droneSn: String,
         commandId: String,
@@ -183,6 +189,13 @@ class AgentBackendClient(
         sourceTs: Long? = null,
         thermalTemperature: Double? = null,
         thermalMeasureRoi: Map<String, Double>? = null,
+        eventId: String? = null,
+        fireLat: Double? = null,
+        fireLng: Double? = null,
+        fireAlt: Double? = null,
+        geoMethod: String? = null,
+        geoQuality: String? = null,
+        geoErrorRadiusM: Double? = null,
     ) {
         debug("ack request drone=$droneSn command=$commandId status=$status")
         api.ackCommand(
@@ -195,6 +208,13 @@ class AgentBackendClient(
                 sourceTs = sourceTs,
                 thermalTemperature = thermalTemperature,
                 thermalMeasureRoi = thermalMeasureRoi,
+                eventId = eventId,
+                fireLat = fireLat,
+                fireLng = fireLng,
+                fireAlt = fireAlt,
+                geoMethod = geoMethod,
+                geoQuality = geoQuality,
+                geoErrorRadiusM = geoErrorRadiusM,
             ),
         )
         debug("ack response drone=$droneSn command=$commandId")
