@@ -15,8 +15,23 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicReference
+
+data class WaypointMissionIdentity(
+    val missionId: String,
+    val missionFileName: String,
+)
+
+data class MissionExecutionSnapshot(
+    val identity: WaypointMissionIdentity?,
+    val state: WaypointMissionExecuteState?,
+    val missionGeneration: Long,
+    val commandGeneration: Long,
+)
+
+data class MissionCommandSubmission(
+    val snapshot: MissionExecutionSnapshot,
+)
 
 /**
  * Wraps DJI MSDK v5 [WaypointMissionManager]. State changes and progress are
@@ -41,26 +56,32 @@ class WaypointMissionExecutor(
         fun onError(missionId: String?, stage: String, error: IDJIError)
     }
 
-    private data class ActiveMission(
-        val missionId: String,
-        val missionFileName: String,
-    )
+    private val missionLock = Any()
+    private val executionSnapshot = AtomicReference(MissionExecutionSnapshot(null, null, 0, 0))
+    private val missionObservers = linkedSetOf<(MissionExecutionSnapshot) -> Unit>()
 
-    private val activeMission = AtomicReference<ActiveMission?>(null)
-    private val lastState = AtomicReference<WaypointMissionExecuteState?>(null)
-    private val missionStateObservers =
-        CopyOnWriteArraySet<(WaypointMissionExecuteState) -> Unit>()
-
-    fun activeMissionId(): String? = activeMission.get()?.missionId
-    fun activeMissionFileName(): String? = activeMission.get()?.missionFileName
-    fun activeMissionIdentity(): Pair<String, String>? =
-        activeMission.get()?.let { it.missionId to it.missionFileName }
-    fun currentMissionState(): WaypointMissionExecuteState? = lastState.get()
+    fun activeMissionId(): String? = executionSnapshot.get().identity?.missionId
+    fun activeMissionFileName(): String? = executionSnapshot.get().identity?.missionFileName
+    fun currentMissionExecution(): MissionExecutionSnapshot = executionSnapshot.get()
 
     private val stateListener = WaypointMissionExecuteStateListener { newState ->
-        val previous = lastState.getAndSet(newState)
-        listener.onState(activeMissionId(), newState, previous)
-        missionStateObservers.forEach { observer -> observer(newState) }
+        val (previous, eventMissionId) = synchronized(missionLock) {
+            val current = executionSnapshot.get()
+            val terminal = newState in NO_ACTIVE_STATES
+            val next = if (terminal && current.identity != null) {
+                current.copy(
+                    identity = null,
+                    state = newState,
+                    missionGeneration = current.missionGeneration + 1,
+                )
+            } else {
+                current.copy(state = newState)
+            }
+            executionSnapshot.set(next)
+            missionObservers.forEach { it(next) }
+            current.state to current.identity?.missionId
+        }
+        listener.onState(eventMissionId, newState, previous)
     }
 
     private val progressListener = object : WaylineExecutingInfoListener {
@@ -135,7 +156,16 @@ class WaypointMissionExecutor(
     }
 
     fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
-        activeMission.set(ActiveMission(missionId, missionFileName))
+        synchronized(missionLock) {
+            val current = executionSnapshot.get()
+            val next = current.copy(
+                identity = WaypointMissionIdentity(missionId, missionFileName),
+                state = null,
+                missionGeneration = current.missionGeneration + 1,
+            )
+            executionSnapshot.set(next)
+            missionObservers.forEach { it(next) }
+        }
         Log.i(
             TAG,
             WaypointMissionDiagnosticFormatter.formatAvailableWaylineIds(
@@ -162,6 +192,19 @@ class WaypointMissionExecutor(
         )
     }
 
+    fun pauseMission(
+        expected: MissionExecutionSnapshot,
+        onSubmissionBoundary: (MissionExecutionSnapshot) -> Unit,
+        onComplete: (MissionExecutionSnapshot, IDJIError?) -> Unit,
+    ): MissionCommandSubmission? = submitCommand(
+        expected,
+        "pauseMission",
+        onSubmissionBoundary,
+        onComplete,
+    ) { callback ->
+        WaypointMissionManager.getInstance().pauseMission(callback)
+    }
+
     fun resumeMission() {
         WaypointMissionManager.getInstance().resumeMission(simpleCallback(activeMissionId(), "resumeMission"))
     }
@@ -176,9 +219,26 @@ class WaypointMissionExecutor(
         )
     }
 
-    fun observeMissionState(observer: (WaypointMissionExecuteState) -> Unit): () -> Unit {
-        missionStateObservers += observer
-        return { missionStateObservers -= observer }
+    fun resumeMission(
+        expected: MissionExecutionSnapshot,
+        breakpoint: BreakPointInfo,
+        onSubmissionBoundary: (MissionExecutionSnapshot) -> Unit,
+        onComplete: (MissionExecutionSnapshot, IDJIError?) -> Unit,
+    ): MissionCommandSubmission? = submitCommand(
+        expected,
+        "resumeMission",
+        onSubmissionBoundary,
+        onComplete,
+    ) { callback ->
+        WaypointMissionManager.getInstance().resumeMission(breakpoint, callback)
+    }
+
+    fun observeMissionExecution(observer: (MissionExecutionSnapshot) -> Unit): () -> Unit {
+        synchronized(missionLock) {
+            missionObservers += observer
+            observer(executionSnapshot.get())
+        }
+        return { synchronized(missionLock) { missionObservers -= observer } }
     }
 
     fun stopActiveMission() {
@@ -246,6 +306,41 @@ class WaypointMissionExecutor(
         }
     }
 
+    private fun submitCommand(
+        expected: MissionExecutionSnapshot,
+        stage: String,
+        onSubmissionBoundary: (MissionExecutionSnapshot) -> Unit,
+        onComplete: (MissionExecutionSnapshot, IDJIError?) -> Unit,
+        submit: (CommonCallbacks.CompletionCallback) -> Unit,
+    ): MissionCommandSubmission? = synchronized(missionLock) {
+        val current = executionSnapshot.get()
+        if (current.identity != expected.identity ||
+            current.missionGeneration != expected.missionGeneration ||
+            current.state != expected.state
+        ) {
+            return@synchronized null
+        }
+        val submitted = current.copy(commandGeneration = current.commandGeneration + 1)
+        executionSnapshot.set(submitted)
+        missionObservers.forEach { it(submitted) }
+        val callback = object : CommonCallbacks.CompletionCallback {
+            override fun onSuccess() {
+                onComplete(submitted, null)
+            }
+
+            override fun onFailure(error: IDJIError) {
+                listener.onError(submitted.identity?.missionId, stage, error)
+                onComplete(submitted, error)
+            }
+        }
+        // This is the one-way submission boundary: after this notification the
+        // caller must assume DJI may receive the command even if the SDK call
+        // throws or the coroutine is cancelled.
+        onSubmissionBoundary(submitted)
+        submit(callback)
+        MissionCommandSubmission(submitted)
+    }
+
     private fun tiltGimbalToNadir(missionId: String?) {
         val client = gimbalActionClient ?: return
         scope.launch(dispatcher) {
@@ -262,5 +357,11 @@ class WaypointMissionExecutor(
     companion object {
         private const val TAG = "WaypointMissionExecutor"
         private const val NADIR_GIMBAL_PITCH_DEGREES: Double = -45.0
+        private val NO_ACTIVE_STATES = setOf(
+            WaypointMissionExecuteState.IDLE,
+            WaypointMissionExecuteState.READY,
+            WaypointMissionExecuteState.FINISHED,
+            WaypointMissionExecuteState.DISCONNECTED,
+        )
     }
 }

@@ -1,6 +1,7 @@
 package com.yinxin.uavfir
 
 import android.app.Application
+import android.os.SystemClock
 import android.util.Log
 import com.yinxin.uavfir.api.AgentBackendConfig
 import com.yinxin.uavfir.api.AgentBackendApiFactory
@@ -24,6 +25,8 @@ import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.firedetection.LatestVisibleFrameBuffer
 import com.yinxin.uavfir.firedetection.AwaitableMissionControl
+import com.yinxin.uavfir.firedetection.FlightSafetyGate
+import com.yinxin.uavfir.firedetection.OwnedResumeSafetyEvidenceProvider
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorFactory
 import com.yinxin.uavfir.firedetection.VisibleFrameIngress
@@ -124,10 +127,15 @@ class AppServices(
         scope = appScope,
     )
     private val missionHoldControl = WaypointMissionHoldControl(waypointExecutor)
+    private val flightSafetyGate = FlightSafetyGate()
+    private val resumeSafetyEvidenceOwner = OwnedResumeSafetyEvidenceProvider()
     private val awaitableMissionControl = AwaitableMissionControl(
         port = WaypointMissionControlPort(waypointExecutor),
         hover = flightControlClient::hover,
         scope = appScope,
+        safetyGate = flightSafetyGate,
+        safetyProvider = resumeSafetyEvidenceOwner,
+        monotonicNow = SystemClock::elapsedRealtime,
     )
     private val visibleFireLaserRangefinder = DjiLaserRangefinderClient()
     private val visibleFireLaserLocator = VisibleFireLaserLocator(

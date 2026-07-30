@@ -56,4 +56,20 @@ class WaypointMissionExecutorSourceTest {
         assertTrue(source.contains("override fun onWaylineExecutingInterruptReasonUpdate(error: IDJIError)"))
         assertTrue(awaitable.contains("suspendCancellableCoroutine"))
     }
+
+    @Test
+    fun missionIdentityStateAndGenerationsUseOneAtomicSnapshot() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
+
+        assertTrue(source.contains("AtomicReference(MissionExecutionSnapshot("))
+        assertTrue(source.contains("missionGeneration"))
+        assertTrue(source.contains("commandGeneration"))
+        assertTrue(source.contains("observeMissionExecution"))
+        assertTrue(
+            "observers must receive a full generation-bound snapshot",
+            source.contains("(MissionExecutionSnapshot) -> Unit"),
+        )
+        assertTrue(!source.contains("private val activeMission ="))
+        assertTrue(!source.contains("private val lastState ="))
+    }
 }

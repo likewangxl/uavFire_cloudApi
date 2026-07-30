@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.firedetection
 
+import com.yinxin.uavfir.wayline.MissionExecutionSnapshot as DjiMissionSnapshot
 import com.yinxin.uavfir.wayline.WaypointMissionExecutor
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.v5.manager.aircraft.waypoint3.model.BreakPointInfo
@@ -17,21 +18,28 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
 enum class ObservedMissionState {
-    IDLE,
-    READY,
-    EXECUTING,
-    INTERRUPTED,
-    RECOVERING,
-    FINISHED,
-    UNKNOWN,
+    IDLE, READY, EXECUTING, INTERRUPTED, RECOVERING, FINISHED, UNKNOWN,
 }
 
 data class MissionSnapshot(
-    val identity: MissionIdentity?,
+    val mission: MissionExecutionKey?,
     val state: ObservedMissionState,
+    val commandGeneration: Long,
 )
 
 data class MissionCommandError(val reason: String)
+
+data class MissionCommandCallback(
+    val mission: MissionExecutionKey,
+    val commandGeneration: Long,
+    val error: MissionCommandError?,
+)
+
+data class MissionCommandSubmission(
+    val mission: MissionExecutionKey,
+    val commandGeneration: Long,
+    val cancellation: MissionCancellation,
+)
 
 fun interface MissionCancellation {
     fun cancel()
@@ -39,54 +47,39 @@ fun interface MissionCancellation {
 
 interface MissionControlPort {
     fun snapshot(): MissionSnapshot
-
     fun queryBreakpoint(
-        identity: MissionIdentity,
+        mission: MissionExecutionKey,
         callback: (MissionBreakpoint?, MissionCommandError?) -> Unit,
     ): MissionCancellation
-
-    fun pause(callback: (MissionCommandError?) -> Unit): MissionCancellation
-
+    fun pause(
+        mission: MissionExecutionKey,
+        onSubmissionBoundary: (MissionCommandSubmission) -> Unit,
+        callback: (MissionCommandCallback) -> Unit,
+    ): MissionCommandSubmission
     fun resume(
+        mission: MissionExecutionKey,
         breakpoint: MissionBreakpoint,
-        callback: (MissionCommandError?) -> Unit,
-    ): MissionCancellation
-
-    fun observeState(listener: (ObservedMissionState) -> Unit): MissionCancellation
+        onSubmissionBoundary: (MissionCommandSubmission) -> Unit,
+        callback: (MissionCommandCallback) -> Unit,
+    ): MissionCommandSubmission
+    /** Atomically subscribes and replays the current full snapshot. */
+    fun observeSnapshots(listener: (MissionSnapshot) -> Unit): MissionCancellation
 }
 
-/**
- * Thin MSDK adapter. It snapshots mission identity together, translates the
- * executor's single registered DJI listener into cancellable local observers,
- * and resumes from the exact captured breakpoint rather than a mutable
- * "current" position.
- */
 class WaypointMissionControlPort(
     private val executor: WaypointMissionExecutor,
 ) : MissionControlPort {
-    override fun snapshot(): MissionSnapshot {
-        val state = executor.currentMissionState().toObservedState()
-        val activeIdentity = executor.activeMissionIdentity()
-        val identity = if (state in NO_ACTIVE_STATES) {
-            null
-        } else if (activeIdentity != null) {
-            MissionIdentity(activeIdentity.first, activeIdentity.second)
-        } else {
-            null
-        }
-        return MissionSnapshot(identity, state)
-    }
+    override fun snapshot(): MissionSnapshot = executor.currentMissionExecution().toMissionSnapshot()
 
     override fun queryBreakpoint(
-        identity: MissionIdentity,
+        mission: MissionExecutionKey,
         callback: (MissionBreakpoint?, MissionCommandError?) -> Unit,
     ): MissionCancellation {
         val active = AtomicBoolean(true)
-        executor.queryBreakpoint(identity.missionFileName) { info, error ->
+        executor.queryBreakpoint(mission.identity.missionFileName) { info, error ->
             if (!active.compareAndSet(true, false)) return@queryBreakpoint
-            val unchanged = snapshot().identity == identity
             when {
-                !unchanged -> callback(null, MissionCommandError("mission-identity-changed"))
+                snapshot().mission != mission -> callback(null, MissionCommandError("mission-generation-changed"))
                 error != null -> callback(null, MissionCommandError(error.description()))
                 else -> callback(info?.toMissionBreakpointOrNull(), null)
             }
@@ -94,35 +87,95 @@ class WaypointMissionControlPort(
         return MissionCancellation { active.set(false) }
     }
 
-    override fun pause(callback: (MissionCommandError?) -> Unit): MissionCancellation {
+    override fun pause(
+        mission: MissionExecutionKey,
+        onSubmissionBoundary: (MissionCommandSubmission) -> Unit,
+        callback: (MissionCommandCallback) -> Unit,
+    ): MissionCommandSubmission {
         val active = AtomicBoolean(true)
-        executor.pauseMission { error ->
-            if (active.compareAndSet(true, false)) {
-                callback(error?.let { MissionCommandError(it.description()) })
-            }
-        }
-        return MissionCancellation { active.set(false) }
+        val expected = executor.currentMissionExecution()
+        if (expected.toMissionSnapshot().mission != mission) error("mission-generation-changed")
+        val submitted = executor.pauseMission(
+            expected = expected,
+            onSubmissionBoundary = { evidence ->
+                onSubmissionBoundary(
+                    MissionCommandSubmission(
+                        mission,
+                        evidence.commandGeneration,
+                        MissionCancellation { active.set(false) },
+                    ),
+                )
+            },
+            onComplete = { evidence, error ->
+                if (active.compareAndSet(true, false)) {
+                    callback(evidence.toCommandCallback(error?.description()))
+                }
+            },
+        ) ?: error("mission-generation-changed")
+        return MissionCommandSubmission(
+            mission,
+            submitted.snapshot.commandGeneration,
+            MissionCancellation { active.set(false) },
+        )
     }
 
     override fun resume(
+        mission: MissionExecutionKey,
         breakpoint: MissionBreakpoint,
-        callback: (MissionCommandError?) -> Unit,
-    ): MissionCancellation {
+        onSubmissionBoundary: (MissionCommandSubmission) -> Unit,
+        callback: (MissionCommandCallback) -> Unit,
+    ): MissionCommandSubmission {
+        require(breakpoint.isValid) { "invalid-breakpoint" }
         val active = AtomicBoolean(true)
-        executor.resumeMission(breakpoint.toDjiBreakpoint()) { error ->
-            if (active.compareAndSet(true, false)) {
-                callback(error?.let { MissionCommandError(it.description()) })
-            }
-        }
-        return MissionCancellation { active.set(false) }
+        val expected = executor.currentMissionExecution()
+        if (expected.toMissionSnapshot().mission != mission) error("mission-generation-changed")
+        val submitted = executor.resumeMission(
+            expected = expected,
+            breakpoint = breakpoint.toDjiBreakpoint(),
+            onSubmissionBoundary = { evidence ->
+                onSubmissionBoundary(
+                    MissionCommandSubmission(
+                        mission,
+                        evidence.commandGeneration,
+                        MissionCancellation { active.set(false) },
+                    ),
+                )
+            },
+            onComplete = { evidence, error ->
+                if (active.compareAndSet(true, false)) {
+                    callback(evidence.toCommandCallback(error?.description()))
+                }
+            },
+        ) ?: error("mission-generation-changed")
+        return MissionCommandSubmission(
+            mission,
+            submitted.snapshot.commandGeneration,
+            MissionCancellation { active.set(false) },
+        )
     }
 
-    override fun observeState(listener: (ObservedMissionState) -> Unit): MissionCancellation {
-        val remove = executor.observeMissionState { listener(it.toObservedState()) }
+    override fun observeSnapshots(listener: (MissionSnapshot) -> Unit): MissionCancellation {
+        val remove = executor.observeMissionExecution { listener(it.toMissionSnapshot()) }
         return MissionCancellation(remove)
     }
 
-    private fun WaypointMissionExecuteState?.toObservedState(): ObservedMissionState = when (this) {
+    private fun DjiMissionSnapshot.toMissionSnapshot(): MissionSnapshot {
+        val state = state.toObservedState()
+        val mission = identity?.let {
+            MissionExecutionKey(
+                MissionIdentity(it.missionId, it.missionFileName),
+                missionGeneration,
+            )
+        }
+        return MissionSnapshot(mission, state, commandGeneration)
+    }
+
+    private fun DjiMissionSnapshot.toCommandCallback(error: String?): MissionCommandCallback {
+        val mission = toMissionSnapshot().mission ?: error("command-mission-missing")
+        return MissionCommandCallback(mission, commandGeneration, error?.let(::MissionCommandError))
+    }
+
+    private fun WaypointMissionExecuteState?.toObservedState() = when (this) {
         WaypointMissionExecuteState.IDLE -> ObservedMissionState.IDLE
         WaypointMissionExecuteState.READY -> ObservedMissionState.READY
         WaypointMissionExecuteState.EXECUTING -> ObservedMissionState.EXECUTING
@@ -133,42 +186,31 @@ class WaypointMissionControlPort(
     }
 
     private fun BreakPointInfo.toMissionBreakpointOrNull(): MissionBreakpoint? {
-        val waylineId = waylineID ?: return null
-        val waypointId = waypointID ?: return null
-        val progress = segmentProgress?.takeIf(Double::isFinite) ?: return null
-        return MissionBreakpoint(
-            waylineId = waylineId,
-            waypointId = waypointId,
-            segmentProgress = progress,
+        val candidate = MissionBreakpoint(
+            waylineId = waylineID ?: return null,
+            waypointId = waypointID ?: return null,
+            segmentProgress = segmentProgress ?: return null,
             latitude = location?.latitude,
             longitude = location?.longitude,
             altitude = location?.altitude,
             recoverAction = recoverActionType?.name,
         )
+        return candidate.takeIf { it.isValid }
     }
 
     private fun MissionBreakpoint.toDjiBreakpoint(): BreakPointInfo {
+        check(isValid) { "invalid-breakpoint" }
         val info = BreakPointInfo(waylineId, waypointId, segmentProgress)
         if (latitude != null && longitude != null && altitude != null) {
             info.location = LocationCoordinate3D(latitude, longitude, altitude)
         }
-        recoverAction?.let { value ->
-            info.recoverActionType = RecoverActionType.valueOf(value)
-        }
+        recoverAction?.let { info.recoverActionType = RecoverActionType.valueOf(it) }
         return info
-    }
-
-    companion object {
-        private val NO_ACTIVE_STATES = setOf(
-            ObservedMissionState.IDLE,
-            ObservedMissionState.READY,
-            ObservedMissionState.FINISHED,
-        )
     }
 }
 
 data class MissionHoldToken(
-    val identity: MissionIdentity,
+    val mission: MissionExecutionKey,
     val breakpoint: MissionBreakpoint,
 )
 
@@ -183,140 +225,138 @@ sealed interface MissionResumeResult {
     data class ManualHold(val reason: FlightSafetyReason) : MissionResumeResult
 }
 
-/**
- * Converts DJI's callback/state split into coalesced suspend operations.
- *
- * This class intentionally owns no timeout. The fire coordinator owns the
- * operation deadline so cancellation can flow here and unregister observation
- * listeners. A DJI callback cannot be physically removed once submitted, so
- * the port cancellation handle must at least revoke local delivery.
- */
+private enum class ResumeLifecycle {
+    NOT_ISSUED, SUBMITTED, SUCCEEDED, FAILED, OUTCOME_UNKNOWN,
+}
+
 class AwaitableMissionControl(
     private val port: MissionControlPort,
     private val hover: suspend () -> Unit,
     private val scope: CoroutineScope,
-    private val safetyGate: FlightSafetyGate = FlightSafetyGate(),
+    private val safetyGate: FlightSafetyGate,
+    private val safetyProvider: ResumeSafetyEvidenceProvider,
+    private val monotonicNow: () -> Long,
 ) : AutoCloseable {
     private val lock = Any()
     private var pauseOperation: SharedOperation<MissionHoldResult>? = null
     private var resumeOperation: SharedOperation<MissionResumeResult>? = null
     private var heldToken: MissionHoldToken? = null
     private var resumedToken: MissionHoldToken? = null
-    private var failedResume: Pair<MissionHoldToken, MissionResumeResult.ManualHold>? = null
-    private val issuedResumeTokens = mutableSetOf<MissionHoldToken>()
+    private val resumeLifecycle = mutableMapOf<MissionHoldToken, ResumeLifecycle>()
     private var manualTakeover = false
     private var closed = false
 
     suspend fun pause(): MissionHoldResult {
+        val captured = port.snapshot()
         val operation = synchronized(lock) {
             if (closed) return MissionHoldResult.ManualHold(FlightSafetyReason.CONTROL_CLOSED)
-            if (manualTakeover) {
-                return MissionHoldResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)
-            }
+            if (manualTakeover) return MissionHoldResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)
             heldToken?.takeIf {
-                port.snapshot() == MissionSnapshot(it.identity, ObservedMissionState.INTERRUPTED)
+                captured.mission == it.mission && captured.state == ObservedMissionState.INTERRUPTED
             }?.let { return MissionHoldResult.WaylinePaused(it) }
-            pauseOperation?.also { it.waiters++ } ?: newPauseOperation()
+            val key = captured.mission
+            pauseOperation?.let {
+                if (it.key != key) return MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
+                it.waiters++
+                it
+            } ?: newPauseOperation(captured)
         }
-        return awaitShared(operation) {
-            if (manualTakeover) {
-                MissionHoldResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)
-            } else {
-                throw it
-            }
-        }
+        return awaitShared(operation, MissionHoldResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER))
     }
 
     suspend fun resume(
         token: MissionHoldToken,
-        context: ResumeSafetyContext,
+        controlSession: FireControlSessionKey,
     ): MissionResumeResult {
-        val immediateSafety = safetyGate.evaluateResume(context)
-        if (immediateSafety is ResumeSafetyDecision.ManualHold) {
-            return MissionResumeResult.ManualHold(immediateSafety.reason)
+        val lifecycle = synchronized(lock) { resumeLifecycle[token] }
+        if (lifecycle == ResumeLifecycle.OUTCOME_UNKNOWN) {
+            return MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_OUTCOME_UNKNOWN)
+        }
+        if (lifecycle == ResumeLifecycle.FAILED) {
+            return MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_COMMAND_FAILED)
         }
         val operation = synchronized(lock) {
             if (closed) return MissionResumeResult.ManualHold(FlightSafetyReason.CONTROL_CLOSED)
-            if (manualTakeover) {
-                return MissionResumeResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)
-            }
-            failedResume?.takeIf { it.first == token }?.let { return it.second }
+            if (manualTakeover) return MissionResumeResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)
             resumedToken?.takeIf {
-                it == token &&
-                    port.snapshot() == MissionSnapshot(token.identity, ObservedMissionState.EXECUTING)
+                it == token && port.snapshot().let { s ->
+                    s.mission == token.mission && s.state == ObservedMissionState.EXECUTING
+                }
             }?.let { return MissionResumeResult.Resumed }
+            val operationKey = ResumeOperationKey(token, controlSession)
             resumeOperation?.let {
-                if (it.key != token) {
+                if (it.key != operationKey) {
                     return MissionResumeResult.ManualHold(FlightSafetyReason.COMPETING_FIRE_SESSION)
                 }
                 it.waiters++
                 it
-            } ?: newResumeOperation(token, context)
+            } ?: newResumeOperation(token, controlSession)
         }
-        return awaitShared(operation) {
-            if (manualTakeover) {
-                MissionResumeResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)
-            } else {
-                throw it
-            }
-        }
+        return awaitShared(operation, MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_OUTCOME_UNKNOWN))
     }
 
     fun onManualControlTakeover() {
-        val operations = synchronized(lock) {
+        val jobs = synchronized(lock) {
             manualTakeover = true
             listOfNotNull(pauseOperation?.deferred, resumeOperation?.deferred)
         }
-        operations.forEach { it.cancel(CancellationException("manual-control-takeover")) }
+        jobs.forEach { it.cancel(CancellationException("manual-control-takeover")) }
     }
 
     override fun close() {
-        val operations = synchronized(lock) {
+        val jobs = synchronized(lock) {
             if (closed) return
             closed = true
             listOfNotNull(pauseOperation?.deferred, resumeOperation?.deferred)
         }
-        operations.forEach { it.cancel(CancellationException("mission-control-closed")) }
+        jobs.forEach { it.cancel(CancellationException("mission-control-closed")) }
     }
 
-    private fun newPauseOperation(): SharedOperation<MissionHoldResult> {
-        val deferred = scope.async(start = CoroutineStart.LAZY) { performPause() }
-        val operation = SharedOperation(deferred, waiters = 1, key = null)
-        pauseOperation = operation
+    private fun newPauseOperation(captured: MissionSnapshot): SharedOperation<MissionHoldResult> {
+        val deferred = scope.async(start = CoroutineStart.LAZY) { performPause(captured) }
+        val op = SharedOperation(deferred, 1, captured.mission)
+        pauseOperation = op
         deferred.invokeOnCompletion {
             synchronized(lock) {
-                if (pauseOperation === operation) pauseOperation = null
-                (deferred.getCompletedOrNull() as? MissionHoldResult.WaylinePaused)?.let {
+                if (pauseOperation === op) pauseOperation = null
+                (deferred.completedOrNull() as? MissionHoldResult.WaylinePaused)?.let {
                     heldToken = it.token
                     resumedToken = null
                 }
             }
         }
         deferred.start()
-        return operation
+        return op
     }
 
     private fun newResumeOperation(
         token: MissionHoldToken,
-        context: ResumeSafetyContext,
+        controlSession: FireControlSessionKey,
     ): SharedOperation<MissionResumeResult> {
-        val deferred = scope.async(start = CoroutineStart.LAZY) { performResume(token, context) }
-        val operation = SharedOperation(deferred, waiters = 1, key = token)
-        resumeOperation = operation
-        deferred.invokeOnCompletion {
+        val deferred = scope.async(start = CoroutineStart.LAZY) { performResume(token, controlSession) }
+        val op = SharedOperation(deferred, 1, ResumeOperationKey(token, controlSession))
+        resumeOperation = op
+        resumeLifecycle.putIfAbsent(token, ResumeLifecycle.NOT_ISSUED)
+        deferred.invokeOnCompletion { cause ->
             synchronized(lock) {
-                if (resumeOperation === operation) resumeOperation = null
-                when (val result = deferred.getCompletedOrNull()) {
+                if (resumeOperation === op) resumeOperation = null
+                if (cause is CancellationException && resumeLifecycle[token] == ResumeLifecycle.SUBMITTED) {
+                    resumeLifecycle[token] = ResumeLifecycle.OUTCOME_UNKNOWN
+                }
+                when (val result = deferred.completedOrNull()) {
                     MissionResumeResult.Resumed -> {
+                        resumeLifecycle[token] = ResumeLifecycle.SUCCEEDED
                         resumedToken = token
                         heldToken = null
                     }
                     is MissionResumeResult.ManualHold -> {
-                        if (token in issuedResumeTokens) {
-                            // A submitted DJI resume is one-shot. Any terminal
-                            // callback/state failure is retained for this exact
-                            // token so repeated calls cannot submit it again.
-                            failedResume = token to result
+                        if (resumeLifecycle[token] == ResumeLifecycle.SUBMITTED) {
+                            resumeLifecycle[token] =
+                                if (result.reason == FlightSafetyReason.RESUME_OUTCOME_UNKNOWN) {
+                                    ResumeLifecycle.OUTCOME_UNKNOWN
+                                } else {
+                                    ResumeLifecycle.FAILED
+                                }
                         }
                     }
                     null -> Unit
@@ -324,197 +364,239 @@ class AwaitableMissionControl(
             }
         }
         deferred.start()
-        return operation
+        return op
     }
 
-    private suspend fun performPause(): MissionHoldResult {
-        val snapshot = port.snapshot()
-        val identity = snapshot.identity
-        if (identity == null) {
-            return if (snapshot.state in PROVABLY_NO_ACTIVE_WAYLINE) {
+    private suspend fun performPause(captured: MissionSnapshot): MissionHoldResult {
+        val mission = captured.mission
+        if (mission == null) {
+            return if (captured.state in NO_ACTIVE_STATES) {
                 runCatching { hover() }.fold(
-                    onSuccess = { MissionHoldResult.HoveringNoWayline },
-                    onFailure = {
-                        MissionHoldResult.ManualHold(FlightSafetyReason.HOVER_COMMAND_FAILED)
-                    },
+                    { MissionHoldResult.HoveringNoWayline },
+                    { MissionHoldResult.ManualHold(FlightSafetyReason.HOVER_COMMAND_FAILED) },
                 )
-            } else {
-                MissionHoldResult.ManualHold(FlightSafetyReason.UNKNOWN_MISSION_STATE)
-            }
+            } else MissionHoldResult.ManualHold(FlightSafetyReason.UNKNOWN_MISSION_STATE)
         }
-        if (snapshot.state !in setOf(ObservedMissionState.EXECUTING, ObservedMissionState.INTERRUPTED)) {
+        if (captured.state !in setOf(ObservedMissionState.EXECUTING, ObservedMissionState.INTERRUPTED)) {
             return MissionHoldResult.ManualHold(FlightSafetyReason.UNKNOWN_MISSION_STATE)
         }
-        val breakpoint = awaitBreakpoint(identity)
+        val breakpoint = awaitBreakpoint(mission)
             ?: return MissionHoldResult.ManualHold(FlightSafetyReason.MISSING_BREAKPOINT)
-        val token = MissionHoldToken(identity, breakpoint)
-        if (snapshot.state == ObservedMissionState.INTERRUPTED) {
-            return MissionHoldResult.WaylinePaused(token)
+        if (!breakpoint.isValid) return MissionHoldResult.ManualHold(FlightSafetyReason.INVALID_BREAKPOINT)
+        val beforeCommand = port.snapshot()
+        if (beforeCommand.mission != mission) {
+            return MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
         }
-        val error = awaitCommandAndState(
-            targetState = ObservedMissionState.INTERRUPTED,
-            permittedStates = setOf(ObservedMissionState.EXECUTING, ObservedMissionState.INTERRUPTED),
-            issue = port::pause,
-        )
-        return if (error == null) {
-            MissionHoldResult.WaylinePaused(token)
-        } else if (error.isUnexpectedState()) {
-            MissionHoldResult.ManualHold(FlightSafetyReason.UNKNOWN_MISSION_STATE)
-        } else {
-            MissionHoldResult.ManualHold(FlightSafetyReason.PAUSE_COMMAND_FAILED)
+        val token = MissionHoldToken(mission, breakpoint)
+        if (beforeCommand.state == ObservedMissionState.INTERRUPTED) return MissionHoldResult.WaylinePaused(token)
+        val outcome = awaitCommandAndState(
+            mission,
+            ObservedMissionState.INTERRUPTED,
+            setOf(ObservedMissionState.EXECUTING, ObservedMissionState.INTERRUPTED),
+        ) { callback, boundary -> port.pause(mission, boundary, callback) }
+        return when {
+            outcome.error == null &&
+                exactState(mission, ObservedMissionState.INTERRUPTED, outcome.commandGeneration) ->
+                MissionHoldResult.WaylinePaused(token)
+            outcome.error?.reason == "mission-generation-changed" ->
+                MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
+            else -> MissionHoldResult.ManualHold(FlightSafetyReason.PAUSE_COMMAND_FAILED)
         }
     }
 
     private suspend fun performResume(
         token: MissionHoldToken,
-        context: ResumeSafetyContext,
+        controlSession: FireControlSessionKey,
     ): MissionResumeResult {
-        val snapshot = port.snapshot()
-        if (snapshot.identity != token.identity) {
+        val initial = port.snapshot()
+        if (initial.mission != token.mission) {
             return MissionResumeResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
         }
-        if (snapshot.state != ObservedMissionState.INTERRUPTED) {
+        if (initial.state != ObservedMissionState.INTERRUPTED) {
             return MissionResumeResult.ManualHold(FlightSafetyReason.UNKNOWN_MISSION_STATE)
         }
-        val observedBreakpoint = awaitBreakpoint(token.identity)
+        val breakpoint = awaitBreakpoint(token.mission)
             ?: return MissionResumeResult.ManualHold(FlightSafetyReason.MISSING_BREAKPOINT)
-        val currentSafety = safetyGate.evaluateResume(
-            context.copy(
-                expectedMission = token.identity,
-                observedMission = snapshot.identity,
-                expectedBreakpoint = token.breakpoint,
-                observedBreakpoint = observedBreakpoint,
-                missionStateKnown = snapshot.state != ObservedMissionState.UNKNOWN,
-            ),
+        if (!breakpoint.isValid) return MissionResumeResult.ManualHold(FlightSafetyReason.INVALID_BREAKPOINT)
+        if (breakpoint != token.breakpoint) {
+            return MissionResumeResult.ManualHold(FlightSafetyReason.BREAKPOINT_MISMATCH)
+        }
+        val immediatelyBeforeSubmission = port.snapshot()
+        if (immediatelyBeforeSubmission.mission != token.mission ||
+            immediatelyBeforeSubmission.state != ObservedMissionState.INTERRUPTED
+        ) {
+            return MissionResumeResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
+        }
+        val evidence = safetyProvider.current(controlSession)
+        val safety = safetyGate.evaluateResume(
+            controlSession,
+            token.mission,
+            token.breakpoint,
+            evidence,
+            monotonicNow(),
         )
-        if (currentSafety is ResumeSafetyDecision.ManualHold) {
-            return MissionResumeResult.ManualHold(currentSafety.reason)
+        if (safety is ResumeSafetyDecision.ManualHold) {
+            return MissionResumeResult.ManualHold(safety.reason)
         }
-        synchronized(lock) {
-            issuedResumeTokens += token
-        }
-        val error = awaitCommandAndState(
-            targetState = ObservedMissionState.EXECUTING,
-            permittedStates = setOf(
-                ObservedMissionState.INTERRUPTED,
-                ObservedMissionState.RECOVERING,
-                ObservedMissionState.EXECUTING,
-            ),
-        ) { callback -> port.resume(token.breakpoint, callback) }
-        return if (error == null) {
-            MissionResumeResult.Resumed
-        } else if (error.isUnexpectedState()) {
-            MissionResumeResult.ManualHold(FlightSafetyReason.UNKNOWN_MISSION_STATE)
-        } else {
-            MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_COMMAND_FAILED)
+        val outcome = awaitCommandAndState(
+            token.mission,
+            ObservedMissionState.EXECUTING,
+            setOf(ObservedMissionState.INTERRUPTED, ObservedMissionState.RECOVERING, ObservedMissionState.EXECUTING),
+            onSubmitted = {
+                synchronized(lock) { resumeLifecycle[token] = ResumeLifecycle.SUBMITTED }
+            },
+        ) { callback, boundary -> port.resume(token.mission, token.breakpoint, boundary, callback) }
+        return when {
+            outcome.error == null &&
+                exactState(token.mission, ObservedMissionState.EXECUTING, outcome.commandGeneration) ->
+                MissionResumeResult.Resumed
+            outcome.error?.reason == "mission-generation-changed" ->
+                MissionResumeResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
+            outcome.error?.reason == "submission-outcome-unknown" ->
+                MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_OUTCOME_UNKNOWN)
+            else -> MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_COMMAND_FAILED)
         }
     }
 
-    private suspend fun awaitBreakpoint(identity: MissionIdentity): MissionBreakpoint? =
+    private fun exactState(
+        mission: MissionExecutionKey,
+        state: ObservedMissionState,
+        commandGeneration: Long?,
+    ): Boolean = port.snapshot().let {
+        commandGeneration != null &&
+            it.mission == mission &&
+            it.state == state &&
+            it.commandGeneration == commandGeneration
+    }
+
+    private suspend fun awaitBreakpoint(mission: MissionExecutionKey): MissionBreakpoint? =
         suspendCancellableCoroutine { continuation ->
-            val cancellation = AtomicReference<MissionCancellation>()
-            continuation.invokeOnCancellation { cancellation.get()?.cancel() }
-            val handle = port.queryBreakpoint(identity) { breakpoint, error ->
-                if (continuation.isActive) {
-                    continuation.resume(if (error == null) breakpoint else null)
-                }
+            val handle = AtomicReference<MissionCancellation>()
+            continuation.invokeOnCancellation { handle.get()?.cancel() }
+            val registered = port.queryBreakpoint(mission) { breakpoint, error ->
+                if (continuation.isActive) continuation.resume(if (error == null) breakpoint else null)
             }
-            cancellation.set(handle)
-            if (!continuation.isActive) handle.cancel()
+            handle.set(registered)
+            if (!continuation.isActive) registered.cancel()
         }
 
     private suspend fun awaitCommandAndState(
-        targetState: ObservedMissionState,
-        permittedStates: Set<ObservedMissionState>,
-        issue: ((MissionCommandError?) -> Unit) -> MissionCancellation,
-    ): MissionCommandError? = suspendCancellableCoroutine { continuation ->
-        val finished = AtomicBoolean(false)
-        val callbackSucceeded = AtomicBoolean(false)
-        val stateObserved = AtomicBoolean(port.snapshot().state == targetState)
-        val listenerHandle = AtomicReference<MissionCancellation>()
-        val commandHandle = AtomicReference<MissionCancellation>()
+        mission: MissionExecutionKey,
+        target: ObservedMissionState,
+        permitted: Set<ObservedMissionState>,
+        onSubmitted: (MissionCommandSubmission) -> Unit = {},
+        issue: (
+            callback: (MissionCommandCallback) -> Unit,
+            onSubmissionBoundary: (MissionCommandSubmission) -> Unit,
+        ) -> MissionCommandSubmission,
+    ): MissionCommandOutcome = suspendCancellableCoroutine { continuation ->
+        val finished = AtomicBoolean()
+        val callbackEvidence = AtomicReference<MissionCommandCallback>()
+        val stateEvidence = AtomicReference<MissionSnapshot>()
+        val observation = AtomicReference<MissionCancellation>()
+        val submission = AtomicReference<MissionCommandSubmission>()
+        val submissionRecorded = AtomicBoolean()
 
         fun cleanup() {
-            listenerHandle.get()?.cancel()
-            commandHandle.get()?.cancel()
+            observation.get()?.cancel()
+            submission.get()?.cancellation?.cancel()
         }
-
-        fun finish(error: MissionCommandError?) {
+        fun finish(error: MissionCommandError?, commandGeneration: Long? = submission.get()?.commandGeneration) {
             if (finished.compareAndSet(false, true)) {
                 cleanup()
-                if (continuation.isActive) continuation.resume(error)
+                if (continuation.isActive) continuation.resume(MissionCommandOutcome(error, commandGeneration))
             }
         }
-
         fun maybeFinish() {
-            if (callbackSucceeded.get() && stateObserved.get()) finish(null)
+            val submitted = submission.get() ?: return
+            val callback = callbackEvidence.get() ?: return
+            val state = stateEvidence.get() ?: return
+            if (callback.mission != mission || submitted.mission != mission || state.mission != mission) {
+                finish(MissionCommandError("mission-generation-changed"))
+            } else if (callback.commandGeneration != submitted.commandGeneration ||
+                state.commandGeneration != submitted.commandGeneration
+            ) {
+                finish(MissionCommandError("command-generation-changed"))
+            } else if (callback.error != null) {
+                finish(callback.error)
+            } else {
+                finish(null)
+            }
         }
 
         continuation.invokeOnCancellation {
             if (finished.compareAndSet(false, true)) cleanup()
         }
-        val listener = port.observeState { state ->
-            if (state == targetState) {
-                stateObserved.set(true)
-                maybeFinish()
-            } else if (state !in permittedStates) {
-                finish(MissionCommandError("unexpected-mission-state:${state.name}"))
-            }
-        }
-        listenerHandle.set(listener)
-        if (finished.get()) listener.cancel()
-
-        val command = runCatching {
-            issue { error ->
-                if (error != null) {
-                    finish(error)
-                } else {
-                    callbackSucceeded.set(true)
+        val observed = port.observeSnapshots { snapshot ->
+            when {
+                snapshot.mission != mission -> finish(MissionCommandError("mission-generation-changed"))
+                snapshot.state == target -> {
+                    stateEvidence.set(snapshot)
                     maybeFinish()
                 }
+                snapshot.state !in permitted -> finish(MissionCommandError("unexpected-mission-state"))
             }
-        }.getOrElse {
-            finish(MissionCommandError("command-exception:${it::class.java.simpleName}"))
-            MissionCancellation {}
         }
-        commandHandle.set(command)
-        if (finished.get()) command.cancel()
-        maybeFinish()
+        observation.set(observed)
+        if (finished.get()) observed.cancel()
+        if (finished.get()) return@suspendCancellableCoroutine
+
+        fun recordSubmission(value: MissionCommandSubmission) {
+            submission.compareAndSet(null, value)
+            if (submissionRecorded.compareAndSet(false, true)) onSubmitted(value)
+            maybeFinish()
+        }
+        val submitted = runCatching {
+            issue(
+                { callback ->
+                    callbackEvidence.set(callback)
+                    maybeFinish()
+                },
+                ::recordSubmission,
+            )
+        }.getOrElse {
+            finish(
+                MissionCommandError(
+                    if (submissionRecorded.get()) "submission-outcome-unknown" else "submission-failed",
+                ),
+            )
+            return@suspendCancellableCoroutine
+        }
+        recordSubmission(submitted)
+        if (finished.get()) submitted.cancellation.cancel()
     }
 
-    private suspend fun <T> awaitShared(
-        operation: SharedOperation<T>,
-        cancellationResult: (CancellationException) -> T,
-    ): T {
+    private suspend fun <T> awaitShared(op: SharedOperation<T>, cancellationResult: T): T {
         try {
-            return operation.deferred.await()
-        } catch (cancelled: CancellationException) {
-            return cancellationResult(cancelled)
+            return op.deferred.await()
+        } catch (_: CancellationException) {
+            return cancellationResult
         } finally {
             synchronized(lock) {
-                operation.waiters--
-                if (operation.waiters == 0 && !operation.deferred.isCompleted) {
-                    operation.deferred.cancel(CancellationException("all-callers-cancelled"))
+                op.waiters--
+                if (op.waiters == 0 && !op.deferred.isCompleted) {
+                    op.deferred.cancel(CancellationException("all-callers-cancelled"))
                 }
             }
         }
     }
 
-    private data class SharedOperation<T>(
-        val deferred: Deferred<T>,
-        var waiters: Int,
-        val key: Any?,
+    private data class SharedOperation<T>(val deferred: Deferred<T>, var waiters: Int, val key: Any?)
+    private data class ResumeOperationKey(
+        val token: MissionHoldToken,
+        val controlSession: FireControlSessionKey,
+    )
+    private data class MissionCommandOutcome(
+        val error: MissionCommandError?,
+        val commandGeneration: Long?,
     )
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private fun <T> Deferred<T>.getCompletedOrNull(): T? =
+    private fun <T> Deferred<T>.completedOrNull(): T? =
         if (isCompleted && !isCancelled) runCatching { getCompleted() }.getOrNull() else null
 
-    private fun MissionCommandError.isUnexpectedState(): Boolean =
-        reason.startsWith("unexpected-mission-state:")
-
     companion object {
-        private val PROVABLY_NO_ACTIVE_WAYLINE = setOf(
+        private val NO_ACTIVE_STATES = setOf(
             ObservedMissionState.IDLE,
             ObservedMissionState.READY,
             ObservedMissionState.FINISHED,
