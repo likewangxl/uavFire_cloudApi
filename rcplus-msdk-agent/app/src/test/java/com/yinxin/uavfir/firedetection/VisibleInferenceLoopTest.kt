@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.advanceTimeBy
@@ -217,6 +218,43 @@ class VisibleInferenceLoopTest {
 
         assertEquals(100L, loop.snapshot().busySkippedCycles)
         assertEquals(VisibleInferenceStatus.CLOSED, loop.snapshot().status)
+    }
+
+    @Test
+    fun successfulInferencePublishesSameWorkerResultWithFrameGenerationAndTimestamp() = runTest {
+        val stream = VisibleInferenceResultStream()
+        val buffer = LatestVisibleFrameBuffer().apply {
+            offer(
+                VisibleRgbaFrame(
+                    byteArrayOf(1, 2, 3, 4),
+                    1,
+                    1,
+                    capturedAtMillis = 101,
+                    sourceGeneration = 7,
+                ),
+            )
+        }
+        val loop = VisibleInferenceLoop(
+            buffer,
+            RecordingDetector(),
+            nowMillis = { 101 },
+            resultPublisher = stream,
+        )
+        val waiting = async {
+            stream.await(
+                LocalDetectionAwaitRequest("s", "e", DetectionKind.FIRE, 7, 100),
+            )
+        }
+        runCurrent()
+
+        loop.processLatest()
+
+        val observed = waiting.await()!!
+        assertEquals(7, observed.sourceGeneration)
+        assertEquals(101, observed.capturedAtMonotonicMs)
+        assertEquals("s", observed.sessionId)
+        assertEquals("e", observed.eventId)
+        loop.close()
     }
 
     private fun frame(capturedAt: Long, onRelease: () -> Unit = {}) =

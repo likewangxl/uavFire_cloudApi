@@ -26,6 +26,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
@@ -96,6 +98,8 @@ data class RobustLaserFix(
 )
 
 interface LaserRangefinderClient {
+    suspend fun enable() = Unit
+
     suspend fun measure(): LaserRangefinderResult?
 
     suspend fun disable() = Unit
@@ -925,19 +929,35 @@ class DjiLaserRangefinderClient(
     private val keyManager: KeyManager = KeyManager.getInstance(),
     private val settleMs: Long = 500L,
 ) : LaserRangefinderClient {
+    private val operationMutex = Mutex()
+    private var enabled = false
+
+    override suspend fun enable() = operationMutex.withLock {
+        if (!enabled) {
+            val workModeKey = laserKey(DJICameraKey.KeyLaserWorkMode)
+            val enabledKey = laserKey(DJICameraKey.KeyLaserMeasureEnabled)
+            setValue(workModeKey, LaserWorkMode.OPEN_ON_DEMAND)
+            setValue(enabledKey, true)
+            enabled = true
+            delay(settleMs)
+        }
+    }
+
     override suspend fun measure(): LaserRangefinderResult? {
-        val workModeKey = laserKey(DJICameraKey.KeyLaserWorkMode)
-        val enabledKey = laserKey(DJICameraKey.KeyLaserMeasureEnabled)
+        // Keep legacy callers self-contained while the local locator explicitly
+        // brackets one bounded operation with enable/disable.
+        enable()
         val informationKey = laserKey(DJICameraKey.KeyLaserMeasureInformation)
-        setValue(workModeKey, LaserWorkMode.OPEN_ON_DEMAND)
-        setValue(enabledKey, true)
-        delay(settleMs)
         val information = getValue(informationKey) ?: return null
         return information.toResult()
     }
 
-    override suspend fun disable() {
-        setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
+    override suspend fun disable() = operationMutex.withLock {
+        try {
+            setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
+        } finally {
+            enabled = false
+        }
     }
 
     private fun <T> laserKey(keyInfo: dji.sdk.keyvalue.key.DJIKeyInfo<T>): DJIKey<T> =

@@ -1,11 +1,20 @@
 package com.yinxin.uavfir.api
 
+import com.yinxin.uavfir.firedetection.DetectionKind
+import com.yinxin.uavfir.firedetection.AircraftOsdSnapshot
+import com.yinxin.uavfir.firedetection.FireLocalizationFailure
+import com.yinxin.uavfir.firedetection.FireLocalizationRequest
+import com.yinxin.uavfir.firedetection.FireLocalizationResult
+import com.yinxin.uavfir.firedetection.LocalTargetAimResult
+import com.yinxin.uavfir.firedetection.LocalVisibleTargetAimerPort
+import com.yinxin.uavfir.firedetection.NormalizedRoi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.CancellationException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class VisibleFireLaserLocatorTest {
@@ -138,6 +147,148 @@ class VisibleFireLaserLocatorTest {
         assertFalse(fixture.mission.resumeCalled)
     }
 
+    @Test
+    fun localizeReturnsTypedPreciseFireAndSmokeResultsAndDisablesLaser() = runTest {
+        for (kind in DetectionKind.entries) {
+            val laser = SequenceLaser(
+                mutableListOf(
+                    LaserRangefinderResult(34.0, 109.0, 10.0, 60.0, "NORMAL", .5, .5),
+                    LaserRangefinderResult(34.00001, 109.00001, 12.0, 62.0, "NORMAL", .5, .5),
+                    LaserRangefinderResult(34.00002, 109.00002, 11.0, 61.0, "NORMAL", .5, .5),
+                ),
+            )
+            val locator = localLocator(laser = laser)
+            locator.hold("event-1")
+
+            val result = locator.localize(localRequest(kind))
+
+            assertTrue(result is FireLocalizationResult.Precise)
+            result as FireLocalizationResult.Precise
+            assertEquals(kind, result.kind)
+            assertEquals("PRECISE", result.locationStatus)
+            assertEquals("LASER_RANGEFINDER", result.geoMethod)
+            assertEquals(3, result.rawSamples.size)
+            assertEquals(1, laser.enableCalls)
+            assertEquals(1, laser.disableCalls)
+        }
+    }
+
+    @Test
+    fun boundedInvalidLaserSamplesDegradeToAircraftObservationWithoutFireCoordinates() = runTest {
+        val laser = SequenceLaser(
+            MutableList(20) {
+                LaserRangefinderResult(null, null, null, null, "INVALID")
+            },
+        )
+        val locator = localLocator(laser = laser)
+        locator.hold("event-1")
+
+        val result = locator.localize(localRequest(DetectionKind.SMOKE))
+
+        assertTrue(result is FireLocalizationResult.DegradedOsd)
+        result as FireLocalizationResult.DegradedOsd
+        assertEquals(DetectionKind.SMOKE, result.kind)
+        assertEquals(FireLocalizationFailure.LASER_SAMPLES_UNAVAILABLE, result.reason)
+        assertEquals("DEGRADED_OSD", result.locationStatus)
+        assertEquals("AIRCRAFT_OBSERVATION", result.geoMethod)
+        assertEquals(null, result.fireLatitude)
+        assertEquals(null, result.fireLongitude)
+        assertEquals(null, result.fireAltitude)
+        assertEquals(9, laser.measureCalls)
+        assertEquals(1, laser.disableCalls)
+        assertEquals(34.1, result.aircraftOsd.latitude, 0.0)
+    }
+
+    @Test
+    fun laserAndInvalidOsdReturnsManualHoldInsteadOfInventingCoordinates() = runTest {
+        val locator = localLocator(
+            laser = SequenceLaser(mutableListOf()),
+            osd = AircraftOsdSnapshot(Double.NaN, 109.0, 100.0, 1),
+        )
+        locator.hold("event-1")
+
+        val result = locator.localize(localRequest(DetectionKind.FIRE))
+
+        assertEquals(
+            FireLocalizationFailure.AIRCRAFT_OSD_UNAVAILABLE,
+            (result as FireLocalizationResult.ManualHold).reason,
+        )
+    }
+
+    @Test
+    fun thrownAndCancelledLaserPathsAlwaysDisable() = runTest {
+        val throwing = SequenceLaser(mutableListOf(), error = IllegalStateException("boom"))
+        val locator = localLocator(laser = throwing)
+        locator.hold("event-1")
+        assertTrue(locator.localize(localRequest(DetectionKind.FIRE)) is FireLocalizationResult.DegradedOsd)
+        assertEquals(1, throwing.disableCalls)
+
+        val cancelled = SequenceLaser(mutableListOf(), error = CancellationException("stop"))
+        val cancelledLocator = localLocator(laser = cancelled)
+        cancelledLocator.hold("event-1")
+        runCatching { cancelledLocator.localize(localRequest(DetectionKind.FIRE)) }
+        assertEquals(1, cancelled.disableCalls)
+    }
+
+    @Test
+    fun aimAndEnableFailuresStillDisableLaserAndReturnTypedDegradation() = runTest {
+        val laser = SequenceLaser(mutableListOf(), enableError = IllegalStateException("enable"))
+        val enableFailure = localLocator(laser = laser)
+        enableFailure.hold("event-1")
+        val enabled = enableFailure.localize(localRequest(DetectionKind.FIRE))
+        assertEquals(
+            FireLocalizationFailure.LASER_ENABLE_FAILED,
+            (enabled as FireLocalizationResult.DegradedOsd).reason,
+        )
+        assertEquals(1, laser.disableCalls)
+
+        val aimLaser = SequenceLaser(mutableListOf())
+        val aimFailure = localLocator(
+            laser = aimLaser,
+            aimer = LocalVisibleTargetAimerPort {
+                LocalTargetAimResult.Failed(
+                    com.yinxin.uavfir.firedetection.LocalTargetAimFailure.TARGET_NOT_REACQUIRED,
+                )
+            },
+        )
+        aimFailure.hold("event-1")
+        assertTrue(
+            aimFailure.localize(localRequest(DetectionKind.SMOKE)) is
+                FireLocalizationResult.DegradedOsd,
+        )
+        assertEquals(1, aimLaser.disableCalls)
+    }
+
+    private fun localRequest(kind: DetectionKind) = FireLocalizationRequest(
+        sessionId = "session-1",
+        eventId = "event-1",
+        taskId = "task-1",
+        kind = kind,
+        initialRoi = NormalizedRoi(.4f, .4f, .6f, .6f),
+    )
+
+    private fun localLocator(
+        laser: SequenceLaser,
+        osd: AircraftOsdSnapshot? = AircraftOsdSnapshot(34.1, 109.1, 100.0, 0),
+        aimer: LocalVisibleTargetAimerPort = LocalVisibleTargetAimerPort {
+            LocalTargetAimResult.Aligned(
+                kind = it.kind,
+                roi = it.priorRoi,
+                sourceGeneration = 7,
+                detectionCapturedAtMonotonicMs = 100,
+                cycles = 1,
+            )
+        },
+    ): VisibleFireLaserLocator = VisibleFireLaserLocator(
+        missionHold = RecordingMissionHold(true),
+        flightControl = RecordingFlightControl(),
+        velocityProvider = SequenceVelocityProvider(MutableList(6) { VelocitySample(.1, .1) }),
+        time = AdvancingTime(),
+        localTargetAimer = aimer,
+        aircraftOsdProvider = { osd },
+        laserRangefinder = laser,
+    )
+
     private fun measuringFixture(
         laserResults: MutableList<LaserRangefinderResult> = mutableListOf(),
     ): MeasuringFixture {
@@ -175,11 +326,23 @@ class VisibleFireLaserLocatorTest {
 
     private class SequenceLaser(
         private val results: MutableList<LaserRangefinderResult>,
+        private val error: Throwable? = null,
+        private val enableError: Throwable? = null,
     ) : LaserRangefinderClient {
         var disableCalls = 0
+        var enableCalls = 0
+        var measureCalls = 0
 
-        override suspend fun measure(): LaserRangefinderResult? =
-            if (results.isEmpty()) null else results.removeAt(0)
+        override suspend fun enable() {
+            enableCalls += 1
+            enableError?.let { throw it }
+        }
+
+        override suspend fun measure(): LaserRangefinderResult? {
+            measureCalls += 1
+            error?.let { throw it }
+            return if (results.isEmpty()) null else results.removeAt(0)
+        }
 
         override suspend fun disable() {
             disableCalls += 1

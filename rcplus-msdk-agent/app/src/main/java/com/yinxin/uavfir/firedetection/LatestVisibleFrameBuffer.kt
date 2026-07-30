@@ -117,6 +117,9 @@ class LatestVisibleFrameBuffer internal constructor(
 ) : VisibleFrameIngress, AutoCloseable {
     override val enabled: Boolean = true
 
+    fun currentVisibleSourceGeneration(): Long? =
+        (sourceState.get() as? SourceState.Visible)?.generation
+
     private sealed interface Slot {
         data object Empty : Slot
         data object Closed : Slot

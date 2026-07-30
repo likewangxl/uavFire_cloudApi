@@ -48,6 +48,8 @@ class VisibleInferenceLoop internal constructor(
     private val detector: VisibleFireDetector,
     private val nowMillis: () -> Long = SystemClock::elapsedRealtime,
     private val hooks: VisibleInferenceLoopHooks = VisibleInferenceLoopHooks(),
+    private val resultPublisher: VisibleInferenceResultPublisher =
+        VisibleInferenceResultPublisher.NO_OP,
 ) : AutoCloseable {
     private val processing = AtomicBoolean(false)
     private val lifecycleMonitor = Any()
@@ -110,7 +112,16 @@ class VisibleInferenceLoop internal constructor(
                         lastFailure = null,
                     )
                 }
-                detector.detect(frame)
+                val result = detector.detect(frame)
+                if (result.frameCapturedAtMillis != frame.capturedAtMillis) {
+                    error("detector-result-frame-timestamp-mismatch")
+                }
+                resultPublisher.publish(
+                    PublishedVisibleInferenceResult(
+                        sourceGeneration = frame.sourceGeneration,
+                        result = result,
+                    ),
+                )
                 updateMetrics {
                     it.copy(
                         status = VisibleInferenceStatus.HEALTHY,

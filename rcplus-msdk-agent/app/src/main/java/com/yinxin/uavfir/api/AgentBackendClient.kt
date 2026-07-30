@@ -174,12 +174,6 @@ class AgentBackendClient(
         return response
     }
 
-    suspend fun latestVisibleRoi(
-        taskId: String,
-        afterSourceTs: Long,
-    ): VisibleRoiSnapshotResponse? =
-        api.latestVisibleRoi(taskId, afterSourceTs)?.data
-
     suspend fun ackCommand(
         droneSn: String,
         commandId: String,

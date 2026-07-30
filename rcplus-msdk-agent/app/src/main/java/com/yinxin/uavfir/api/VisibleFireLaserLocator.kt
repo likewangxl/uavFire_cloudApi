@@ -1,6 +1,19 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.session.DualStreamSessionManager
+import com.yinxin.uavfir.firedetection.AircraftOsdSnapshotProvider
+import com.yinxin.uavfir.firedetection.BoundLaserSample
+import com.yinxin.uavfir.firedetection.FireLocalizationFailure
+import com.yinxin.uavfir.firedetection.FireLocalizationRequest
+import com.yinxin.uavfir.firedetection.FireLocalizationResult
+import com.yinxin.uavfir.firedetection.LaserOperationBinding
+import com.yinxin.uavfir.firedetection.LaserSampleValidator
+import com.yinxin.uavfir.firedetection.LaserValidationResult
+import com.yinxin.uavfir.firedetection.LocalTargetAimRequest
+import com.yinxin.uavfir.firedetection.LocalTargetAimResult
+import com.yinxin.uavfir.firedetection.LocalVisibleTargetAimerPort
+import com.yinxin.uavfir.firedetection.LocalTargetAlignmentAction
+import com.yinxin.uavfir.firedetection.TargetActionReceipt
 import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.DJIKey
@@ -18,11 +31,17 @@ import dji.v5.et.get
 import dji.v5.manager.KeyManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
+import java.util.concurrent.atomic.AtomicLong
 
 data class VelocitySample(
     val horizontalMps: Double,
@@ -48,10 +67,6 @@ object UnsupportedVisibleTargetAimer : VisibleTargetAimer {
 
 fun interface TapZoomClient {
     suspend fun tap(x: Double, y: Double)
-}
-
-fun interface VisibleRoiProvider {
-    suspend fun latest(taskId: String, afterSourceTs: Long): VisibleRoiSnapshotResponse?
 }
 
 class DjiTapZoomClient(
@@ -89,36 +104,34 @@ class DjiTapZoomClient(
     }
 }
 
-class BackendVisibleTargetAimer(
-    private val visibleRoiProvider: VisibleRoiProvider,
+class DjiLocalTargetAlignmentAction(
     private val tapZoomClient: TapZoomClient,
-    private val laserRangefinder: LaserRangefinderClient,
+    private val currentVisibleGeneration: () -> Long?,
     private val time: VisibleFireTime = SystemVisibleFireTime,
-    private val maxIterations: Int = 3,
     private val settleMs: Long = 500L,
-) : VisibleTargetAimer {
-    override suspend fun align(taskId: String, visibleRoi: Map<String, Double>): Boolean {
-        var roi = visibleRoi
-        repeat(maxIterations) {
-            if (!roi.isNormalizedRoi()) {
-                return false
-            }
-            tapZoomClient.tap(
-                roi.getValue("x") + roi.getValue("width") / 2.0,
-                roi.getValue("y") + roi.getValue("height") / 2.0,
-            )
-            val movedAt = System.currentTimeMillis()
-            time.delayMs(settleMs)
-            val fresh = visibleRoiProvider.latest(taskId, movedAt) ?: return false
-            val laser = laserRangefinder.measure() ?: return false
-            val targetX = laser.targetX ?: return false
-            val targetY = laser.targetY ?: return false
-            if (fresh.visibleRoi.containsPoint(targetX, targetY)) {
-                return true
-            }
-            roi = fresh.visibleRoi
+) : LocalTargetAlignmentAction {
+    init {
+        require(settleMs >= 0L)
+    }
+
+    override suspend fun alignAt(x: Double, y: Double): TargetActionReceipt {
+        val generationBefore = currentVisibleGeneration()
+            ?: error("visible-source-generation-unavailable")
+        tapZoomClient.tap(x, y)
+        time.delayMs(settleMs)
+        val generationAfter = currentVisibleGeneration()
+            ?: error("visible-source-generation-unavailable")
+        check(generationAfter == generationBefore) {
+            "visible-source-generation-changed-during-alignment"
         }
-        return false
+        return TargetActionReceipt(
+            completedAtMonotonicMs = time.nowMs(),
+            sourceGeneration = generationAfter,
+            // The MSDK zoom-lens laser reticle is the normalized display
+            // center after tap-zoom/gimbal-follow completes.
+            reticleX = 0.5,
+            reticleY = 0.5,
+        )
     }
 }
 
@@ -152,10 +165,16 @@ class VisibleFireLaserLocator(
     private val velocityProvider: AircraftVelocityProvider = DjiAircraftVelocityProvider(),
     private val time: VisibleFireTime = SystemVisibleFireTime,
     private val targetAimer: VisibleTargetAimer = UnsupportedVisibleTargetAimer,
+    private val localTargetAimer: LocalVisibleTargetAimerPort? = null,
+    private val aircraftOsdProvider: AircraftOsdSnapshotProvider =
+        AircraftOsdSnapshotProvider { null },
+    private val laserSampleValidator: LaserSampleValidator = LaserSampleValidator(),
     private val laserRangefinder: LaserRangefinderClient = NoopLaserRangefinderClient,
 ) {
     @Volatile
     private var heldEventId: String? = null
+    private val laserOperationGeneration = AtomicLong()
+    private val localizationMutex = Mutex()
 
     suspend fun hold(eventId: String): DualStreamSessionManager.CommandExecutionResult {
         if (eventId.isBlank()) {
@@ -245,6 +264,123 @@ class VisibleFireLaserLocator(
         }
     }
 
+    suspend fun localize(request: FireLocalizationRequest): FireLocalizationResult =
+        localizationMutex.withLock {
+            try {
+                localizeHeld(request)
+            } finally {
+                withContext(NonCancellable) {
+                    runCatching { laserRangefinder.disable() }
+                }
+                heldEventId = null
+            }
+        }
+
+    private suspend fun localizeHeld(request: FireLocalizationRequest): FireLocalizationResult {
+        if (heldEventId != request.eventId) {
+            return degradedOrManualHold(
+                request,
+                FireLocalizationFailure.EVENT_SESSION_MISMATCH,
+            )
+        }
+        val aimer = localTargetAimer ?: return degradedOrManualHold(
+            request,
+            FireLocalizationFailure.TARGET_NOT_ALIGNED,
+        )
+        val aimed = try {
+            aimer.align(
+                LocalTargetAimRequest(
+                    sessionId = request.sessionId,
+                    eventId = request.eventId,
+                    kind = request.kind,
+                    priorRoi = request.initialRoi,
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return degradedOrManualHold(request, FireLocalizationFailure.TARGET_NOT_ALIGNED)
+        }
+        if (aimed !is LocalTargetAimResult.Aligned || aimed.kind != request.kind) {
+            return degradedOrManualHold(request, FireLocalizationFailure.TARGET_NOT_ALIGNED)
+        }
+
+        val operationGeneration = laserOperationGeneration.incrementAndGet()
+        val windowStarted = time.nowMs()
+        val binding = LaserOperationBinding(
+            sessionId = request.sessionId,
+            eventId = request.eventId,
+            targetRoi = aimed.roi,
+            sourceGeneration = aimed.sourceGeneration,
+            operationGeneration = operationGeneration,
+            windowStartedAtMonotonicMs = windowStarted,
+            windowEndsAtMonotonicMs = windowStarted + LASER_OPERATION_WINDOW_MS,
+        )
+        val accepted = mutableListOf<BoundLaserSample>()
+        try {
+            laserRangefinder.enable()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return degradedOrManualHold(request, FireLocalizationFailure.LASER_ENABLE_FAILED)
+        }
+        repeat(MAX_LASER_ATTEMPTS) { attempt ->
+            if (accepted.size == LASER_SAMPLE_COUNT) return@repeat
+            if (attempt > 0) time.delayMs(LASER_SAMPLE_INTERVAL_MS)
+            val value = try {
+                laserRangefinder.measure()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (value != null) {
+                val bound = BoundLaserSample(binding, time.nowMs(), value)
+                if (laserSampleValidator.isAcceptableCandidate(binding, bound)) {
+                    accepted += bound
+                }
+            }
+        }
+        if (accepted.size != LASER_SAMPLE_COUNT) {
+            return degradedOrManualHold(
+                request,
+                FireLocalizationFailure.LASER_SAMPLES_UNAVAILABLE,
+            )
+        }
+        return when (val validated = laserSampleValidator.validate(binding, accepted)) {
+            is LaserValidationResult.Valid -> FireLocalizationResult.Precise(
+                kind = request.kind,
+                fireLatitude = validated.latitude,
+                fireLongitude = validated.longitude,
+                fireAltitude = validated.altitude,
+                rangeM = validated.rangeM,
+                errorRadiusM = validated.errorRadiusM,
+                rawSamples = validated.rawSamples,
+                targetRoi = aimed.roi,
+                sourceGeneration = aimed.sourceGeneration,
+            )
+            is LaserValidationResult.Invalid -> degradedOrManualHold(
+                request,
+                FireLocalizationFailure.LASER_SAMPLES_INVALID,
+            )
+        }
+    }
+
+    private fun degradedOrManualHold(
+        request: FireLocalizationRequest,
+        failure: FireLocalizationFailure,
+    ): FireLocalizationResult {
+        val osd = runCatching { aircraftOsdProvider.current() }.getOrNull()
+        return if (osd != null && osd.valid) {
+            FireLocalizationResult.DegradedOsd(request.kind, failure, osd)
+        } else {
+            FireLocalizationResult.ManualHold(
+                request.kind,
+                FireLocalizationFailure.AIRCRAFT_OSD_UNAVAILABLE,
+            )
+        }
+    }
+
     private fun failure(reason: String) = DualStreamSessionManager.CommandExecutionResult(
         status = "failed",
         message = "LASER_FAILED:$reason",
@@ -273,6 +409,8 @@ class VisibleFireLaserLocator(
         const val LASER_SAMPLE_INTERVAL_MS = 300L
         const val LASER_SCATTER_LIMIT_M = 15.0
         const val LASER_ERROR_RADIUS_M = 5.0
+        const val MAX_LASER_ATTEMPTS = 9
+        const val LASER_OPERATION_WINDOW_MS = 20_000L
     }
 }
 
