@@ -213,8 +213,13 @@ class WaypointMissionControlPort(
 data class MissionHoldToken(
     val mission: MissionExecutionKey,
     val breakpoint: MissionBreakpoint,
+    val pausedCommandGeneration: Long,
     val holdGeneration: Long = 1,
-)
+) {
+    init {
+        require(pausedCommandGeneration > 0 && holdGeneration > 0)
+    }
+}
 
 sealed interface MissionHoldResult {
     data class WaylinePaused(val token: MissionHoldToken) : MissionHoldResult
@@ -255,8 +260,11 @@ class AwaitableMissionControl(
             if (closed) return MissionHoldResult.ManualHold(FlightSafetyReason.CONTROL_CLOSED)
             if (manualTakeover) return MissionHoldResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)
             heldToken?.takeIf {
-                captured.mission == it.mission && captured.state == ObservedMissionState.INTERRUPTED
+                captured.mission == it.mission &&
+                    captured.state == ObservedMissionState.INTERRUPTED &&
+                    captured.commandGeneration == it.pausedCommandGeneration
             }?.let { return MissionHoldResult.WaylinePaused(it) }
+            if (heldToken != null) heldToken = null
             val key = captured.mission
             pauseOperation?.let {
                 if (it.key != key) return MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
@@ -405,8 +413,14 @@ class AwaitableMissionControl(
         if (beforeCommand.mission != mission) {
             return MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
         }
-        val token = MissionHoldToken(mission, breakpoint, holdGeneration.incrementAndGet())
-        if (beforeCommand.state == ObservedMissionState.INTERRUPTED) return MissionHoldResult.WaylinePaused(token)
+        if (beforeCommand.commandGeneration != captured.commandGeneration) {
+            return MissionHoldResult.ManualHold(FlightSafetyReason.PAUSE_COMMAND_FAILED)
+        }
+        if (beforeCommand.state == ObservedMissionState.INTERRUPTED) {
+            return MissionHoldResult.WaylinePaused(
+                newHoldToken(mission, breakpoint, beforeCommand.commandGeneration),
+            )
+        }
         val outcome = awaitCommandAndState(
             mission,
             ObservedMissionState.INTERRUPTED,
@@ -415,7 +429,9 @@ class AwaitableMissionControl(
         return when {
             outcome.error == null &&
                 exactState(mission, ObservedMissionState.INTERRUPTED, outcome.commandGeneration) ->
-                MissionHoldResult.WaylinePaused(token)
+                MissionHoldResult.WaylinePaused(
+                    newHoldToken(mission, breakpoint, checkNotNull(outcome.commandGeneration)),
+                )
             outcome.error?.reason == "mission-generation-changed" ->
                 MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
             else -> MissionHoldResult.ManualHold(FlightSafetyReason.PAUSE_COMMAND_FAILED)
@@ -429,6 +445,9 @@ class AwaitableMissionControl(
         val initial = port.snapshot()
         if (initial.mission != token.mission) {
             return MissionResumeResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
+        }
+        if (initial.commandGeneration != token.pausedCommandGeneration) {
+            return MissionResumeResult.ManualHold(FlightSafetyReason.HOLD_COMMAND_GENERATION_MISMATCH)
         }
         if (initial.state != ObservedMissionState.INTERRUPTED) {
             return MissionResumeResult.ManualHold(FlightSafetyReason.UNKNOWN_MISSION_STATE)
@@ -445,11 +464,15 @@ class AwaitableMissionControl(
         ) {
             return MissionResumeResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
         }
+        if (immediatelyBeforeSubmission.commandGeneration != token.pausedCommandGeneration) {
+            return MissionResumeResult.ManualHold(FlightSafetyReason.HOLD_COMMAND_GENERATION_MISMATCH)
+        }
         val versionedEvidence = safetyProvider.current(controlSession)
         val safety = safetyGate.evaluateResume(
             controlSession,
             token.mission,
             token.breakpoint,
+            token.pausedCommandGeneration,
             versionedEvidence?.evidence,
             monotonicNow(),
         )
@@ -509,6 +532,17 @@ class AwaitableMissionControl(
             handle.set(registered)
             if (!continuation.isActive) registered.cancel()
         }
+
+    private fun newHoldToken(
+        mission: MissionExecutionKey,
+        breakpoint: MissionBreakpoint,
+        pausedCommandGeneration: Long,
+    ) = MissionHoldToken(
+        mission,
+        breakpoint,
+        pausedCommandGeneration,
+        holdGeneration.incrementAndGet(),
+    )
 
     private suspend fun awaitCommandAndState(
         mission: MissionExecutionKey,

@@ -45,7 +45,26 @@ internal class SerializedSnapshotObserver<T>(
                 }
                 pending.removeFirst()
             }
-            callback(next)
+            var failure: Throwable? = null
+            try {
+                callback(next)
+            } catch (throwable: Throwable) {
+                failure = throwable
+            } finally {
+                if (failure != null) {
+                    synchronized(lock) {
+                        active = false
+                        pending.clear()
+                        draining = false
+                    }
+                }
+            }
+            when (failure) {
+                is Error -> throw failure
+                is Exception -> return
+                null -> Unit
+                else -> throw failure
+            }
         }
     }
 
@@ -55,6 +74,8 @@ internal class SerializedSnapshotObserver<T>(
             pending.clear()
         }
     }
+
+    fun isActive(): Boolean = synchronized(lock) { active }
 }
 
 data class WaypointMissionIdentity(
@@ -121,7 +142,7 @@ class WaypointMissionExecutor(
             missionObservers.forEach { it.enqueue(next) }
             (current.state to current.identity?.missionId) to missionObservers.toList()
         }
-        observersToDrain.forEach { it.drain() }
+        drainObservers(observersToDrain)
         listener.onState(transition.second, newState, transition.first)
     }
 
@@ -208,7 +229,7 @@ class WaypointMissionExecutor(
             missionObservers.forEach { it.enqueue(next) }
             missionObservers.toList()
         }
-        observersToDrain.forEach { it.drain() }
+        drainObservers(observersToDrain)
         Log.i(
             TAG,
             WaypointMissionDiagnosticFormatter.formatAvailableWaylineIds(
@@ -287,7 +308,7 @@ class WaypointMissionExecutor(
             missionObservers += registration
             registration.enqueue(executionSnapshot.get())
         }
-        registration.drain()
+        drainObservers(listOf(registration))
         return {
             synchronized(missionLock) { missionObservers -= registration }
             registration.deactivate()
@@ -300,7 +321,11 @@ class WaypointMissionExecutor(
             Log.w(TAG, "stopActiveMission called but no active mission")
             return
         }
-        WaypointMissionManager.getInstance().stopMission(fileName, simpleCallback(activeMissionId(), "stopMission"))
+        submitLegacyCommand(
+            stage = "stopMission",
+        ) { callback ->
+            WaypointMissionManager.getInstance().stopMission(fileName, callback)
+        }
     }
 
     fun queryActiveBreakpoint(onResult: (BreakPointInfo?, IDJIError?) -> Unit) {
@@ -397,7 +422,7 @@ class WaypointMissionExecutor(
             missionObservers.forEach { it.enqueue(next) }
             next to missionObservers.toList()
         } ?: return null
-        observersToDrain.forEach { it.drain() }
+        drainObservers(observersToDrain)
         val callback = object : CommonCallbacks.CompletionCallback {
             override fun onSuccess() {
                 onComplete(submitted, null)
@@ -414,6 +439,19 @@ class WaypointMissionExecutor(
         onSubmissionBoundary(submitted)
         submit(callback)
         return MissionCommandSubmission(submitted)
+    }
+
+    private fun drainObservers(
+        observersToDrain: List<SerializedSnapshotObserver<MissionExecutionSnapshot>>,
+    ) {
+        try {
+            observersToDrain.forEach { it.drain() }
+        } finally {
+            val inactive = observersToDrain.filterNot { it.isActive() }
+            if (inactive.isNotEmpty()) {
+                synchronized(missionLock) { missionObservers.removeAll(inactive.toSet()) }
+            }
+        }
     }
 
     private fun tiltGimbalToNadir(missionId: String?) {

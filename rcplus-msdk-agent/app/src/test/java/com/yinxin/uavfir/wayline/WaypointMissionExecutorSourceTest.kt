@@ -93,4 +93,15 @@ class WaypointMissionExecutorSourceTest {
         assertTrue(source.contains("registration.deactivate()"))
         assertTrue(!source.contains("missionObservers.forEach { it("))
     }
+
+    @Test
+    fun stopMissionRoutesThroughTheSameGenerationPrimitive() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
+        val stopBody = source.substringAfter("fun stopActiveMission()").substringBefore("fun queryActiveBreakpoint")
+
+        assertTrue(stopBody.contains("submitLegacyCommand("))
+        assertTrue(stopBody.contains("stage = \"stopMission\""))
+        assertTrue(stopBody.contains("stopMission(fileName, callback)"))
+        assertTrue(!stopBody.contains("simpleCallback("))
+    }
 }

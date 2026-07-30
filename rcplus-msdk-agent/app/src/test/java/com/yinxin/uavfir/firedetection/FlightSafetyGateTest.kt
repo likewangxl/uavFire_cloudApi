@@ -7,7 +7,7 @@ import org.junit.Test
 class FlightSafetyGateTest {
     private val mission = MissionExecutionKey(MissionIdentity("m", "m.kmz"), 1)
     private val control = FireControlSessionKey("fire", 1)
-    private val binding = HoverControlBinding(control, mission)
+    private val binding = HoverControlBinding(control, mission, 1)
     private val gate = FlightSafetyGate()
 
     @Test

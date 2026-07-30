@@ -21,6 +21,7 @@ enum class FlightSafetyReason {
     MISSING_BREAKPOINT,
     INVALID_BREAKPOINT,
     MISSION_IDENTITY_MISMATCH,
+    HOLD_COMMAND_GENERATION_MISMATCH,
     BREAKPOINT_MISMATCH,
     LASER_ENABLED,
     TARGET_ALIGNMENT_ACTIVE,
@@ -93,7 +94,12 @@ data class FireControlSessionKey(val sessionId: String, val generation: Long) {
 data class HoverControlBinding(
     val controlSession: FireControlSessionKey,
     val mission: MissionExecutionKey,
-)
+    val pausedCommandGeneration: Long,
+) {
+    init {
+        require(pausedCommandGeneration > 0)
+    }
+}
 
 data class FlightSafetySignals(
     val manualTakeover: Boolean = false,
@@ -128,6 +134,7 @@ data class ResumeSafetyEvidence internal constructor(
     val controlSession: FireControlSessionKey,
     val mission: MissionExecutionKey,
     val breakpoint: MissionBreakpoint,
+    val pausedCommandGeneration: Long,
     val terminalResultDurable: Boolean,
     val laserEnabled: Boolean,
     val targetAlignmentClosed: Boolean,
@@ -136,7 +143,11 @@ data class ResumeSafetyEvidence internal constructor(
     val telemetry: FlightTelemetrySample?,
     val stableHoverEvidence: StableHoverEvidence?,
     val observedAtMonotonicMs: Long,
-)
+) {
+    init {
+        require(pausedCommandGeneration > 0)
+    }
+}
 
 @ConsistentCopyVisibility
 data class VersionedResumeSafetyEvidence internal constructor(
@@ -346,6 +357,7 @@ class FlightSafetyGate {
         controlSession: FireControlSessionKey,
         mission: MissionExecutionKey,
         breakpoint: MissionBreakpoint,
+        pausedCommandGeneration: Long,
         evidence: ResumeSafetyEvidence?,
         nowMs: Long,
     ): ResumeSafetyDecision {
@@ -353,6 +365,8 @@ class FlightSafetyGate {
             evidence == null -> FlightSafetyReason.TELEMETRY_UNAVAILABLE
             evidence.controlSession != controlSession -> FlightSafetyReason.FIRE_SESSION_IDENTITY_MISMATCH
             evidence.mission != mission -> FlightSafetyReason.MISSION_IDENTITY_MISMATCH
+            evidence.pausedCommandGeneration != pausedCommandGeneration ->
+                FlightSafetyReason.HOLD_COMMAND_GENERATION_MISMATCH
             evidence.breakpoint != breakpoint -> FlightSafetyReason.BREAKPOINT_MISMATCH
             !evidence.terminalResultDurable -> FlightSafetyReason.TERMINAL_RESULT_NOT_DURABLE
             signalFailure(evidence.signals) != null -> signalFailure(evidence.signals)
@@ -372,7 +386,8 @@ class FlightSafetyGate {
             evidence.stableHoverEvidence == null -> FlightSafetyReason.HOVER_NOT_STABLE
             currentProof !== evidence.stableHoverEvidence ||
                 evidence.stableHoverEvidence.hoverEpoch != hoverEpoch ||
-                evidence.stableHoverEvidence.binding != HoverControlBinding(controlSession, mission) ->
+                evidence.stableHoverEvidence.binding !=
+                    HoverControlBinding(controlSession, mission, pausedCommandGeneration) ->
                 FlightSafetyReason.HOVER_NOT_STABLE
             else -> null
         }

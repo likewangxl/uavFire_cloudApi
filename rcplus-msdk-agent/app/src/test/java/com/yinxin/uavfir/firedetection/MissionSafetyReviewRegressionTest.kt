@@ -54,24 +54,24 @@ class MissionSafetyReviewRegressionTest {
     fun submittedResumeCancellationIsOutcomeUnknownAndAbaNeverReissues() = runTest {
         val port = ReviewPort(MissionSnapshot(missionA, ObservedMissionState.INTERRUPTED, 7), breakpoint)
         val safety = RecordingSafetyProvider().apply {
-            evidence = validEvidence(controlA, missionA, breakpoint)
+            evidence = validEvidence(controlA, missionA, breakpoint, 7)
         }
         val control = AwaitableMissionControl(port, {}, this, safety.gate, safety) { 1_000 }
-        val tokenA = MissionHoldToken(missionA, breakpoint)
+        val tokenA = MissionHoldToken(missionA, breakpoint, 7)
         val first = async { control.resume(tokenA, controlA) }
         advanceUntilIdle()
         assertEquals(1, port.resumeCalls)
         first.cancelAndJoin()
 
-        val tokenB = MissionHoldToken(missionB, breakpoint)
+        val tokenB = MissionHoldToken(missionB, breakpoint, 8)
         port.switchMission(MissionSnapshot(missionB, ObservedMissionState.INTERRUPTED, 8))
-        safety.evidence = validEvidence(FireControlSessionKey("fire-b", 22), missionB, breakpoint)
+        safety.evidence = validEvidence(FireControlSessionKey("fire-b", 22), missionB, breakpoint, 8)
         val second = async { control.resume(tokenB, FireControlSessionKey("fire-b", 22)) }
         advanceUntilIdle()
         second.cancelAndJoin()
 
         port.switchMission(MissionSnapshot(missionA, ObservedMissionState.INTERRUPTED, 7))
-        safety.evidence = validEvidence(controlA, missionA, breakpoint)
+        safety.evidence = validEvidence(controlA, missionA, breakpoint, 7)
         assertEquals(
             MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_OUTCOME_UNKNOWN),
             control.resume(tokenA, controlA),
@@ -85,10 +85,10 @@ class MissionSafetyReviewRegressionTest {
         val port = ReviewPort(MissionSnapshot(missionA, ObservedMissionState.INTERRUPTED, 7), breakpoint)
         port.throwAfterResumeBoundary = true
         val safety = RecordingSafetyProvider().apply {
-            evidence = validEvidence(controlA, missionA, breakpoint)
+            evidence = validEvidence(controlA, missionA, breakpoint, 7)
         }
         val control = AwaitableMissionControl(port, {}, this, safety.gate, safety) { 1_000 }
-        val token = MissionHoldToken(missionA, breakpoint)
+        val token = MissionHoldToken(missionA, breakpoint, 7)
 
         assertEquals(
             MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_OUTCOME_UNKNOWN),
@@ -106,10 +106,10 @@ class MissionSafetyReviewRegressionTest {
     fun differentFireSessionGenerationCannotCoalesceIntoSubmittedResume() = runTest {
         val port = ReviewPort(MissionSnapshot(missionA, ObservedMissionState.INTERRUPTED, 7), breakpoint)
         val safety = RecordingSafetyProvider().apply {
-            evidence = validEvidence(controlA, missionA, breakpoint)
+            evidence = validEvidence(controlA, missionA, breakpoint, 7)
         }
         val control = AwaitableMissionControl(port, {}, this, safety.gate, safety) { 1_000 }
-        val token = MissionHoldToken(missionA, breakpoint)
+        val token = MissionHoldToken(missionA, breakpoint, 7)
         val first = async { control.resume(token, controlA) }
         advanceUntilIdle()
 
@@ -126,14 +126,14 @@ class MissionSafetyReviewRegressionTest {
     fun staleCallerCannotSupplySafetyAndProviderIsReadImmediatelyBeforeSubmit() = runTest {
         val port = ReviewPort(MissionSnapshot(missionA, ObservedMissionState.INTERRUPTED, 7), breakpoint)
         val safety = RecordingSafetyProvider().apply {
-            evidence = validEvidence(controlA, missionA, breakpoint)
+            evidence = validEvidence(controlA, missionA, breakpoint, 7)
             onRead = { evidence = evidence!!.copy(laserEnabled = true) }
         }
         val control = AwaitableMissionControl(port, {}, this, safety.gate, safety) { 1_000 }
 
         assertEquals(
             MissionResumeResult.ManualHold(FlightSafetyReason.LASER_ENABLED),
-            control.resume(MissionHoldToken(missionA, breakpoint), controlA),
+            control.resume(MissionHoldToken(missionA, breakpoint, 7), controlA),
         )
         assertEquals(0, port.resumeCalls)
         assertEquals(1, safety.reads)
@@ -143,24 +143,24 @@ class MissionSafetyReviewRegressionTest {
     @Test
     fun movingTelemetryAndInvalidatedStableProofBlockResume() {
         val provider = RecordingSafetyProvider()
-        val evidence = validEvidence(controlA, missionA, breakpoint)
+        val evidence = validEvidence(controlA, missionA, breakpoint, 7)
         provider.evidence = evidence.copy(
             telemetry = evidence.telemetry!!.copy(horizontalSpeedMps = 0.31),
         )
         assertEquals(
             ResumeSafetyDecision.ManualHold(FlightSafetyReason.TELEMETRY_STALE),
-            provider.gate.evaluateResume(controlA, missionA, breakpoint, provider.evidence, 1_000),
+            provider.gate.evaluateResume(controlA, missionA, breakpoint, 7, provider.evidence, 1_000),
         )
 
-        val refreshed = validEvidence(controlA, missionA, breakpoint)
+        val refreshed = validEvidence(controlA, missionA, breakpoint, 7)
         provider.gate.observeHover(
-            HoverControlBinding(controlA, missionA),
+            HoverControlBinding(controlA, missionA, 7),
             0,
             FlightTelemetrySample(1_100, 1_100, 0.31, 0.0),
         )
         assertEquals(
             ResumeSafetyDecision.ManualHold(FlightSafetyReason.HOVER_NOT_STABLE),
-            provider.gate.evaluateResume(controlA, missionA, breakpoint, refreshed, 1_100),
+            provider.gate.evaluateResume(controlA, missionA, breakpoint, 7, refreshed, 1_100),
         )
     }
 
@@ -176,7 +176,7 @@ class MissionSafetyReviewRegressionTest {
         assertFalse(MissionBreakpoint(1, 0, 0.5, recoverAction = "UNKNOWN").isValid)
 
         val gate = FlightSafetyGate()
-        val binding = HoverControlBinding(controlA, missionA)
+        val binding = HoverControlBinding(controlA, missionA, 7)
         gate.observeHover(binding, 100, sample(100), nowMs = 100)
         assertEquals(
             HoverSafetyDecision.ManualHold(FlightSafetyReason.TELEMETRY_STALE),
@@ -191,7 +191,7 @@ class MissionSafetyReviewRegressionTest {
     @Test
     fun ownedProviderRejectsStaleOrCrossGenerationEvidenceAndInvalidatesItself() {
         val provider = OwnedResumeSafetyEvidenceProvider()
-        val first = validEvidence(controlA, missionA, breakpoint)
+        val first = validEvidence(controlA, missionA, breakpoint, 7)
         assertTrue(provider.publish(first))
         assertEquals(first, provider.current(controlA)?.evidence)
 
@@ -222,8 +222,9 @@ class MissionSafetyReviewRegressionTest {
         control: FireControlSessionKey,
         mission: MissionExecutionKey,
         breakpoint: MissionBreakpoint,
+        pausedCommandGeneration: Long,
     ): ResumeSafetyEvidence {
-        val binding = HoverControlBinding(control, mission)
+        val binding = HoverControlBinding(control, mission, pausedCommandGeneration)
         val gate = RecordingSafetyProvider.sharedGate
         gate.reset()
         gate.observeHover(binding, 0, sample(0))
@@ -233,6 +234,7 @@ class MissionSafetyReviewRegressionTest {
             controlSession = control,
             mission = mission,
             breakpoint = breakpoint,
+            pausedCommandGeneration = pausedCommandGeneration,
             terminalResultDurable = true,
             laserEnabled = false,
             targetAlignmentClosed = true,
