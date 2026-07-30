@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import random
@@ -211,8 +212,23 @@ def _read_yolo_boxes(label: Path) -> list[dict[str, float | int]]:
         values = line.split()
         if len(values) != 5:
             raise ValueError(f"Invalid YOLO label at {label}:{line_number}")
-        class_id, x, y, width, height = values
-        boxes.append({"class": int(class_id), "x": float(x), "y": float(y), "width": float(width), "height": float(height)})
+        raw_class_id, raw_x, raw_y, raw_width, raw_height = values
+        try:
+            class_id = int(raw_class_id)
+            x, y, width, height = (float(value) for value in (raw_x, raw_y, raw_width, raw_height))
+        except ValueError as error:
+            raise ValueError(f"Invalid YOLO label at {label}:{line_number}") from error
+        if (
+            class_id not in {0, 1}
+            or not all(math.isfinite(value) for value in (x, y, width, height))
+            or not (0 <= x <= 1 and 0 <= y <= 1 and 0 < width <= 1 and 0 < height <= 1)
+            or x - width / 2 < 0
+            or x + width / 2 > 1
+            or y - height / 2 < 0
+            or y + height / 2 > 1
+        ):
+            raise ValueError(f"Invalid YOLO label at {label}:{line_number}")
+        boxes.append({"class": class_id, "x": x, "y": y, "width": width, "height": height})
     return boxes
 
 

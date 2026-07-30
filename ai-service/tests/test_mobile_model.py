@@ -251,6 +251,23 @@ def test_build_benchmark_set_does_not_allow_smaller_counts_or_a_different_seed(t
         build_benchmark_set(tmp_path / "missing", tmp_path / "output", 1, 1, 20260727)
 
 
+@pytest.mark.parametrize("label_contents", [
+    "2 0.5 0.5 0.2 0.2\n",
+    "-1 0.5 0.5 0.2 0.2\n",
+    "0 nan 0.5 0.2 0.2\n",
+    "0 0.5 0.5 0 0.2\n",
+    "0 0.5 0.5 0.2 1.1\n",
+    "0 0.1 0.5 0.3 0.2\n",
+])
+def test_read_yolo_boxes_rejects_invalid_visible_contract_labels(tmp_path, label_contents):
+    """Catches labels that could falsify fire/smoke benchmark category semantics."""
+    label = tmp_path / "invalid.txt"
+    label.write_text(label_contents, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid YOLO label"):
+        mobile_model._read_yolo_boxes(label)
+
+
 def test_validation_images_rebases_windows_dataset_path_to_staged_root(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     dataset = Path("source-validation")
