@@ -146,10 +146,10 @@ class SqliteFireSessionStoreTest {
                     geoMethod = GeoMethod.AIRCRAFT_OBSERVATION,
                 ),
             ),
-            payload = terminalPayload(
-                locationStatus = LocationStatus.DEGRADED_OSD,
-                geoMethod = GeoMethod.AIRCRAFT_OBSERVATION,
+            report = DegradedTerminalReport(
+                ReportGeoPoint(34.95, 108.12, 120.0),
             ),
+            payload = degradedTerminalPayload(),
         )
         assertTrue(store.persistTerminalResult(conflictingTerminal) is DurableWriteResult.Conflict)
         assertEquals(LocationStatus.PRECISE, store.loadActiveSessions().single().locationStatus)
@@ -327,6 +327,45 @@ class SqliteFireSessionStoreTest {
     }
 
     @Test
+    fun stateSpecificSchemasRejectContradictionsMissingFieldsAndInvalidDomains() {
+        listOf(
+            initialPayload(extra = ""","fireLat":34.0"""),
+            initialPayload(extra = ""","geoMethod":"LASER_RANGEFINDER""""),
+            initialPayload(extra = ""","laserSamples":[]"""),
+            initialPayload(extra = ""","aircraft":{"lat":91,"lng":108,"alt":120}"""),
+        ).forEach { payload ->
+            assertTrue(
+                store.persistInitialConfirmation(initialRecord().copy(payload = payload)) is
+                    DurableWriteResult.Rejected,
+            )
+        }
+
+        store.persistInitialConfirmation(initialRecord())
+        assertTrue(
+            store.persistStage(
+                stageRecord(2, FireSessionState.HOLD_REQUESTED).copy(
+                    flightStatus = "MISSION_RESUMED",
+                    payload = stagePayload(
+                        2,
+                        FireSessionState.HOLD_REQUESTED,
+                        extra = ""","flightStatus":"MISSION_RESUMED"""",
+                    ),
+                ),
+            ) is DurableWriteResult.Rejected,
+        )
+    }
+
+    @Test
+    fun extremeJsonNumbersAreRejectedWithoutCanonicalExpansion() {
+        listOf("1e-2147483647", "1e2147483647", "1e-10000", "1e10000").forEach { number ->
+            val result = store.persistInitialConfirmation(
+                initialRecord().copy(payload = initialPayload(confidence = number)),
+            )
+            assertTrue(result is DurableWriteResult.Rejected)
+        }
+    }
+
+    @Test
     fun semanticallyIdenticalJsonIsCanonicalizedAndHashIsDerivedInternally() {
         val first = initialRecord()
         assertEquals(DurableWriteResult.Written, store.persistInitialConfirmation(first))
@@ -360,9 +399,114 @@ class SqliteFireSessionStoreTest {
         assertTrue(store.persistTerminalResult(terminalRecord()) is DurableWriteResult.Rejected)
         assertEquals(DurableWriteResult.Written, store.persistStage(stageRecord(4, FireSessionState.TARGET_ALIGNING)))
         assertTrue(store.persistTerminalResult(terminalRecord()) is DurableWriteResult.Rejected)
-        assertEquals(DurableWriteResult.Written, store.persistStage(stageRecord(5, FireSessionState.LASER_MEASURING)))
+        assertEquals(
+            DurableWriteResult.Written,
+            store.registerPendingTerminal(
+                stageRecord(5, FireSessionState.LASER_MEASURING),
+                terminalRequest(),
+            ),
+        )
         assertEquals(DurableWriteResult.Written, store.persistTerminalResult(terminalRecord()))
         assertEquals(DurableWriteResult.ExactDuplicate, store.persistTerminalResult(terminalRecord()))
+    }
+
+    @Test
+    fun onlyDurablyRegisteredTerminalRequestCanConsumeTheSlot() {
+        store.persistInitialConfirmation(initialRecord())
+        listOf(
+            FireSessionState.HOLD_REQUESTED,
+            FireSessionState.HOVER_VERIFYING,
+            FireSessionState.TARGET_ALIGNING,
+        ).forEachIndexed { index, state ->
+            store.persistStage(stageRecord(index + 2L, state))
+        }
+        val expected = terminalRequest()
+        assertEquals(
+            DurableWriteResult.Written,
+            store.registerPendingTerminal(stageRecord(5, FireSessionState.LASER_MEASURING), expected),
+        )
+        assertEquals(
+            DurableWriteResult.ExactDuplicate,
+            store.registerPendingTerminal(stageRecord(5, FireSessionState.LASER_MEASURING), expected),
+        )
+        assertTrue(
+            store.registerPendingTerminal(
+                stageRecord(5, FireSessionState.LASER_MEASURING),
+                expected.copy(requestId = "66666666-6666-4666-8666-666666666666"),
+            ) is DurableWriteResult.Conflict,
+        )
+        val forged = terminalRecord().copy(
+            effect = FireSessionEffect.PersistTerminalResult(
+                expected.copy(requestId = "77777777-7777-4777-8777-777777777777"),
+            ),
+        )
+        assertTrue(store.persistTerminalResult(forged) is DurableWriteResult.Conflict)
+        assertEquals(DurableWriteResult.Written, store.persistTerminalResult(terminalRecord()))
+        assertEquals(DurableWriteResult.ExactDuplicate, store.persistTerminalResult(terminalRecord()))
+    }
+
+    @Test
+    fun preciseTerminalSchemaRejectsMissingContradictoryAndOutOfRangeFields() {
+        store.persistInitialConfirmation(initialRecord())
+        advanceToLaser()
+        val valid = terminalPayload()
+        listOf(
+            valid.replace("\"fireLat\":34.960123,\n", ""),
+            valid.replace("\"fireLat\":34.960123", "\"fireLat\":999"),
+            valid.replace("\"errorRadiusMeters\":3.0", "\"errorRadiusMeters\":-1"),
+            valid.replace("\"rangeMeters\":58.0", "\"rangeMeters\":-58.0"),
+            valid.replaceFirst("\"status\":\"NORMAL\"", "\"status\":\"ERROR\""),
+            valid.replace(
+                "\"geoMethod\":\"LASER_RANGEFINDER\"",
+                "\"geoMethod\":\"LASER_RANGEFINDER\",\"flightStatus\":\"MISSION_RESUMED\"",
+            ),
+            valid.replace(
+                "\"laserSamples\":[",
+                "\"aircraft\":{\"lat\":34.0,\"lng\":108.0,\"alt\":120.0},\"laserSamples\":[",
+            ),
+        ).forEachIndexed { index, payload ->
+            val result = store.persistTerminalResult(terminalRecord().copy(payload = payload))
+            assertTrue("precise invalid variant $index returned $result", result is DurableWriteResult.Rejected)
+        }
+        assertEquals(DurableWriteResult.Written, store.persistTerminalResult(terminalRecord()))
+    }
+
+    @Test
+    fun degradedTerminalRequiresOnlyBoundAircraftObservation() {
+        store.persistInitialConfirmation(initialRecord())
+        listOf(
+            FireSessionState.HOLD_REQUESTED,
+            FireSessionState.HOVER_VERIFYING,
+            FireSessionState.TARGET_ALIGNING,
+        ).forEachIndexed { index, state -> store.persistStage(stageRecord(index + 2L, state)) }
+        val request = terminalRequest(
+            locationStatus = LocationStatus.DEGRADED_OSD,
+            geoMethod = GeoMethod.AIRCRAFT_OBSERVATION,
+        )
+        assertEquals(
+            DurableWriteResult.Written,
+            store.registerPendingTerminal(stageRecord(5, FireSessionState.LASER_MEASURING), request),
+        )
+        val record = degradedTerminalRecord(request)
+        listOf(
+            degradedTerminalPayload().replace(
+                Regex(""",\s*"aircraft":\{"lat":34\.95,"lng":108\.12,"alt":120\.0\}"""),
+                "",
+            ),
+            degradedTerminalPayload().replace(
+                """"aircraft":{""",
+                """"fireLat":34.95,"aircraft":{""",
+            ),
+            degradedTerminalPayload().replace("\"lat\":34.95", "\"lat\":91"),
+            degradedTerminalPayload().replace(
+                """"geoMethod":"AIRCRAFT_OBSERVATION"""",
+                """"geoMethod":"LASER_RANGEFINDER"""",
+            ),
+        ).forEachIndexed { index, payload ->
+            val result = store.persistTerminalResult(record.copy(payload = payload))
+            assertTrue("degraded invalid variant $index returned $result", result is DurableWriteResult.Rejected)
+        }
+        assertEquals(DurableWriteResult.Written, store.persistTerminalResult(record))
     }
 
     @Test
@@ -439,16 +583,19 @@ class SqliteFireSessionStoreTest {
 
     private fun terminalRecord() = TerminalResultRecord(
         effect = FireSessionEffect.PersistTerminalResult(
-            TerminalPersistenceRequest(
-                sessionId = SESSION_ID,
-                eventId = EVENT_ID,
-                requestId = "22222222-2222-4222-8222-222222222222",
-                locationStatus = LocationStatus.PRECISE,
-                geoMethod = GeoMethod.LASER_RANGEFINDER,
-            ),
+            terminalRequest(),
         ),
         sequence = 6,
         eventTimestampWallMillis = 102_000,
+        report = PreciseTerminalReport(
+            fire = ReportGeoPoint(34.960123, 108.120456, 120.0),
+            errorRadiusMeters = 3.0,
+            laserSamples = listOf(
+                LaserReportSample("NORMAL", 58.0, ReportGeoPoint(34.960122, 108.120455, 120.0), 101_700),
+                LaserReportSample("NORMAL", 58.1, ReportGeoPoint(34.960123, 108.120456, 120.1), 101_800),
+                LaserReportSample("NORMAL", 57.9, ReportGeoPoint(34.960124, 108.120457, 119.9), 101_900),
+            ),
+        ),
         payload = terminalPayload(),
         evidence = emptyList(),
     )
@@ -470,9 +617,16 @@ class SqliteFireSessionStoreTest {
             FireSessionState.HOVER_VERIFYING,
             FireSessionState.TARGET_ALIGNING,
             FireSessionState.LASER_MEASURING,
-        ).forEachIndexed { index, state ->
+        ).dropLast(1).forEachIndexed { index, state ->
             assertEquals(DurableWriteResult.Written, store.persistStage(stageRecord(index + 2L, state)))
         }
+        assertEquals(
+            DurableWriteResult.Written,
+            store.registerPendingTerminal(
+                stageRecord(5, FireSessionState.LASER_MEASURING),
+                terminalRequest(),
+            ),
+        )
     }
 
     private fun stageRecord(
@@ -486,6 +640,8 @@ class SqliteFireSessionStoreTest {
         sequence = sequence,
         eventTimestampWallMillis = 100_000 + sequence * 1_000,
         state = state,
+        flightStatus = null,
+        locationStatus = null,
         payload = stagePayload(sequence, state, eventId, sessionId),
     )
 
@@ -494,6 +650,7 @@ class SqliteFireSessionStoreTest {
         state: FireSessionState,
         eventId: String = EVENT_ID,
         sessionId: String = SESSION_ID,
+        extra: String = "",
     ): String = """
         {
           "eventTimestamp":${100_000 + sequence * 1_000},
@@ -501,6 +658,7 @@ class SqliteFireSessionStoreTest {
           "sequence":$sequence,
           "sessionId":"$sessionId",
           "eventId":"$eventId"
+          $extra
         }
     """.trimIndent()
 
@@ -532,20 +690,59 @@ class SqliteFireSessionStoreTest {
         }
     """.trimIndent()
 
-    private fun terminalPayload(
-        locationStatus: LocationStatus = LocationStatus.PRECISE,
-        geoMethod: GeoMethod = GeoMethod.LASER_RANGEFINDER,
-    ): String = """
+    private fun terminalPayload(): String = """
         {
           "eventId":"$EVENT_ID",
           "sessionId":"$SESSION_ID",
           "sequence":6,
           "eventTimestamp":102000,
           "state":"RESULT_DURABLE",
-          "locationStatus":"${locationStatus.name}",
-          "geoMethod":"${geoMethod.name}"
+          "locationStatus":"PRECISE",
+          "geoMethod":"LASER_RANGEFINDER",
+          "fireLat":34.960123,
+          "fireLng":108.120456,
+          "fireAlt":120.0,
+          "errorRadiusMeters":3.0,
+          "laserSamples":[
+            {"status":"NORMAL","rangeMeters":58.0,"lat":34.960122,"lng":108.120455,"alt":120.0,"eventTimestamp":101700},
+            {"status":"NORMAL","rangeMeters":58.1,"lat":34.960123,"lng":108.120456,"alt":120.1,"eventTimestamp":101800},
+            {"status":"NORMAL","rangeMeters":57.9,"lat":34.960124,"lng":108.120457,"alt":119.9,"eventTimestamp":101900}
+          ]
         }
     """.trimIndent()
+
+    private fun degradedTerminalPayload(): String = """
+        {
+          "eventId":"$EVENT_ID",
+          "sessionId":"$SESSION_ID",
+          "sequence":6,
+          "eventTimestamp":102000,
+          "state":"RESULT_DURABLE",
+          "locationStatus":"DEGRADED_OSD",
+          "geoMethod":"AIRCRAFT_OBSERVATION",
+          "aircraft":{"lat":34.95,"lng":108.12,"alt":120.0}
+        }
+    """.trimIndent()
+
+    private fun degradedTerminalRecord(request: TerminalPersistenceRequest) = TerminalResultRecord(
+        effect = FireSessionEffect.PersistTerminalResult(request),
+        sequence = 6,
+        eventTimestampWallMillis = 102_000,
+        report = DegradedTerminalReport(ReportGeoPoint(34.95, 108.12, 120.0)),
+        payload = degradedTerminalPayload(),
+        evidence = emptyList(),
+    )
+
+    private fun terminalRequest(
+        locationStatus: LocationStatus = LocationStatus.PRECISE,
+        geoMethod: GeoMethod = GeoMethod.LASER_RANGEFINDER,
+    ) = TerminalPersistenceRequest(
+        sessionId = SESSION_ID,
+        eventId = EVENT_ID,
+        requestId = "22222222-2222-4222-8222-222222222222",
+        locationStatus = locationStatus,
+        geoMethod = geoMethod,
+    )
 
     private fun android.database.sqlite.SQLiteDatabase.longPragma(name: String): Long =
         rawQuery("PRAGMA $name", null).use { cursor ->

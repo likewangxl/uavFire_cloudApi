@@ -11,9 +11,13 @@ import com.yinxin.uavfir.firedetection.TerminalPersistenceRequest
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 object FireStoreContract {
-    const val SCHEMA_VERSION = 2
+    const val SCHEMA_VERSION = 3
     const val DEFAULT_DATABASE_NAME = "agent-fire-store.db"
 
     object Session {
@@ -100,6 +104,7 @@ data class InitialConfirmationRecord(
     val modelHash: String,
     val inputSize: Int,
     val runtime: String,
+    val aircraft: ReportGeoPoint? = null,
     val payload: String,
     val evidence: List<FireEvidenceReference>,
 ) {
@@ -117,6 +122,7 @@ data class TerminalResultRecord(
     val effect: FireSessionEffect.PersistTerminalResult,
     val sequence: Long,
     val eventTimestampWallMillis: Long,
+    val report: TerminalLocationReport,
     val payload: String,
     val evidence: List<FireEvidenceReference>,
 ) {
@@ -125,8 +131,24 @@ data class TerminalResultRecord(
 
     init {
         require(request.isValidTerminalMapping) { "Invalid terminal mapping" }
+        require(
+            (request.locationStatus == LocationStatus.PRECISE &&
+                report is PreciseTerminalReport) ||
+                (request.locationStatus == LocationStatus.DEGRADED_OSD &&
+                    report is DegradedTerminalReport),
+        ) { "Terminal report does not match the persistence request" }
         require(sequence > 1) { "Terminal sequence must follow the initial report" }
         require(eventTimestampWallMillis >= 0)
+        if (report is PreciseTerminalReport) {
+            require(report.laserSamples.all { it.eventTimestampWallMillis <= eventTimestampWallMillis }) {
+                "Laser sample cannot be newer than the terminal report"
+            }
+            require(
+                report.laserSamples.zipWithNext().all {
+                    it.first.eventTimestampWallMillis < it.second.eventTimestampWallMillis
+                },
+            ) { "Laser sample timestamps must be strictly increasing" }
+        }
         validatePayloadSize(payload)
     }
 }
@@ -137,6 +159,8 @@ data class StagePersistenceRecord(
     val sequence: Long,
     val eventTimestampWallMillis: Long,
     val state: FireSessionState,
+    val flightStatus: String? = null,
+    val locationStatus: LocationStatus? = null,
     val payload: String,
 ) {
     init {
@@ -146,6 +170,58 @@ data class StagePersistenceRecord(
         validatePayloadSize(payload)
     }
 }
+
+data class ReportGeoPoint(
+    val latitude: Double,
+    val longitude: Double,
+    val altitudeMeters: Double,
+) {
+    init {
+        require(latitude.isFinite() && latitude in -90.0..90.0) { "Latitude is invalid" }
+        require(longitude.isFinite() && longitude in -180.0..180.0) { "Longitude is invalid" }
+        require(altitudeMeters.isFinite() && altitudeMeters in -1_000.0..20_000.0) {
+            "Altitude is invalid"
+        }
+    }
+}
+
+data class LaserReportSample(
+    val status: String,
+    val rangeMeters: Double,
+    val point: ReportGeoPoint,
+    val eventTimestampWallMillis: Long,
+) {
+    init {
+        require(status == "NORMAL") { "Only NORMAL laser samples are durable" }
+        require(rangeMeters.isFinite() && rangeMeters > 0.0 && rangeMeters <= 5_000.0) {
+            "Laser range is invalid"
+        }
+        require(eventTimestampWallMillis >= 0) { "Laser sample timestamp is invalid" }
+    }
+}
+
+sealed interface TerminalLocationReport
+
+data class PreciseTerminalReport(
+    val fire: ReportGeoPoint,
+    val errorRadiusMeters: Double,
+    val laserSamples: List<LaserReportSample>,
+    val aircraft: ReportGeoPoint? = null,
+) : TerminalLocationReport {
+    init {
+        require(errorRadiusMeters.isFinite() && errorRadiusMeters > 0.0 && errorRadiusMeters <= 100.0) {
+            "Error radius is invalid"
+        }
+        require(laserSamples.size == 3) { "Precise reports require exactly three laser samples" }
+        require(laserSamples.all { horizontalDistanceMeters(fire, it.point) <= errorRadiusMeters }) {
+            "Laser sample scatter exceeds the error radius"
+        }
+    }
+}
+
+data class DegradedTerminalReport(
+    val aircraft: ReportGeoPoint,
+) : TerminalLocationReport
 
 sealed interface DurableWriteResult {
     data object Written : DurableWriteResult
@@ -207,6 +283,16 @@ interface FireOutboxDispatchStore {
 internal fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
     .digest(value.toByteArray(Charsets.UTF_8))
     .joinToString("") { "%02x".format(it) }
+
+private fun horizontalDistanceMeters(left: ReportGeoPoint, right: ReportGeoPoint): Double {
+    val lat1 = Math.toRadians(left.latitude)
+    val lat2 = Math.toRadians(right.latitude)
+    val deltaLat = lat2 - lat1
+    val deltaLng = Math.toRadians(right.longitude - left.longitude)
+    val haversine = sin(deltaLat / 2).let { it * it } +
+        cos(lat1) * cos(lat2) * sin(deltaLng / 2).let { it * it }
+    return 2.0 * 6_371_000.0 * asin(sqrt(haversine.coerceIn(0.0, 1.0)))
+}
 
 private fun validatePayloadSize(payload: String) {
     require(payload.isNotBlank()) { "Outbox payload is required" }

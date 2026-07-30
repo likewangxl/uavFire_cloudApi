@@ -45,6 +45,9 @@ class SqliteFireSessionStore(
                 put("runtime", record.runtime)
                 put("initial_request_id", record.request.requestId)
                 putNull("terminal_request_id")
+                putNull("pending_terminal_request_id")
+                putNull("pending_location_status")
+                putNull("pending_geo_method")
                 put("location_status", LocationStatus.LASER_LOCATING.name)
                 putNull("geo_method")
                 put("created_at_wall_ms", record.eventTimestampWallMillis)
@@ -87,6 +90,15 @@ class SqliteFireSessionStore(
                     "Terminal result requires LASER_MEASURING",
                 )
             }
+            if (
+                session.pendingTerminalRequestId != record.request.requestId ||
+                session.pendingLocationStatus != record.request.locationStatus ||
+                session.pendingGeoMethod != record.request.geoMethod
+            ) {
+                return@durableTransaction DurableWriteResult.Conflict(
+                    "Terminal result does not match the durable pending request",
+                )
+            }
             if (!hasOutboxSequence(database, record.request.eventId, 1)) {
                 return@durableTransaction DurableWriteResult.Rejected("Initial report is not durable")
             }
@@ -97,6 +109,9 @@ class SqliteFireSessionStore(
             val values = ContentValues().apply {
                 put("state", FireSessionState.RESULT_DURABLE.name)
                 put("terminal_request_id", record.request.requestId)
+                putNull("pending_terminal_request_id")
+                putNull("pending_location_status")
+                putNull("pending_geo_method")
                 put("location_status", record.request.locationStatus.name)
                 put("geo_method", record.request.geoMethod.name)
                 put("updated_at_wall_ms", record.eventTimestampWallMillis)
@@ -134,6 +149,11 @@ class SqliteFireSessionStore(
 
     fun persistStage(record: StagePersistenceRecord): DurableWriteResult =
         durableTransaction { database ->
+            if (record.state == FireSessionState.LASER_MEASURING) {
+                return@durableTransaction DurableWriteResult.Rejected(
+                    "LASER_MEASURING requires a registered terminal request",
+                )
+            }
             val canonical = CanonicalFireReport.stage(record)
             val session = sessionById(database, record.sessionId)
                 ?: return@durableTransaction DurableWriteResult.Rejected("Session is not durable")
@@ -187,6 +207,74 @@ class SqliteFireSessionStore(
             )
             DurableWriteResult.Written
         }
+
+    fun registerPendingTerminal(
+        stage: StagePersistenceRecord,
+        request: com.yinxin.uavfir.firedetection.TerminalPersistenceRequest,
+    ): DurableWriteResult = durableTransaction { database ->
+        require(stage.state == FireSessionState.LASER_MEASURING) {
+            "Pending terminal registration must enter LASER_MEASURING"
+        }
+        require(request.isValidTerminalMapping) { "Invalid terminal mapping" }
+        require(stage.sessionId == request.sessionId && stage.eventId == request.eventId) {
+            "Pending terminal identity mismatch"
+        }
+        val canonical = CanonicalFireReport.stage(stage)
+        val session = sessionById(database, stage.sessionId)
+            ?: return@durableTransaction DurableWriteResult.Rejected("Session is not durable")
+        if (session.eventId != stage.eventId) {
+            return@durableTransaction DurableWriteResult.Conflict("Session/event identity mismatch")
+        }
+        val existing = outboxByKey(database, stage.eventId, stage.sequence)
+        if (existing != null) {
+            val same = session.state == FireSessionState.LASER_MEASURING &&
+                session.pendingTerminalRequestId == request.requestId &&
+                session.pendingLocationStatus == request.locationStatus &&
+                session.pendingGeoMethod == request.geoMethod &&
+                existing.sessionId == stage.sessionId &&
+                existing.eventId == stage.eventId &&
+                existing.sequence == stage.sequence &&
+                existing.eventTimestampWallMillis == stage.eventTimestampWallMillis &&
+                existing.state == stage.state &&
+                existing.payload == canonical.payload &&
+                existing.payloadSha256 == canonical.sha256
+            return@durableTransaction if (same) DurableWriteResult.ExactDuplicate
+            else DurableWriteResult.Conflict("Pending terminal registration differs")
+        }
+        if (session.state != FireSessionState.TARGET_ALIGNING) {
+            return@durableTransaction DurableWriteResult.Rejected(
+                "Pending terminal registration requires TARGET_ALIGNING",
+            )
+        }
+        if (stage.sequence != nextSequence(database, stage.eventId)) {
+            return@durableTransaction DurableWriteResult.Rejected("Outbox sequence must be contiguous")
+        }
+        val values = ContentValues().apply {
+            put("state", FireSessionState.LASER_MEASURING.name)
+            put("pending_terminal_request_id", request.requestId)
+            put("pending_location_status", request.locationStatus.name)
+            put("pending_geo_method", request.geoMethod.name)
+            put("updated_at_wall_ms", stage.eventTimestampWallMillis)
+        }
+        check(
+            database.update(
+                FireStoreContract.Session.TABLE,
+                values,
+                "session_id=? AND event_id=? AND state=? AND pending_terminal_request_id IS NULL",
+                arrayOf(stage.sessionId, stage.eventId, FireSessionState.TARGET_ALIGNING.name),
+            ) == 1,
+        )
+        insertOutbox(
+            database,
+            stage.sessionId,
+            stage.eventId,
+            stage.sequence,
+            stage.eventTimestampWallMillis,
+            stage.state,
+            canonical,
+        )
+        DurableWriteResult.Written
+    }
 
     fun loadActiveSessions(): List<DurableFireSession> =
         db.query(
@@ -414,6 +502,9 @@ class SqliteFireSessionStore(
                 val report = CanonicalFireReport.manualHold(eventId, sessionId, sequence, wall)
                 val values = ContentValues().apply {
                     put("state", FireSessionState.MANUAL_HOLD.name)
+                    putNull("pending_terminal_request_id")
+                    putNull("pending_location_status")
+                    putNull("pending_geo_method")
                     put("updated_at_wall_ms", wall)
                 }
                 check(
@@ -693,14 +784,17 @@ class SqliteFireSessionStore(
         detectionKind = DetectionKind.valueOf(getString(3)),
         initialRequestId = getString(4),
         terminalRequestId = getStringOrNull(5),
-        locationStatus = LocationStatus.valueOf(getString(6)),
-        geoMethod = getStringOrNull(7)?.let(GeoMethod::valueOf),
-        confidence = getDouble(8),
-        policyVersion = getString(9),
-        modelVersion = getString(10),
-        modelHash = getString(11),
-        inputSize = getInt(12),
-        runtime = getString(13),
+        pendingTerminalRequestId = getStringOrNull(6),
+        pendingLocationStatus = getStringOrNull(7)?.let(LocationStatus::valueOf),
+        pendingGeoMethod = getStringOrNull(8)?.let(GeoMethod::valueOf),
+        locationStatus = LocationStatus.valueOf(getString(9)),
+        geoMethod = getStringOrNull(10)?.let(GeoMethod::valueOf),
+        confidence = getDouble(11),
+        policyVersion = getString(12),
+        modelVersion = getString(13),
+        modelHash = getString(14),
+        inputSize = getInt(15),
+        runtime = getString(16),
     )
 
     private fun Cursor.toOutbox(): OutboxRow = OutboxRow(
@@ -731,6 +825,9 @@ class SqliteFireSessionStore(
         val detectionKind: DetectionKind,
         val initialRequestId: String,
         val terminalRequestId: String?,
+        val pendingTerminalRequestId: String?,
+        val pendingLocationStatus: LocationStatus?,
+        val pendingGeoMethod: GeoMethod?,
         val locationStatus: LocationStatus,
         val geoMethod: GeoMethod?,
         val confidence: Double,
@@ -769,6 +866,9 @@ class SqliteFireSessionStore(
             "detection_kind",
             "initial_request_id",
             "terminal_request_id",
+            "pending_terminal_request_id",
+            "pending_location_status",
+            "pending_geo_method",
             "location_status",
             "geo_method",
             "confidence",

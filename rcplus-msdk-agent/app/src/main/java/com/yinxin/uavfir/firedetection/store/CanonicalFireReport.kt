@@ -27,6 +27,7 @@ internal object CanonicalFireReport {
             eventTimestampWallMillis = record.eventTimestampWallMillis,
             state = FireSessionState.VISUAL_CONFIRMED,
         )
+        validateInitialSchema(root)
         val confirmation = record.request.confirmation
         requireString(root, "detectionKind", confirmation.kind.name)
         requireNumber(root, "confidence", confirmation.confidence.toString())
@@ -37,6 +38,7 @@ internal object CanonicalFireReport {
         requireLong(root, "inputSize", record.inputSize.toLong())
         requireString(root, "runtime", record.runtime)
         validateRoi(root.requiredObject("visibleRoi"), confirmation.roi)
+        bindOptionalPoint(root, "aircraft", record.aircraft)
         return canonical(root)
     }
 
@@ -50,22 +52,27 @@ internal object CanonicalFireReport {
             eventTimestampWallMillis = record.eventTimestampWallMillis,
             state = FireSessionState.RESULT_DURABLE,
         )
+        when (val report = record.report) {
+            is PreciseTerminalReport -> validatePreciseSchema(root, report)
+            is DegradedTerminalReport -> validateDegradedSchema(root, report)
+        }
         requireString(root, "locationStatus", request.locationStatus.name)
         requireString(root, "geoMethod", request.geoMethod.name)
         return canonical(root)
     }
 
-    fun stage(record: StagePersistenceRecord): CanonicalReport =
-        canonical(
-            parseAndValidateIdentity(
-                payload = record.payload,
-                eventId = record.eventId,
-                sessionId = record.sessionId,
-                sequence = record.sequence,
-                eventTimestampWallMillis = record.eventTimestampWallMillis,
-                state = record.state,
-            ),
+    fun stage(record: StagePersistenceRecord): CanonicalReport {
+        val root = parseAndValidateIdentity(
+            payload = record.payload,
+            eventId = record.eventId,
+            sessionId = record.sessionId,
+            sequence = record.sequence,
+            eventTimestampWallMillis = record.eventTimestampWallMillis,
+            state = record.state,
         )
+        validateProgressSchema(root, record)
+        return canonical(root)
+    }
 
     fun manualHold(
         eventId: String,
@@ -81,7 +88,7 @@ internal object CanonicalFireReport {
             addProperty("state", FireSessionState.MANUAL_HOLD.name)
             addProperty("reason", "STARTUP_FLIGHT_STATE_UNRECONCILED")
         }
-        validateRootSchema(root)
+        requireAllowedKeys(root, BASE_FIELDS + "reason", "manual-hold report")
         return canonical(root)
     }
 
@@ -98,7 +105,6 @@ internal object CanonicalFireReport {
         require(parsed.isJsonObject) { "Outbox payload must be a JSON object" }
         val root = parsed.asJsonObject
         rejectSensitiveOrBinary(root)
-        validateRootSchema(root)
         requireString(root, "eventId", eventId)
         requireString(root, "sessionId", sessionId)
         requireLong(root, "sequence", sequence)
@@ -135,10 +141,7 @@ internal object CanonicalFireReport {
                 reader.endArray()
             }
             JsonToken.STRING -> JsonPrimitive(reader.nextString())
-            JsonToken.NUMBER -> JsonPrimitive(
-                runCatching { BigDecimal(reader.nextString()) }
-                    .getOrElse { throw IllegalArgumentException("Outbox payload has an invalid number", it) },
-            )
+            JsonToken.NUMBER -> JsonPrimitive(parseBoundedNumber(reader.nextString()))
             JsonToken.BOOLEAN -> JsonPrimitive(reader.nextBoolean())
             JsonToken.NULL -> {
                 reader.nextNull()
@@ -148,28 +151,59 @@ internal object CanonicalFireReport {
         }
     }
 
-    private fun validateRootSchema(root: JsonObject) {
-        requireAllowedKeys(root, ROOT_FIELDS, "report")
-        root.optionalString("detectionKind")
-        root.optionalNumber("confidence")
-        root.optionalObject("visibleRoi")?.let(::validateRoiShape)
-        root.optionalString("locationStatus")
-        root.optionalString("flightStatus")
-        root.optionalString("modelVersion")
-        root.optionalString("modelHash")
-        root.optionalString("policyVersion")
-        root.optionalLong("inputSize")
-        root.optionalString("runtime")
-        root.optionalObject("aircraft")?.let(::validateAircraft)
-        root.optionalNullableNumber("fireLat")
-        root.optionalNullableNumber("fireLng")
-        root.optionalNullableNumber("fireAlt")
-        root.optionalString("geoMethod")
-        root.optionalNumber("errorRadiusMeters")
-        root.optionalArray("laserSamples")?.let(::validateLaserSamples)
+    private fun validateInitialSchema(root: JsonObject) {
+        requireAllowedKeys(root, INITIAL_FIELDS, "visual-confirmed report")
+        root.requiredString("detectionKind")
+        root.requiredNumber("confidence")
+        validateRoiShape(root.requiredObject("visibleRoi"))
+        root.requiredString("locationStatus")
+        root.requiredString("modelVersion")
+        root.requiredString("modelHash")
+        root.requiredString("policyVersion")
+        root.requiredLong("inputSize")
+        root.requiredString("runtime")
+        root.optionalObject("aircraft")?.let(::validatePointShape)
+    }
+
+    private fun validateProgressSchema(root: JsonObject, record: StagePersistenceRecord) {
+        requireAllowedKeys(root, PROGRESS_FIELDS, "progress report")
+        bindOptionalString(root, "flightStatus", record.flightStatus)
+        bindOptionalString(root, "locationStatus", record.locationStatus?.name)
+        record.flightStatus?.let {
+            require(PROGRESS_FLIGHT_STATUS[record.state] == it) {
+                "flightStatus is incompatible with ${record.state}"
+            }
+        }
+        record.locationStatus?.let {
+            require(record.state in PRE_TERMINAL_PROGRESS && it == com.yinxin.uavfir.firedetection.LocationStatus.LASER_LOCATING) {
+                "locationStatus is incompatible with ${record.state}"
+            }
+        }
         root.optionalString("reason")?.let {
             require(SAFE_CODE.matches(it)) { "Report reason must be a safe code" }
         }
+    }
+
+    private fun validatePreciseSchema(root: JsonObject, report: PreciseTerminalReport) {
+        requireAllowedKeys(root, PRECISE_FIELDS, "precise terminal report")
+        requireString(root, "locationStatus", "PRECISE")
+        requireString(root, "geoMethod", "LASER_RANGEFINDER")
+        bindPointFields(root, report.fire)
+        requireDecimal(root, "errorRadiusMeters", report.errorRadiusMeters.toString())
+        val samples = root.requiredArray("laserSamples")
+        require(samples.size() == 3) { "Precise report requires exactly three laser samples" }
+        samples.forEachIndexed { index, element ->
+            require(element.isJsonObject) { "laserSamples[$index] must be an object" }
+            bindLaserSample(element.asJsonObject, report.laserSamples[index], index)
+        }
+        bindOptionalPoint(root, "aircraft", report.aircraft)
+    }
+
+    private fun validateDegradedSchema(root: JsonObject, report: DegradedTerminalReport) {
+        requireAllowedKeys(root, DEGRADED_FIELDS, "degraded terminal report")
+        requireString(root, "locationStatus", "DEGRADED_OSD")
+        requireString(root, "geoMethod", "AIRCRAFT_OBSERVATION")
+        bindOptionalPoint(root, "aircraft", report.aircraft)
     }
 
     private fun validateRoiShape(roi: JsonObject) {
@@ -188,23 +222,44 @@ internal object CanonicalFireReport {
         requireDecimal(roi, "height", (expected.bottom - expected.top).toString())
     }
 
-    private fun validateAircraft(aircraft: JsonObject) {
+    private fun validatePointShape(aircraft: JsonObject) {
         requireAllowedKeys(aircraft, AIRCRAFT_FIELDS, "aircraft")
         AIRCRAFT_FIELDS.forEach { aircraft.requiredNumber(it) }
     }
 
-    private fun validateLaserSamples(samples: JsonArray) {
-        require(samples.size() in 1..3) { "laserSamples must contain one to three samples" }
-        samples.forEachIndexed { index, element ->
-            require(element.isJsonObject) { "laserSamples[$index] must be an object" }
-            val sample = element.asJsonObject
-            requireAllowedKeys(sample, LASER_SAMPLE_FIELDS, "laserSamples[$index]")
-            sample.requiredString("status")
-            sample.requiredNumber("rangeMeters")
-            sample.requiredNumber("lat")
-            sample.requiredNumber("lng")
-            sample.requiredNumber("alt")
-            sample.requiredLong("eventTimestamp")
+    private fun bindPointFields(root: JsonObject, point: ReportGeoPoint) {
+        requireDecimal(root, "fireLat", point.latitude.toString())
+        requireDecimal(root, "fireLng", point.longitude.toString())
+        requireDecimal(root, "fireAlt", point.altitudeMeters.toString())
+    }
+
+    private fun bindOptionalPoint(root: JsonObject, field: String, point: ReportGeoPoint?) {
+        if (point == null) {
+            require(!root.has(field)) { "$field is not present in the typed report" }
+            return
+        }
+        val objectValue = root.requiredObject(field)
+        validatePointShape(objectValue)
+        requireDecimal(objectValue, "lat", point.latitude.toString())
+        requireDecimal(objectValue, "lng", point.longitude.toString())
+        requireDecimal(objectValue, "alt", point.altitudeMeters.toString())
+    }
+
+    private fun bindLaserSample(root: JsonObject, sample: LaserReportSample, index: Int) {
+        requireAllowedKeys(root, LASER_SAMPLE_FIELDS, "laserSamples[$index]")
+        requireString(root, "status", sample.status)
+        requireDecimal(root, "rangeMeters", sample.rangeMeters.toString())
+        requireDecimal(root, "lat", sample.point.latitude.toString())
+        requireDecimal(root, "lng", sample.point.longitude.toString())
+        requireDecimal(root, "alt", sample.point.altitudeMeters.toString())
+        requireLong(root, "eventTimestamp", sample.eventTimestampWallMillis)
+    }
+
+    private fun bindOptionalString(root: JsonObject, field: String, expected: String?) {
+        if (expected == null) {
+            require(!root.has(field)) { "$field is not present in the typed report" }
+        } else {
+            requireString(root, field, expected)
         }
     }
 
@@ -258,12 +313,53 @@ internal object CanonicalFireReport {
     }
 
     private fun normalizeNumber(value: String): String {
-        val decimal = runCatching { BigDecimal(value) }
-            .getOrElse { throw IllegalArgumentException("Invalid JSON number") }
+        val decimal = parseBoundedNumber(value)
         return if (decimal.compareTo(BigDecimal.ZERO) == 0) {
             "0"
         } else {
             decimal.stripTrailingZeros().toPlainString()
+        }
+    }
+
+    private fun parseBoundedNumber(raw: String): BigDecimal {
+        require(raw.length <= MAX_NUMBER_SOURCE_LENGTH && JSON_NUMBER.matches(raw)) {
+            "Outbox payload has an invalid number"
+        }
+        val exponentIndex = raw.indexOfAny(charArrayOf('e', 'E'))
+        if (exponentIndex >= 0) {
+            val exponentText = raw.substring(exponentIndex + 1)
+            require(exponentText.length <= MAX_EXPONENT_SOURCE_LENGTH) {
+                "JSON number exponent is too large"
+            }
+            val exponent = exponentText.toIntOrNull()
+                ?: throw IllegalArgumentException("JSON number exponent is invalid")
+            require(exponent in -MAX_ABS_EXPONENT..MAX_ABS_EXPONENT) {
+                "JSON number exponent is out of bounds"
+            }
+        }
+        val significand = if (exponentIndex >= 0) raw.substring(0, exponentIndex) else raw
+        val digitCount = significand.count(Char::isDigit)
+        require(digitCount <= MAX_NUMBER_PRECISION) { "JSON number precision is too large" }
+        val decimal = runCatching { BigDecimal(raw) }
+            .getOrElse { throw IllegalArgumentException("Outbox payload has an invalid number", it) }
+        require(kotlin.math.abs(decimal.scale().toLong()) <= MAX_ABS_SCALE) {
+            "JSON number scale is out of bounds"
+        }
+        require(canonicalNumberLength(decimal) <= MAX_CANONICAL_NUMBER_LENGTH) {
+            "Canonical JSON number is too large"
+        }
+        return decimal
+    }
+
+    private fun canonicalNumberLength(value: BigDecimal): Long {
+        if (value.compareTo(BigDecimal.ZERO) == 0) return 1
+        val precision = value.precision().toLong()
+        val scale = value.scale().toLong()
+        val sign = if (value.signum() < 0) 1L else 0L
+        return sign + when {
+            scale <= 0 -> precision - scale
+            scale >= precision -> 2L + scale
+            else -> precision + 1L
         }
     }
 
@@ -326,6 +422,12 @@ internal object CanonicalFireReport {
         return value.asJsonObject
     }
 
+    private fun JsonObject.requiredArray(field: String): JsonArray {
+        val value = required(field)
+        require(value.isJsonArray) { "Report field $field must be an array" }
+        return value.asJsonArray
+    }
+
     private fun JsonObject.optionalString(field: String): String? =
         get(field)?.let {
             require(it.isJsonPrimitive && it.asJsonPrimitive.isString) {
@@ -334,52 +436,43 @@ internal object CanonicalFireReport {
             it.asString
         }
 
-    private fun JsonObject.optionalLong(field: String): Long? =
-        get(field)?.let { requiredLong(field) }
-
-    private fun JsonObject.optionalNumber(field: String): BigDecimal? =
-        get(field)?.let { requiredNumber(field) }
-
-    private fun JsonObject.optionalNullableNumber(field: String): BigDecimal? =
-        get(field)?.takeUnless { it.isJsonNull }?.let { requiredNumber(field) }
-
     private fun JsonObject.optionalObject(field: String): JsonObject? =
         get(field)?.let {
             require(it.isJsonObject) { "Report field $field must be an object" }
             it.asJsonObject
         }
 
-    private fun JsonObject.optionalArray(field: String): JsonArray? =
-        get(field)?.let {
-            require(it.isJsonArray) { "Report field $field must be an array" }
-            it.asJsonArray
-        }
-
-    private val ROOT_FIELDS = setOf(
+    private val BASE_FIELDS = setOf(
         "eventId",
         "sessionId",
         "sequence",
         "eventTimestamp",
         "state",
+    )
+    private val INITIAL_FIELDS = BASE_FIELDS + setOf(
         "detectionKind",
         "confidence",
         "visibleRoi",
         "locationStatus",
-        "flightStatus",
         "modelVersion",
         "modelHash",
         "policyVersion",
         "inputSize",
         "runtime",
         "aircraft",
+    )
+    private val PROGRESS_FIELDS = BASE_FIELDS + setOf("flightStatus", "locationStatus", "reason")
+    private val PRECISE_FIELDS = BASE_FIELDS + setOf(
+        "locationStatus",
+        "geoMethod",
+        "aircraft",
         "fireLat",
         "fireLng",
         "fireAlt",
-        "geoMethod",
         "errorRadiusMeters",
         "laserSamples",
-        "reason",
     )
+    private val DEGRADED_FIELDS = BASE_FIELDS + setOf("locationStatus", "geoMethod", "aircraft")
     private val ROI_FIELDS = setOf("x", "y", "width", "height")
     private val AIRCRAFT_FIELDS = setOf("lat", "lng", "alt")
     private val LASER_SAMPLE_FIELDS =
@@ -401,10 +494,33 @@ internal object CanonicalFireReport {
         "credentials",
     )
     private val SAFE_CODE = Regex("^[A-Z0-9_:-]{1,128}$")
+    private val JSON_NUMBER = Regex("""-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?""")
     private val BASE64_VALUE = Regex("^[A-Za-z0-9+/]+={0,2}$")
     private val EMAIL_VALUE = Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}""")
     private val PHONE_VALUE = Regex("""^\+?[0-9][0-9 ()-]{7,}$""")
     private val GSON = Gson()
     private const val MAX_JSON_DEPTH = 16
     private const val MAX_JSON_ARRAY_SIZE = 64
+    private const val MAX_NUMBER_SOURCE_LENGTH = 128
+    private const val MAX_EXPONENT_SOURCE_LENGTH = 4
+    private const val MAX_ABS_EXPONENT = 100
+    private const val MAX_NUMBER_PRECISION = 32
+    private const val MAX_ABS_SCALE = 100L
+    private const val MAX_CANONICAL_NUMBER_LENGTH = 128L
+    private val PRE_TERMINAL_PROGRESS = setOf(
+        FireSessionState.HOLD_REQUESTED,
+        FireSessionState.HOVER_VERIFYING,
+        FireSessionState.TARGET_ALIGNING,
+        FireSessionState.LASER_MEASURING,
+    )
+    private val PROGRESS_FLIGHT_STATUS = mapOf(
+        FireSessionState.HOLD_REQUESTED to "HOLD_REQUESTED",
+        FireSessionState.HOVER_VERIFYING to "HOVERING",
+        FireSessionState.TARGET_ALIGNING to "TARGET_ALIGNING",
+        FireSessionState.LASER_MEASURING to "LASER_MEASURING",
+        FireSessionState.RESUME_REQUESTED to "RESUME_REQUESTED",
+        FireSessionState.MISSION_RESUMED to "MISSION_RESUMED",
+        FireSessionState.SCANNING to "SCANNING",
+        FireSessionState.MANUAL_HOLD to "MANUAL_HOLD",
+    )
 }

@@ -20,11 +20,11 @@ class FireStoreOpenHelperMigrationTest {
     fun upgradeAndDowngradeFailClosedInsteadOfDeletingData() {
         val upgrade = FireStoreOpenHelper(context, "upgrade-${UUID.randomUUID()}.db")
         assertThrows(IllegalStateException::class.java) {
-            upgrade.onUpgrade(upgrade.writableDatabase, 1, 2)
+            upgrade.onUpgrade(upgrade.writableDatabase, 2, 3)
         }
         val downgrade = FireStoreOpenHelper(context, "downgrade-${UUID.randomUUID()}.db")
         assertThrows(IllegalStateException::class.java) {
-            downgrade.onDowngrade(downgrade.writableDatabase, 2, 1)
+            downgrade.onDowngrade(downgrade.writableDatabase, 3, 2)
         }
         upgrade.close()
         downgrade.close()
