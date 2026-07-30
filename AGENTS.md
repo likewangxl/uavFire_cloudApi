@@ -1,15 +1,38 @@
 <claude-mem-context>
 # Memory Context
 
-# [uavfire] recent context, 2026-07-27 11:37am GMT+8
+# [uavfire] recent context, 2026-06-23 10:38am GMT+8
 
 Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
 Format: ID TIME TYPE TITLE
 Fetch details: get_observations([IDs]) | Search: mem-search skill
 
-Stats: 50 obs (18,894t read) | 605,983t work | 97% savings
+Stats: 50 obs (20,721t read) | 572,068t work | 96% savings
 
 ### Jun 15, 2026
+4020 2:19p 🔵 T11 Export Segment 0 (Session 85985) Completed — 1000 Rows, 1,049,183,187 Bytes
+4021 2:24p 🔵 T11 Export Segment 2 (Session 4568) Completed — 1000 Rows, 1,049,191,365 Bytes; Only Part-001 Remains
+4022 2:25p 🟣 T11_ORACLE_ALL_TYPES_5G Parallel Export 100% Complete — All 6 Segments Exited Code 0, 5,120 Rows, 5.0 GiB
+4023 " ✅ T11 Export Archive Created: T11_ORACLE_ALL_TYPES_5G.tar.gz in dist/linux/data
+4024 " 🔵 T11 Export Row Count Validated: Exactly 5,120 Data Rows Across 6 Part Files (5,126 Lines Including Headers)
+4025 " 🟣 MySQL Target Table T11_ORACLE_ALL_TYPES_5G Created in cloud_sample Database for Import Phase
+4026 2:26p 🔵 T11 tar.gz Archive Only 7.3 MB for 5.0 GiB Uncompressed — ~700:1 Compression Ratio on Repetitive CLOB Data
+4027 " 🟣 Import Config dist/linux/conf/import-t11-generated.properties Created for T11 External CSV Import into MySQL
+4028 " 🟣 T11 MySQL Import Started — ExternalCsvTaskScanner Registered 6 Shards, LOAD DATA LOCAL INFILE Running for Shard 0
+4029 2:27p 🔵 TIMESTAMP_LTZ_COL Import Generates 2 Warnings Per Row — Oracle TIMESTAMP WITH LOCAL TIME ZONE Exports Named TZ Not Offset
+4030 " 🔵 Migration Pipeline State: Shard 0 Already VERIFIED, Shard 1 IMPORTING, Shards 2–5 EXPORTED — 1000 Rows in MySQL
+4031 2:28p 🔵 T11 Import Throughput Confirmed: ~26 Seconds Per 1000-Row/1GiB Shard — Shards 0–2 VERIFIED, 3000 Rows in MySQL
+4032 2:29p 🟣 T11 MySQL Import 100% Complete — All 5,120 Rows Imported in 2m43s, Migration Program Exited Normally
+4033 " 🔵 Final Migration Verification: All 6 Shards VERIFIED, 5,120 Rows in MySQL — Perfect Row Count Match
+4034 2:30p 🔵 Oracle Source Confirmed: 5120 Rows, Exactly 5 GiB CLOB — End-to-End Migration Fully Validated
+4035 " 🔵 Local Disk at 98% Capacity (436 GiB / 466 GiB Used, 11 GiB Free) — Critical Disk Pressure After 5 GiB CSV Export
+4036 " 🔵 MySQL T11 Final Verification: 5120 Rows, IDs 1–5120, 5.00 GiB CLOB, All Shards VERIFIED With File Sizes
+4037 6:23p ✅ System Promotional Documentation Requested for Video Script
+4038 " 🔵 uavFire System Identity and Architecture Discovered from README
+4039 " 🔵 Formal System Requirements Extracted from PDF: Smart Cluster UAV Fire Suppression System
+4040 " 🔵 Current System Runtime Model and Subsystem Implementation Status Mapped
+4041 6:25p 🔵 Existing Promotional Assets Found in docs/promo/ Including Two PPT Files
+4042 " 🔵 Sub-Meter Fire Geolocation Design Completed: Multi-Observation Triangulation System
 4043 6:26p ✅ System Promotional Documentation Requested for Video Script
 4044 " 🟣 智能集群大载重无人机灭火系统宣传文案母稿创建
 4045 " 🔵 docs/promo/ Directory Is Gitignored in uavfire Project
@@ -38,30 +61,6 @@ Stats: 50 obs (18,894t read) | 605,983t work | 97% savings
 4440 " 🔵 GMap/Wayline HMR 'state' TypeError Root Cause: useMyStore() Returns Undefined During HMR
 4452 9:57a 🔵 Test Assertions Added to Enforce Transparent FC100 Marker Design — CSS Update Required
 4453 " ✅ FC100 Map Marker Redesigned: Transparent Container, SVG-Only Rendering
-4476 10:39a 🟣 监测规划页面蓝色图标替换为DJI Matrice 4T机体图标
-4479 10:43a 🟣 监测规划页面蓝色图标替换为DJI Matrice 4T机体图标
-4482 10:44a 🔵 规划页面飞行位置图标架构：双标记系统
-4484 " 🔵 监测tab飞行位置标记的完整CSS样式与渲染条件
-4485 " 🟣 TDD红灯：为Matrice 4T图标替换添加测试断言，实现待补
-4486 10:45a 🟣 实现matrice4tPositionContent()：DJI Matrice 4T机体SVG图标
-4487 " 🟣 Matrice 4T SVG图标补丁成功应用至use-planner-overlays.ts
-4488 " 🟣 GMap.vue新增Matrice 4T机体图标CSS，移除flight-position-marker的青色圆形气泡样式
-4489 10:46a 🟣 TDD绿灯：Matrice 4T图标替换测试通过
-4490 10:47a 🟣 Matrice 4T图标替换后生产构建成功
-### Jul 27, 2026
-5231 10:36a 🔵 Codex CLI Environment Profile on macOS x86_64
-5232 10:37a 🔵 Codex Config Has Architecture Mismatch: x86_64 CLI vs arm64 node_repl
-5233 " 🔵 Confirmed: node_repl MCP Fails with "bad CPU type" on Intel Mac
-5234 " 🔵 Config.toml References ChatGPT.app-Bundled Codex Binary and Local Marketplaces
-5235 10:38a 🔴 Fixed Codex Config: Removed arm64 node_repl MCP and Upgraded Deprecated Hook Flag
-5236 " 🔵 Codex MCP Server Inventory and Config Fix Verified
-5237 " 🔵 Codex CLI Gets 403 Forbidden from chatgpt.com API — Authentication/Region Issue
-5238 11:33a ⚖️ Fire Detection Logic Migration: Backend → Agent Execution
-5239 11:34a 🔵 uavfire Project: Fire Detection Architecture Mapped
-5240 " 🔵 rcplus-msdk-agent Already Has On-Device Thermal Detection Infrastructure
-5241 11:35a 🔵 All uavfire Services Currently Running; Agent Thermal Probe Interval Confirmed at 500ms
-5242 11:36a 🔵 ai-service YOLO Visible Detection Confirmed 2.3–3.5s Per Frame on CPU (Mac)
-5243 " 🔵 ThermalFrameProbe Saves Snapshots Every 2s; OpenCvVideoSource Reopens Every 8 Reads
 
-Access 606k tokens of past work via get_observations([IDs]) or mem-search skill.
+Access 572k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
