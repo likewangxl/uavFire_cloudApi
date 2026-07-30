@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.firedetection
 
+import com.google.gson.JsonParser
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,31 +11,38 @@ class VisibleRgbaBgrGoldenTest {
     private val manifest = VisibleFireModelManifestParser.parse(
         File("src/main/assets/fire-detection/model-manifest.json").readText(),
     )
+    private val fixture = JsonParser.parseReader(
+        File("../../test-fixtures/visible-fire-color-bgr.json").reader(),
+    ).asJsonObject
 
     @Test
     fun androidRgbaTensorMatchesOpenCvBgrChannelMeaning() {
-        // OpenCV BGR golden pixel [10, 80, 220] is MSDK RGBA [220, 80, 10, 255].
+        val bgr = fixture.getAsJsonArray("tensorPixelBgr").map { it.asInt }
         val prepared = VisibleRgbaTensorPreprocessor(manifest).prepare(
             VisibleRgbaFrame(
-                byteArrayOf(220.toByte(), 80, 10, 255.toByte()),
+                byteArrayOf(bgr[2].toByte(), bgr[1].toByte(), bgr[0].toByte(), 255.toByte()),
                 1, 1, 1,
             ),
         )
         val center = 480 * 960 + 480
         val plane = 960 * 960
 
-        assertEquals(220f / 255f, prepared.nchw.getFloat(center * 4), 0.000001f)
-        assertEquals(80f / 255f, prepared.nchw.getFloat((plane + center) * 4), 0.000001f)
-        assertEquals(10f / 255f, prepared.nchw.getFloat((plane * 2 + center) * 4), 0.000001f)
+        assertEquals(bgr[2] / 255f, prepared.nchw.getFloat(center * 4), 0.000001f)
+        assertEquals(bgr[1] / 255f, prepared.nchw.getFloat((plane + center) * 4), 0.000001f)
+        assertEquals(bgr[0] / 255f, prepared.nchw.getFloat((plane * 2 + center) * 4), 0.000001f)
     }
 
     @Test
     fun fireColorDecisionMatchesPythonOpenCvBgrBaseline() {
-        assertTrue(VisibleFireColor.isFireColoredRgba(220, 80, 10))
-        assertTrue(VisibleFireColor.isFireColoredRgba(180, 180, 120))
-        assertFalse(VisibleFireColor.isFireColoredRgba(179, 100, 10))
-        assertFalse(VisibleFireColor.isFireColoredRgba(220, 79, 10))
-        assertFalse(VisibleFireColor.isFireColoredRgba(220, 100, 121))
-        assertFalse(VisibleFireColor.isFireColoredRgba(100, 120, 10))
+        val thresholds = fixture.getAsJsonObject("thresholds")
+        fixture.getAsJsonArray("cases").forEach { element ->
+            val case = element.asJsonObject
+            val bgr = case.getAsJsonArray("bgr").map { it.asInt }
+            val actual = bgr[2] >= thresholds.get("redMin").asInt &&
+                bgr[1] >= thresholds.get("greenMin").asInt &&
+                bgr[0] <= thresholds.get("blueMax").asInt &&
+                bgr[2] >= bgr[1]
+            assertEquals(case.get("name").asString, case.get("expected").asBoolean, actual)
+        }
     }
 }

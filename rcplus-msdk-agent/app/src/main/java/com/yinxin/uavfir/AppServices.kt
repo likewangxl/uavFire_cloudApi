@@ -25,7 +25,7 @@ import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.firedetection.LatestVisibleFrameBuffer
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorFactory
-import com.yinxin.uavfir.firedetection.VisibleFrameOffer
+import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import com.yinxin.uavfir.firedetection.VisibleInferenceLoop
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
@@ -72,14 +72,14 @@ class AppServices(
     private val visibleFireDetectorArming = VisibleFireDetectorFactory.create(application)
     private val visibleInferenceLoop = (visibleFireDetectorArming as? VisibleFireDetectorArmingResult.Armed)
         ?.let { VisibleInferenceLoop(latestVisibleFrameBuffer, it.detector) }
-    private val visibleFrameOffer: VisibleFrameOffer =
-        if (visibleInferenceLoop != null) latestVisibleFrameBuffer else VisibleFrameOffer.NO_OP
+    private val visibleFrameIngress: VisibleFrameIngress =
+        if (visibleInferenceLoop != null) latestVisibleFrameBuffer else VisibleFrameIngress.NO_OP
     private val thermalHotspotTriggerBridge = ThermalHotspotTriggerBridge()
     private val fireConfirmationRunnerBridge = FireConfirmationRunnerBridge()
     private val sessionManager = DualStreamSessionManager(
         RealMsdkStreamProvider(
             hotspotCandidateListener = thermalHotspotTriggerBridge,
-            visibleFrameOffer = visibleFrameOffer,
+            visibleFrameIngress = visibleFrameIngress,
         ),
         fireConfirmationRunner = fireConfirmationRunnerBridge::run,
     )

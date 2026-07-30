@@ -14,6 +14,7 @@ class VisibleRgbaFrame(
     val height: Int,
     val capturedAtMillis: Long,
     private val onRelease: () -> Unit = {},
+    val sourceGeneration: Long = 0L,
 ) : AutoCloseable {
     private val released = AtomicBoolean(false)
     @Volatile
@@ -41,16 +42,4 @@ class VisibleRgbaFrame(
     private companion object {
         const val RGBA_CHANNELS = 4L
     }
-}
-
-/** Mirrors the Python/OpenCV BGR fire-color gate using MSDK RGBA channel order. */
-internal object VisibleFireColor {
-    fun isFireColoredRgba(
-        red: Int,
-        green: Int,
-        blue: Int,
-        redMin: Int = 180,
-        greenMin: Int = 80,
-        blueMax: Int = 120,
-    ): Boolean = red >= redMin && green >= greenMin && blue <= blueMax && red >= green
 }

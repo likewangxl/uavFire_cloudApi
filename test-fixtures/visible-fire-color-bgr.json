@@ -1,0 +1,16 @@
+{
+  "thresholds": {
+    "redMin": 180,
+    "greenMin": 80,
+    "blueMax": 120
+  },
+  "tensorPixelBgr": [10, 80, 220],
+  "cases": [
+    {"name": "orange_fire", "bgr": [10, 80, 220], "expected": true},
+    {"name": "inclusive_edges", "bgr": [120, 180, 180], "expected": true},
+    {"name": "red_below", "bgr": [10, 100, 179], "expected": false},
+    {"name": "green_below", "bgr": [10, 79, 220], "expected": false},
+    {"name": "blue_above", "bgr": [121, 100, 220], "expected": false},
+    {"name": "red_below_green", "bgr": [10, 120, 100], "expected": false}
+  ]
+}

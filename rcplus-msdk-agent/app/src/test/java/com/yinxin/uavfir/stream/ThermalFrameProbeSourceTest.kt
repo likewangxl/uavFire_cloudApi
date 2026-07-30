@@ -80,8 +80,10 @@ class ThermalFrameProbeSourceTest {
                 onFrameBody.indexOf("consumeImmediateVisibleSnapshotRequest(now)"),
         )
         assertTrue(
-            "MSDK source must be mapped explicitly rather than treating unknown/thermal as visible",
-            onFrameBody.contains("visibleFrameSource(source)"),
+            "callback admission must use the source generation bound by the switch command, not re-read the current key",
+            onFrameBody.contains("visibleFrameIngress.offerVisibleFrame(") &&
+                onFrameBody.indexOf("visibleFrameIngress.offerVisibleFrame(") <
+                onFrameBody.indexOf("currentSource()"),
         )
         assertTrue(
             "callback must not infer",

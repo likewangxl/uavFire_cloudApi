@@ -1,12 +1,12 @@
 package com.yinxin.uavfir.stream
 
-import com.yinxin.uavfir.firedetection.VisibleFrameOffer
+import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import kotlinx.coroutines.delay
 
 class RealMsdkStreamProvider(
     hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
-    visibleFrameOffer: VisibleFrameOffer = VisibleFrameOffer.NO_OP,
-    private val binder: MsdkStreamBinder = defaultStreamBinder(hotspotCandidateListener, visibleFrameOffer),
+    visibleFrameIngress: VisibleFrameIngress = VisibleFrameIngress.NO_OP,
+    private val binder: MsdkStreamBinder = defaultStreamBinder(hotspotCandidateListener, visibleFrameIngress),
     private val liveStreamController: LiveStreamController = defaultLiveStreamController(),
 ) : StreamProvider {
     var visibleState: BoundStreamState = BoundStreamState.IDLE
@@ -220,12 +220,12 @@ private class StubLiveStreamController : LiveStreamController {
 
 private fun defaultStreamBinder(
     hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
-    visibleFrameOffer: VisibleFrameOffer = VisibleFrameOffer.NO_OP,
+    visibleFrameIngress: VisibleFrameIngress = VisibleFrameIngress.NO_OP,
 ): MsdkStreamBinder {
     return if (com.yinxin.uavfir.AppContextHolder.get() != null) {
         DjiMsdkStreamBinder(
             hotspotCandidateListener = hotspotCandidateListener,
-            visibleFrameOffer = visibleFrameOffer,
+            visibleFrameIngress = visibleFrameIngress,
         )
     } else {
         StubMsdkStreamBinder()

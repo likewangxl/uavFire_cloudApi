@@ -1,7 +1,8 @@
 package com.yinxin.uavfir.stream
 
 import android.util.Log
-import com.yinxin.uavfir.firedetection.VisibleFrameOffer
+import com.yinxin.uavfir.firedetection.VisibleFrameIngress
+import com.yinxin.uavfir.firedetection.VisibleFrameSource
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.KeyTools
@@ -26,7 +27,7 @@ import kotlin.coroutines.resumeWithException
 
 class DjiMsdkStreamBinder(
     hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
-    visibleFrameOffer: VisibleFrameOffer = VisibleFrameOffer.NO_OP,
+    visibleFrameIngress: VisibleFrameIngress = VisibleFrameIngress.NO_OP,
 ) : MsdkStreamBinder {
     private val tag = "DjiMsdkStreamBinder"
     private val keyManager: KeyManager
@@ -34,7 +35,7 @@ class DjiMsdkStreamBinder(
     private var visibleListener: ICameraStreamManager.ReceiveStreamListener? = null
     private val thermalFrameProbe = ThermalFrameProbe(
         hotspotCandidateListener = hotspotCandidateListener,
-        visibleFrameOffer = visibleFrameOffer,
+        visibleFrameIngress = visibleFrameIngress,
     )
 
     override suspend fun bindVisible(droneSn: String) {
@@ -69,13 +70,24 @@ class DjiMsdkStreamBinder(
     }
 
     override suspend fun focusVisible(droneSn: String) {
-        setValue(
-            KeyTools.createKey(
-                CameraKey.KeyCameraVideoStreamSource,
-                ComponentIndexType.LEFT_OR_MAIN,
-            ),
-            preferredVisibleSource(),
-        )
+        val target = preferredVisibleSource()
+        val generation = thermalFrameProbe.beginSourceSwitch(VisibleFrameSource.VISIBLE)
+        try {
+            setValue(
+                KeyTools.createKey(
+                    CameraKey.KeyCameraVideoStreamSource,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                ),
+                target,
+            )
+            check(!thermalFrameProbe.requiresVisibleSourceBinding() || awaitStableSource(target)) {
+                "visible-source-not-stable-after-switch"
+            }
+            thermalFrameProbe.completeSourceSwitch(generation, success = true)
+        } catch (error: Exception) {
+            thermalFrameProbe.completeSourceSwitch(generation, success = false)
+            throw error
+        }
         resetVisibleZoomToWide()
         logCurrentStreamSelection("focusVisible")
     }
@@ -97,13 +109,26 @@ class DjiMsdkStreamBinder(
     }
 
     override suspend fun focusThermal(droneSn: String) {
-        setValue(
-            KeyTools.createKey(
-                CameraKey.KeyCameraVideoStreamSource,
-                ComponentIndexType.LEFT_OR_MAIN,
-            ),
-            CameraVideoStreamSourceType.INFRARED_CAMERA,
-        )
+        val generation = thermalFrameProbe.beginSourceSwitch(VisibleFrameSource.THERMAL)
+        try {
+            setValue(
+                KeyTools.createKey(
+                    CameraKey.KeyCameraVideoStreamSource,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                ),
+                CameraVideoStreamSourceType.INFRARED_CAMERA,
+            )
+            check(
+                !thermalFrameProbe.requiresVisibleSourceBinding() ||
+                    awaitStableSource(CameraVideoStreamSourceType.INFRARED_CAMERA),
+            ) {
+                "thermal-source-not-stable-after-switch"
+            }
+            thermalFrameProbe.completeSourceSwitch(generation, success = true)
+        } catch (error: Exception) {
+            thermalFrameProbe.completeSourceSwitch(generation, success = false)
+            throw error
+        }
         runCatching {
             setValue(
                 KeyTools.createCameraKey(
@@ -427,6 +452,22 @@ class DjiMsdkStreamBinder(
             .orEmpty()
     }
 
+    private suspend fun awaitStableSource(expected: CameraVideoStreamSourceType): Boolean {
+        var consecutiveMatches = 0
+        repeat(SOURCE_STABLE_MAX_READS) { attempt ->
+            val current = keyManager.getValue(
+                KeyTools.createKey(
+                    CameraKey.KeyCameraVideoStreamSource,
+                    ComponentIndexType.LEFT_OR_MAIN,
+                ),
+            )
+            consecutiveMatches = if (current == expected) consecutiveMatches + 1 else 0
+            if (consecutiveMatches >= SOURCE_STABLE_REQUIRED_MATCHES) return true
+            if (attempt + 1 < SOURCE_STABLE_MAX_READS) delay(SOURCE_STABLE_POLL_MILLIS)
+        }
+        return false
+    }
+
     private fun logCurrentStreamSelection(action: String) {
         runCatching {
             val currentSource = keyManager.getValue(
@@ -536,6 +577,9 @@ class DjiMsdkStreamBinder(
         private const val VISIBLE_SNAPSHOT_POLL_MS: Long = 100
         private const val VISIBLE_SNAPSHOT_WAIT_ATTEMPTS: Int = 12
         private const val VISIBLE_SNAPSHOT_MAX_AGE_MS: Long = 3_000
+        private const val SOURCE_STABLE_MAX_READS: Int = 6
+        private const val SOURCE_STABLE_REQUIRED_MATCHES: Int = 2
+        private const val SOURCE_STABLE_POLL_MILLIS: Long = 50
         const val COARSE_SCAN_COLUMNS = 5
         const val COARSE_SCAN_ROWS = 4
         const val COARSE_SCAN_REGION_SIZE = 0.18

@@ -2,9 +2,12 @@ from app.inference.visible.detector import (
     ColorFireVisibleDetector,
     StubVisibleDetector,
     YoloVisibleDetector,
+    _fire_colored_ratio,
 )
 from app.models.frame import FramePacket
 from concurrent.futures import ThreadPoolExecutor
+import json
+from pathlib import Path
 
 
 def test_stub_returns_configured_score_for_visible_frame_with_data():
@@ -208,6 +211,26 @@ def test_color_fire_detector_returns_zero_when_no_fire_colored_pixels():
     )
 
     assert detector.detect(packet) == 0.0
+
+
+def test_python_fire_color_gate_matches_shared_android_bgr_fixture():
+    fixture_path = (
+        Path(__file__).resolve().parents[2]
+        / "test-fixtures"
+        / "visible-fire-color-bgr.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    thresholds = fixture["thresholds"]
+
+    for case in fixture["cases"]:
+        ratio, total = _fire_colored_ratio(
+            [[case["bgr"]]],
+            red_min=thresholds["redMin"],
+            green_min=thresholds["greenMin"],
+            blue_max=thresholds["blueMax"],
+        )
+        assert total == 1, case["name"]
+        assert (ratio == 1.0) is case["expected"], case["name"]
 
 
 class _FakeYolo:

@@ -88,4 +88,26 @@ class DjiMsdkStreamBinderSourceTest {
             !bindThermalBody.contains("msdk-v5-camera-stream-manager-does-not-expose-simultaneous-visible-and-thermal-stream-binding"),
         )
     }
+
+    @Test
+    fun sourceSwitchCommandsOwnGenerationAndRequireStableKeyBeforeCompleting() {
+        val source = String(Files.readAllBytes(
+            Paths.get("src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt"),
+        ))
+        val visible = source.substringAfter("override suspend fun focusVisible")
+            .substringBefore("private suspend fun resetVisibleZoomToWide")
+        val thermal = source.substringAfter("override suspend fun focusThermal")
+            .substringBefore("override suspend fun captureVisibleSnapshot")
+
+        listOf(visible, thermal).forEach { body ->
+            assertTrue(body.contains("thermalFrameProbe.beginSourceSwitch"))
+            assertTrue(body.contains("awaitStableSource"))
+            assertTrue(body.contains("thermalFrameProbe.requiresVisibleSourceBinding()"))
+            assertTrue(body.contains("thermalFrameProbe.completeSourceSwitch(generation, success = true)"))
+            assertTrue(
+                body.indexOf("beginSourceSwitch") < body.indexOf("setValue(") &&
+                    body.indexOf("awaitStableSource") < body.indexOf("completeSourceSwitch"),
+            )
+        }
+    }
 }

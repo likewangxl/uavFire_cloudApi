@@ -5,7 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.yinxin.uavfir.AppContextHolder
 import com.yinxin.uavfir.firedetection.VisibleFrameFormat
-import com.yinxin.uavfir.firedetection.VisibleFrameOffer
+import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import com.yinxin.uavfir.firedetection.VisibleFrameSource
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.KeyTools
@@ -36,9 +36,10 @@ class ThermalFrameProbe(
     private val cameraStreamManager: ICameraStreamManager = MediaDataCenter.getInstance().cameraStreamManager,
     private val hotspotDetector: ThermalHotspotFrameDetector = ThermalHotspotFrameDetector(),
     private val hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
-    private val visibleFrameOffer: VisibleFrameOffer = VisibleFrameOffer.NO_OP,
+    private val visibleFrameIngress: VisibleFrameIngress = VisibleFrameIngress.NO_OP,
 ) {
     private val running = AtomicBoolean(false)
+    private val frameListenerMonitor = Any()
     private val saveExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "thermal-frame-probe-writer").apply { isDaemon = true }
     }
@@ -61,9 +62,10 @@ class ThermalFrameProbe(
         onReceiveStream(data, offset, length, info)
     }
 
-    private val frameListener = ICameraStreamManager.CameraFrameListener { frameData, offset, length, width, height, format ->
-        onFrame(frameData, offset, length, width, height, format)
-    }
+    @Volatile
+    private var activeSourceGeneration = 0L
+    @Volatile
+    private var frameListener: ICameraStreamManager.CameraFrameListener? = null
 
     fun start() {
         if (!running.compareAndSet(false, true)) {
@@ -71,11 +73,9 @@ class ThermalFrameProbe(
         }
         runCatching {
             cameraStreamManager.addReceiveStreamListener(componentIndex, receiveStreamListener)
-            cameraStreamManager.addFrameListener(
-                componentIndex,
-                ICameraStreamManager.FrameFormat.RGBA_8888,
-                frameListener,
-            )
+            synchronized(frameListenerMonitor) {
+                installFrameListener(activeSourceGeneration)
+            }
             Log.i(TAG, "started component=$componentIndex sampleDir=${sampleDir().absolutePath}")
         }.onFailure {
             running.set(false)
@@ -89,10 +89,35 @@ class ThermalFrameProbe(
         }
         runCatching { cameraStreamManager.removeReceiveStreamListener(receiveStreamListener) }
             .onFailure { Log.w(TAG, "remove receive listener failed: ${it.message}", it) }
-        runCatching { cameraStreamManager.removeFrameListener(frameListener) }
+        runCatching {
+            synchronized(frameListenerMonitor) {
+                removeFrameListener()
+            }
+        }
             .onFailure { Log.w(TAG, "remove frame listener failed: ${it.message}", it) }
         Log.i(TAG, "stopped")
     }
+
+    fun beginSourceSwitch(source: VisibleFrameSource): Long {
+        if (!visibleFrameIngress.enabled) return 0L
+        val generation = visibleFrameIngress.onSourceSwitchStarted(source)
+        synchronized(frameListenerMonitor) {
+            activeSourceGeneration = generation
+            if (running.get()) removeFrameListener()
+        }
+        return generation
+    }
+
+    fun completeSourceSwitch(generation: Long, success: Boolean) {
+        if (!visibleFrameIngress.enabled) return
+        visibleFrameIngress.onSourceSwitchCompleted(generation, success)
+        synchronized(frameListenerMonitor) {
+            if (generation != activeSourceGeneration) return
+            if (running.get()) installFrameListener(generation)
+        }
+    }
+
+    fun requiresVisibleSourceBinding(): Boolean = visibleFrameIngress.enabled
 
     fun latestHotspotRegion(maxAgeMs: Long = HOTSPOT_MAX_AGE_MS): ThermalMeasureRegion? {
         val hotspot = latestHotspot ?: return null
@@ -153,6 +178,7 @@ class ThermalFrameProbe(
     }
 
     private fun onFrame(
+        sourceGeneration: Long,
         frameData: ByteArray?,
         offset: Int,
         length: Int,
@@ -171,8 +197,6 @@ class ThermalFrameProbe(
             decodedOffset = offset,
             decodedFormat = format,
         )
-        val now = System.currentTimeMillis()
-        val source = currentSource()
         if (format != ICameraStreamManager.FrameFormat.RGBA_8888 || width <= 0 || height <= 0) {
             return
         }
@@ -184,12 +208,12 @@ class ThermalFrameProbe(
         if (length < expectedLength || offset < 0 || offset.toLong() + expectedLength > frameData.size) {
             Log.w(
                 TAG,
-                "skip invalid frame source=$source width=$width height=$height offset=$offset length=$length dataSize=${frameData.size}",
+                "skip invalid frame generation=$sourceGeneration width=$width height=$height offset=$offset length=$length dataSize=${frameData.size}",
             )
             return
         }
-        visibleFrameOffer.offerVisibleFrame(
-            source = visibleFrameSource(source),
+        visibleFrameIngress.offerVisibleFrame(
+            sourceGeneration = sourceGeneration,
             format = VisibleFrameFormat.RGBA_8888,
             frameData = frameData,
             offset = offset,
@@ -198,6 +222,8 @@ class ThermalFrameProbe(
             height = height,
             capturedAtMillis = SystemClock.elapsedRealtime(),
         )
+        val now = System.currentTimeMillis()
+        val source = currentSource()
         if (source == CameraVideoStreamSourceType.INFRARED_CAMERA &&
             !ThermalFrameClassifier.looksLikeThermalFrame(frameData, offset, expectedLength, width, height)
         ) {
@@ -350,15 +376,24 @@ class ThermalFrameProbe(
         }.getOrNull()
     }
 
-    private fun visibleFrameSource(source: CameraVideoStreamSourceType?): VisibleFrameSource = when (source) {
-        CameraVideoStreamSourceType.DEFAULT_CAMERA,
-        CameraVideoStreamSourceType.WIDE_CAMERA,
-        CameraVideoStreamSourceType.ZOOM_CAMERA,
-        CameraVideoStreamSourceType.VISION_CAMERA,
-        CameraVideoStreamSourceType.RGB_CAMERA,
-        -> VisibleFrameSource.VISIBLE
-        CameraVideoStreamSourceType.INFRARED_CAMERA -> VisibleFrameSource.THERMAL
-        else -> VisibleFrameSource.UNKNOWN
+    private fun installFrameListener(generation: Long) {
+        removeFrameListener()
+        val listener = ICameraStreamManager.CameraFrameListener {
+                frameData, offset, length, width, height, format,
+            ->
+            onFrame(generation, frameData, offset, length, width, height, format)
+        }
+        cameraStreamManager.addFrameListener(
+            componentIndex,
+            ICameraStreamManager.FrameFormat.RGBA_8888,
+            listener,
+        )
+        frameListener = listener
+    }
+
+    private fun removeFrameListener() {
+        frameListener?.let(cameraStreamManager::removeFrameListener)
+        frameListener = null
     }
 
     private fun sampleDir(kind: String = "thermal"): File {

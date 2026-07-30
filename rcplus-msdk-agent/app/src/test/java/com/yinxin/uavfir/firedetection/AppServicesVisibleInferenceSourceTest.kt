@@ -21,7 +21,7 @@ class AppServicesVisibleInferenceSourceTest {
         assertTrue(
             "disabled/failed detector must leave callback ingress as a no-op",
             source.contains(
-                "if (visibleInferenceLoop != null) latestVisibleFrameBuffer else VisibleFrameOffer.NO_OP",
+                "if (visibleInferenceLoop != null) latestVisibleFrameBuffer else VisibleFrameIngress.NO_OP",
             ),
         )
         assertTrue(

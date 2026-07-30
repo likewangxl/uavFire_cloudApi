@@ -4,13 +4,15 @@ import android.os.SystemClock
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 enum class VisibleInferenceStatus {
     IDLE,
@@ -33,81 +35,103 @@ data class VisibleInferenceMetrics(
     val lastFailure: String? = null,
 )
 
+internal data class VisibleInferenceLoopHooks(
+    val beforeJobPublication: () -> Unit = {},
+)
+
 /**
- * A single sequential consumer capped at 5 FPS. Detector work never runs on
- * the MSDK callback; only this coroutine takes ownership from the buffer.
+ * Single sequential consumer capped at 5 FPS. Lifecycle publication is
+ * linearized under [lifecycleMonitor]; detector/metric work stays outside it.
  */
-class VisibleInferenceLoop(
+class VisibleInferenceLoop internal constructor(
     private val buffer: LatestVisibleFrameBuffer,
     private val detector: VisibleFireDetector,
     private val nowMillis: () -> Long = SystemClock::elapsedRealtime,
+    private val hooks: VisibleInferenceLoopHooks = VisibleInferenceLoopHooks(),
 ) : AutoCloseable {
     private val processing = AtomicBoolean(false)
-    private val started = AtomicBoolean(false)
-    private val closed = AtomicBoolean(false)
-    @Volatile
-    private var metrics = VisibleInferenceMetrics()
-    private val mutableHealth = MutableStateFlow(metrics)
-    val health: StateFlow<VisibleInferenceMetrics> = mutableHealth.asStateFlow()
-    @Volatile
+    private val lifecycleMonitor = Any()
+    private var closed = false
     private var job: Job? = null
+    private val mutableHealth = MutableStateFlow(VisibleInferenceMetrics())
+    val health: StateFlow<VisibleInferenceMetrics> = mutableHealth.asStateFlow()
 
     fun start(scope: CoroutineScope) {
-        check(!closed.get()) { "Visible inference loop is closed" }
-        if (!started.compareAndSet(false, true)) return
-        job = scope.launch {
-            while (isActive) {
-                processLatest()
-                delay(TARGET_INTERVAL_MILLIS)
+        synchronized(lifecycleMonitor) {
+            check(!closed) { "Visible inference loop is closed" }
+            if (job != null) return
+            val newJob = scope.launch(start = CoroutineStart.LAZY) {
+                while (isActive && !isClosed()) {
+                    processLatest()
+                    delay(TARGET_INTERVAL_MILLIS)
+                }
+            }
+            hooks.beforeJobPublication()
+            job = newJob
+            if (closed) {
+                newJob.cancel()
+            } else {
+                newJob.start()
             }
         }
     }
 
     internal suspend fun processLatest(): Boolean {
-        if (closed.get()) return false
+        if (isClosed()) return false
         if (!processing.compareAndSet(false, true)) {
-            publish(metrics.copy(busySkippedCycles = metrics.busySkippedCycles + 1))
+            updateMetrics { it.copy(busySkippedCycles = it.busySkippedCycles + 1) }
             return false
         }
         try {
+            if (isClosed()) return false
             val frame = buffer.takeLatest() ?: return false
             try {
                 val startedAt = nowMillis()
                 val age = (startedAt - frame.capturedAtMillis).coerceAtLeast(0L)
-                publish(metrics.copy(
-                    lastCapturedAtMillis = frame.capturedAtMillis,
-                    lastFrameAgeMillis = age,
-                ))
+                updateMetrics {
+                    it.copy(
+                        lastCapturedAtMillis = frame.capturedAtMillis,
+                        lastFrameAgeMillis = age,
+                    )
+                }
                 if (age > MAX_FRAME_AGE_MILLIS) {
-                    publish(metrics.copy(
-                        status = VisibleInferenceStatus.DEGRADED,
-                        staleRejectedFrames = metrics.staleRejectedFrames + 1,
-                    ))
+                    updateMetrics {
+                        it.copy(
+                            status = VisibleInferenceStatus.DEGRADED,
+                            staleRejectedFrames = it.staleRejectedFrames + 1,
+                        )
+                    }
                     return true
                 }
-                publish(metrics.copy(
-                    lastStartedAtMillis = startedAt,
-                    inFlight = true,
-                    lastFailure = null,
-                ))
+                updateMetrics {
+                    it.copy(
+                        lastStartedAtMillis = startedAt,
+                        inFlight = true,
+                        lastFailure = null,
+                    )
+                }
                 detector.detect(frame)
-                publish(metrics.copy(
-                    status = VisibleInferenceStatus.HEALTHY,
-                    lastCompletedAtMillis = nowMillis(),
-                    completedInferences = metrics.completedInferences + 1,
-                    inFlight = false,
-                ))
+                updateMetrics {
+                    it.copy(
+                        status = VisibleInferenceStatus.HEALTHY,
+                        lastCompletedAtMillis = nowMillis(),
+                        completedInferences = it.completedInferences + 1,
+                        inFlight = false,
+                    )
+                }
             } catch (cancelled: CancellationException) {
-                publish(metrics.copy(inFlight = false))
+                updateMetrics { it.copy(inFlight = false) }
                 throw cancelled
             } catch (error: Exception) {
-                publish(metrics.copy(
-                    status = VisibleInferenceStatus.DEGRADED,
-                    lastCompletedAtMillis = nowMillis(),
-                    failedInferences = metrics.failedInferences + 1,
-                    inFlight = false,
-                    lastFailure = error.message ?: error::class.java.simpleName,
-                ))
+                updateMetrics {
+                    it.copy(
+                        status = VisibleInferenceStatus.DEGRADED,
+                        lastCompletedAtMillis = nowMillis(),
+                        failedInferences = it.failedInferences + 1,
+                        inFlight = false,
+                        lastFailure = error.message ?: error::class.java.simpleName,
+                    )
+                }
             } finally {
                 frame.release()
             }
@@ -117,25 +141,35 @@ class VisibleInferenceLoop(
         }
     }
 
-    fun snapshot(): VisibleInferenceMetrics = metrics
+    fun snapshot(): VisibleInferenceMetrics = mutableHealth.value
 
-    private fun publish(value: VisibleInferenceMetrics) {
-        metrics = value
-        mutableHealth.value = value
+    private fun updateMetrics(transform: (VisibleInferenceMetrics) -> VisibleInferenceMetrics) {
+        mutableHealth.update { current ->
+            if (current.status == VisibleInferenceStatus.CLOSED) current else transform(current)
+        }
     }
 
+    private fun isClosed(): Boolean = synchronized(lifecycleMonitor) { closed }
+
+    internal fun hasLiveJobForTesting(): Boolean =
+        synchronized(lifecycleMonitor) { job?.isActive == true }
+
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        job?.cancel()
+        val publishedJob = synchronized(lifecycleMonitor) {
+            if (closed) return
+            closed = true
+            job
+        }
+        publishedJob?.cancel()
         buffer.close()
         val closeFailure = runCatching(detector::close).exceptionOrNull()
-        publish(
-            metrics.copy(
+        mutableHealth.update {
+            it.copy(
                 status = VisibleInferenceStatus.CLOSED,
                 inFlight = false,
                 lastFailure = closeFailure?.message ?: closeFailure?.javaClass?.simpleName,
-            ),
-        )
+            )
+        }
     }
 
     companion object {
