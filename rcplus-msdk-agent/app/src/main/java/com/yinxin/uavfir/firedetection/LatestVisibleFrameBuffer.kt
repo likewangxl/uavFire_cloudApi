@@ -15,6 +15,16 @@ enum class VisibleFrameFormat {
     OTHER,
 }
 
+enum class VisibleFrameOfferResult {
+    PUBLISHED,
+    REJECTED_BEFORE_COPY,
+    COPIED_DISCARDED,
+    ;
+
+    val published: Boolean
+        get() = this == PUBLISHED
+}
+
 interface VisibleFrameIngress {
     val enabled: Boolean
 
@@ -31,7 +41,7 @@ interface VisibleFrameIngress {
         width: Int,
         height: Int,
         capturedAtMillis: Long,
-    ): Boolean
+    ): VisibleFrameOfferResult
 
     companion object {
         val NO_OP = object : VisibleFrameIngress {
@@ -47,13 +57,14 @@ interface VisibleFrameIngress {
                 width: Int,
                 height: Int,
                 capturedAtMillis: Long,
-            ): Boolean = false
+            ): VisibleFrameOfferResult = VisibleFrameOfferResult.REJECTED_BEFORE_COPY
         }
     }
 }
 
 internal data class LatestVisibleFrameBufferHooks(
     val afterAdmissionReserved: () -> Unit = {},
+    val afterCopyPermissionAcquired: () -> Unit = {},
 )
 
 data class LatestVisibleFrameBufferMetrics(
@@ -74,7 +85,10 @@ data class LatestVisibleFrameBufferMetrics(
  *
  * Source commands first invalidate the old generation and drain the slot.
  * A callback must then reserve both the cadence and slot before allocating its
- * copy. Close/source-switch can invalidate that reservation before copy.
+ * copy. The Reservation -> Copying CAS is the copy-admission linearization
+ * point: close/source-switch can revoke Reservation with zero copy, while a
+ * producer that owns Copying completes its copy and either publishes or
+ * explicitly discards it.
  */
 class LatestVisibleFrameBuffer internal constructor(
     private val admissionNowMillis: () -> Long = SystemClock::elapsedRealtime,
@@ -88,6 +102,11 @@ class LatestVisibleFrameBuffer internal constructor(
         data object Closed : Slot
         data class Frame(val value: VisibleRgbaFrame) : Slot
         data class Reservation(
+            val token: Any,
+            val generation: Long,
+            val replaced: Frame?,
+        ) : Slot
+        data class Copying(
             val token: Any,
             val generation: Long,
             val replaced: Frame?,
@@ -154,7 +173,7 @@ class LatestVisibleFrameBuffer internal constructor(
         width: Int,
         height: Int,
         capturedAtMillis: Long,
-    ): Boolean {
+    ): VisibleFrameOfferResult {
         val expectedLength = width.toLong() * height.toLong() * RGBA_BYTES
         if (format != VisibleFrameFormat.RGBA_8888 ||
             width <= 0 ||
@@ -167,29 +186,29 @@ class LatestVisibleFrameBuffer internal constructor(
             offset.toLong() + expectedLength > frameData.size
         ) {
             reject()
-            return false
+            return VisibleFrameOfferResult.REJECTED_BEFORE_COPY
         }
         if (!isVisibleGenerationBound(sourceGeneration)) {
             sourceRejectedFrames.incrementAndGet()
             reject()
-            return false
+            return VisibleFrameOfferResult.REJECTED_BEFORE_COPY
         }
         val now = admissionNowMillis()
         if (!isVisibleGenerationAdmissible(sourceGeneration, now)) {
             sourceRejectedFrames.incrementAndGet()
             reject()
-            return false
+            return VisibleFrameOfferResult.REJECTED_BEFORE_COPY
         }
         if (!reserveCadence(now)) {
             cadenceRejectedFrames.incrementAndGet()
             reject()
-            return false
+            return VisibleFrameOfferResult.REJECTED_BEFORE_COPY
         }
 
         val reservation = reserveSlot(sourceGeneration) ?: run {
             reservationRejectedFrames.incrementAndGet()
             reject()
-            return false
+            return VisibleFrameOfferResult.REJECTED_BEFORE_COPY
         }
         hooks.afterAdmissionReserved()
         if (slot.get() !== reservation ||
@@ -197,8 +216,18 @@ class LatestVisibleFrameBuffer internal constructor(
         ) {
             cancelReservation(reservation)
             reject()
-            return false
+            return VisibleFrameOfferResult.REJECTED_BEFORE_COPY
         }
+        val copying = Slot.Copying(
+            token = reservation.token,
+            generation = reservation.generation,
+            replaced = reservation.replaced,
+        )
+        if (!slot.compareAndSet(reservation, copying)) {
+            reject()
+            return VisibleFrameOfferResult.REJECTED_BEFORE_COPY
+        }
+        hooks.afterCopyPermissionAcquired()
 
         val pixels = frameData.copyOfRange(offset, offset + expectedLength.toInt())
         copiedFrames.incrementAndGet()
@@ -211,25 +240,25 @@ class LatestVisibleFrameBuffer internal constructor(
             onRelease = { releasedFrames.incrementAndGet() },
         )
         if (!isVisibleGenerationAdmissible(sourceGeneration, admissionNowMillis()) ||
-            !slot.compareAndSet(reservation, Slot.Frame(frame))
+            !slot.compareAndSet(copying, Slot.Frame(frame))
         ) {
             frame.release()
-            cancelReservation(reservation)
+            finishDiscardedCopy(copying)
             reject()
-            return false
+            return VisibleFrameOfferResult.COPIED_DISCARDED
         }
         acceptedFrames.incrementAndGet()
-        reservation.replaced?.let {
+        copying.replaced?.let {
             replacedFrames.incrementAndGet()
             it.value.release()
         }
-        return true
+        return VisibleFrameOfferResult.PUBLISHED
     }
 
     fun offer(frame: VisibleRgbaFrame): Boolean {
         while (true) {
             val current = slot.get()
-            if (current === Slot.Closed || current is Slot.Reservation) {
+            if (current === Slot.Closed || current is Slot.Reservation || current is Slot.Copying) {
                 rejectedFrames.incrementAndGet()
                 frame.release()
                 return false
@@ -268,8 +297,13 @@ class LatestVisibleFrameBuffer internal constructor(
 
     override fun close() {
         sourceState.set(SourceState.Closed)
-        val previous = slot.getAndSet(Slot.Closed)
-        releaseOwnedBy(previous)
+        while (true) {
+            val current = slot.get()
+            if (current === Slot.Closed || current is Slot.Copying) return
+            if (!slot.compareAndSet(current, Slot.Closed)) continue
+            releaseOwnedBy(current)
+            return
+        }
     }
 
     private fun isVisibleGenerationAdmissible(generation: Long, now: Long): Boolean {
@@ -296,7 +330,7 @@ class LatestVisibleFrameBuffer internal constructor(
     private fun reserveSlot(generation: Long): Slot.Reservation? {
         while (true) {
             val current = slot.get()
-            if (current === Slot.Closed || current is Slot.Reservation) return null
+            if (current === Slot.Closed || current is Slot.Reservation || current is Slot.Copying) return null
             val reservation = Slot.Reservation(Any(), generation, current as? Slot.Frame)
             if (slot.compareAndSet(current, reservation)) return reservation
         }
@@ -308,10 +342,18 @@ class LatestVisibleFrameBuffer internal constructor(
         }
     }
 
+    private fun finishDiscardedCopy(copying: Slot.Copying) {
+        val terminal = if (sourceState.get() === SourceState.Closed) Slot.Closed else Slot.Empty
+        check(slot.compareAndSet(copying, terminal)) {
+            "Copy admission ownership was unexpectedly transferred"
+        }
+        copying.replaced?.value?.release()
+    }
+
     private fun invalidateQueuedOrReservedFrame() {
         while (true) {
             val current = slot.get()
-            if (current === Slot.Empty || current === Slot.Closed) return
+            if (current === Slot.Empty || current === Slot.Closed || current is Slot.Copying) return
             if (!slot.compareAndSet(current, Slot.Empty)) continue
             releaseOwnedBy(current)
             return
@@ -322,6 +364,7 @@ class LatestVisibleFrameBuffer internal constructor(
         when (slot) {
             is Slot.Frame -> slot.value.release()
             is Slot.Reservation -> slot.replaced?.value?.release()
+            is Slot.Copying -> Unit
             Slot.Empty, Slot.Closed -> Unit
         }
     }

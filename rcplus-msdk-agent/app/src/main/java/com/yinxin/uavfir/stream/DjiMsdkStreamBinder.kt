@@ -433,12 +433,8 @@ class DjiMsdkStreamBinder(
     }
 
     private fun preferredVisibleSource(): CameraVideoStreamSourceType {
-        val sourceNames = loadAvailableSources()
-        sourceNames.firstOrNull { it == CameraVideoStreamSourceType.ZOOM_CAMERA }?.let {
-            return it
-        }
-        return sourceNames.firstOrNull { it != CameraVideoStreamSourceType.INFRARED_CAMERA }
-            ?: CameraVideoStreamSourceType.DEFAULT_CAMERA
+        return selectPreferredVisibleSource(loadAvailableSources())
+            ?: throw IllegalStateException("rgb-visible-stream-source-unavailable")
     }
 
     private fun loadAvailableSources(): List<CameraVideoStreamSourceType> {
@@ -587,6 +583,31 @@ class DjiMsdkStreamBinder(
         const val LOCAL_SCAN_STEP = 0.07
     }
 }
+
+internal fun selectPreferredVisibleSource(
+    availableSources: List<CameraVideoStreamSourceType>,
+): CameraVideoStreamSourceType? {
+    val preferredName = selectPreferredVisibleSourceName(availableSources.map { it.name })
+        ?: return null
+    return availableSources.firstOrNull { it.name == preferredName }
+}
+
+internal fun selectPreferredVisibleSourceName(
+    availableSourceNames: List<String>,
+): String? {
+    availableSourceNames.firstOrNull { it == "ZOOM_CAMERA" }?.let {
+        return it
+    }
+    return availableSourceNames.firstOrNull { it in RGB_VISIBLE_STREAM_SOURCE_NAMES }
+}
+
+private val RGB_VISIBLE_STREAM_SOURCE_NAMES = setOf(
+    "DEFAULT_CAMERA",
+    "WIDE_CAMERA",
+    "ZOOM_CAMERA",
+    "VISION_CAMERA",
+    "RGB_CAMERA",
+)
 
 private fun coarseThermalScanRegions(): List<ThermalMeasureRegion> {
     val regions = mutableListOf<ThermalMeasureRegion>()

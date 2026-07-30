@@ -1,5 +1,7 @@
 package com.yinxin.uavfir.stream
 
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -26,21 +28,59 @@ class DjiMsdkStreamBinderSourceTest {
     }
 
     @Test
-    fun preferredVisibleSource_prioritizesZoomBeforeWideVisibleSources() {
-        val source = String(Files.readAllBytes(
-            Paths.get("src/main/java/com/yinxin/uavfir/stream/DjiMsdkStreamBinder.kt"),
-        ))
-        val preferredVisibleSourceBody = source.substringAfter("private fun preferredVisibleSource")
-            .substringBefore("private fun loadAvailableSources")
-
-        assertTrue(
-            "visible fire detection should default to zoom camera before wide/default visible sources",
-            preferredVisibleSourceBody.contains("CameraVideoStreamSourceType.ZOOM_CAMERA"),
+    fun preferredVisibleSource_acceptsEveryExplicitRgbVisibleCategory() {
+        val allowed = listOf(
+            "DEFAULT_CAMERA",
+            "WIDE_CAMERA",
+            "ZOOM_CAMERA",
+            "VISION_CAMERA",
+            "RGB_CAMERA",
         )
-        assertTrue(
-            "zoom source should be checked before falling back to the first non-infrared source",
-            preferredVisibleSourceBody.indexOf("CameraVideoStreamSourceType.ZOOM_CAMERA") <
-                preferredVisibleSourceBody.indexOf("CameraVideoStreamSourceType.INFRARED_CAMERA"),
+
+        allowed.forEach { source ->
+            assertEquals(source, selectPreferredVisibleSourceName(listOf(source)))
+        }
+    }
+
+    @Test
+    fun preferredVisibleSource_rejectsEveryNonRgbVisibleCategory() {
+        val forbidden = listOf(
+            "INFRARED_CAMERA",
+            "NDVI_CAMERA",
+            "MS_G_CAMERA",
+            "MS_R_CAMERA",
+            "MS_RE_CAMERA",
+            "MS_NIR_CAMERA",
+            "POINT_CLOUD_CAMERA",
+            "UNKNOWN",
+        )
+
+        forbidden.forEach { source ->
+            assertNull(source, selectPreferredVisibleSourceName(listOf(source)))
+        }
+        assertNull(selectPreferredVisibleSourceName(forbidden))
+    }
+
+    @Test
+    fun preferredVisibleSource_skipsForbiddenSourcesAndPrioritizesZoom() {
+        assertEquals(
+            "WIDE_CAMERA",
+            selectPreferredVisibleSourceName(
+                listOf(
+                    "NDVI_CAMERA",
+                    "WIDE_CAMERA",
+                ),
+            ),
+        )
+        assertEquals(
+            "ZOOM_CAMERA",
+            selectPreferredVisibleSourceName(
+                listOf(
+                    "WIDE_CAMERA",
+                    "ZOOM_CAMERA",
+                    "RGB_CAMERA",
+                ),
+            ),
         )
     }
 
