@@ -18,6 +18,13 @@ data class EngineBenchmark(
     val inferenceSampleCount: Int,
     val firstWindowSampleCount: Int,
     val finalWindowSampleCount: Int,
+    val agentHealthCheckCount: Int,
+    val candidateApkSha256: String,
+    val runtimeSha256: Map<String, String>,
+    val ncnnPackageVersion: String?,
+    val ncnnPackageArchiveSha256: String?,
+    val ncnnBridgeSourceSha256: String?,
+    val ncnnBridgeSha256: String?,
 )
 
 /**
@@ -51,5 +58,24 @@ object EngineSelectionPolicy {
             falsePositives >= 0 &&
             inferenceSampleCount > 0 &&
             firstWindowSampleCount > 0 &&
-            finalWindowSampleCount > 0
+            finalWindowSampleCount > 0 &&
+            agentHealthCheckCount >= 3 &&
+            candidateApkSha256.matches(SHA256) &&
+            runtimeSha256.keys == ApkDeltaMetadata.expectedRuntimeEntries(engine) &&
+            runtimeSha256.values.all { it.matches(SHA256) } &&
+            when (engine) {
+                Engine.NCNN ->
+                    ncnnPackageVersion == APPROVED_NCNN_VERSION &&
+                        ncnnPackageArchiveSha256 == APPROVED_NCNN_ARCHIVE_SHA256 &&
+                        ncnnBridgeSourceSha256?.matches(SHA256) == true &&
+                        ncnnBridgeSha256?.matches(SHA256) == true &&
+                        ncnnBridgeSha256 == runtimeSha256["lib/arm64-v8a/libfire_detector_ncnn.so"]
+                else ->
+                    ncnnPackageVersion == null &&
+                        ncnnPackageArchiveSha256 == null &&
+                        ncnnBridgeSourceSha256 == null &&
+                        ncnnBridgeSha256 == null
+            }
+
+    private val SHA256 = Regex("[0-9a-f]{64}")
 }

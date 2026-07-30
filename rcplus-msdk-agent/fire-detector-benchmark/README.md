@@ -18,10 +18,13 @@ Run the RC Plus gate only after the official NCNN bridge and candidate APK-delta
 export UAVFIRE_ADB_SERIAL=192.168.50.141:5555
 export ANDROID_SERIAL="$UAVFIRE_ADB_SERIAL"
 export FORMAL_AGENT_APK=/absolute/path/to/formal-agent-with-real-uxsdk.apk
-export FORMAL_AGENT_APK_SHA256="$(shasum -a 256 "$FORMAL_AGENT_APK" | awk '{print $1}')"
+export NCNN_ARCHIVE=/absolute/path/to/ncnn-20260526-android-vulkan-shared.zip
+export ANDROID_NDK_DIR=/absolute/path/to/android-ndk
 adb -s "$UAVFIRE_ADB_SERIAL" get-state
 ./gradlew :fire-detector-benchmark:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.agentApkSha256="$FORMAL_AGENT_APK_SHA256"
+  -PformalAgentApk="$FORMAL_AGENT_APK" \
+  -PncnnArchive="$NCNN_ARCHIVE" \
+  -PncnnAndroidNdkDir="$ANDROID_NDK_DIR"
 adb -s "$UAVFIRE_ADB_SERIAL" pull \
   /sdcard/Android/data/com.yinxin.uavfir.benchmark/files/fire-detector-benchmark.json \
   build/visible-960-fire-detector-benchmark.json
@@ -38,43 +41,63 @@ stays within 2 recall points of PyTorch, has P95 at or below 200 ms, and degrade
 more than 20% from the first to final five-minute window. Do not substitute another
 runtime or weaken these limits.
 
-The gate fails unless `com.yinxin.uavfir` is installed and its installed base APK hash
-matches `agentApkSha256`. The final JSON records the exact model, benchmark, PyTorch
+The gate fails unless `com.yinxin.uavfir` is installed and its installed base APK and
+signing-certificate hashes match the build-bound `formal-agent-trust.json`. Gradle
+derives that trust asset from the local APK with Android SDK `apksigner`; no
+instrumentation argument can self-attest Agent identity. The installed Agent must
+declare real UXSDK metadata and `agent-process-v1`, and its process must be healthy at
+the start, throughout, and end of every soak. The final JSON records the exact model, benchmark, PyTorch
 baseline, benchmark APK, instrumentation APK, device fingerprint, hashed Android ID,
-Agent version/APK/signing certificate, and whether the Agent process was co-running.
-Partial engine results are merged only
-when every provenance field and `runId` matches. When running one engine at a time,
-pass the same explicit run ID to every invocation:
+Agent version/APK/signing certificate, real-UXSDK marker, health checks, candidate APK,
+runtime libraries, and NCNN package/source/bridge hashes.
+
+Partial engine results are merged only when every provenance field, harness-generated
+session nonce, boot ID, six-hour expiry, and provenance digest matches. Operators do
+not supply a run ID. For thermal safety on RC Plus 2, start the split sequence with
+ONNX and then continue the same on-device session:
 
 ```bash
--Pandroid.testInstrumentationRunnerArguments.runId=visible-960-20260730-01
+-Pandroid.testInstrumentationRunnerArguments.engine=onnx \
+-Pandroid.testInstrumentationRunnerArguments.sessionAction=start
+
+-Pandroid.testInstrumentationRunnerArguments.engine=tflite \
+-Pandroid.testInstrumentationRunnerArguments.sessionAction=continue
+
+-Pandroid.testInstrumentationRunnerArguments.engine=ncnn \
+-Pandroid.testInstrumentationRunnerArguments.sessionAction=continue
 ```
+
+Starting a gate deletes old final/partial files in both app storage locations. A
+schema-less result or a partial without exact schema-v2 provenance is legacy evidence
+and must never be used for selection. Previously generated thermal results belong
+under `build/quarantine/*.quarantined`, not at the normal result path.
 
 ## NCNN provisioning contract
 
-NCNN has no supported Maven Android runtime. Before a device run, obtain an official,
-checksum-recorded arm64-v8a build and provision these files locally, without committing
-them:
+NCNN has no supported Maven Android runtime. This module is locked to the official
+`ncnn-20260526-android-vulkan-shared.zip` archive with SHA-256
+`eb205b332274974511890903828451ae7a4c19c309f21431536e0a8c9f3dd0c1`.
+Keep that archive local. A missing archive, wrong hash, missing NDK, or failed source
+build stops packaging.
 
-Build the committed bridge source against a locally provisioned official SDK:
+Gradle verifies and extracts the archive, then builds the committed bridge source
+itself:
 
 ```bash
-cmake -S src/main/cpp -B build/local-ncnn \
-  -DANDROID_ABI=arm64-v8a \
-  -DANDROID_PLATFORM=android-26 \
-  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
-  -Dncnn_DIR=/absolute/path/to/checksum-recorded-ncnn-package/lib/cmake/ncnn
-cmake --build build/local-ncnn
+./gradlew :fire-detector-benchmark:buildNcnnBridgeFromSource \
+  -PncnnArchive=/absolute/path/to/ncnn-20260526-android-vulkan-shared.zip \
+  -PncnnAndroidNdkDir=/absolute/path/to/android-ndk
 ```
 
-Use the SDK and bridge locations only as local Gradle properties, never source files:
+Use only the archive and NDK locations as local Gradle properties:
 
 ```text
-ncnnPackageDir=/absolute/path/to/checksum-recorded-ncnn-package/lib/cmake/ncnn
-ncnnRuntimeLibrary=/absolute/path/to/checksum-recorded-ncnn-package/lib/arm64-v8a/libncnn.so
-ncnnBridgeDir=/absolute/path/to/build/local-ncnn
+ncnnArchive=/absolute/path/to/ncnn-20260526-android-vulkan-shared.zip
+ncnnAndroidNdkDir=/absolute/path/to/android-ndk
 ```
 
+The build writes `ncnn-runtime-trust.json` containing the locked package/version,
+aggregate current-source hash, runtime hash, and newly built bridge hash.
 `libfire_detector_ncnn.so` is built from `src/main/cpp/ncnn_bridge.cpp` and exports JNI methods for Kotlin object
 `com.yinxin.uavfir.benchmark.NcnnBridge`:
 
@@ -107,9 +130,8 @@ with its selected runtime/model only, capture its APK, then write metadata:
 ./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=onnx
 ./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=tflite
 ./gradlew :fire-detector-benchmark:captureCandidateMeasurementApk -PfireDetectorCandidate=ncnn \
-  -PncnnPackageDir=/absolute/path/to/checksum-recorded-ncnn-package/lib/cmake/ncnn \
-  -PncnnRuntimeLibrary=/absolute/path/to/checksum-recorded-ncnn-package/lib/arm64-v8a/libncnn.so \
-  -PncnnBridgeDir=/absolute/path/to/build/local-ncnn
+  -PncnnArchive=/absolute/path/to/ncnn-20260526-android-vulkan-shared.zip \
+  -PncnnAndroidNdkDir=/absolute/path/to/android-ndk
 ./gradlew :fire-detector-benchmark:writeApkDeltaMetadata
 ```
 
@@ -123,4 +145,6 @@ generated arm64 APK fixtures, run:
 The metadata task rejects missing APKs, non-arm64 native entries, candidate APKs
 without native runtime code, and any candidate smaller than the runtime-free
 baseline. It writes `build/generated/apkDeltaMetadata/apk-delta.json`; the device
-test fails closed when that file is not packaged.
+test fails closed when that file is not packaged. Each runtime entry carries its
+archive SHA-256; NCNN metadata additionally binds the locked archive/version,
+current bridge source, packaged runtime, packaged bridge, and whole candidate APK.

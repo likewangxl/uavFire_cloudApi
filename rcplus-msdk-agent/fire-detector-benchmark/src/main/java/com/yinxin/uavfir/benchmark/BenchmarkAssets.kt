@@ -19,7 +19,12 @@ internal class BenchmarkAssets(private val context: Context) {
 
     fun verifyIntegrity() {
         BenchmarkRunContract.validateVisibleDataset(manifest, modelManifest.classNames)
-        BenchmarkRunContract.validateVisibleBaseline(baseline, manifest, modelManifest)
+        BenchmarkRunContract.validateVisibleBaseline(
+            baseline,
+            manifest,
+            modelManifest,
+            benchmarkManifestSha256,
+        )
         for (engine in Engine.entries) {
             for (artifact in modelManifest.artifact(engine)) {
                 verifyHash(artifact.path, artifact.sha256)
@@ -29,6 +34,7 @@ internal class BenchmarkAssets(private val context: Context) {
         for (sampleIndex in 0 until samples.length()) {
             val sample = samples.getJSONObject(sampleIndex)
             verifyHash("benchmark-set/${sample.getString("image")}", sample.getString("imageSha256"))
+            verifyHash("benchmark-set/${sample.getString("label")}", sample.getString("labelSha256"))
         }
     }
 

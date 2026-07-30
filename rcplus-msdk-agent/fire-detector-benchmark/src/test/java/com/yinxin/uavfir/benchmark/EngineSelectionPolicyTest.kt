@@ -137,6 +137,34 @@ class EngineSelectionPolicyTest {
         assertNull(result)
     }
 
+    @Test
+    fun select_rejectsMissingFormalAgentHealthChecks() {
+        val result = EngineSelectionPolicy.select(
+            pytorchRecall = 0.90,
+            candidates = listOf(
+                candidate(Engine.ONNX),
+                candidate(Engine.TFLITE),
+                candidate(Engine.NCNN, agentHealthCheckCount = 2),
+            ),
+        )
+
+        assertNull(result)
+    }
+
+    @Test
+    fun select_rejectsMissingCandidateRuntimeOrCurrentSourceBridgeIdentity() {
+        val result = EngineSelectionPolicy.select(
+            pytorchRecall = 0.90,
+            candidates = listOf(
+                candidate(Engine.ONNX),
+                candidate(Engine.TFLITE),
+                candidate(Engine.NCNN, ncnnBridgeSourceSha256 = ""),
+            ),
+        )
+
+        assertNull(result)
+    }
+
     private fun candidatesWithNcnn(
         recall: Double = 0.90,
         p95Millis: Double = 100.0,
@@ -168,6 +196,14 @@ class EngineSelectionPolicyTest {
         inferenceSampleCount: Int = 1,
         firstWindowSampleCount: Int = 1,
         finalWindowSampleCount: Int = 1,
+        agentHealthCheckCount: Int = 3,
+        candidateApkSha256: String = "a".repeat(64),
+        runtimeSha256: Map<String, String> = ApkDeltaMetadata.expectedRuntimeEntries(engine)
+            .associateWith { "b".repeat(64) },
+        ncnnPackageVersion: String? = if (engine == Engine.NCNN) APPROVED_NCNN_VERSION else null,
+        ncnnPackageArchiveSha256: String? = if (engine == Engine.NCNN) APPROVED_NCNN_ARCHIVE_SHA256 else null,
+        ncnnBridgeSourceSha256: String? = if (engine == Engine.NCNN) "d".repeat(64) else null,
+        ncnnBridgeSha256: String? = if (engine == Engine.NCNN) "b".repeat(64) else null,
     ) = EngineBenchmark(
         engine = engine,
         recall = recall,
@@ -180,5 +216,12 @@ class EngineSelectionPolicyTest {
         inferenceSampleCount = inferenceSampleCount,
         firstWindowSampleCount = firstWindowSampleCount,
         finalWindowSampleCount = finalWindowSampleCount,
+        agentHealthCheckCount = agentHealthCheckCount,
+        candidateApkSha256 = candidateApkSha256,
+        runtimeSha256 = runtimeSha256,
+        ncnnPackageVersion = ncnnPackageVersion,
+        ncnnPackageArchiveSha256 = ncnnPackageArchiveSha256,
+        ncnnBridgeSourceSha256 = ncnnBridgeSourceSha256,
+        ncnnBridgeSha256 = ncnnBridgeSha256,
     )
 }

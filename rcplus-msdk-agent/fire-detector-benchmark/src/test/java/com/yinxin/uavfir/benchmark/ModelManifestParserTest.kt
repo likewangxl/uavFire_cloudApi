@@ -10,7 +10,8 @@ class ModelManifestParserTest {
 
         assertEquals(2, manifest.schemaVersion)
         assertEquals(listOf("fire", "smoke"), manifest.classNames)
-        assertEquals("visible-fire-test.pt", manifest.sourceName)
+        assertEquals("visible-fire-wechat-best2-20260728.pt", manifest.sourceName)
+        assertEquals("957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650", manifest.sourceSha256)
         assertEquals(960, manifest.inputWidth)
         assertEquals(0.25f, manifest.confidenceThreshold, 0f)
         assertEquals("model.onnx", manifest.artifact(Engine.ONNX).single().path)
@@ -49,8 +50,9 @@ internal fun validVisibleManifest() =
     """
     {
       "schemaVersion":2,
-      "modelVersion":"visible-fire-test",
-      "source":{"name":"visible-fire-test.pt","sha256":"${"a".repeat(64)}"},
+      "modality":"visible",
+      "modelVersion":"visible-fire-wechat-best2-20260728",
+      "source":{"name":"visible-fire-wechat-best2-20260728.pt","sha256":"957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650"},
       "classes":["fire","smoke"],
       "input":{
         "width":960,

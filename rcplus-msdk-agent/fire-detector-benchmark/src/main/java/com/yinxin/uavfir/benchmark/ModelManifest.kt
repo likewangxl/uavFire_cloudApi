@@ -29,6 +29,8 @@ internal data class ModelManifest(
 internal object ModelManifestParser {
     private const val EXPECTED_SCHEMA_VERSION = 2
     private const val EXPECTED_INPUT_SIZE = 960
+    private const val APPROVED_SOURCE_NAME = "visible-fire-wechat-best2-20260728.pt"
+    private const val APPROVED_SOURCE_SHA256 = "957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650"
     private const val EXPECTED_OUTPUT_LAYOUT = "xywh, class scores; postprocess with NMS"
     private val EXPECTED_CLASSES = listOf("fire", "smoke")
 
@@ -37,10 +39,15 @@ internal object ModelManifestParser {
         check(root.optInt("schemaVersion", -1) == EXPECTED_SCHEMA_VERSION) {
             "Only visible model manifest schema v2 is supported"
         }
+        check(root.getString("modality") == "visible") { "Only visible model manifests are supported" }
         val modelVersion = root.getString("modelVersion")
         val source = root.getJSONObject("source")
-        check(modelVersion.startsWith("visible-") && source.getString("name").startsWith("visible-")) {
-            "Thermal model manifests are not accepted by the visible benchmark"
+        check(
+            modelVersion == APPROVED_SOURCE_NAME.removeSuffix(".pt") &&
+                source.getString("name") == APPROVED_SOURCE_NAME &&
+                source.getString("sha256") == APPROVED_SOURCE_SHA256,
+        ) {
+            "Visible benchmark requires the approved production source model"
         }
         val classes = root.getJSONArray("classes").strings()
         check(classes == EXPECTED_CLASSES) { "Visible benchmark classes must be fire and smoke" }

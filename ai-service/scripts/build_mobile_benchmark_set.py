@@ -15,7 +15,9 @@ from app.mobile_model import (
     IOU_THRESHOLD,
     PRODUCTION_VISIBLE_MODEL_SHA256,
     VISIBLE_INPUT_SIZE,
+    build_pytorch_baseline_manifest,
     build_benchmark_set,
+    sha256_file,
     validate_production_visible_model,
     write_json_atomically,
 )
@@ -43,13 +45,14 @@ def run_pytorch_baseline(model: Path, benchmark: Path) -> None:
             xyxy = [float(value) for value in box.xyxy[0].tolist()]
             boxes.append({"class": int(box.cls[0]), "confidence": float(box.conf[0]), "xyxy": xyxy})
         detections.append({"id": sample["id"], "detections": boxes})
-    write_json_atomically(benchmark / "pytorch-baseline.json", {
-        "model": {"name": model.name, "sha256": PRODUCTION_VISIBLE_MODEL_SHA256},
-        "inputSize": VISIBLE_INPUT_SIZE,
-        "confidenceThreshold": CONFIDENCE_THRESHOLD,
-        "iouThreshold": IOU_THRESHOLD,
-        "samples": detections,
-    })
+    write_json_atomically(
+        benchmark / "pytorch-baseline.json",
+        build_pytorch_baseline_manifest(
+            manifest,
+            benchmark_manifest_sha256=sha256_file(manifest_path),
+            detections=detections,
+        ),
+    )
 
 
 def _required_value(expected: int):

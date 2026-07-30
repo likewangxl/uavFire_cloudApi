@@ -40,6 +40,12 @@
         <meta-data
             android:name="com.dji.mapkit.maplibre.apikey"
             android:value="${MAPLIBRE_TOKEN}" />
+        <meta-data
+            android:name="com.yinxin.uavfir.REAL_UXSDK"
+            android:value="${UAVFIRE_REAL_UXSDK}" />
+        <meta-data
+            android:name="com.yinxin.uavfir.HEALTH_CONTRACT"
+            android:value="${UAVFIRE_AGENT_HEALTH_CONTRACT}" />
 
         <activity
             android:name="dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity"

@@ -17,6 +17,7 @@ val agentMqttBrokerPassword = providers.gradleProperty("agentMqttBrokerPassword"
 val agentWaylineSharedSecret = providers.gradleProperty("agentWaylineSharedSecret").orElse("change-me-in-production")
 val agentAircraftSn = providers.gradleProperty("agentAircraftSn").orElse("")
 val agentGatewaySn = providers.gradleProperty("agentGatewaySn").orElse("")
+val realUxsdkBuild = project(":uxsdk").projectDir.canonicalFile != rootProject.file("uxsdk-stub").canonicalFile
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -38,6 +39,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["DJI_API_KEY"] = djiApiKey.get()
         manifestPlaceholders["MAPLIBRE_TOKEN"] = maplibreToken.get()
+        manifestPlaceholders["UAVFIRE_REAL_UXSDK"] = realUxsdkBuild.toString()
+        manifestPlaceholders["UAVFIRE_AGENT_HEALTH_CONTRACT"] = "agent-process-v1"
         buildConfigField("String", "AGENT_BACKEND_BASE_URL", "\"${agentBackendBaseUrl.get()}\"")
         buildConfigField("String", "AGENT_AI_SERVICE_BASE_URL", "\"${agentAiServiceBaseUrl.get()}\"")
         buildConfigField("String", "AGENT_MEDIA_HOST", "\"${agentMediaHost.get()}\"")

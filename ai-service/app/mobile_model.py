@@ -27,6 +27,8 @@ CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.7
 OUTPUT_LAYOUT = "xywh, class scores; postprocess with NMS"
 BENCHMARK_SEED = 20260730
+VISIBLE_MODALITY = "visible"
+VISIBLE_BENCHMARK_DATASET_ID = "visible-validation-20260730"
 REQUIRED_BENCHMARK_TAGS = frozenset({
     "fire",
     "smoke",
@@ -132,6 +134,7 @@ def build_candidate_manifest(
 
     return {
         "schemaVersion": 2,
+        "modality": VISIBLE_MODALITY,
         "modelVersion": _model_version(source_model),
         "source": {"name": source_model.name, "sha256": PRODUCTION_VISIBLE_MODEL_SHA256},
         "classes": VISIBLE_CLASS_NAMES,
@@ -244,7 +247,46 @@ def build_benchmark_manifest(
             "labelSha256": sha256_file(label),
             "expectedBoxes": boxes,
         })
-    return {"schemaVersion": 2, "seed": seed, "samples": entries}
+    return {
+        "schemaVersion": 2,
+        "modality": VISIBLE_MODALITY,
+        "datasetId": VISIBLE_BENCHMARK_DATASET_ID,
+        "seed": seed,
+        "samples": entries,
+    }
+
+
+def build_pytorch_baseline_manifest(
+    benchmark_manifest: dict[str, Any],
+    *,
+    benchmark_manifest_sha256: str,
+    detections: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    detections_by_id = {item["id"]: item["detections"] for item in detections}
+    benchmark_ids = [sample["id"] for sample in benchmark_manifest["samples"]]
+    if len(detections_by_id) != len(benchmark_ids) or set(detections_by_id) != set(benchmark_ids):
+        raise ValueError("PyTorch detections must cover exactly the benchmark manifest samples")
+    samples = []
+    for sample in benchmark_manifest["samples"]:
+        samples.append({
+            "id": sample["id"],
+            "tags": list(sample["tags"]),
+            "imageSha256": sample["imageSha256"],
+            "labelSha256": sample["labelSha256"],
+            "expectedBoxes": [dict(box) for box in sample["expectedBoxes"]],
+            "detections": detections_by_id[sample["id"]],
+        })
+    return {
+        "model": {"name": PRODUCTION_VISIBLE_MODEL_NAME, "sha256": PRODUCTION_VISIBLE_MODEL_SHA256},
+        "modality": VISIBLE_MODALITY,
+        "datasetId": VISIBLE_BENCHMARK_DATASET_ID,
+        "seed": BENCHMARK_SEED,
+        "benchmarkManifestSha256": benchmark_manifest_sha256,
+        "inputSize": VISIBLE_INPUT_SIZE,
+        "confidenceThreshold": CONFIDENCE_THRESHOLD,
+        "iouThreshold": IOU_THRESHOLD,
+        "samples": samples,
+    }
 
 
 def _load_benchmark_tags(dataset: Path) -> dict[str, tuple[str, list[str]]]:

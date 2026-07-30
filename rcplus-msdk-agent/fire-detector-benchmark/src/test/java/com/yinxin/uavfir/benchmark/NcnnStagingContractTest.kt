@@ -27,7 +27,12 @@ class NcnnStagingContractTest {
         assertFalse(buildScript.contains("onlyIf { measurementCandidate in setOf(\"ncnn\", \"benchmark\")"))
         assertTrue(buildScript.contains("deleteRecursively() || !outputDirectory.exists()"))
         assertTrue(buildScript.contains("if (!requiresNcnnRuntime) return@doLast"))
-        assertTrue(buildScript.contains("NCNN packaging requires -PncnnPackageDir"))
+        assertTrue(buildScript.contains("buildNcnnBridgeFromSource"))
+        assertTrue(buildScript.contains("NCNN_VERSION = \"20260526\""))
+        assertTrue(buildScript.contains(APPROVED_NCNN_ARCHIVE_SHA256))
+        assertTrue(buildScript.contains("ncnn-runtime-trust.json"))
+        assertTrue(buildScript.contains("src/main/cpp/ncnn_bridge.cpp"))
+        assertFalse(buildScript.contains("ncnnBridgeDir"))
         assertTrue(buildScript.contains("copy {"))
     }
 

@@ -26,9 +26,10 @@ class FireDetectorBenchmarkInstrumentedTest {
 
     @Test
     fun benchmarkAndSelectProductionEngine() {
+        val arguments = androidx.test.platform.app.InstrumentationRegistry.getArguments()
         // DJI 的 Android 11 连 run-as 都读不到外部应用目录;exportOnly 模式把结果
         // 镜像到内部 filesDir(run-as 可读),供宿主提取,几秒完成。
-        if (androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("exportOnly") == "true") {
+        if (arguments.getString("exportOnly") == "true") {
             val externalDir = context.getExternalFilesDir(null)
             val listing = buildString {
                 append("externalDir=").append(externalDir?.absolutePath).append('\n')
@@ -41,6 +42,19 @@ class FireDetectorBenchmarkInstrumentedTest {
             }
             return
         }
+        val engineArgument = arguments.getString("engine")
+        val dryRun = arguments.getString("dryRun") == "true"
+        val targets = if (engineArgument == null) Engine.values().toList()
+            else listOf(Engine.valueOf(engineArgument.uppercase()))
+        val sessionAction = arguments.getString("sessionAction")
+        if (!dryRun && (engineArgument == null || sessionAction == SESSION_START)) {
+            if (engineArgument != null) {
+                check(targets.single() == Engine.ONNX) {
+                    "A split gate session must start with the ONNX engine"
+                }
+            }
+            clearPriorGateEvidence()
+        }
         val assets = BenchmarkAssets(context)
         assets.verifyIntegrity()
         val samples = assets.samples()
@@ -52,24 +66,38 @@ class FireDetectorBenchmarkInstrumentedTest {
         )
         // 三引擎背靠背 30 分钟满载浸泡会让 RC Plus 2 热重启;支持 -e engine 单引擎运行,
         // 每个引擎完成即落盘,三份齐了才计算选型。门槛本身不变。
-        val arguments = androidx.test.platform.app.InstrumentationRegistry.getArguments()
-        val engineArgument = arguments.getString("engine")
         // dryRun 只做预热+正确性评估并把召回写到 files/dry-run-<engine>.txt,
         // 不写浸泡成绩、不参与选型——纯诊断通道。
-        val dryRun = arguments.getString("dryRun") == "true"
-        val targets = if (engineArgument == null) Engine.values().toList()
-            else listOf(Engine.valueOf(engineArgument.uppercase()))
         val provenance = if (dryRun) {
             null
+        } else if (engineArgument == null || sessionAction == SESSION_START) {
+            val startedAt = System.currentTimeMillis()
+            BenchmarkPartialResults.beginSession(
+                captureStaticProvenance(assets),
+                nonce = UUID.randomUUID().toString(),
+                bootId = bootId(),
+                startedAtEpochMillis = startedAt,
+                expiresAtEpochMillis = startedAt + BenchmarkPartialResults.SESSION_TTL_MILLIS,
+            )
         } else {
-            val runId = arguments.getString("runId")
-                ?: if (engineArgument == null) UUID.randomUUID().toString()
-                else error("Single-engine gate runs require the same explicit -e runId for all three engines")
-            val expectedAgentApkSha256 = arguments.getString("agentApkSha256")
-                ?: error("Formal Agent/UXSDK APK SHA-256 must be provided as -e agentApkSha256")
-            captureRunProvenance(assets, runId, expectedAgentApkSha256)
+            check(sessionAction == SESSION_CONTINUE) {
+                "Split gate runs require -e sessionAction start for ONNX, then continue"
+            }
+            val partial = checkNotNull(partialFile().takeIf(File::exists)) {
+                "No current gate session exists to continue"
+            }
+            val currentProvenance = JSONObject(partial.readText()).getJSONObject("provenance")
+            BenchmarkPartialResults.requireFreshSession(
+                currentProvenance,
+                System.currentTimeMillis(),
+                bootId(),
+            )
+            BenchmarkPartialResults.requireMatchingStaticProvenance(
+                currentProvenance,
+                captureStaticProvenance(assets),
+            )
+            currentProvenance
         }
-        if (engineArgument == null && !dryRun) partialFile().delete()
         for (target in targets) {
             val adapter = when (target) {
                 Engine.ONNX -> OnnxEngineAdapter(context, assets.modelManifest)
@@ -85,7 +113,12 @@ class FireDetectorBenchmarkInstrumentedTest {
                     .writeText("recall=${metrics.recall} falsePositives=${metrics.falsePositives} pytorchRecall=${pytorchMetrics.recall}")
                 continue
             }
-            val report = runEngine(adapter, samples, apkDeltas.getValue(target).apkDeltaBytes)
+            val report = runEngine(
+                adapter,
+                samples,
+                apkDeltas.getValue(target),
+                checkNotNull(provenance).getString("provenanceDigest"),
+            )
             mergePartial(report, checkNotNull(provenance))
         }
         if (dryRun) return
@@ -103,6 +136,7 @@ class FireDetectorBenchmarkInstrumentedTest {
     private fun partialFile() = File(context.getExternalFilesDir(null), "fire-detector-benchmark-partial.json")
 
     private fun mergePartial(report: EngineReport, provenance: JSONObject) {
+        BenchmarkPartialResults.requireFreshSession(provenance, System.currentTimeMillis(), bootId())
         val current = partialFile().takeIf(File::exists)?.let { JSONObject(it.readText()) }
         val merged = BenchmarkPartialResults.merge(current, provenance, report.engine, report.toJson())
         val serialized = merged.toString(2)
@@ -112,6 +146,7 @@ class FireDetectorBenchmarkInstrumentedTest {
     }
 
     private fun loadPartials(provenance: JSONObject): Map<String, JSONObject> {
+        BenchmarkPartialResults.requireFreshSession(provenance, System.currentTimeMillis(), bootId())
         if (!partialFile().exists()) return emptyMap()
         val current = JSONObject(partialFile().readText())
         BenchmarkPartialResults.requireMatchingProvenance(current, provenance)
@@ -134,9 +169,31 @@ class FireDetectorBenchmarkInstrumentedTest {
         inferenceSampleCount = json.getJSONArray("inferenceSamples").length(),
         firstWindowSampleCount = json.getInt("firstFiveMinuteSampleCount"),
         finalWindowSampleCount = json.getInt("finalFiveMinuteSampleCount"),
+        agentHealthCheckCount = json.getInt("agentHealthCheckCount"),
+        candidateApkSha256 = json.getString("candidateApkSha256"),
+        runtimeSha256 = json.getJSONArray("runtimeEntries").let { entries ->
+            buildMap {
+                for (index in 0 until entries.length()) {
+                    val entry = entries.getJSONObject(index)
+                    put(entry.getString("path"), entry.getString("sha256"))
+                }
+            }
+        },
+        ncnnPackageVersion = json.optString("ncnnPackageVersion").takeIf(String::isNotBlank),
+        ncnnPackageArchiveSha256 = json.optString("ncnnPackageArchiveSha256").takeIf(String::isNotBlank),
+        ncnnBridgeSourceSha256 = json.optString("ncnnBridgeSourceSha256").takeIf(String::isNotBlank),
+        ncnnBridgeSha256 = json.optString("ncnnBridgeSha256").takeIf(String::isNotBlank),
     )
 
-    private fun runEngine(adapter: EngineAdapter, samples: List<BenchmarkSample>, apkDeltaBytes: Long): EngineReport = adapter.use {
+    private fun runEngine(
+        adapter: EngineAdapter,
+        samples: List<BenchmarkSample>,
+        apkDelta: MeasuredApkDelta,
+        provenanceDigest: String,
+    ): EngineReport = adapter.use {
+        var agentHealthCheckCount = 0
+        requireFormalAgentRunning()
+        agentHealthCheckCount += 1
         repeat(BenchmarkRunContract.WARM_UP_FRAMES) { index -> adapter.infer(decode(samples[index % samples.size])) }
         val correctness = samples.map { sample -> sample to adapter.infer(decode(sample)) }
         val correctnessMetrics = CorrectnessEvaluator.evaluate(correctness)
@@ -145,8 +202,14 @@ class FireDetectorBenchmarkInstrumentedTest {
         val finalWindow = mutableListOf<Double>()
         val startedAt = SystemClock.elapsedRealtime()
         val deadline = startedAt + BenchmarkRunContract.RUN_DURATION_MILLIS
+        var nextAgentHealthCheckAt = startedAt + AGENT_HEALTH_CHECK_INTERVAL_MILLIS
         var sampleIndex = 0
         while (SystemClock.elapsedRealtime() < deadline) {
+            if (SystemClock.elapsedRealtime() >= nextAgentHealthCheckAt) {
+                requireFormalAgentRunning()
+                agentHealthCheckCount += 1
+                nextAgentHealthCheckAt += AGENT_HEALTH_CHECK_INTERVAL_MILLIS
+            }
             val frame = decode(samples[sampleIndex % samples.size])
             val inferenceStartedAt = SystemClock.elapsedRealtime()
             adapter.infer(frame)
@@ -168,16 +231,20 @@ class FireDetectorBenchmarkInstrumentedTest {
         check(stabilityDurationMillis >= BenchmarkRunContract.RUN_DURATION_MILLIS) {
             "Incomplete 30-minute stability evidence"
         }
+        requireFormalAgentRunning()
+        agentHealthCheckCount += 1
         EngineReport(
             engine = adapter.engine,
             correctness = correctnessMetrics,
             p95Millis = percentile(observations.map(InferenceObservation::inferenceMillis)),
             firstWindowP95Millis = percentile(firstWindow),
             finalWindowP95Millis = percentile(finalWindow),
-            apkDeltaBytes = apkDeltaBytes,
+            apkDelta = apkDelta,
             stabilityDurationMillis = stabilityDurationMillis,
             firstWindowSampleCount = firstWindow.size,
             finalWindowSampleCount = finalWindow.size,
+            agentHealthCheckCount = agentHealthCheckCount,
+            provenanceDigest = provenanceDigest,
             observations = observations,
         )
     }
@@ -201,6 +268,7 @@ class FireDetectorBenchmarkInstrumentedTest {
         selectedEngine: Engine?,
         provenance: JSONObject,
     ) {
+        BenchmarkPartialResults.requireFreshSession(provenance, System.currentTimeMillis(), bootId())
         val result = JSONObject()
             .put("schemaVersion", 2)
             .put("provenance", JSONObject(provenance.toString()))
@@ -213,30 +281,32 @@ class FireDetectorBenchmarkInstrumentedTest {
         File(context.filesDir, "fire-detector-benchmark.json").writeText(serialized)
     }
 
-    private fun captureRunProvenance(
-        assets: BenchmarkAssets,
-        runId: String,
-        expectedAgentApkSha256: String,
-    ): JSONObject {
-        check(expectedAgentApkSha256.matches(Regex("[0-9a-f]{64}"))) {
-            "agentApkSha256 must be a lowercase SHA-256"
-        }
+    private fun captureStaticProvenance(assets: BenchmarkAssets): JSONObject {
+        val formalAgentTrust = FormalAgentTrust.load(context)
         val packageInfo = context.packageManager.getPackageInfo(
             FORMAL_AGENT_PACKAGE,
-            PackageManager.GET_SIGNING_CERTIFICATES,
+            PackageManager.GET_SIGNING_CERTIFICATES or PackageManager.GET_META_DATA,
         )
         val agentApplication = checkNotNull(packageInfo.applicationInfo) { "Formal Agent application info is unavailable" }
         val agentApkSha256 = sha256(File(agentApplication.sourceDir))
-        check(agentApkSha256 == expectedAgentApkSha256) {
-            "Installed Agent APK does not match the formal Agent/UXSDK build"
+        check(agentApkSha256 == formalAgentTrust.apkSha256) {
+            "Installed Agent APK does not match the build-bound formal Agent APK"
         }
         val signers = checkNotNull(packageInfo.signingInfo) { "Formal Agent signing info is unavailable" }
             .apkContentsSigners
         check(signers.size == 1) { "Formal Agent APK must have one current signing certificate" }
-        val activityManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as ActivityManager
-        val agentRunning = activityManager.runningAppProcesses
-            ?.any { it.processName == FORMAL_AGENT_PACKAGE }
-            ?: false
+        val signingCertificateSha256 = sha256(signers.single().toByteArray())
+        check(signingCertificateSha256 == formalAgentTrust.signingCertificateSha256) {
+            "Installed Agent signing certificate does not match the build-bound formal Agent APK"
+        }
+        val metadata = checkNotNull(agentApplication.metaData) { "Formal Agent build metadata is unavailable" }
+        val realUxsdk = metadata.getBoolean(FORMAL_AGENT_REAL_UXSDK_METADATA, false)
+        val healthContract = metadata.getString(FORMAL_AGENT_HEALTH_CONTRACT_METADATA)
+        check(realUxsdk) { "Formal Agent APK was not built with the real UXSDK project" }
+        check(healthContract == FORMAL_AGENT_HEALTH_CONTRACT) {
+            "Formal Agent APK has an unsupported health contract"
+        }
+        requireFormalAgentRunning()
         val androidId = checkNotNull(
             Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID),
         ) { "Stable Android device ID is unavailable" }
@@ -245,7 +315,6 @@ class FireDetectorBenchmarkInstrumentedTest {
             .getInstrumentation()
             .context
         return JSONObject()
-            .put("runId", runId)
             .put("modelManifestSha256", assets.modelManifest.sha256)
             .put("benchmarkManifestSha256", assets.benchmarkManifestSha256)
             .put("pytorchBaselineSha256", assets.pytorchBaselineSha256)
@@ -257,8 +326,45 @@ class FireDetectorBenchmarkInstrumentedTest {
             .put("agentVersionName", checkNotNull(packageInfo.versionName))
             .put("agentVersionCode", packageInfo.longVersionCode)
             .put("agentApkSha256", agentApkSha256)
-            .put("agentSigningCertificateSha256", sha256(signers.single().toByteArray()))
-            .put("agentRunning", agentRunning)
+            .put("agentSigningCertificateSha256", signingCertificateSha256)
+            .put("agentRealUxsdk", realUxsdk)
+            .put("agentHealthContract", healthContract)
+            .put("agentRunning", true)
+    }
+
+    private fun clearPriorGateEvidence() {
+        for (directory in listOfNotNull(context.getExternalFilesDir(null), context.filesDir)) {
+            for (name in listOf("fire-detector-benchmark.json", "fire-detector-benchmark-partial.json")) {
+                check(!File(directory, name).exists() || File(directory, name).delete()) {
+                    "Unable to clear prior gate evidence: ${File(directory, name)}"
+                }
+            }
+        }
+    }
+
+    private fun bootId(): String {
+        val id = File("/proc/sys/kernel/random/boot_id").readText().trim()
+        check(id.isNotBlank()) { "Device boot identity is unavailable" }
+        return id
+    }
+
+    private fun requireFormalAgentRunning() {
+        val activityManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as ActivityManager
+        val visibleToActivityManager = activityManager.runningAppProcesses
+            ?.any { it.processName == FORMAL_AGENT_PACKAGE }
+            ?: false
+        val visibleToShell = runCatching {
+            val descriptor = androidx.test.platform.app.InstrumentationRegistry
+                .getInstrumentation()
+                .uiAutomation
+                .executeShellCommand("pidof $FORMAL_AGENT_PACKAGE")
+            descriptor.use {
+                FileInputStream(it.fileDescriptor).bufferedReader().use { output ->
+                    output.readText().trim().isNotBlank()
+                }
+            }
+        }.getOrDefault(false)
+        check(visibleToActivityManager || visibleToShell) { "Formal Agent process is not running" }
     }
 
     private fun sha256(file: File): String = FileInputStream(file).use { input ->
@@ -300,10 +406,12 @@ class FireDetectorBenchmarkInstrumentedTest {
         val p95Millis: Double,
         val firstWindowP95Millis: Double,
         val finalWindowP95Millis: Double,
-        val apkDeltaBytes: Long,
+        val apkDelta: MeasuredApkDelta,
         val stabilityDurationMillis: Long,
         val firstWindowSampleCount: Int,
         val finalWindowSampleCount: Int,
+        val agentHealthCheckCount: Int,
+        val provenanceDigest: String,
         val observations: List<InferenceObservation>,
     ) {
         fun toJson() = JSONObject()
@@ -313,14 +421,35 @@ class FireDetectorBenchmarkInstrumentedTest {
             .put("p95InferenceMillis", p95Millis)
             .put("firstFiveMinuteP95Millis", firstWindowP95Millis)
             .put("finalFiveMinuteP95Millis", finalWindowP95Millis)
-            .put("apkDeltaBytes", apkDeltaBytes)
+            .put("apkDeltaBytes", apkDelta.apkDeltaBytes)
+            .put("candidateApkSha256", apkDelta.candidateApkSha256)
+            .put(
+                "runtimeEntries",
+                JSONArray(apkDelta.runtimeEntries.map { (path, sha256) ->
+                    JSONObject().put("path", path).put("sha256", sha256)
+                }),
+            )
             .put("stabilityDurationMillis", stabilityDurationMillis)
             .put("firstFiveMinuteSampleCount", firstWindowSampleCount)
             .put("finalFiveMinuteSampleCount", finalWindowSampleCount)
+            .put("agentHealthCheckCount", agentHealthCheckCount)
+            .put("provenanceDigest", provenanceDigest)
             .put("inferenceSamples", JSONArray(observations.map(InferenceObservation::toJson)))
+            .also { report ->
+                apkDelta.ncnnPackageVersion?.let { report.put("ncnnPackageVersion", it) }
+                apkDelta.ncnnPackageArchiveSha256?.let { report.put("ncnnPackageArchiveSha256", it) }
+                apkDelta.ncnnBridgeSourceSha256?.let { report.put("ncnnBridgeSourceSha256", it) }
+                apkDelta.ncnnBridgeSha256?.let { report.put("ncnnBridgeSha256", it) }
+            }
     }
 
     private companion object {
         const val FORMAL_AGENT_PACKAGE = "com.yinxin.uavfir"
+        const val FORMAL_AGENT_REAL_UXSDK_METADATA = "com.yinxin.uavfir.REAL_UXSDK"
+        const val FORMAL_AGENT_HEALTH_CONTRACT_METADATA = "com.yinxin.uavfir.HEALTH_CONTRACT"
+        const val FORMAL_AGENT_HEALTH_CONTRACT = "agent-process-v1"
+        const val AGENT_HEALTH_CHECK_INTERVAL_MILLIS = 30_000L
+        const val SESSION_START = "start"
+        const val SESSION_CONTINUE = "continue"
     }
 }

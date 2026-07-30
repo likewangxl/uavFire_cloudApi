@@ -171,6 +171,8 @@ def test_benchmark_manifest_uses_stable_ids_and_hashes_without_private_source_pa
     )
 
     sample = manifest["samples"][0]
+    assert manifest["modality"] == "visible"
+    assert manifest["datasetId"] == "visible-validation-20260730"
     assert manifest["seed"] == 20260730
     assert sample["id"] == "fire-small-001"
     assert sample["tags"] == ["fire", "small-target"]
@@ -180,6 +182,43 @@ def test_benchmark_manifest_uses_stable_ids_and_hashes_without_private_source_pa
     assert "sourcePath" not in sample
     assert "labelPath" not in sample
     assert str(tmp_path) not in json.dumps(manifest)
+
+
+def test_pytorch_baseline_binds_manifest_and_every_evaluated_sample():
+    manifest = {
+        "schemaVersion": 2,
+        "modality": "visible",
+        "datasetId": "visible-validation-20260730",
+        "seed": 20260730,
+        "samples": [{
+            "id": "fire-001",
+            "tags": ["fire"],
+            "image": "images/fire-001.jpg",
+            "label": "labels/fire-001.txt",
+            "imageSha256": "a" * 64,
+            "labelSha256": "b" * 64,
+            "expectedBoxes": [{"class": 0, "x": 0.5, "y": 0.5, "width": 0.2, "height": 0.2}],
+        }],
+    }
+
+    baseline = mobile_model.build_pytorch_baseline_manifest(
+        manifest,
+        benchmark_manifest_sha256="c" * 64,
+        detections=[{"id": "fire-001", "detections": []}],
+    )
+
+    assert baseline["benchmarkManifestSha256"] == "c" * 64
+    assert baseline["modality"] == "visible"
+    assert baseline["datasetId"] == "visible-validation-20260730"
+    assert baseline["seed"] == 20260730
+    assert baseline["samples"][0] == {
+        "id": "fire-001",
+        "tags": ["fire"],
+        "imageSha256": "a" * 64,
+        "labelSha256": "b" * 64,
+        "expectedBoxes": [{"class": 0, "x": 0.5, "y": 0.5, "width": 0.2, "height": 0.2}],
+        "detections": [],
+    }
 
 
 def test_benchmark_set_requires_each_visible_gate_category(tmp_path):
