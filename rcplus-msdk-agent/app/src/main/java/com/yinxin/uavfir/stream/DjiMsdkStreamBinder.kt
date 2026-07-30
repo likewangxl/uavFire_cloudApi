@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.stream
 
 import android.util.Log
+import com.yinxin.uavfir.firedetection.VisibleFrameOffer
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.KeyTools
@@ -25,6 +26,7 @@ import kotlin.coroutines.resumeWithException
 
 class DjiMsdkStreamBinder(
     hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
+    visibleFrameOffer: VisibleFrameOffer = VisibleFrameOffer.NO_OP,
 ) : MsdkStreamBinder {
     private val tag = "DjiMsdkStreamBinder"
     private val keyManager: KeyManager
@@ -32,6 +34,7 @@ class DjiMsdkStreamBinder(
     private var visibleListener: ICameraStreamManager.ReceiveStreamListener? = null
     private val thermalFrameProbe = ThermalFrameProbe(
         hotspotCandidateListener = hotspotCandidateListener,
+        visibleFrameOffer = visibleFrameOffer,
     )
 
     override suspend fun bindVisible(droneSn: String) {

@@ -65,4 +65,31 @@ class ThermalFrameProbeSourceTest {
             detectBody.contains("hotspotCandidateListener.onThermalHotspotCandidate"),
         )
     }
+
+    @Test
+    fun visibleFrameIngressRunsBeforeSnapshotThrottleWithoutCallbackThreadInferenceOrIo() {
+        val source = String(Files.readAllBytes(
+            Paths.get("src/main/java/com/yinxin/uavfir/stream/ThermalFrameProbe.kt"),
+        ))
+        val onFrameBody = source.substringAfter("private fun onFrame")
+            .substringBefore("private fun consumeImmediateVisibleSnapshotRequest")
+
+        assertTrue(
+            "visible inference ingress must be offered before diagnostic snapshot throttling",
+            onFrameBody.indexOf("offerVisibleFrame(") in 0 until
+                onFrameBody.indexOf("consumeImmediateVisibleSnapshotRequest(now)"),
+        )
+        assertTrue(
+            "MSDK source must be mapped explicitly rather than treating unknown/thermal as visible",
+            onFrameBody.contains("visibleFrameSource(source)"),
+        )
+        assertTrue(
+            "callback must not infer",
+            !onFrameBody.contains(".detect(") && !onFrameBody.contains("processLatest("),
+        )
+        assertTrue(
+            "callback must leave JPEG/disk work on the existing executor",
+            !onFrameBody.contains("saveRgbaFrame(") || onFrameBody.contains("saveExecutor.execute"),
+        )
+    }
 }

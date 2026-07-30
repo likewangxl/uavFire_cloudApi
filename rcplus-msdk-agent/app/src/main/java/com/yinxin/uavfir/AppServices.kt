@@ -22,6 +22,11 @@ import com.yinxin.uavfir.api.BackendVisibleTargetAimer
 import com.yinxin.uavfir.api.DjiLaserRangefinderClient
 import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
+import com.yinxin.uavfir.firedetection.LatestVisibleFrameBuffer
+import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
+import com.yinxin.uavfir.firedetection.VisibleFireDetectorFactory
+import com.yinxin.uavfir.firedetection.VisibleFrameOffer
+import com.yinxin.uavfir.firedetection.VisibleInferenceLoop
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
@@ -63,10 +68,19 @@ class AppServices(
     private val backendClient = AgentBackendClient(api)
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
+    private val latestVisibleFrameBuffer = LatestVisibleFrameBuffer()
+    private val visibleFireDetectorArming = VisibleFireDetectorFactory.create(application)
+    private val visibleInferenceLoop = (visibleFireDetectorArming as? VisibleFireDetectorArmingResult.Armed)
+        ?.let { VisibleInferenceLoop(latestVisibleFrameBuffer, it.detector) }
+    private val visibleFrameOffer: VisibleFrameOffer =
+        if (visibleInferenceLoop != null) latestVisibleFrameBuffer else VisibleFrameOffer.NO_OP
     private val thermalHotspotTriggerBridge = ThermalHotspotTriggerBridge()
     private val fireConfirmationRunnerBridge = FireConfirmationRunnerBridge()
     private val sessionManager = DualStreamSessionManager(
-        RealMsdkStreamProvider(hotspotCandidateListener = thermalHotspotTriggerBridge),
+        RealMsdkStreamProvider(
+            hotspotCandidateListener = thermalHotspotTriggerBridge,
+            visibleFrameOffer = visibleFrameOffer,
+        ),
         fireConfirmationRunner = fireConfirmationRunnerBridge::run,
     )
     private val flightControlClient = DjiFlightControlActionClient()
@@ -193,6 +207,7 @@ class AppServices(
     )
 
     init {
+        visibleInferenceLoop?.start(appScope)
         fireConfirmationRunnerBridge.runner = fireConfirmationProcessor::run
         thermalHotspotTriggerBridge.trigger = {
             activeThermalDroneSn()?.let { droneSn ->
@@ -200,6 +215,11 @@ class AppServices(
             }
         }
         Log.i(TAG, "initialized backend=${AgentBackendConfig.DEFAULT_BASE_URL}")
+        Log.i(
+            TAG,
+            "visible detector=${visibleFireDetectorArming::class.java.simpleName} " +
+                "armed=${visibleInferenceLoop != null}",
+        )
         waypointExecutor.attach()
     }
 
@@ -291,6 +311,7 @@ class AppServices(
     }
 
     fun shutdown() {
+        visibleInferenceLoop?.close() ?: latestVisibleFrameBuffer.close()
         osdReporter.stop()
         hmsReporter.stop()
         waypointExecutor.detach()

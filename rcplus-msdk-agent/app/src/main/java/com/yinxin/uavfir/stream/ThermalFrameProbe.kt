@@ -1,8 +1,12 @@
 package com.yinxin.uavfir.stream
 
 import android.graphics.Bitmap
+import android.os.SystemClock
 import android.util.Log
 import com.yinxin.uavfir.AppContextHolder
+import com.yinxin.uavfir.firedetection.VisibleFrameFormat
+import com.yinxin.uavfir.firedetection.VisibleFrameOffer
+import com.yinxin.uavfir.firedetection.VisibleFrameSource
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.value.camera.CameraVideoStreamSourceType
@@ -32,6 +36,7 @@ class ThermalFrameProbe(
     private val cameraStreamManager: ICameraStreamManager = MediaDataCenter.getInstance().cameraStreamManager,
     private val hotspotDetector: ThermalHotspotFrameDetector = ThermalHotspotFrameDetector(),
     private val hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
+    private val visibleFrameOffer: VisibleFrameOffer = VisibleFrameOffer.NO_OP,
 ) {
     private val running = AtomicBoolean(false)
     private val saveExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -171,14 +176,28 @@ class ThermalFrameProbe(
         if (format != ICameraStreamManager.FrameFormat.RGBA_8888 || width <= 0 || height <= 0) {
             return
         }
-        val expectedLength = width * height * BYTES_PER_RGBA_PIXEL
-        if (length < expectedLength || offset < 0 || offset + expectedLength > frameData.size) {
+        val expectedLengthLong = width.toLong() * height.toLong() * BYTES_PER_RGBA_PIXEL
+        if (expectedLengthLong <= 0L || expectedLengthLong > Int.MAX_VALUE) {
+            return
+        }
+        val expectedLength = expectedLengthLong.toInt()
+        if (length < expectedLength || offset < 0 || offset.toLong() + expectedLength > frameData.size) {
             Log.w(
                 TAG,
                 "skip invalid frame source=$source width=$width height=$height offset=$offset length=$length dataSize=${frameData.size}",
             )
             return
         }
+        visibleFrameOffer.offerVisibleFrame(
+            source = visibleFrameSource(source),
+            format = VisibleFrameFormat.RGBA_8888,
+            frameData = frameData,
+            offset = offset,
+            length = length,
+            width = width,
+            height = height,
+            capturedAtMillis = SystemClock.elapsedRealtime(),
+        )
         if (source == CameraVideoStreamSourceType.INFRARED_CAMERA &&
             !ThermalFrameClassifier.looksLikeThermalFrame(frameData, offset, expectedLength, width, height)
         ) {
@@ -331,6 +350,17 @@ class ThermalFrameProbe(
         }.getOrNull()
     }
 
+    private fun visibleFrameSource(source: CameraVideoStreamSourceType?): VisibleFrameSource = when (source) {
+        CameraVideoStreamSourceType.DEFAULT_CAMERA,
+        CameraVideoStreamSourceType.WIDE_CAMERA,
+        CameraVideoStreamSourceType.ZOOM_CAMERA,
+        CameraVideoStreamSourceType.VISION_CAMERA,
+        CameraVideoStreamSourceType.RGB_CAMERA,
+        -> VisibleFrameSource.VISIBLE
+        CameraVideoStreamSourceType.INFRARED_CAMERA -> VisibleFrameSource.THERMAL
+        else -> VisibleFrameSource.UNKNOWN
+    }
+
     private fun sampleDir(kind: String = "thermal"): File {
         val root = AppContextHolder.get()?.getExternalFilesDir(null)
             ?: AppContextHolder.get()?.filesDir
@@ -343,7 +373,7 @@ class ThermalFrameProbe(
         private const val STATS_INTERVAL_MS = 1_000L
         private const val SAMPLE_INTERVAL_MS = 2_000L
         private const val JPEG_QUALITY = 92
-        private const val BYTES_PER_RGBA_PIXEL = 4
+        private const val BYTES_PER_RGBA_PIXEL = 4L
         private const val MAX_SAMPLE_FILES = 20
         private const val HOTSPOT_DETECT_INTERVAL_MS = 500L
         private const val HOTSPOT_MAX_AGE_MS = 2_500L

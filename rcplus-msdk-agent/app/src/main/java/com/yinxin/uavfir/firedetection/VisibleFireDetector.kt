@@ -1,23 +1,5 @@
 package com.yinxin.uavfir.firedetection
 
-data class VisibleRgbaFrame(
-    val pixels: ByteArray,
-    val width: Int,
-    val height: Int,
-    val capturedAtMillis: Long,
-) {
-    init {
-        require(width > 0 && height > 0) { "Visible frame dimensions must be positive" }
-        require(pixels.size.toLong() == width.toLong() * height * RGBA_CHANNELS) {
-            "Visible frame must contain exactly width * height * 4 RGBA bytes"
-        }
-    }
-
-    private companion object {
-        const val RGBA_CHANNELS = 4L
-    }
-}
-
 data class VisibleDetection(
     val left: Float,
     val top: Float,
