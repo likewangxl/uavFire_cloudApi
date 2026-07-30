@@ -18,6 +18,21 @@ class FireDetectorBenchmarkInstrumentedTest {
 
     @Test
     fun benchmarkAndSelectProductionEngine() {
+        // DJI 的 Android 11 连 run-as 都读不到外部应用目录;exportOnly 模式把结果
+        // 镜像到内部 filesDir(run-as 可读),供宿主提取,几秒完成。
+        if (androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("exportOnly") == "true") {
+            val externalDir = context.getExternalFilesDir(null)
+            val listing = buildString {
+                append("externalDir=").append(externalDir?.absolutePath).append('\n')
+                externalDir?.listFiles()?.forEach { append(it.name).append(' ').append(it.length()).append('\n') }
+            }
+            File(context.filesDir, "export-log.txt").writeText(listing)
+            for (name in listOf("fire-detector-benchmark.json", "fire-detector-benchmark-partial.json")) {
+                val source = File(externalDir, name)
+                if (source.exists()) source.copyTo(File(context.filesDir, name), overwrite = true)
+            }
+            return
+        }
         val assets = BenchmarkAssets(context)
         assets.verifyIntegrity()
         val samples = assets.samples()
@@ -27,16 +42,73 @@ class FireDetectorBenchmarkInstrumentedTest {
         val pytorchMetrics = CorrectnessEvaluator.evaluate(
             samples.map { sample -> sample to assets.pytorchDetections(sample) },
         )
-        val adapters = listOf(
-            OnnxEngineAdapter(context, assets.modelManifest),
-            TfliteEngineAdapter(context, assets.modelManifest),
-            NcnnEngineAdapter(context, assets.modelManifest),
+        // 三引擎背靠背 30 分钟满载浸泡会让 RC Plus 2 热重启;支持 -e engine 单引擎运行,
+        // 每个引擎完成即落盘,三份齐了才计算选型。门槛本身不变。
+        val arguments = androidx.test.platform.app.InstrumentationRegistry.getArguments()
+        val engineArgument = arguments.getString("engine")
+        // dryRun 只做预热+正确性评估并把召回写到 files/dry-run-<engine>.txt,
+        // 不写浸泡成绩、不参与选型——纯诊断通道。
+        val dryRun = arguments.getString("dryRun") == "true"
+        val targets = if (engineArgument == null) Engine.values().toList()
+            else listOf(Engine.valueOf(engineArgument.uppercase()))
+        if (engineArgument == null && !dryRun) partialFile().delete()
+        for (target in targets) {
+            val adapter = when (target) {
+                Engine.ONNX -> OnnxEngineAdapter(context, assets.modelManifest)
+                Engine.TFLITE -> TfliteEngineAdapter(context, assets.modelManifest)
+                Engine.NCNN -> NcnnEngineAdapter(context, assets.modelManifest)
+            }
+            if (dryRun) {
+                val metrics = adapter.use {
+                    repeat(BenchmarkRunContract.WARM_UP_FRAMES) { index -> adapter.infer(decode(samples[index % samples.size])) }
+                    CorrectnessEvaluator.evaluate(samples.map { sample -> sample to adapter.infer(decode(sample)) })
+                }
+                File(context.filesDir, "dry-run-${target.name.lowercase()}.txt")
+                    .writeText("recall=${metrics.recall} falsePositives=${metrics.falsePositives} pytorchRecall=${pytorchMetrics.recall}")
+                continue
+            }
+            val report = runEngine(adapter, samples, apkDeltas.getValue(target).apkDeltaBytes)
+            mergePartial(report)
+        }
+        if (dryRun) return
+        val partials = loadPartials()
+        if (partials.size < Engine.values().size) return
+        val selected = EngineSelectionPolicy.select(
+            pytorchMetrics.recall,
+            partials.values.map(::selectionInput),
         )
-        val reports = adapters.map { adapter -> runEngine(adapter, samples, apkDeltas.getValue(adapter.engine).apkDeltaBytes) }
-        val selected = EngineSelectionPolicy.select(pytorchMetrics.recall, reports.map(EngineReport::selectionInput))
-        writeResult(pytorchMetrics, reports, selected?.engine)
+        writeResult(pytorchMetrics, partials, selected?.engine)
         assertNotNull("No engine passed the immutable production gate", selected)
     }
+
+    private fun partialFile() = File(context.getExternalFilesDir(null), "fire-detector-benchmark-partial.json")
+
+    private fun mergePartial(report: EngineReport) {
+        val current = if (partialFile().exists()) JSONObject(partialFile().readText()) else JSONObject()
+        current.put(report.engine.name.lowercase(), report.toJson())
+        val serialized = current.toString(2)
+        partialFile().writeText(serialized)
+        // 双写内部存储:外部目录 adb/run-as 均不可读,且 gradle 跑完会随卸载被清。
+        File(context.filesDir, partialFile().name).writeText(serialized)
+    }
+
+    private fun loadPartials(): Map<String, JSONObject> {
+        if (!partialFile().exists()) return emptyMap()
+        val current = JSONObject(partialFile().readText())
+        return Engine.values().mapNotNull { engine ->
+            val key = engine.name.lowercase()
+            current.optJSONObject(key)?.let { key to it }
+        }.toMap()
+    }
+
+    private fun selectionInput(json: JSONObject) = EngineBenchmark(
+        engine = Engine.valueOf(json.getString("engine").uppercase()),
+        recall = json.getDouble("recall"),
+        p95Millis = json.getDouble("p95InferenceMillis"),
+        firstWindowP95Millis = json.getDouble("firstFiveMinuteP95Millis"),
+        finalWindowP95Millis = json.getDouble("finalFiveMinuteP95Millis"),
+        apkDeltaBytes = json.getLong("apkDeltaBytes"),
+    )
 
     private fun runEngine(adapter: EngineAdapter, samples: List<BenchmarkSample>, apkDeltaBytes: Long): EngineReport = adapter.use {
         repeat(BenchmarkRunContract.WARM_UP_FRAMES) { index -> adapter.infer(decode(samples[index % samples.size])) }
@@ -92,16 +164,17 @@ class FireDetectorBenchmarkInstrumentedTest {
 
     private fun writeResult(
         pytorch: CorrectnessMetrics,
-        reports: List<EngineReport>,
+        partials: Map<String, JSONObject>,
         selectedEngine: Engine?,
     ) {
         val result = JSONObject()
             .put("pytorchRecall", pytorch.recall)
             .put("pytorchFalsePositives", pytorch.falsePositives)
             .put("selectedEngine", selectedEngine?.name?.lowercase())
-            .put("engines", JSONArray(reports.map(EngineReport::toJson)))
-        val output = File(context.getExternalFilesDir(null), "fire-detector-benchmark.json")
-        output.writeText(result.toString(2))
+            .put("engines", JSONArray(Engine.values().map { partials.getValue(it.name.lowercase()) }))
+        val serialized = result.toString(2)
+        File(context.getExternalFilesDir(null), "fire-detector-benchmark.json").writeText(serialized)
+        File(context.filesDir, "fire-detector-benchmark.json").writeText(serialized)
     }
 
     private fun percentile(values: List<Double>): Double {
@@ -131,15 +204,6 @@ class FireDetectorBenchmarkInstrumentedTest {
         val apkDeltaBytes: Long,
         val observations: List<InferenceObservation>,
     ) {
-        fun selectionInput() = EngineBenchmark(
-            engine = engine,
-            recall = correctness.recall,
-            p95Millis = p95Millis,
-            firstWindowP95Millis = firstWindowP95Millis,
-            finalWindowP95Millis = finalWindowP95Millis,
-            apkDeltaBytes = apkDeltaBytes,
-        )
-
         fun toJson() = JSONObject()
             .put("engine", engine.name.lowercase())
             .put("recall", correctness.recall)

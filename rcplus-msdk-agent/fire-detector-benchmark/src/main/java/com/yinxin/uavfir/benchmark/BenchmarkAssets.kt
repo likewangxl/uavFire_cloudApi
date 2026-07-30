@@ -36,10 +36,10 @@ internal class BenchmarkAssets(private val context: Context) {
             sourceHeight = dimensions.second,
             expected = sample.getJSONArray("expectedBoxes").mapObjects { expected ->
                 Detection(
-                    left = (expected.getDouble("x") - expected.getDouble("width") / 2.0).toFloat(),
-                    top = (expected.getDouble("y") - expected.getDouble("height") / 2.0).toFloat(),
-                    right = (expected.getDouble("x") + expected.getDouble("width") / 2.0).toFloat(),
-                    bottom = (expected.getDouble("y") + expected.getDouble("height") / 2.0).toFloat(),
+                    left = (expected.getDouble("x") - expected.getDouble("width") / 2.0).toFloat().coerceIn(0f, 1f),
+                    top = (expected.getDouble("y") - expected.getDouble("height") / 2.0).toFloat().coerceIn(0f, 1f),
+                    right = (expected.getDouble("x") + expected.getDouble("width") / 2.0).toFloat().coerceIn(0f, 1f),
+                    bottom = (expected.getDouble("y") + expected.getDouble("height") / 2.0).toFloat().coerceIn(0f, 1f),
                     confidence = 1f,
                 )
             },

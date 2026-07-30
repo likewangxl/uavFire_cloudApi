@@ -17,6 +17,11 @@ jlong create(JNIEnv* env, jstring param_path, jstring bin_path) {
     ncnn::create_gpu_instance();
     if (ncnn::get_gpu_count() == 0) return 0;
     model->net.opt.use_vulkan_compute = true;
+    // RC Plus 2 实测:Vulkan 默认 FP16 让召回从 0.985(ONNX FP32)跌到 0.61,
+    // 关闭 FP16 走 FP32 计算;速度余量足够(FP16 时 P95=104ms,门槛 200ms)。
+    model->net.opt.use_fp16_packed = false;
+    model->net.opt.use_fp16_storage = false;
+    model->net.opt.use_fp16_arithmetic = false;
     const int param_status = model->net.load_param(param);
     const int bin_status = param_status == 0 ? model->net.load_model(bin) : -1;
     env->ReleaseStringUTFChars(param_path, param);

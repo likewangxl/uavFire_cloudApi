@@ -26,7 +26,7 @@ internal class OnnxEngineAdapter(context: Context, manifest: ModelManifest) : En
 
     override fun infer(frame: RgbaFrame): List<Detection> {
         val input = preprocessor.prepare(frame)
-        OnnxTensor.createTensor(environment, input.nchw, longArrayOf(1, 3, 640, 640)).use { tensor ->
+        OnnxTensor.createTensor(environment, input.nchw.asFloatBuffer(), longArrayOf(1, 3, 640, 640)).use { tensor ->
             session.run(mapOf(session.inputNames.single() to tensor)).use { results ->
                 @Suppress("UNCHECKED_CAST")
                 val output = (results[0].value as Array<Array<FloatArray>>)[0]
