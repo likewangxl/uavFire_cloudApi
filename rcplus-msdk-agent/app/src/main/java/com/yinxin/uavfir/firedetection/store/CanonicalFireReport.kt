@@ -79,6 +79,7 @@ internal object CanonicalFireReport {
         sessionId: String,
         sequence: Long,
         eventTimestampWallMillis: Long,
+        reason: StagePersistenceReason,
     ): CanonicalReport {
         val root = JsonObject().apply {
             addProperty("eventId", eventId)
@@ -86,10 +87,19 @@ internal object CanonicalFireReport {
             addProperty("sequence", sequence)
             addProperty("eventTimestamp", eventTimestampWallMillis)
             addProperty("state", FireSessionState.MANUAL_HOLD.name)
-            addProperty("reason", "STARTUP_FLIGHT_STATE_UNRECONCILED")
+            addProperty("reason", reason.name)
         }
-        requireAllowedKeys(root, BASE_FIELDS + "reason", "manual-hold report")
-        return canonical(root)
+        return stage(
+            StagePersistenceRecord(
+                sessionId = sessionId,
+                eventId = eventId,
+                sequence = sequence,
+                eventTimestampWallMillis = eventTimestampWallMillis,
+                state = FireSessionState.MANUAL_HOLD,
+                reason = reason,
+                payload = canonicalJson(root),
+            ),
+        )
     }
 
     private fun parseAndValidateIdentity(
@@ -169,6 +179,7 @@ internal object CanonicalFireReport {
         requireAllowedKeys(root, PROGRESS_FIELDS, "progress report")
         bindOptionalString(root, "flightStatus", record.flightStatus)
         bindOptionalString(root, "locationStatus", record.locationStatus?.name)
+        bindOptionalString(root, "reason", record.reason?.name)
         record.flightStatus?.let {
             require(PROGRESS_FLIGHT_STATUS[record.state] == it) {
                 "flightStatus is incompatible with ${record.state}"
@@ -179,8 +190,12 @@ internal object CanonicalFireReport {
                 "locationStatus is incompatible with ${record.state}"
             }
         }
-        root.optionalString("reason")?.let {
-            require(SAFE_CODE.matches(it)) { "Report reason must be a safe code" }
+        if (record.state == FireSessionState.MANUAL_HOLD) {
+            require(record.reason != null) { "MANUAL_HOLD requires a typed safety reason" }
+        } else {
+            require(record.reason == null) {
+                "Safety reason is not allowed for ${record.state}"
+            }
         }
     }
 
@@ -428,14 +443,6 @@ internal object CanonicalFireReport {
         return value.asJsonArray
     }
 
-    private fun JsonObject.optionalString(field: String): String? =
-        get(field)?.let {
-            require(it.isJsonPrimitive && it.asJsonPrimitive.isString) {
-                "Report field $field must be a string"
-            }
-            it.asString
-        }
-
     private fun JsonObject.optionalObject(field: String): JsonObject? =
         get(field)?.let {
             require(it.isJsonObject) { "Report field $field must be an object" }
@@ -493,7 +500,6 @@ internal object CanonicalFireReport {
         "credential",
         "credentials",
     )
-    private val SAFE_CODE = Regex("^[A-Z0-9_:-]{1,128}$")
     private val JSON_NUMBER = Regex("""-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?""")
     private val BASE64_VALUE = Regex("^[A-Za-z0-9+/]+={0,2}$")
     private val EMAIL_VALUE = Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}""")

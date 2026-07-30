@@ -161,6 +161,7 @@ data class StagePersistenceRecord(
     val state: FireSessionState,
     val flightStatus: String? = null,
     val locationStatus: LocationStatus? = null,
+    val reason: StagePersistenceReason? = null,
     val payload: String,
 ) {
     init {
@@ -169,6 +170,16 @@ data class StagePersistenceRecord(
         require(eventTimestampWallMillis >= 0)
         validatePayloadSize(payload)
     }
+}
+
+enum class StagePersistenceReason {
+    UNKNOWN_MISSION_STATE,
+    MISSING_BREAKPOINT,
+    MANUAL_INTERVENTION,
+    STORAGE_FAILURE,
+    DETECTOR_FAILURE,
+    RESUME_FAILURE,
+    STARTUP_FLIGHT_STATE_UNRECONCILED,
 }
 
 data class ReportGeoPoint(

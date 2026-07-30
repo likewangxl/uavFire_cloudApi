@@ -499,7 +499,13 @@ class SqliteFireSessionStore(
             unsafe.forEach { (sessionId, eventId) ->
                 val sequence = nextSequence(database, eventId)
                 val wall = clock.wallTimeMillis()
-                val report = CanonicalFireReport.manualHold(eventId, sessionId, sequence, wall)
+                val report = CanonicalFireReport.manualHold(
+                    eventId,
+                    sessionId,
+                    sequence,
+                    wall,
+                    StagePersistenceReason.STARTUP_FLIGHT_STATE_UNRECONCILED,
+                )
                 val values = ContentValues().apply {
                     put("state", FireSessionState.MANUAL_HOLD.name)
                     putNull("pending_terminal_request_id")

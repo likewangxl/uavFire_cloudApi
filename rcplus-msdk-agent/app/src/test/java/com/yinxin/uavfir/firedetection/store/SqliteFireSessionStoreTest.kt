@@ -275,6 +275,11 @@ class SqliteFireSessionStoreTest {
         val recovery = store.loadForStartup()
         assertEquals(FireSessionState.MANUAL_HOLD, recovery.activeSessions.single().state)
         assertEquals(listOf(1L, 2L, 3L), recovery.pendingOutbox.map { it.sequence })
+        assertTrue(
+            recovery.pendingOutbox.last().payload.contains(
+                """"reason":"STARTUP_FLIGHT_STATE_UNRECONCILED"""",
+            ),
+        )
         assertEquals(FireSessionState.MANUAL_HOLD, store.loadActiveSessions().single().state)
     }
 
@@ -353,6 +358,72 @@ class SqliteFireSessionStoreTest {
                 ),
             ) is DurableWriteResult.Rejected,
         )
+    }
+
+    @Test
+    fun progressReasonIsClosedTypedBoundAndStateCompatible() {
+        store.persistInitialConfirmation(initialRecord())
+        assertTrue(
+            store.persistStage(
+                stageRecord(2, FireSessionState.HOLD_REQUESTED).copy(
+                    payload = stagePayload(
+                        2,
+                        FireSessionState.HOLD_REQUESTED,
+                        extra = ""","reason":"FALSE_REASON"""",
+                    ),
+                ),
+            ) is DurableWriteResult.Rejected,
+        )
+        assertTrue(
+            store.persistStage(
+                stageRecord(2, FireSessionState.HOLD_REQUESTED).copy(
+                    reason = StagePersistenceReason.MANUAL_INTERVENTION,
+                    payload = stagePayload(
+                        2,
+                        FireSessionState.HOLD_REQUESTED,
+                        extra = ""","reason":"MANUAL_INTERVENTION"""",
+                    ),
+                ),
+            ) is DurableWriteResult.Rejected,
+        )
+        assertTrue(
+            store.persistStage(stageRecord(2, FireSessionState.MANUAL_HOLD)) is
+                DurableWriteResult.Rejected,
+        )
+        assertTrue(
+            store.persistStage(
+                stageRecord(2, FireSessionState.MANUAL_HOLD).copy(
+                    reason = StagePersistenceReason.MANUAL_INTERVENTION,
+                    payload = stagePayload(
+                        2,
+                        FireSessionState.MANUAL_HOLD,
+                        extra = ""","reason":"STARTUP_FLIGHT_STATE_UNRECONCILED"""",
+                    ),
+                ),
+            ) is DurableWriteResult.Rejected,
+        )
+
+        StagePersistenceReason.entries.forEach { reason ->
+            CanonicalFireReport.stage(
+                stageRecord(2, FireSessionState.MANUAL_HOLD).copy(
+                    reason = reason,
+                    payload = stagePayload(
+                        2,
+                        FireSessionState.MANUAL_HOLD,
+                        extra = ""","reason":"${reason.name}"""",
+                    ),
+                ),
+            )
+        }
+        val valid = stageRecord(2, FireSessionState.MANUAL_HOLD).copy(
+            reason = StagePersistenceReason.MANUAL_INTERVENTION,
+            payload = stagePayload(
+                2,
+                FireSessionState.MANUAL_HOLD,
+                extra = ""","reason":"MANUAL_INTERVENTION"""",
+            ),
+        )
+        assertEquals(DurableWriteResult.Written, store.persistStage(valid))
     }
 
     @Test
