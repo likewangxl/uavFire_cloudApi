@@ -12,20 +12,20 @@ class FireSessionReducerTest {
         FireSessionEvent.Armed,
         FireSessionEvent.CandidateObserved,
         FireSessionEvent.CandidateCleared,
-        FireSessionEvent.VisualConfirmed(confirmation()),
-        FireSessionEvent.InitialAlertDurable,
+        FireSessionEvent.VisualConfirmed(initialRequest()),
+        FireSessionEvent.InitialAlertDurable(initialRequest()),
         FireSessionEvent.MissionPaused,
         FireSessionEvent.HoverStable,
         FireSessionEvent.TargetAligned,
         terminalReady(),
         degradedReady(),
         FireSessionEvent.TerminalResultReady(
-            TerminalPersistenceRequest("invalid-locating", LocationStatus.LASER_LOCATING, GeoMethod.LASER_RANGEFINDER),
+            terminalRequest(locationStatus = LocationStatus.LASER_LOCATING),
         ),
         FireSessionEvent.TerminalResultReady(
-            TerminalPersistenceRequest("invalid-method", LocationStatus.PRECISE, GeoMethod.AIRCRAFT_OBSERVATION),
+            terminalRequest(geoMethod = GeoMethod.AIRCRAFT_OBSERVATION),
         ),
-        FireSessionEvent.TerminalResultDurable("precise-1"),
+        FireSessionEvent.TerminalResultDurable(terminalRequest()),
         FireSessionEvent.ResumeRequested,
         FireSessionEvent.MissionResumeConfirmed,
         FireSessionEvent.ScanContinued,
@@ -41,15 +41,9 @@ class FireSessionReducerTest {
             Case(FireSessionState.SCANNING, FireSessionEvent.CandidateObserved, FireSessionState.VISUAL_CONFIRMING),
             Case(
                 FireSessionState.VISUAL_CONFIRMING,
-                FireSessionEvent.VisualConfirmed(confirmation()),
+                FireSessionEvent.VisualConfirmed(initialRequest()),
                 FireSessionState.VISUAL_CONFIRMED,
-                listOf(FireSessionEffect.PersistInitialAlert(confirmation())),
-            ),
-            Case(
-                FireSessionState.VISUAL_CONFIRMED,
-                FireSessionEvent.InitialAlertDurable,
-                FireSessionState.HOLD_REQUESTED,
-                listOf(FireSessionEffect.PauseMission),
+                listOf(FireSessionEffect.PersistInitialAlert(initialRequest())),
             ),
             Case(FireSessionState.HOLD_REQUESTED, FireSessionEvent.MissionPaused, FireSessionState.HOVER_VERIFYING),
             Case(
@@ -63,16 +57,6 @@ class FireSessionReducerTest {
                 FireSessionEvent.TargetAligned,
                 FireSessionState.LASER_MEASURING,
                 listOf(FireSessionEffect.MeasureLaser),
-            ),
-            Case(
-                FireSessionState.LASER_MEASURING,
-                terminalReady(),
-                FireSessionState.LASER_MEASURING,
-                listOf(
-                    FireSessionEffect.PersistTerminalResult(
-                        terminalRequest(),
-                    ),
-                ),
             ),
             Case(
                 FireSessionState.RESUME_REQUESTED,
@@ -90,8 +74,21 @@ class FireSessionReducerTest {
             assertEquals(actual, reducer.reduce(case.from, case.event))
         }
 
-        val requested = reducer.reduce(FireSessionState.LASER_MEASURING, terminalReady())
-        val durable = reducer.reduce(requested.phase, FireSessionEvent.TerminalResultDurable("precise-1"))
+        val visual = reducer.reduce(
+            FireSessionState.VISUAL_CONFIRMING,
+            FireSessionEvent.VisualConfirmed(initialRequest()),
+        )
+        val held = reducer.reduce(visual.phase, FireSessionEvent.InitialAlertDurable(initialRequest()))
+        assertEquals(listOf(FireSessionEffect.PauseMission), held.effects)
+        var phase = reducer.reduce(held.phase, FireSessionEvent.MissionPaused).phase
+        phase = reducer.reduce(phase, FireSessionEvent.HoverStable).phase
+        phase = reducer.reduce(phase, FireSessionEvent.TargetAligned).phase
+        val requested = reducer.reduce(phase, terminalReady())
+        assertEquals(listOf(FireSessionEffect.PersistTerminalResult(terminalRequest())), requested.effects)
+        val durable = reducer.reduce(
+            requested.phase,
+            FireSessionEvent.TerminalResultDurable(terminalRequest()),
+        )
         assertTrue(durable.accepted)
         assertEquals(FireSessionState.RESULT_DURABLE, durable.state)
         val resume = reducer.reduce(durable.phase, FireSessionEvent.ResumeRequested)
@@ -164,10 +161,7 @@ class FireSessionReducerTest {
         assertFalse(beforeTerminal.accepted)
         assertFalse(beforeTerminal.effects.contains(FireSessionEffect.ResumeMission))
 
-        val degraded = reducer.reduce(
-            FireSessionState.LASER_MEASURING,
-            degradedReady(),
-        )
+        val degraded = reducer.reduce(laserPhase(), degradedReady())
         assertEquals(
             listOf(
                 FireSessionEffect.PersistTerminalResult(
@@ -190,16 +184,12 @@ class FireSessionReducerTest {
             requestedTransitions.filterIsInstance<FireSessionEvent.VisualConfirmed>().single()
         map.getValue(FireSessionState.VISUAL_CONFIRMING)[matrixVisualConfirmed] =
             FireSessionState.VISUAL_CONFIRMED
-        map.getValue(FireSessionState.VISUAL_CONFIRMED)[FireSessionEvent.InitialAlertDurable] =
-            FireSessionState.HOLD_REQUESTED
         map.getValue(FireSessionState.HOLD_REQUESTED)[FireSessionEvent.MissionPaused] =
             FireSessionState.HOVER_VERIFYING
         map.getValue(FireSessionState.HOVER_VERIFYING)[FireSessionEvent.HoverStable] =
             FireSessionState.TARGET_ALIGNING
         map.getValue(FireSessionState.TARGET_ALIGNING)[FireSessionEvent.TargetAligned] =
             FireSessionState.LASER_MEASURING
-        map.getValue(FireSessionState.LASER_MEASURING)[terminalReady()] = FireSessionState.LASER_MEASURING
-        map.getValue(FireSessionState.LASER_MEASURING)[degradedReady()] = FireSessionState.LASER_MEASURING
         map.getValue(FireSessionState.RESUME_REQUESTED)[FireSessionEvent.MissionResumeConfirmed] =
             FireSessionState.MISSION_RESUMED
         map.getValue(FireSessionState.MISSION_RESUMED)[FireSessionEvent.ScanContinued] =
@@ -225,28 +215,31 @@ class FireSessionReducerTest {
     fun terminalDurabilityRequiresMatchingPendingRequestAndRejectsConflicts() {
         val beforeRequest = reducer.reduce(
             FireSessionState.LASER_MEASURING,
-            FireSessionEvent.TerminalResultDurable("precise-1"),
+            FireSessionEvent.TerminalResultDurable(terminalRequest()),
         )
         assertFalse(beforeRequest.accepted)
 
-        val pending = reducer.reduce(FireSessionState.LASER_MEASURING, terminalReady())
+        val pending = reducer.reduce(laserPhase(), terminalReady())
         assertTrue(pending.accepted)
-        assertEquals(terminalRequest(), pending.phase.pendingTerminal)
         assertFalse(reducer.reduce(pending.phase, terminalReady()).accepted)
         assertFalse(reducer.reduce(pending.phase, degradedReady()).accepted)
         assertFalse(
-            reducer.reduce(pending.phase, FireSessionEvent.TerminalResultDurable("wrong-request")).accepted,
+            reducer.reduce(
+                pending.phase,
+                FireSessionEvent.TerminalResultDurable(terminalRequest(requestId = REQUEST_ID_3)),
+            ).accepted,
         )
 
         val durable = reducer.reduce(
             pending.phase,
-            FireSessionEvent.TerminalResultDurable(terminalRequest().requestId),
+            FireSessionEvent.TerminalResultDurable(terminalRequest()),
         )
         assertEquals(FireSessionState.RESULT_DURABLE, durable.state)
-        assertTrue(durable.phase.terminalPersistenceVerified)
-        assertEquals(terminalRequest(), durable.phase.durableTerminal)
         assertFalse(
-            reducer.reduce(durable.phase, FireSessionEvent.TerminalResultDurable("precise-1")).accepted,
+            reducer.reduce(
+                durable.phase,
+                FireSessionEvent.TerminalResultDurable(terminalRequest()),
+            ).accepted,
         )
         assertFalse(reducer.reduce(FireSessionState.RESULT_DURABLE, FireSessionEvent.ResumeRequested).accepted)
         assertTrue(reducer.reduce(durable.phase, FireSessionEvent.ResumeRequested).accepted)
@@ -258,24 +251,120 @@ class FireSessionReducerTest {
         val mutableView = confirmation.frameTimestampsMillis as MutableList<Long>
         val reduction = reducer.reduce(
             FireSessionState.VISUAL_CONFIRMING,
-            FireSessionEvent.VisualConfirmed(confirmation),
+            FireSessionEvent.VisualConfirmed(initialRequest(confirmation = confirmation)),
         )
         mutableView[0] = 999_999
 
         assertEquals(listOf(1_000L, 1_100L), confirmation.frameTimestampsMillis)
         val persisted = reduction.effects.single() as FireSessionEffect.PersistInitialAlert
-        assertEquals(1_000L, persisted.confirmation.firstFrameTimestampMillis)
-        assertEquals(1_100L, persisted.confirmation.secondFrameTimestampMillis)
+        assertEquals(1_000L, persisted.request.confirmation.firstFrameTimestampMillis)
+        assertEquals(1_100L, persisted.request.confirmation.secondFrameTimestampMillis)
     }
 
-    private fun terminalRequest() = TerminalPersistenceRequest(
-        requestId = "precise-1",
-        locationStatus = LocationStatus.PRECISE,
-        geoMethod = GeoMethod.LASER_RANGEFINDER,
+    @Test
+    fun phaseProofIsOpaqueAndCannotBeForgedThroughPublicApi() {
+        assertTrue(FireSessionPhase::class.java.isInterface)
+        assertTrue(FireSessionPhase::class.java.declaredConstructors.isEmpty())
+        assertFalse(FireSessionPhase::class.java.methods.any { it.name == "copy" })
+        val forged = object : FireSessionPhase {
+            override val state = FireSessionState.RESULT_DURABLE
+        }
+        assertFalse(reducer.reduce(forged, FireSessionEvent.ResumeRequested).accepted)
+    }
+
+    @Test
+    fun initialDurabilityRequiresExactSessionEventAndRequestIdentity() {
+        assertFalse(
+            reducer.reduce(
+                FireSessionState.VISUAL_CONFIRMED,
+                FireSessionEvent.InitialAlertDurable(initialRequest()),
+            ).accepted,
+        )
+        val pending = reducer.reduce(
+            FireSessionState.VISUAL_CONFIRMING,
+            FireSessionEvent.VisualConfirmed(initialRequest()),
+        )
+        listOf(
+            initialRequest(sessionId = "other-session"),
+            initialRequest(eventId = "other-event"),
+            initialRequest(requestId = REQUEST_ID_2),
+        ).forEach { stale ->
+            assertFalse(reducer.reduce(pending.phase, FireSessionEvent.InitialAlertDurable(stale)).accepted)
+        }
+        assertTrue(
+            reducer.reduce(
+                pending.phase,
+                FireSessionEvent.InitialAlertDurable(initialRequest()),
+            ).accepted,
+        )
+    }
+
+    @Test
+    fun terminalDurabilityComparesExactRequestNotOnlyRequestId() {
+        val pending = reducer.reduce(laserPhase(), terminalReady())
+        listOf(
+            terminalRequest(sessionId = "other-session"),
+            terminalRequest(eventId = "other-event"),
+            terminalRequest(locationStatus = LocationStatus.DEGRADED_OSD),
+            terminalRequest(geoMethod = GeoMethod.AIRCRAFT_OBSERVATION),
+        ).forEach { collision ->
+            assertFalse(
+                reducer.reduce(
+                    pending.phase,
+                    FireSessionEvent.TerminalResultDurable(collision),
+                ).accepted,
+            )
+        }
+        assertTrue(
+            reducer.reduce(
+                pending.phase,
+                FireSessionEvent.TerminalResultDurable(terminalRequest()),
+            ).accepted,
+        )
+    }
+
+    @Test
+    fun persistenceRequestIdsMustBeCollisionResistantUuids() {
+        listOf("", "precise-1", "11111111-1111-1111-1111-111111111111").forEach { invalid ->
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                initialRequest(requestId = invalid)
+            }
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                terminalRequest(requestId = invalid)
+            }
+        }
+    }
+
+    private fun initialRequest(
+        sessionId: String = SESSION_ID,
+        eventId: String = EVENT_ID,
+        requestId: String = REQUEST_ID_1,
+        confirmation: VisibleConfirmation = confirmation(),
+    ) = InitialPersistenceRequest(
+        sessionId = sessionId,
+        eventId = eventId,
+        requestId = requestId,
+        confirmation = confirmation,
+    )
+
+    private fun terminalRequest(
+        sessionId: String = SESSION_ID,
+        eventId: String = EVENT_ID,
+        requestId: String = REQUEST_ID_2,
+        locationStatus: LocationStatus = LocationStatus.PRECISE,
+        geoMethod: GeoMethod = GeoMethod.LASER_RANGEFINDER,
+    ) = TerminalPersistenceRequest(
+        sessionId = sessionId,
+        eventId = eventId,
+        requestId = requestId,
+        locationStatus = locationStatus,
+        geoMethod = geoMethod,
     )
 
     private fun degradedRequest() = TerminalPersistenceRequest(
-        requestId = "degraded-1",
+        sessionId = SESSION_ID,
+        eventId = EVENT_ID,
+        requestId = REQUEST_ID_3,
         locationStatus = LocationStatus.DEGRADED_OSD,
         geoMethod = GeoMethod.AIRCRAFT_OBSERVATION,
     )
@@ -284,10 +373,32 @@ class FireSessionReducerTest {
 
     private fun degradedReady() = FireSessionEvent.TerminalResultReady(degradedRequest())
 
+    private fun laserPhase(): FireSessionPhase {
+        val visual = reducer.reduce(
+            FireSessionState.VISUAL_CONFIRMING,
+            FireSessionEvent.VisualConfirmed(initialRequest()),
+        )
+        var phase = reducer.reduce(
+            visual.phase,
+            FireSessionEvent.InitialAlertDurable(initialRequest()),
+        ).phase
+        phase = reducer.reduce(phase, FireSessionEvent.MissionPaused).phase
+        phase = reducer.reduce(phase, FireSessionEvent.HoverStable).phase
+        return reducer.reduce(phase, FireSessionEvent.TargetAligned).phase
+    }
+
     private data class Case(
         val from: FireSessionState,
         val event: FireSessionEvent,
         val to: FireSessionState,
         val effects: List<FireSessionEffect> = emptyList(),
     )
+
+    private companion object {
+        const val SESSION_ID = "session-1"
+        const val EVENT_ID = "event-1"
+        const val REQUEST_ID_1 = "11111111-1111-4111-8111-111111111111"
+        const val REQUEST_ID_2 = "22222222-2222-4222-8222-222222222222"
+        const val REQUEST_ID_3 = "33333333-3333-4333-8333-333333333333"
+    }
 }

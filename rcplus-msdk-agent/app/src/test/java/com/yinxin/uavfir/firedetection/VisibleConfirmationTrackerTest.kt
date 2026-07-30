@@ -225,6 +225,20 @@ class VisibleConfirmationTrackerTest {
         )
     }
 
+    @Test
+    fun coherentCandidateFreeFrameAdvancesWatermarkAndRejectsOlderReplay() {
+        val tracker = VisibleConfirmationTracker(policy)
+        assertNull(tracker.observe(input(100, 150, smoke())).confirmation)
+        assertNull(tracker.observe(input(300, 350)).confirmation)
+        assertNull(tracker.observe(input(200, 250, smoke(left = 0.21f))).confirmation)
+        assertNull(tracker.observe(input(250, 260, smoke(left = 0.22f))).confirmation)
+        assertNull(tracker.observe(input(400, 450, smoke(left = 0.23f))).confirmation)
+        assertEquals(
+            DetectionKind.SMOKE,
+            tracker.observe(input(500, 550, smoke(left = 0.24f))).confirmation?.kind,
+        )
+    }
+
     private fun input(
         capturedAt: Long,
         observedAt: Long,

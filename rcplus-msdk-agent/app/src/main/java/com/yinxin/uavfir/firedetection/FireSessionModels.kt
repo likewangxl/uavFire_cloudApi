@@ -112,7 +112,27 @@ enum class FireSessionFailure {
     RESUME_FAILURE,
 }
 
+private val PERSISTENCE_REQUEST_ID =
+    Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+
+data class InitialPersistenceRequest(
+    val sessionId: String,
+    val eventId: String,
+    val requestId: String,
+    val confirmation: VisibleConfirmation,
+) {
+    init {
+        require(sessionId.isNotBlank()) { "Initial persistence session ID is required" }
+        require(eventId.isNotBlank()) { "Initial persistence event ID is required" }
+        require(PERSISTENCE_REQUEST_ID.matches(requestId)) {
+            "Initial persistence request ID must be a collision-resistant UUID"
+        }
+    }
+}
+
 data class TerminalPersistenceRequest(
+    val sessionId: String,
+    val eventId: String,
     val requestId: String,
     val locationStatus: LocationStatus,
     val geoMethod: GeoMethod,
@@ -124,39 +144,16 @@ data class TerminalPersistenceRequest(
                 geoMethod == GeoMethod.AIRCRAFT_OBSERVATION)
 
     init {
-        require(requestId.isNotBlank()) { "Terminal persistence request ID is required" }
+        require(sessionId.isNotBlank()) { "Terminal persistence session ID is required" }
+        require(eventId.isNotBlank()) { "Terminal persistence event ID is required" }
+        require(PERSISTENCE_REQUEST_ID.matches(requestId)) {
+            "Terminal persistence request ID must be a collision-resistant UUID"
+        }
     }
 }
 
-data class FireSessionPhase(
-    val state: FireSessionState,
-    val pendingTerminal: TerminalPersistenceRequest? = null,
-    val durableTerminal: TerminalPersistenceRequest? = null,
-) {
-    val terminalPersistenceVerified: Boolean
-        get() = durableTerminal != null
-
-    init {
-        require(pendingTerminal == null || state == FireSessionState.LASER_MEASURING) {
-            "Pending terminal persistence is only valid while laser measurement is active"
-        }
-        require(durableTerminal == null || state == FireSessionState.RESULT_DURABLE) {
-            "Terminal persistence proof is only valid for a durable result"
-        }
-        require(pendingTerminal == null || durableTerminal == null) {
-            "Terminal persistence cannot be pending and verified simultaneously"
-        }
-        require(pendingTerminal?.isValidTerminalMapping != false) {
-            "Pending terminal persistence mapping is invalid"
-        }
-        require(durableTerminal?.isValidTerminalMapping != false) {
-            "Durable terminal persistence mapping is invalid"
-        }
-    }
-
-    companion object {
-        fun unproven(state: FireSessionState) = FireSessionPhase(state)
-    }
+interface FireSessionPhase {
+    val state: FireSessionState
 }
 
 sealed interface FireSessionEvent {
@@ -164,17 +161,13 @@ sealed interface FireSessionEvent {
     data object Armed : FireSessionEvent
     data object CandidateObserved : FireSessionEvent
     data object CandidateCleared : FireSessionEvent
-    data class VisualConfirmed(val confirmation: VisibleConfirmation) : FireSessionEvent
-    data object InitialAlertDurable : FireSessionEvent
+    data class VisualConfirmed(val request: InitialPersistenceRequest) : FireSessionEvent
+    data class InitialAlertDurable(val request: InitialPersistenceRequest) : FireSessionEvent
     data object MissionPaused : FireSessionEvent
     data object HoverStable : FireSessionEvent
     data object TargetAligned : FireSessionEvent
     data class TerminalResultReady(val request: TerminalPersistenceRequest) : FireSessionEvent
-    data class TerminalResultDurable(val requestId: String) : FireSessionEvent {
-        init {
-            require(requestId.isNotBlank())
-        }
-    }
+    data class TerminalResultDurable(val request: TerminalPersistenceRequest) : FireSessionEvent
     data object ResumeRequested : FireSessionEvent
     data object MissionResumeConfirmed : FireSessionEvent
     data object ScanContinued : FireSessionEvent
@@ -184,7 +177,7 @@ sealed interface FireSessionEvent {
 }
 
 sealed interface FireSessionEffect {
-    data class PersistInitialAlert(val confirmation: VisibleConfirmation) : FireSessionEffect
+    data class PersistInitialAlert(val request: InitialPersistenceRequest) : FireSessionEffect
     data object PauseMission : FireSessionEffect
     data object AlignTarget : FireSessionEffect
     data object MeasureLaser : FireSessionEffect

@@ -32,13 +32,15 @@ class VisibleConfirmationTracker(
             return VisibleConfirmationOutcome(reset = true)
         }
 
+        // Every coherent, fresh, healthy frame belongs to the ordered stream,
+        // even when it has no qualifying candidate. Invalid inputs above do not.
+        greatestFrameTimestampMillis = timestamp
+        greatestObservedAtMillis = input.observedAtMillis
         val candidate = selectBestCandidate(input)
         if (candidate == null) {
             pending = null
             return VisibleConfirmationOutcome(reset = true)
         }
-        greatestFrameTimestampMillis = timestamp
-        greatestObservedAtMillis = input.observedAtMillis
 
         val previous = pending
         if (previous == null) {
