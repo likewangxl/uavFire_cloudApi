@@ -47,6 +47,8 @@ public class FireEventCreateParam {
 
     private Map<String, Double> thermalMeasureRoi;
 
+    private Map<String, Double> visibleRoi;
+
     @JsonProperty("geo_snapshot")
     @JsonAlias("geoSnapshot")
     private FireGeoSnapshotDTO geoSnapshot;

@@ -4,6 +4,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface DualStreamApi {
     @POST("/manage/api/v1/dual-stream/agents/{droneSn}/heartbeat")
@@ -40,6 +41,12 @@ interface DualStreamApi {
         @Path("taskId") taskId: String,
         @Body body: DualStreamEventRequest,
     )
+
+    @GET("/manage/api/v1/dual-stream/tasks/{taskId}/latest-visible-roi")
+    suspend fun latestVisibleRoi(
+        @Path("taskId") taskId: String,
+        @Query("after_source_ts") afterSourceTs: Long,
+    ): AgentApiEnvelope<VisibleRoiSnapshotResponse>? = null
 
     @POST("/manage/api/v1/msdk/devices/state")
     suspend fun reportMsdkDeviceState(

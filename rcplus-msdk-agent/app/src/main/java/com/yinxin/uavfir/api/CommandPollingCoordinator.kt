@@ -53,8 +53,11 @@ class CommandPollingCoordinator(
         try {
             val result = runCatching {
                 withTimeout(commandTimeoutMs) {
-                    if (command.action.equals("fire-confirmation-mission", ignoreCase = true)) {
-                        // 抵近任务走参数重载：火点坐标在 command.params 里
+                    if (command.action.equals("fire-confirmation-mission", ignoreCase = true) ||
+                        command.action.equals("visible-fire-hold", ignoreCase = true) ||
+                        command.action.equals("visible-fire-laser-measure", ignoreCase = true)
+                    ) {
+                        // Fire workflows carry their target/session data in command.params.
                         sessionManager.executeCommand(droneSn, command.action, command.params.orEmpty())
                     } else {
                         sessionManager.executeCommand(
@@ -83,11 +86,18 @@ class CommandPollingCoordinator(
                 status = result.status,
                 message = result.message,
                 taskId = command.taskId,
-                sourceTs = command.sourceTs,
+                sourceTs = result.sourceTs ?: command.sourceTs,
                 thermalTemperature = result.thermalCenterTemperatureC
                     .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
                 thermalMeasureRoi = command.thermalMeasureRoi
                     .takeIf { command.action.equals("measure-thermal-region", ignoreCase = true) },
+                eventId = result.eventId,
+                fireLat = result.fireLat,
+                fireLng = result.fireLng,
+                fireAlt = result.fireAlt,
+                geoMethod = result.geoMethod,
+                geoQuality = result.geoQuality,
+                geoErrorRadiusM = result.geoErrorRadiusM,
             )
             client.sendStatus(
                 droneSn = droneSn,

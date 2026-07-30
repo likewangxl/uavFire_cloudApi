@@ -17,6 +17,10 @@ import com.yinxin.uavfir.api.FireConfirmationRequest
 import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.api.LegacyCommandDeduplicator
 import com.yinxin.uavfir.api.MissionHoldControl
+import com.yinxin.uavfir.api.VisibleFireLaserLocator
+import com.yinxin.uavfir.api.BackendVisibleTargetAimer
+import com.yinxin.uavfir.api.DjiLaserRangefinderClient
+import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
@@ -104,6 +108,19 @@ class AppServices(
         scope = appScope,
     )
     private val missionHoldControl = WaypointMissionHoldControl(waypointExecutor)
+    private val visibleFireLaserRangefinder = DjiLaserRangefinderClient()
+    private val visibleFireLaserLocator = VisibleFireLaserLocator(
+        missionHold = missionHoldControl,
+        flightControl = flightControlClient,
+        targetAimer = BackendVisibleTargetAimer(
+            visibleRoiProvider = { taskId, afterSourceTs ->
+                backendClient.latestVisibleRoi(taskId, afterSourceTs)
+            },
+            tapZoomClient = DjiTapZoomClient(),
+            laserRangefinder = visibleFireLaserRangefinder,
+        ),
+        laserRangefinder = visibleFireLaserRangefinder,
+    ).also(sessionManager::attachVisibleFireLaserLocator)
     private val fireConfirmationProcessor = FireConfirmationProcessor(
         sessionManager = sessionManager,
         flightControl = flightControlClient,

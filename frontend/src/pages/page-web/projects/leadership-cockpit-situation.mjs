@@ -197,9 +197,8 @@ function buildAircraftMarker ({
 
 function isLocatedFireEvent (event) {
   const quality = String(event?.geoQuality || '').toUpperCase()
-  if (!eventPoint(event)) return false
-  if (!quality) return true
-  return ['AUTO_WAYPOINT_READY', 'READY', 'OK'].includes(quality)
+  if (!quality) return Boolean(eventPoint(event))
+  return isRouteReadyFireLocation(event)
 }
 
 function eventPoint (event) {
@@ -264,3 +263,4 @@ function formatTime (value) {
     hour12: false
   })
 }
+import { isRouteReadyFireLocation } from './fire/fire-event-location.mjs'

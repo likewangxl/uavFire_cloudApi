@@ -40,9 +40,14 @@ public class FireDetectionService {
                 aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, url, "");
         if (ok) {
             activityTracker.markActive(droneSn);
-            issueDualStreamCommand(droneSn, "thermal-monitor-on");
-            // 启动即把画面切到红外（航线自动到第一航点触发时尤为重要——此路径没有前端来切焦点）。
-            issueDualStreamCommand(droneSn, "focus-thermal");
+            // 纯可见光模式必须显式清掉 agent 进程中可能遗留的红外探针开关。
+            // 仅仅“不再发送 thermal-monitor-on”无法把旧会话留下的 true 恢复为 false。
+            issueDualStreamCommand(droneSn, "thermal-monitor-off");
+            // 纯可见光识别：仅当镜头真在红外时才切回可见光——
+            // agent 收到镜头命令会重建推流，无操作切换也会让直播卡顿。
+            if (isThermalFocusActive(droneSn)) {
+                issueDualStreamCommand(droneSn, "focus-visible");
+            }
         }
         return ok;
     }
@@ -57,10 +62,26 @@ public class FireDetectionService {
         }
         // 用户意图是停止监测：无论 ai-service 停止是否成功，都不再允许自动切红外。
         activityTracker.markInactive(droneSn);
-        // 停掉 agent 端探测，并把相机切回可见光，确保空闲时主画面是可见光。
+        // 停掉 agent 端探测；镜头在红外时切回可见光，确保空闲时主画面是可见光。
         issueDualStreamCommand(droneSn, "thermal-monitor-off");
-        issueDualStreamCommand(droneSn, "focus-visible");
+        if (isThermalFocusActive(droneSn)) {
+            issueDualStreamCommand(droneSn, "focus-visible");
+        }
         return aiServiceClient.stopDetection(aiServiceClient.fireTaskIdForDrone(droneSn));
+    }
+
+    private boolean isThermalFocusActive(String droneSn) {
+        if (dualStreamService == null) {
+            return false;
+        }
+        try {
+            var group = dualStreamService.getGroup(droneSn);
+            String mode = group == null ? "" : String.valueOf(group.getCurrentMode());
+            return mode.toUpperCase().contains("THERMAL");
+        } catch (RuntimeException ex) {
+            // 状态不可得时宁可不切：镜头默认就在可见光，多切一次反而断流。
+            return false;
+        }
     }
 
     private void issueDualStreamCommand(String droneSn, String action) {

@@ -25,6 +25,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 
 class FireEventServiceImplOsdFillTest {
 
@@ -74,6 +75,40 @@ class FireEventServiceImplOsdFillTest {
         assertEquals(31.2304, persisted.getLat(), 1e-4);
         assertEquals(121.4737, persisted.getLng(), 1e-4);
         assertEquals(123.5, persisted.getAlt(), 1e-2);
+    }
+
+    @Test
+    void laserLocatingEventKeepsOsdAsAircraftTelemetryAndSkipsSpatialDedup() {
+        IDeviceRedisService redis = mock(IDeviceRedisService.class);
+        FireEventMapper events = mock(FireEventMapper.class);
+        OsdDockDrone osd = new OsdDockDrone();
+        osd.setLatitude(34.9607f);
+        osd.setLongitude(109.3163f);
+        osd.setHeight(88.5f);
+        when(redis.getDeviceOsd(eq("DRONE-1"), eq(OsdDockDrone.class))).thenReturn(Optional.of(osd));
+        when(events.selectOne(any())).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(11L);
+            return 1;
+        });
+        FireEventCreateParam param = paramWithoutPosition();
+        param.setGeoMethod("LASER_RANGEFINDER");
+        param.setGeoQuality("LASER_LOCATING");
+
+        build(redis, events).create(param);
+
+        ArgumentCaptor<FireEventEntity> captor = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).insert(captor.capture());
+        FireEventEntity persisted = captor.getValue();
+        assertEquals(34.9607, persisted.getLat(), 1e-4);
+        assertEquals(109.3163, persisted.getLng(), 1e-4);
+        assertEquals(34.9607, persisted.getAircraftLat(), 1e-4);
+        assertEquals(109.3163, persisted.getAircraftLng(), 1e-4);
+        assertEquals(88.5, persisted.getAircraftAlt(), 1e-2);
+        assertEquals("LASER_LOCATING", persisted.getGeoQuality());
+        verify(events, never()).selectList(any());
+        verify(events, never()).acquireNamedLock(any(), any(Integer.class));
     }
 
     @Test

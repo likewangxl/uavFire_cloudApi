@@ -3,6 +3,7 @@ package com.yinxin.uavfir.session
 import com.yinxin.uavfir.api.AgentReporter
 import com.yinxin.uavfir.api.FireConfirmationRequest
 import com.yinxin.uavfir.api.FireConfirmationResult
+import com.yinxin.uavfir.api.VisibleFireLaserLocator
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiDeviceState
 import com.yinxin.uavfir.stream.BoundStreamState
@@ -16,8 +17,16 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class DualStreamSessionManager(
     private val streamProvider: StreamProvider,
+    visibleFireLaserLocator: VisibleFireLaserLocator? = null,
     private val fireConfirmationRunner: (suspend (FireConfirmationRequest) -> FireConfirmationResult)? = null,
 ) : DualStreamCommandExecutor {
+    @Volatile
+    private var visibleFireLaserLocator: VisibleFireLaserLocator? = visibleFireLaserLocator
+
+    fun attachVisibleFireLaserLocator(locator: VisibleFireLaserLocator) {
+        visibleFireLaserLocator = locator
+    }
+
     data class CommandExecutionResult(
         val status: String,
         val message: String? = null,
@@ -29,6 +38,14 @@ class DualStreamSessionManager(
         val thermalMeasurements: List<ThermalMeasuredPoint> = emptyList(),
         val thermalSnapshotPath: String? = null,
         val visibleSnapshotPath: String? = null,
+        val eventId: String? = null,
+        val fireLat: Double? = null,
+        val fireLng: Double? = null,
+        val fireAlt: Double? = null,
+        val geoMethod: String? = null,
+        val geoQuality: String? = null,
+        val geoErrorRadiusM: Double? = null,
+        val sourceTs: Long? = null,
     )
 
     private val _state = MutableStateFlow(DualStreamSessionState.INIT)
@@ -203,6 +220,47 @@ class DualStreamSessionManager(
         action: String,
         params: Map<String, Any?>,
     ): CommandExecutionResult {
+        if (action.equals("visible-fire-hold", ignoreCase = true)) {
+            val eventId = params["eventId"]?.toString()
+                ?: return CommandExecutionResult(
+                    status = "failed",
+                    message = "LASER_FAILED:event-id-required",
+                )
+            val locator = visibleFireLaserLocator
+                ?: return CommandExecutionResult(
+                    status = "failed",
+                    message = "LASER_FAILED:locator-not-wired",
+                    eventId = eventId,
+                )
+            return locator.hold(eventId)
+        }
+        if (action.equals("visible-fire-laser-measure", ignoreCase = true)) {
+            val eventId = params["eventId"]?.toString()
+                ?: return CommandExecutionResult(
+                    status = "failed",
+                    message = "LASER_FAILED:event-id-required",
+                )
+            val taskId = params["taskId"]?.toString()
+                ?: return CommandExecutionResult(
+                    status = "failed",
+                    message = "LASER_FAILED:task-id-required",
+                    eventId = eventId,
+                )
+            val roi = params["visibleRoi"].asVisibleRoi()
+                ?: params["visible_roi"].asVisibleRoi()
+                ?: return CommandExecutionResult(
+                    status = "failed",
+                    message = "LASER_FAILED:visible-roi-required",
+                    eventId = eventId,
+                )
+            val locator = visibleFireLaserLocator
+                ?: return CommandExecutionResult(
+                    status = "failed",
+                    message = "LASER_FAILED:locator-not-wired",
+                    eventId = eventId,
+                )
+            return locator.measure(eventId, taskId, roi)
+        }
         if (!action.equals("fire-confirmation-mission", ignoreCase = true)) {
             return executeCommand(droneSn, action)
         }
@@ -415,6 +473,16 @@ private fun Any?.asDoubleOrNull(): Double? = when (this) {
     is Number -> toDouble()
     is String -> toDoubleOrNull()
     else -> null
+}
+
+private fun Any?.asVisibleRoi(): Map<String, Double>? {
+    val raw = this as? Map<*, *> ?: return null
+    val result = linkedMapOf<String, Double>()
+    for (key in listOf("x", "y", "width", "height")) {
+        val value = raw[key].asDoubleOrNull() ?: return null
+        result[key] = value
+    }
+    return result
 }
 
 interface DualStreamCommandExecutor {

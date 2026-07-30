@@ -1,5 +1,6 @@
 package com.yx.uavfire.firedetection;
 
+import com.yx.uavfire.manage.service.IDualStreamService;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -8,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class FireDetectionServiceTest {
@@ -22,12 +24,16 @@ class FireDetectionServiceTest {
     @Test
     void startForDrone_marksFireDetectionActiveOnSuccess() {
         AiServiceClient client = mock(AiServiceClient.class);
+        IDualStreamService dualStreamService = mock(IDualStreamService.class);
         when(client.fireTaskIdForDrone("DRONE-001")).thenReturn("fire-DRONE-001");
         when(client.startDetection(eq("fire-DRONE-001"), eq("DRONE-001"), anyString(), anyString())).thenReturn(true);
         FireDetectionActivityTracker tracker = new FireDetectionActivityTracker();
+        FireDetectionService service = newService(client, tracker);
+        ReflectionTestUtils.setField(service, "dualStreamService", dualStreamService);
 
-        assertTrue(newService(client, tracker).startForDrone("DRONE-001"));
+        assertTrue(service.startForDrone("DRONE-001"));
         assertTrue(tracker.isActive("DRONE-001"));
+        verify(dualStreamService).issueCommand("DRONE-001", "thermal-monitor-off");
     }
 
     @Test

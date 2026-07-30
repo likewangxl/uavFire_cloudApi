@@ -31,4 +31,18 @@ public class DualStreamCommandAckDTO {
 
     @JsonProperty("thermal_measure_roi")
     private Map<String, Double> thermalMeasureRoi;
+
+    private String eventId;
+
+    private Double fireLat;
+
+    private Double fireLng;
+
+    private Double fireAlt;
+
+    private String geoMethod;
+
+    private String geoQuality;
+
+    private Double geoErrorRadiusM;
 }

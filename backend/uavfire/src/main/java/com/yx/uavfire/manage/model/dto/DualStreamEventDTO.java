@@ -49,6 +49,10 @@ public class DualStreamEventDTO {
     @JsonProperty("thermal_measure_roi")
     private Map<String, Double> thermalMeasureRoi;
 
+    @JsonProperty("visible_roi")
+    @JsonAlias("visibleRoi")
+    private Map<String, Double> visibleRoi;
+
     private List<Map<String, Object>> thermalMeasurements;
 
     @JsonProperty("geo_snapshot")

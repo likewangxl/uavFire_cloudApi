@@ -2,6 +2,7 @@ package com.yx.uavfire.manage.service.impl;
 
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireLaserLocationParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentCapabilityDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentHeartbeatDTO;
@@ -10,6 +11,7 @@ import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
+import com.yx.uavfire.manage.model.dto.VisibleRoiSnapshotDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,6 +58,8 @@ public class DualStreamServiceImpl implements IDualStreamService {
     // 会让 agent 反复 restartLiveStream；确认流程内按时间节流。
     private static final long VISIBLE_FOCUS_REISSUE_MIN_INTERVAL_MS = 10_000L;
     private static final long VISIBLE_ATTACHMENT_WINDOW_MS = 60_000L;
+    private static final long VISIBLE_ROI_FRESHNESS_MS = 1_500L;
+    private static final long VISIBLE_ROI_REACQUIRE_TIMEOUT_MS = 3_000L;
     private static final String COMMAND_STATUS_PENDING = "pending";
     private static final String COMMAND_STATUS_DISPATCHED = "dispatched";
     private static final String COMMAND_STATUS_EXPIRED = "expired";
@@ -76,7 +80,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
             "focus-thermal",
             "focus-visible",
             "measure-thermal-region",
-            "fire-confirmation-mission"
+            "fire-confirmation-mission",
+            "visible-fire-hold",
+            "visible-fire-laser-measure"
     );
 
     private final Map<String, DualStreamLiveGroupDTO> groups = new ConcurrentHashMap<>();
@@ -89,6 +95,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private final Map<String, Long> lastVisibleFocusIssuedAtByDrone = new ConcurrentHashMap<>();
     private final Map<String, DualStreamEventDTO> confirmedThermalEventByTask = new ConcurrentHashMap<>();
     private final Map<String, String> confirmedThermalFireEventIdByTask = new ConcurrentHashMap<>();
+    private final Map<String, VisibleRoiSnapshotDTO> latestVisibleRoiByTask = new ConcurrentHashMap<>();
+    private final Map<String, VisibleLaserSession> visibleLaserSessionByEvent = new ConcurrentHashMap<>();
+    private final Map<String, String> visibleLaserEventByDrone = new ConcurrentHashMap<>();
 
     @Value("${livestream.playback.webrtc-host:}")
     private String webrtcPlaybackHost;
@@ -215,6 +224,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
         if (!StringUtils.hasText(taskId) || event == null) {
             return;
         }
+        recordLatestVisibleRoi(taskId, event);
         taskEvents.compute(taskId, (key, existing) -> {
             List<DualStreamEventDTO> events = existing != null ? copyEvents(existing) : restoreEventsFromRedis(taskId);
             if (events == null) {
@@ -237,6 +247,62 @@ public class DualStreamServiceImpl implements IDualStreamService {
             persistEvents(taskId, events);
             return events;
         });
+        dispatchLaserMeasureIfReady(taskId);
+    }
+
+    @Override
+    public synchronized void startVisibleLaserLocalization(
+            String eventId,
+            String taskId,
+            String droneSn,
+            long sourceTs,
+            Map<String, Double> visibleRoi) {
+        if (!StringUtils.hasText(eventId)
+                || !StringUtils.hasText(taskId)
+                || !StringUtils.hasText(droneSn)
+                || !isValidVisibleRoi(visibleRoi)) {
+            return;
+        }
+        if (visibleLaserSessionByEvent.containsKey(eventId)
+                || visibleLaserEventByDrone.containsKey(droneSn)) {
+            return;
+        }
+        VisibleLaserSession session = new VisibleLaserSession(
+                eventId, taskId, droneSn, sourceTs, new LinkedHashMap<>(visibleRoi));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("eventId", eventId);
+        params.put("taskId", taskId);
+        params.put("sourceTs", sourceTs);
+        params.put("visibleRoi", new LinkedHashMap<>(visibleRoi));
+        DualStreamCommandDTO hold = issueCommand(droneSn, "visible-fire-hold", params);
+        if (hold == null) {
+            return;
+        }
+        session.holdIssuedAt = hold.getIssuedAt();
+        visibleLaserSessionByEvent.put(eventId, session);
+        visibleLaserEventByDrone.put(droneSn, eventId);
+    }
+
+    @Override
+    public VisibleRoiSnapshotDTO latestVisibleRoi(String taskId, long afterSourceTs) {
+        VisibleRoiSnapshotDTO snapshot = latestVisibleRoiByTask.get(taskId);
+        if (snapshot == null
+                || snapshot.getSourceTs() == null
+                || snapshot.getSourceTs() <= afterSourceTs
+                || System.currentTimeMillis() - snapshot.getSourceTs() > VISIBLE_ROI_FRESHNESS_MS) {
+            return null;
+        }
+        return copyVisibleRoiSnapshot(snapshot);
+    }
+
+    @Override
+    public synchronized void expireLocalizationSessions() {
+        long now = System.currentTimeMillis();
+        for (VisibleLaserSession session : List.copyOf(visibleLaserSessionByEvent.values())) {
+            if ("REACQUIRING".equals(session.phase) && now > session.reacquireDeadlineAt) {
+                failVisibleLaserSession(session, "target-not-reacquired", now);
+            }
+        }
     }
 
     @Override
@@ -338,6 +404,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
             return existing;
         });
         handleThermalMeasurementAck(matchedCommand.get(), ack);
+        handleVisibleLaserAck(matchedCommand.get(), ack);
         if (matchedCommand.get() != null && isTerminalCommandStatus(ack.getStatus())) {
             commandByDrone.remove(droneSn, matchedCommand.get());
         }
@@ -708,6 +775,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setThermalSourceEventId(event.getThermalSourceEventId())
                 .setThermalTemperature(event.getThermalTemperature())
                 .setThermalMeasureRoi(event.getThermalMeasureRoi())
+                .setVisibleRoi(event.getVisibleRoi())
                 .setThermalMeasurements(event.getThermalMeasurements())
                 .setGeoSnapshot(event.getGeoSnapshot())
                 .setFireLat(event.getFireLat())
@@ -716,6 +784,194 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setGeoQuality(event.getGeoQuality())
                 .setGeoErrorRadiusM(event.getGeoErrorRadiusM())
                 .setGeoMethod(event.getGeoMethod());
+    }
+
+    private void recordLatestVisibleRoi(String taskId, DualStreamEventDTO event) {
+        if (event.getSourceTs() == null
+                || !"visible".equals(normalize(event.getAnalysisChannel()))
+                || !isValidVisibleRoi(event.getVisibleRoi())) {
+            return;
+        }
+        latestVisibleRoiByTask.compute(taskId, (ignored, existing) -> {
+            if (existing != null
+                    && existing.getSourceTs() != null
+                    && existing.getSourceTs() >= event.getSourceTs()) {
+                return existing;
+            }
+            return new VisibleRoiSnapshotDTO()
+                    .setSourceTs(event.getSourceTs())
+                    .setVisibleRoi(new LinkedHashMap<>(event.getVisibleRoi()));
+        });
+    }
+
+    private synchronized void dispatchLaserMeasureIfReady(String taskId) {
+        expireLocalizationSessions();
+        for (VisibleLaserSession session : visibleLaserSessionByEvent.values()) {
+            if (!Objects.equals(taskId, session.taskId) || !"REACQUIRING".equals(session.phase)) {
+                continue;
+            }
+            VisibleRoiSnapshotDTO snapshot = latestVisibleRoi(taskId, session.holdIssuedAt);
+            if (snapshot == null) {
+                continue;
+            }
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("eventId", session.eventId);
+            params.put("taskId", session.taskId);
+            params.put("sourceTs", snapshot.getSourceTs());
+            params.put("visibleRoi", new LinkedHashMap<>(snapshot.getVisibleRoi()));
+            DualStreamCommandDTO command =
+                    issueCommand(session.droneSn, "visible-fire-laser-measure", params);
+            if (command != null) {
+                session.phase = "MEASURING";
+            }
+        }
+    }
+
+    private synchronized void handleVisibleLaserAck(
+            DualStreamCommandDTO command,
+            DualStreamCommandAckDTO ack) {
+        if (command == null || ack == null) {
+            return;
+        }
+        String action = normalize(command.getAction());
+        if (!"visible-fire-hold".equals(action) && !"visible-fire-laser-measure".equals(action)) {
+            return;
+        }
+        String eventId = StringUtils.hasText(ack.getEventId())
+                ? ack.getEventId()
+                : commandParamString(command, "eventId");
+        VisibleLaserSession session = visibleLaserSessionByEvent.get(eventId);
+        if (session == null
+                || !Objects.equals(session.droneSn, command.getDroneSn())
+                || !Objects.equals(session.eventId, eventId)) {
+            return;
+        }
+        if ("visible-fire-hold".equals(action)) {
+            if ("applied".equals(normalize(ack.getStatus()))
+                    && "hover_stable".equals(normalize(ack.getMessage()))) {
+                session.phase = "REACQUIRING";
+                session.reacquireDeadlineAt =
+                        System.currentTimeMillis() + VISIBLE_ROI_REACQUIRE_TIMEOUT_MS;
+                dispatchLaserMeasureIfReady(session.taskId);
+            } else if (isTerminalCommandStatus(ack.getStatus())) {
+                failVisibleLaserSession(
+                        session,
+                        failureReason(ack.getMessage(), "hover-stability-failed"),
+                        ack.getSourceTs() != null ? ack.getSourceTs() : System.currentTimeMillis());
+            }
+            return;
+        }
+        if (!isTerminalCommandStatus(ack.getStatus())) {
+            return;
+        }
+        if ("applied".equals(normalize(ack.getStatus()))
+                && validLaserAck(ack)
+                && fireEventService != null) {
+            FireLaserLocationParam param = new FireLaserLocationParam()
+                    .setFireLat(ack.getFireLat())
+                    .setFireLng(ack.getFireLng())
+                    .setFireAlt(ack.getFireAlt())
+                    .setSourceTs(ack.getSourceTs())
+                    .setGeoErrorRadiusM(ack.getGeoErrorRadiusM());
+            fireEventService.applyLaserLocation(session.eventId, param);
+            completeVisibleLaserSession(session);
+            return;
+        }
+        failVisibleLaserSession(
+                session,
+                failureReason(ack.getMessage(), "laser-fix-unavailable"),
+                ack.getSourceTs() != null ? ack.getSourceTs() : System.currentTimeMillis());
+    }
+
+    private boolean validLaserAck(DualStreamCommandAckDTO ack) {
+        return ack.getFireLat() != null
+                && ack.getFireLat() >= -90.0
+                && ack.getFireLat() <= 90.0
+                && ack.getFireLng() != null
+                && ack.getFireLng() >= -180.0
+                && ack.getFireLng() <= 180.0
+                && ack.getSourceTs() != null
+                && "laser_rangefinder".equals(normalize(ack.getGeoMethod()))
+                && "precise".equals(normalize(ack.getGeoQuality()));
+    }
+
+    private void failVisibleLaserSession(VisibleLaserSession session, String reason, long sourceTs) {
+        if (fireEventService != null) {
+            fireEventService.markLaserLocationFailed(session.eventId, reason, sourceTs);
+        }
+        completeVisibleLaserSession(session);
+    }
+
+    private void completeVisibleLaserSession(VisibleLaserSession session) {
+        visibleLaserSessionByEvent.remove(session.eventId, session);
+        visibleLaserEventByDrone.remove(session.droneSn, session.eventId);
+    }
+
+    private String failureReason(String message, String fallback) {
+        if (!StringUtils.hasText(message)) {
+            return fallback;
+        }
+        String trimmed = message.trim();
+        int colon = trimmed.indexOf(':');
+        return colon >= 0 && colon + 1 < trimmed.length()
+                ? trimmed.substring(colon + 1)
+                : trimmed;
+    }
+
+    private String commandParamString(DualStreamCommandDTO command, String key) {
+        if (command.getParams() == null) {
+            return null;
+        }
+        Object value = command.getParams().get(key);
+        return value == null ? null : value.toString();
+    }
+
+    private boolean isValidVisibleRoi(Map<String, Double> roi) {
+        if (roi == null) {
+            return false;
+        }
+        Double x = roi.get("x");
+        Double y = roi.get("y");
+        Double width = roi.get("width");
+        Double height = roi.get("height");
+        return x != null && y != null && width != null && height != null
+                && x >= 0.0 && x <= 1.0
+                && y >= 0.0 && y <= 1.0
+                && width > 0.0 && height > 0.0
+                && x + width <= 1.000001
+                && y + height <= 1.000001;
+    }
+
+    private VisibleRoiSnapshotDTO copyVisibleRoiSnapshot(VisibleRoiSnapshotDTO snapshot) {
+        return new VisibleRoiSnapshotDTO()
+                .setSourceTs(snapshot.getSourceTs())
+                .setVisibleRoi(snapshot.getVisibleRoi() == null
+                        ? null
+                        : new LinkedHashMap<>(snapshot.getVisibleRoi()));
+    }
+
+    private static final class VisibleLaserSession {
+        private final String eventId;
+        private final String taskId;
+        private final String droneSn;
+        private final long sourceTs;
+        private final Map<String, Double> originalRoi;
+        private long holdIssuedAt;
+        private long reacquireDeadlineAt;
+        private String phase = "HOLDING";
+
+        private VisibleLaserSession(
+                String eventId,
+                String taskId,
+                String droneSn,
+                long sourceTs,
+                Map<String, Double> originalRoi) {
+            this.eventId = eventId;
+            this.taskId = taskId;
+            this.droneSn = droneSn;
+            this.sourceTs = sourceTs;
+            this.originalRoi = originalRoi;
+        }
     }
 
     private DualStreamEventDTO applySingleStreamReview(DualStreamEventDTO event, List<DualStreamEventDTO> priorEvents) {
@@ -782,13 +1038,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
         }
 
         if ("visible".equals(channel)) {
+            // 纯可见光模式：火情事件由 ai-service 上报器直接创建，这里不再切红外做串行复核。
             reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_SKIPPED_THERMAL_FIRST);
             rememberVisibleTrigger(reviewed, droneSn);
-            if (isFireDetectionActiveForAutoFocus(droneSn)
-                    && !isWithinVisibleConfirmationGrace(droneSn)
-                    && shouldIssueFocus(droneSn, "focus-thermal")) {
-                issueCommand(droneSn, "focus-thermal");
-            }
             return reviewed;
         }
 

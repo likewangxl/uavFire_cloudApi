@@ -52,8 +52,17 @@ class WaypointMissionExecutor(
         listener.onState(activeMissionId.get(), newState, previous)
     }
 
-    private val progressListener = WaylineExecutingInfoListener { info ->
-        listener.onProgress(activeMissionId.get(), info)
+    private val progressListener = object : WaylineExecutingInfoListener {
+        override fun onWaylineExecutingInfoUpdate(info: WaylineExecutingInfo) {
+            listener.onProgress(activeMissionId.get(), info)
+        }
+
+        override fun onWaylineExecutingInterruptReasonUpdate(error: IDJIError) {
+            Log.w(
+                TAG,
+                "wayline interrupted missionId=${activeMissionId.get()} reason=$error",
+            )
+        }
     }
 
     fun attach() {

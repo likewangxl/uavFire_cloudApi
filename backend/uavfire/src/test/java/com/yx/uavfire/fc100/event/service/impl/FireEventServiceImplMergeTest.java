@@ -17,6 +17,7 @@ import com.yx.uavfire.fc100.event.model.entity.FireEventEntity;
 import com.yx.uavfire.fc100.event.model.entity.FireEventHistoryEntity;
 import com.yx.uavfire.fc100.event.model.enums.FireEventStatus;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
+import com.yx.uavfire.fc100.event.model.param.FireLaserLocationParam;
 import com.yx.uavfire.fc100.event.service.FireGeoLocationResult;
 import com.yx.uavfire.fc100.event.service.FireGeoLocationService;
 import com.yx.uavfire.fc100.mission.dao.FireMissionMapper;
@@ -136,6 +137,37 @@ class FireEventServiceImplMergeTest {
         assertEquals("CREATED", response.getNotificationReason());
         verify(events).insert(any(FireEventEntity.class));
         verify(missions, never()).insert(any(FireMissionEntity.class));
+    }
+
+    @Test
+    void laserLocatingCreate_dispatchesVisibleFireHoldCoordinator() {
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity entity = inv.getArgument(0);
+            entity.setId(7L);
+            return 1;
+        });
+        VisibleFireLocalizationDispatcher dispatcher =
+                mock(VisibleFireLocalizationDispatcher.class);
+        FireEventServiceImpl service = build();
+        ReflectionTestUtils.setField(service, "visibleFireLocalizationDispatcher", dispatcher);
+        FireEventCreateParam request =
+                param("task-visible-1779163440000", 34.659140, 109.340600,
+                        "MEDIUM", "0.72", 1779163440000L);
+        request.setDeviceSn("DRONE-1");
+        request.setGeoMethod("LASER_RANGEFINDER");
+        request.setGeoQuality("LASER_LOCATING");
+        request.setVisibleRoi(Map.of(
+                "x", 0.4, "y", 0.3, "width", 0.2, "height", 0.2));
+
+        service.create(request);
+
+        verify(dispatcher).dispatch(
+                "task-visible-1779163440000",
+                "task-visible",
+                "DRONE-1",
+                1779163440000L,
+                request.getVisibleRoi());
     }
 
     @Test
@@ -749,6 +781,71 @@ class FireEventServiceImplMergeTest {
         assertEquals(5.0, inserted.getGeoErrorRadiusM(), 1e-6);
         assertEquals("PRECISE", inserted.getGeoQuality());
         assertEquals(1779163440000L, inserted.getGeoSourceTs());
+    }
+
+    @Test
+    void laser_location_success_updates_original_event_once() {
+        FireEventEntity locating = existingEvent(
+            7L, 34.9607, 109.3163, "HIGH", "0.81", 1779163440000L);
+        locating.setEventId("visible-laser-event");
+        locating.setGeoMethod("LASER_RANGEFINDER");
+        locating.setGeoQuality("LASER_LOCATING");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(locating);
+        FireLaserLocationParam fix = new FireLaserLocationParam()
+            .setFireLat(34.961234)
+            .setFireLng(109.317654)
+            .setFireAlt(386.2)
+            .setSourceTs(1779163445000L)
+            .setGeoErrorRadiusM(5.0);
+        FireEventServiceImpl service = build();
+
+        assertTrue(service.applyLaserLocation("visible-laser-event", fix));
+        assertFalse(service.applyLaserLocation("visible-laser-event", fix));
+
+        assertEquals(34.961234, locating.getLat(), 1e-6);
+        assertEquals(109.317654, locating.getLng(), 1e-6);
+        assertEquals(386.2, locating.getAlt(), 1e-6);
+        assertEquals("LASER_RANGEFINDER", locating.getGeoMethod());
+        assertEquals("PRECISE", locating.getGeoQuality());
+        assertEquals(5.0, locating.getGeoErrorRadiusM(), 1e-6);
+        assertEquals(1779163445000L, locating.getGeoSourceTs());
+        verify(events).updateById(locating);
+    }
+
+    @Test
+    void laser_failure_cannot_overwrite_precise_location() {
+        FireEventEntity precise = existingEvent(
+            8L, 34.961234, 109.317654, "HIGH", "0.81", 1779163440000L);
+        precise.setEventId("already-precise");
+        precise.setGeoMethod("LASER_RANGEFINDER");
+        precise.setGeoQuality("PRECISE");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(precise);
+
+        boolean changed = build().markLaserLocationFailed(
+            "already-precise", "target-lost", 1779163445000L);
+
+        assertFalse(changed);
+        assertEquals("PRECISE", precise.getGeoQuality());
+        verify(events, never()).updateById(any(FireEventEntity.class));
+    }
+
+    @Test
+    void laser_locating_event_does_not_dispatch_legacy_auto_approach() {
+        FireApproachDispatcher approach = mock(FireApproachDispatcher.class);
+        FireEventCreateParam locating = param(
+            "visible-locating", 34.9607, 109.3163, "HIGH", "0.81", 1779163440000L);
+        locating.setGeoMethod("LASER_RANGEFINDER");
+        locating.setGeoQuality("LASER_LOCATING");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(9L);
+            return 1;
+        });
+
+        buildWithApproachDispatcher(approach).create(locating);
+
+        verify(approach, never()).dispatchIfEligible(any(FireEventEntity.class));
     }
 
     @Test
