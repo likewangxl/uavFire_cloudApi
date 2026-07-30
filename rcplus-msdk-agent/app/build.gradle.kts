@@ -40,6 +40,13 @@ val visibleFireNcnnBridgeSources = listOf(
     layout.projectDirectory.file("src/main/cpp/CMakeLists.txt").asFile,
     layout.projectDirectory.file("src/main/cpp/visible_fire_ncnn_bridge.cpp").asFile,
 )
+val robolectricAndroidSdk = configurations.create("robolectricAndroidSdk") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+val robolectricNativeRuntime = providers.gradleProperty("robolectricNativeRuntime").map(::file)
+val robolectricNativeRuntimeSha256 =
+    "688d499acc8b33315c1f799cd9afb1f0486cd4605b89e3f8e7df72588365bccd"
 val visibleFireNcnnBridgeSourceSha256 = MessageDigest.getInstance("SHA-256")
     .digest(
         visibleFireNcnnBridgeSources
@@ -306,6 +313,33 @@ tasks.matching { it.name.matches(Regex("merge(Debug|Release)Assets")) }.configur
 tasks.matching { it.name == "testDebugUnitTest" }.configureEach {
     dependsOn("packageDebug")
 }
+val stageRobolectricAndroidSdk = tasks.register<Sync>("stageRobolectricAndroidSdk") {
+    from(robolectricAndroidSdk)
+    into(layout.buildDirectory.dir("robolectric-offline"))
+}
+val verifyRobolectricNativeRuntime = tasks.register("verifyRobolectricNativeRuntime") {
+    onlyIf { robolectricNativeRuntime.isPresent }
+    doLast {
+        val runtime = robolectricNativeRuntime.get()
+        check(runtime.isFile) { "Robolectric native runtime is missing: $runtime" }
+        check(sha256File(runtime) == robolectricNativeRuntimeSha256) {
+            "Robolectric native runtime SHA-256 does not match the 1.0.12 lock"
+        }
+    }
+}
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    dependsOn(stageRobolectricAndroidSdk)
+    if (robolectricNativeRuntime.isPresent) {
+        dependsOn(verifyRobolectricNativeRuntime)
+    }
+    doFirst {
+        systemProperty("robolectric.offline", "true")
+        systemProperty(
+            "robolectric.dependency.dir",
+            layout.buildDirectory.dir("robolectric-offline").get().asFile.absolutePath,
+        )
+    }
+}
 
 dependencies {
 
@@ -338,6 +372,16 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.robolectric:robolectric:4.13") {
+        if (robolectricNativeRuntime.isPresent) {
+            exclude(group = "org.robolectric", module = "nativeruntime-dist-compat")
+        }
+    }
+    if (robolectricNativeRuntime.isPresent) {
+        testRuntimeOnly(files(robolectricNativeRuntime))
+    }
+    add(robolectricAndroidSdk.name, "org.robolectric:android-all-instrumented:14-robolectric-10818077-i6")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
