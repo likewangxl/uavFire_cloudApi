@@ -85,6 +85,10 @@ class ProductionFireDetectorPackagingTest {
                 trust.get("packageArchiveSha256").asString,
             )
             assertEquals(
+                BuildConfig.VISIBLE_FIRE_NCNN_BRIDGE_SOURCE_SHA256,
+                trust.get("bridgeSourceSha256").asString,
+            )
+            assertEquals(
                 trust.get("runtimeSha256").asString,
                 zip.sha256("lib/arm64-v8a/libncnn.so"),
             )

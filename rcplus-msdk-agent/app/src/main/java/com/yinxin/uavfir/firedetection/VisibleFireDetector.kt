@@ -46,6 +46,10 @@ interface VisibleFireDetector : AutoCloseable {
     suspend fun detect(frame: VisibleRgbaFrame): VisibleDetectionResult
 }
 
+sealed class VisibleFireDetectionFailure(message: String) : IllegalStateException(message) {
+    class Closed : VisibleFireDetectionFailure("Visible fire detector is closed")
+}
+
 internal object VisibleBoxMapper {
     fun mapToSource(
         modelWidth: Int,

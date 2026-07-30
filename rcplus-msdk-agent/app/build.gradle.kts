@@ -184,7 +184,6 @@ val buildVisibleFireNcnnFromPinnedArchive = tasks.register("buildVisibleFireNcnn
     outputs.dir(ncnnExtractOutputDir)
     outputs.dir(ncnnBridgeBuildOutputDir)
     outputs.file(ncnnTrustOutput)
-    outputs.upToDateWhen { false }
     doLast {
         val extracted = ncnnExtractOutputDir.get().asFile
         val bridgeBuild = ncnnBridgeBuildOutputDir.get().asFile
@@ -264,7 +263,6 @@ val buildVisibleFireNcnnFromPinnedArchive = tasks.register("buildVisibleFireNcnn
 val stageVisibleFireNcnnRuntime = tasks.register("stageVisibleFireNcnnRuntime") {
     dependsOn(buildVisibleFireNcnnFromPinnedArchive)
     outputs.dir(ncnnJniOutputDir)
-    outputs.upToDateWhen { false }
     doLast {
         val outputDirectory = ncnnJniOutputDir.get().asFile
         check(outputDirectory.deleteRecursively() || !outputDirectory.exists()) {

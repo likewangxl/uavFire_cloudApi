@@ -5,10 +5,10 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.concurrent.withLock
 
 internal data class VisibleFireModelArtifact(
     val path: String,
@@ -146,7 +146,35 @@ internal interface VisibleFireNcnnRuntime {
     fun close(handle: Long)
 }
 
+internal class SerializedVisibleFireNcnnRuntime(
+    private val delegate: VisibleFireNcnnRuntime,
+) : VisibleFireNcnnRuntime {
+    private val runtimeLock = ReentrantLock()
+
+    override fun loadLibrary() = runtimeLock.withLock(delegate::loadLibrary)
+    override fun create(paramPath: String, binPath: String): Long = runtimeLock.withLock {
+        delegate.create(paramPath, binPath)
+    }
+
+    override fun infer(handle: Long, input: ByteBuffer): FloatArray = runtimeLock.withLock {
+        delegate.infer(handle, input)
+    }
+
+    override fun close(handle: Long) = runtimeLock.withLock {
+        delegate.close(handle)
+    }
+}
+
 internal object AndroidVisibleFireNcnnRuntime : VisibleFireNcnnRuntime {
+    private val serialized = SerializedVisibleFireNcnnRuntime(JniVisibleFireNcnnRuntime)
+
+    override fun loadLibrary() = serialized.loadLibrary()
+    override fun create(paramPath: String, binPath: String): Long = serialized.create(paramPath, binPath)
+    override fun infer(handle: Long, input: ByteBuffer): FloatArray = serialized.infer(handle, input)
+    override fun close(handle: Long) = serialized.close(handle)
+}
+
+private object JniVisibleFireNcnnRuntime : VisibleFireNcnnRuntime {
     override fun loadLibrary() = System.loadLibrary("visible_fire_ncnn")
     override fun create(paramPath: String, binPath: String): Long =
         VisibleFireNcnnBridge.create(paramPath, binPath)
@@ -163,6 +191,14 @@ internal object VisibleFireNcnnBridge {
     external fun close(handle: Long)
 }
 
+internal object VisibleNcnnOutputShape {
+    const val OUTPUT_CHANNELS = 6
+    const val CANDIDATE_COUNT = 18_900
+
+    fun isExpected(dims: Int, width: Int, height: Int): Boolean =
+        dims == 2 && width == CANDIDATE_COUNT && height == OUTPUT_CHANNELS
+}
+
 internal class NcnnVisibleFireDetector(
     private val manifest: VisibleFireModelManifest,
     private val runtime: VisibleFireNcnnRuntime,
@@ -170,11 +206,11 @@ internal class NcnnVisibleFireDetector(
 ) : VisibleFireDetector {
     private val preprocessor = VisibleRgbaTensorPreprocessor(manifest)
     private val postprocessor = VisibleYoloPostprocessor(manifest, preprocessor)
-    private val mutex = Mutex()
-    private val closed = AtomicBoolean(false)
+    private val lifecycleLock = ReentrantLock()
+    private var closed = false
 
-    override suspend fun detect(frame: VisibleRgbaFrame): VisibleDetectionResult = mutex.withLock {
-        check(!closed.get()) { "Visible detector is closed" }
+    override suspend fun detect(frame: VisibleRgbaFrame): VisibleDetectionResult = lifecycleLock.withLock {
+        if (closed) throw VisibleFireDetectionFailure.Closed()
         val prepared = preprocessor.prepare(frame)
         val output = runtime.infer(handle, prepared.nchw)
         VisibleDetectionResult(
@@ -183,8 +219,11 @@ internal class NcnnVisibleFireDetector(
         )
     }
 
-    override fun close() {
-        if (closed.compareAndSet(false, true)) runtime.close(handle)
+    override fun close() = lifecycleLock.withLock {
+        if (!closed) {
+            closed = true
+            runtime.close(handle)
+        }
     }
 }
 
@@ -206,8 +245,8 @@ internal class VisibleRgbaTensorPreprocessor(private val manifest: VisibleFireMo
         nchw.clear()
         for (y in 0 until manifest.inputHeight) {
             for (x in 0 until manifest.inputWidth) {
-                val sourceX = ((x - padX) / scale).toInt()
-                val sourceY = ((y - padY) / scale).toInt()
+                val sourceX = floor((x - padX) / scale).toInt()
+                val sourceY = floor((y - padY) / scale).toInt()
                 val position = y * manifest.inputWidth + x
                 if (sourceX in 0 until frame.width && sourceY in 0 until frame.height) {
                     val pixelOffset = (sourceY * frame.width + sourceX) * 4
