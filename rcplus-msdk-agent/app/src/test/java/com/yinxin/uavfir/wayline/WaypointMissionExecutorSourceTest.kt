@@ -43,4 +43,17 @@ class WaypointMissionExecutorSourceTest {
             source.contains("NADIR_GIMBAL_PITCH_DEGREES: Double = -45.0"),
         )
     }
+
+    @Test
+    fun legacyPauseResumeCallbacksAndExplicitInterruptImplementationRemainPresent() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
+        val awaitable = File("src/main/java/com/yinxin/uavfir/firedetection/AwaitableMissionControl.kt").readText()
+
+        assertTrue(source.contains("fun pauseMission()"))
+        assertTrue(source.contains("fun resumeMission()"))
+        assertTrue(source.contains("fun pauseMission(onComplete: (IDJIError?) -> Unit)"))
+        assertTrue(source.contains("breakpoint: BreakPointInfo"))
+        assertTrue(source.contains("override fun onWaylineExecutingInterruptReasonUpdate(error: IDJIError)"))
+        assertTrue(awaitable.contains("suspendCancellableCoroutine"))
+    }
 }

@@ -23,10 +23,12 @@ import com.yinxin.uavfir.api.DjiLaserRangefinderClient
 import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.firedetection.LatestVisibleFrameBuffer
+import com.yinxin.uavfir.firedetection.AwaitableMissionControl
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorFactory
 import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import com.yinxin.uavfir.firedetection.VisibleInferenceLoop
+import com.yinxin.uavfir.firedetection.WaypointMissionControlPort
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
@@ -122,6 +124,11 @@ class AppServices(
         scope = appScope,
     )
     private val missionHoldControl = WaypointMissionHoldControl(waypointExecutor)
+    private val awaitableMissionControl = AwaitableMissionControl(
+        port = WaypointMissionControlPort(waypointExecutor),
+        hover = flightControlClient::hover,
+        scope = appScope,
+    )
     private val visibleFireLaserRangefinder = DjiLaserRangefinderClient()
     private val visibleFireLaserLocator = VisibleFireLaserLocator(
         missionHold = missionHoldControl,
@@ -311,6 +318,7 @@ class AppServices(
     }
 
     fun shutdown() {
+        awaitableMissionControl.close()
         visibleInferenceLoop?.close() ?: latestVisibleFrameBuffer.close()
         osdReporter.stop()
         hmsReporter.stop()

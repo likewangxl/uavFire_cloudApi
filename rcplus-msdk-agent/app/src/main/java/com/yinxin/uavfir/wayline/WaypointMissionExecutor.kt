@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -40,27 +41,37 @@ class WaypointMissionExecutor(
         fun onError(missionId: String?, stage: String, error: IDJIError)
     }
 
-    private val activeMissionId = AtomicReference<String?>(null)
-    private val activeMissionFileName = AtomicReference<String?>(null)
-    private val lastState = AtomicReference<WaypointMissionExecuteState?>(null)
+    private data class ActiveMission(
+        val missionId: String,
+        val missionFileName: String,
+    )
 
-    fun activeMissionId(): String? = activeMissionId.get()
-    fun activeMissionFileName(): String? = activeMissionFileName.get()
+    private val activeMission = AtomicReference<ActiveMission?>(null)
+    private val lastState = AtomicReference<WaypointMissionExecuteState?>(null)
+    private val missionStateObservers =
+        CopyOnWriteArraySet<(WaypointMissionExecuteState) -> Unit>()
+
+    fun activeMissionId(): String? = activeMission.get()?.missionId
+    fun activeMissionFileName(): String? = activeMission.get()?.missionFileName
+    fun activeMissionIdentity(): Pair<String, String>? =
+        activeMission.get()?.let { it.missionId to it.missionFileName }
+    fun currentMissionState(): WaypointMissionExecuteState? = lastState.get()
 
     private val stateListener = WaypointMissionExecuteStateListener { newState ->
         val previous = lastState.getAndSet(newState)
-        listener.onState(activeMissionId.get(), newState, previous)
+        listener.onState(activeMissionId(), newState, previous)
+        missionStateObservers.forEach { observer -> observer(newState) }
     }
 
     private val progressListener = object : WaylineExecutingInfoListener {
         override fun onWaylineExecutingInfoUpdate(info: WaylineExecutingInfo) {
-            listener.onProgress(activeMissionId.get(), info)
+            listener.onProgress(activeMissionId(), info)
         }
 
         override fun onWaylineExecutingInterruptReasonUpdate(error: IDJIError) {
             Log.w(
                 TAG,
-                "wayline interrupted missionId=${activeMissionId.get()} reason=$error",
+                "wayline interrupted missionId=${activeMissionId()} reason=$error",
             )
         }
     }
@@ -124,8 +135,7 @@ class WaypointMissionExecutor(
     }
 
     fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
-        activeMissionId.set(missionId)
-        activeMissionFileName.set(missionFileName)
+        activeMission.set(ActiveMission(missionId, missionFileName))
         Log.i(
             TAG,
             WaypointMissionDiagnosticFormatter.formatAvailableWaylineIds(
@@ -143,24 +153,45 @@ class WaypointMissionExecutor(
     }
 
     fun pauseMission() {
-        WaypointMissionManager.getInstance().pauseMission(simpleCallback(activeMissionId.get(), "pauseMission"))
+        WaypointMissionManager.getInstance().pauseMission(simpleCallback(activeMissionId(), "pauseMission"))
+    }
+
+    fun pauseMission(onComplete: (IDJIError?) -> Unit) {
+        WaypointMissionManager.getInstance().pauseMission(
+            callback(activeMissionId(), "pauseMission", onComplete),
+        )
     }
 
     fun resumeMission() {
-        WaypointMissionManager.getInstance().resumeMission(simpleCallback(activeMissionId.get(), "resumeMission"))
+        WaypointMissionManager.getInstance().resumeMission(simpleCallback(activeMissionId(), "resumeMission"))
+    }
+
+    fun resumeMission(
+        breakpoint: BreakPointInfo,
+        onComplete: (IDJIError?) -> Unit,
+    ) {
+        WaypointMissionManager.getInstance().resumeMission(
+            breakpoint,
+            callback(activeMissionId(), "resumeMission", onComplete),
+        )
+    }
+
+    fun observeMissionState(observer: (WaypointMissionExecuteState) -> Unit): () -> Unit {
+        missionStateObservers += observer
+        return { missionStateObservers -= observer }
     }
 
     fun stopActiveMission() {
-        val fileName = activeMissionFileName.get()
+        val fileName = activeMissionFileName()
         if (fileName == null) {
             Log.w(TAG, "stopActiveMission called but no active mission")
             return
         }
-        WaypointMissionManager.getInstance().stopMission(fileName, simpleCallback(activeMissionId.get(), "stopMission"))
+        WaypointMissionManager.getInstance().stopMission(fileName, simpleCallback(activeMissionId(), "stopMission"))
     }
 
     fun queryActiveBreakpoint(onResult: (BreakPointInfo?, IDJIError?) -> Unit) {
-        val fileName = activeMissionFileName.get()
+        val fileName = activeMissionFileName()
         if (fileName == null) {
             Log.w(TAG, "queryActiveBreakpoint called but no active mission")
             onResult(null, null)
@@ -178,7 +209,7 @@ class WaypointMissionExecutor(
                 }
 
                 override fun onFailure(error: IDJIError) {
-                    listener.onError(activeMissionId.get(), "queryBreakpoint", error)
+                    listener.onError(activeMissionId(), "queryBreakpoint", error)
                     onResult(null, error)
                 }
             },
@@ -196,6 +227,22 @@ class WaypointMissionExecutor(
 
         override fun onFailure(error: IDJIError) {
             listener.onError(missionId, stage, error)
+        }
+    }
+
+    private fun callback(
+        missionId: String?,
+        stage: String,
+        onComplete: (IDJIError?) -> Unit,
+    ) = object : CommonCallbacks.CompletionCallback {
+        override fun onSuccess() {
+            Log.d(TAG, "$stage success missionId=$missionId")
+            onComplete(null)
+        }
+
+        override fun onFailure(error: IDJIError) {
+            listener.onError(missionId, stage, error)
+            onComplete(error)
         }
     }
 
