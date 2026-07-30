@@ -195,6 +195,26 @@ class LatestVisibleFrameBufferTest {
     }
 
     @Test
+    fun closeAfterFinalCheckRevokesPublicationBeforeReturning() {
+        assertPublicationRevokedBeforeTerminalReturns(
+            interrupt = { buffer -> buffer.close() },
+            expectedSlot = LatestVisibleFrameBufferSlotPhase.CLOSED,
+            expectedSource = LatestVisibleFrameBufferSourcePhase.CLOSED,
+        )
+    }
+
+    @Test
+    fun sourceSwitchAfterFinalCheckRevokesPublicationBeforeReturning() {
+        assertPublicationRevokedBeforeTerminalReturns(
+            interrupt = { buffer ->
+                buffer.onSourceSwitchStarted(VisibleFrameSource.THERMAL)
+            },
+            expectedSlot = LatestVisibleFrameBufferSlotPhase.EMPTY,
+            expectedSource = LatestVisibleFrameBufferSourcePhase.TRANSITION,
+        )
+    }
+
+    @Test
     fun visibleToThermalTransitionDrainsQueuedFrameAndRejectsCallbacksWithoutCopy() {
         var now = 1_000L
         var released = 0
@@ -373,9 +393,84 @@ class LatestVisibleFrameBufferTest {
         val snapshot = buffer.snapshot()
         assertEquals(baseline.copiedFrames + 1, snapshot.copiedFrames)
         assertEquals(baseline.acceptedFrames, snapshot.acceptedFrames)
+        assertEquals(
+            baseline.discardedCopiedFrames + 1,
+            snapshot.discardedCopiedFrames,
+        )
         assertEquals(baseline.releasedFrames + 1, snapshot.releasedFrames)
         assertEquals(1, displacedReleases)
         assertNull(buffer.takeLatest())
+        executor.shutdownNow()
+    }
+
+    private fun assertPublicationRevokedBeforeTerminalReturns(
+        interrupt: (LatestVisibleFrameBuffer) -> Unit,
+        expectedSlot: LatestVisibleFrameBufferSlotPhase,
+        expectedSource: LatestVisibleFrameBufferSourcePhase,
+    ) {
+        val finalCheckPassed = CountDownLatch(1)
+        val continuePublication = CountDownLatch(1)
+        val ready = readyVisibleBuffer(
+            nowMillis = { 1_000L },
+            hooks = LatestVisibleFrameBufferHooks(
+                afterFinalAdmissibilityCheckBeforePublish = {
+                    finalCheckPassed.countDown()
+                    assertTrue(continuePublication.await(5, TimeUnit.SECONDS))
+                },
+            ),
+        )
+        val buffer = ready.buffer
+        var displacedReleases = 0
+        assertTrue(buffer.offer(frame(9, onRelease = { displacedReleases += 1 })))
+        val baseline = buffer.snapshot()
+        val executor = Executors.newFixedThreadPool(2)
+        val offered = executor.submit<VisibleFrameOfferResult> {
+            buffer.offerVisibleFrame(
+                ready.generation,
+                VisibleFrameFormat.RGBA_8888,
+                byteArrayOf(1, 2, 3, 4), 0, 4, 1, 1, 1_000,
+            )
+        }
+        assertTrue(finalCheckPassed.await(5, TimeUnit.SECONDS))
+
+        interrupt(buffer)
+        assertEquals(
+            LatestVisibleFrameBufferSlotPhase.COPYING_REVOKED,
+            buffer.slotPhaseForTesting(),
+        )
+        assertEquals(expectedSource, buffer.sourcePhaseForTesting())
+        assertEquals(1, displacedReleases)
+
+        val raceStart = CountDownLatch(1)
+        val racedTake = executor.submit<VisibleRgbaFrame?> {
+            assertTrue(raceStart.await(5, TimeUnit.SECONDS))
+            buffer.takeLatest()
+        }
+        raceStart.countDown()
+        continuePublication.countDown()
+
+        val racedFrame = racedTake.get(5, TimeUnit.SECONDS)
+        racedFrame?.release()
+        assertNull(racedFrame)
+        assertEquals(
+            VisibleFrameOfferResult.COPIED_DISCARDED,
+            offered.get(5, TimeUnit.SECONDS),
+        )
+        assertNull(buffer.takeLatest())
+        assertEquals(expectedSlot, buffer.slotPhaseForTesting())
+        assertEquals(expectedSource, buffer.sourcePhaseForTesting())
+
+        val snapshot = buffer.snapshot()
+        assertEquals(baseline.copiedFrames + 1, snapshot.copiedFrames)
+        assertEquals(baseline.acceptedFrames, snapshot.acceptedFrames)
+        assertEquals(
+            baseline.discardedCopiedFrames + 1,
+            snapshot.discardedCopiedFrames,
+        )
+        assertEquals(baseline.rejectedFrames + 1, snapshot.rejectedFrames)
+        assertEquals(baseline.consumedFrames, snapshot.consumedFrames)
+        assertEquals(baseline.releasedFrames + 1, snapshot.releasedFrames)
+        assertEquals(1, displacedReleases)
         executor.shutdownNow()
     }
 
