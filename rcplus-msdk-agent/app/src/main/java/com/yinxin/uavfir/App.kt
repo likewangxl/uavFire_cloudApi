@@ -7,6 +7,7 @@ import dji.v5.common.utils.GeoidManager
 import dji.v5.ux.core.communication.DefaultGlobalPreferences
 import dji.v5.ux.core.communication.GlobalPreferencesManager
 import dji.v5.ux.core.util.UxSharedPreferencesUtil
+import com.yinxin.uavfir.sdk.AgentSdkHealthState
 
 class App : Application() {
     lateinit var services: AppServices
@@ -37,6 +38,12 @@ class App : Application() {
         UxSharedPreferencesUtil.initialize(this)
         GlobalPreferencesManager.initialize(DefaultGlobalPreferences(this))
         GeoidManager.getInstance().init(this)
+        AgentSdkHealthState.tracker.markUxSdkInitialized(
+            sourceSha256 = BuildConfig.UXSDK_SOURCE_SHA256,
+            runtimeClassPresent = runCatching {
+                Class.forName("dji.v5.ux.core.widget.fpv.FPVWidget")
+            }.isSuccess,
+        )
     }
 
     override fun onTerminate() {

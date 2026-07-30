@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <permission
+        android:name="com.yinxin.uavfir.permission.READ_SDK_HEALTH"
+        android:protectionLevel="signature" />
 
     <uses-feature
         android:name="android.hardware.usb.host"
@@ -46,6 +49,11 @@
         <meta-data
             android:name="com.yinxin.uavfir.HEALTH_CONTRACT"
             android:value="${UAVFIRE_AGENT_HEALTH_CONTRACT}" />
+        <provider
+            android:name=".sdk.AgentSdkHealthProvider"
+            android:authorities="com.yinxin.uavfir.sdk-health"
+            android:exported="true"
+            android:readPermission="com.yinxin.uavfir.permission.READ_SDK_HEALTH" />
 
         <activity
             android:name="dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity"

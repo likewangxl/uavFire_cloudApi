@@ -165,6 +165,20 @@ class EngineSelectionPolicyTest {
         assertNull(result)
     }
 
+    @Test
+    fun select_rejectsMeasurementOnlyNcnnWithoutActuallyExecutingThoseLibraries() {
+        val result = EngineSelectionPolicy.select(
+            pytorchRecall = 0.90,
+            candidates = listOf(
+                candidate(Engine.ONNX),
+                candidate(Engine.TFLITE),
+                candidate(Engine.NCNN, executingNcnnRuntimeSha256 = null),
+            ),
+        )
+
+        assertNull(result)
+    }
+
     private fun candidatesWithNcnn(
         recall: Double = 0.90,
         p95Millis: Double = 100.0,
@@ -204,6 +218,10 @@ class EngineSelectionPolicyTest {
         ncnnPackageArchiveSha256: String? = if (engine == Engine.NCNN) APPROVED_NCNN_ARCHIVE_SHA256 else null,
         ncnnBridgeSourceSha256: String? = if (engine == Engine.NCNN) "d".repeat(64) else null,
         ncnnBridgeSha256: String? = if (engine == Engine.NCNN) "b".repeat(64) else null,
+        executingBenchmarkApkSha256: String? = if (engine == Engine.NCNN) "e".repeat(64) else null,
+        executingNcnnRuntimeSha256: String? = if (engine == Engine.NCNN) "b".repeat(64) else null,
+        executingNcnnBridgeSha256: String? = if (engine == Engine.NCNN) "b".repeat(64) else null,
+        reviewedNcnnBridgeSourceSha256: String? = if (engine == Engine.NCNN) "d".repeat(64) else null,
     ) = EngineBenchmark(
         engine = engine,
         recall = recall,
@@ -223,5 +241,9 @@ class EngineSelectionPolicyTest {
         ncnnPackageArchiveSha256 = ncnnPackageArchiveSha256,
         ncnnBridgeSourceSha256 = ncnnBridgeSourceSha256,
         ncnnBridgeSha256 = ncnnBridgeSha256,
+        executingBenchmarkApkSha256 = executingBenchmarkApkSha256,
+        executingNcnnRuntimeSha256 = executingNcnnRuntimeSha256,
+        executingNcnnBridgeSha256 = executingNcnnBridgeSha256,
+        reviewedNcnnBridgeSourceSha256 = reviewedNcnnBridgeSourceSha256,
     )
 }

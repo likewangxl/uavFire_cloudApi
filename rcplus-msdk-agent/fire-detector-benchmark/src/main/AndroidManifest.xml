@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="com.yinxin.uavfir.permission.READ_SDK_HEALTH" />
     <queries>
         <package android:name="com.yinxin.uavfir" />
     </queries>

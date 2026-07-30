@@ -25,6 +25,10 @@ data class EngineBenchmark(
     val ncnnPackageArchiveSha256: String?,
     val ncnnBridgeSourceSha256: String?,
     val ncnnBridgeSha256: String?,
+    val executingBenchmarkApkSha256: String? = null,
+    val executingNcnnRuntimeSha256: String? = null,
+    val executingNcnnBridgeSha256: String? = null,
+    val reviewedNcnnBridgeSourceSha256: String? = null,
 )
 
 /**
@@ -69,12 +73,20 @@ object EngineSelectionPolicy {
                         ncnnPackageArchiveSha256 == APPROVED_NCNN_ARCHIVE_SHA256 &&
                         ncnnBridgeSourceSha256?.matches(SHA256) == true &&
                         ncnnBridgeSha256?.matches(SHA256) == true &&
-                        ncnnBridgeSha256 == runtimeSha256["lib/arm64-v8a/libfire_detector_ncnn.so"]
+                        ncnnBridgeSha256 == runtimeSha256["lib/arm64-v8a/libfire_detector_ncnn.so"] &&
+                        executingBenchmarkApkSha256?.matches(SHA256) == true &&
+                        executingNcnnRuntimeSha256 == runtimeSha256["lib/arm64-v8a/libncnn.so"] &&
+                        executingNcnnBridgeSha256 == ncnnBridgeSha256 &&
+                        reviewedNcnnBridgeSourceSha256 == ncnnBridgeSourceSha256
                 else ->
                     ncnnPackageVersion == null &&
                         ncnnPackageArchiveSha256 == null &&
                         ncnnBridgeSourceSha256 == null &&
-                        ncnnBridgeSha256 == null
+                        ncnnBridgeSha256 == null &&
+                        executingBenchmarkApkSha256 == null &&
+                        executingNcnnRuntimeSha256 == null &&
+                        executingNcnnBridgeSha256 == null &&
+                        reviewedNcnnBridgeSourceSha256 == null
             }
 
     private val SHA256 = Regex("[0-9a-f]{64}")

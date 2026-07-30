@@ -15,7 +15,10 @@ class DjiMsdkRuntimeAdapter(
         if (!sdkClient.initialize()) {
             return false
         }
-        return sdkClient.registerApp()
+        AgentSdkHealthState.tracker.markMsdkInitialized()
+        val registered = sdkClient.registerApp()
+        if (registered) AgentSdkHealthState.tracker.markSdkRegistered()
+        return registered
     }
 
     override suspend fun isAircraftConnected(): Boolean = keyValueClient.isAircraftConnected()

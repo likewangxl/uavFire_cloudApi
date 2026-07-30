@@ -3,6 +3,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import java.security.MessageDigest
 import java.io.ByteArrayOutputStream
+import groovy.json.JsonSlurper
 
 plugins {
     id("com.android.application")
@@ -14,6 +15,28 @@ val supportedMeasurementCandidates = setOf("baseline", "onnx", "tflite", "ncnn",
 check(measurementCandidate in supportedMeasurementCandidates) { "Unknown fireDetectorCandidate: $measurementCandidate" }
 val NCNN_VERSION = "20260526"
 val NCNN_ARCHIVE_SHA256 = "eb205b332274974511890903828451ae7a4c19c309f21431536e0a8c9f3dd0c1"
+fun sha256Bytes(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+    .digest(bytes)
+    .joinToString("") { "%02x".format(it) }
+fun sha256File(file: java.io.File): String = file.inputStream().use { input ->
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        digest.update(buffer, 0, count)
+    }
+    digest.digest().joinToString("") { "%02x".format(it) }
+}
+val reviewedNcnnBridgeSources = listOf(
+    layout.projectDirectory.file("src/main/cpp/CMakeLists.txt").asFile,
+    layout.projectDirectory.file("src/main/cpp/ncnn_bridge.cpp").asFile,
+)
+val reviewedNcnnBridgeSourceSha256 = sha256Bytes(
+    reviewedNcnnBridgeSources.sortedBy { it.name }
+        .joinToString("\n") { "${it.name}:${sha256File(it)}" }
+        .toByteArray(),
+)
 
 android {
     namespace = "com.yinxin.uavfir.benchmark"
@@ -27,7 +50,12 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "NCNN_VERSION", "\"$NCNN_VERSION\"")
+        buildConfigField("String", "NCNN_ARCHIVE_SHA256", "\"$NCNN_ARCHIVE_SHA256\"")
+        buildConfigField("String", "NCNN_BRIDGE_SOURCE_SHA256", "\"$reviewedNcnnBridgeSourceSha256\"")
     }
+
+    buildFeatures { buildConfig = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -63,25 +91,28 @@ val stageBenchmarkAssets by tasks.registering(Sync::class) {
 }
 
 val formalAgentApk = providers.gradleProperty("formalAgentApk").map(::file)
+val repositoryAgentTrustAnchor = layout.projectDirectory.file("agent-trust-anchor.json")
 val formalAgentTrustOutput = layout.buildDirectory.file("generated/formalAgentTrust/formal-agent-trust.json")
 val writeFormalAgentTrust by tasks.registering {
+    inputs.file(repositoryAgentTrustAnchor)
+    inputs.property(
+        "formalAgentApkPath",
+        formalAgentApk.map { it.absoluteFile.normalize().path }.orElse("UNSET"),
+    )
+    formalAgentApk.orNull?.let { inputs.file(it) }
     outputs.file(formalAgentTrustOutput)
+    outputs.upToDateWhen { false }
     doLast {
+        val priorOutput = formalAgentTrustOutput.get().asFile
+        check(!priorOutput.exists() || priorOutput.delete()) {
+            "Unable to remove stale formal Agent trust output: $priorOutput"
+        }
         check(formalAgentApk.isPresent) {
             "Formal Agent packaging requires -PformalAgentApk=/absolute/path/to/formal-real-uxsdk-agent.apk"
         }
         val apk = formalAgentApk.get()
         check(apk.isFile) { "Formal Agent APK is missing: $apk" }
-        fun sha256(file: java.io.File) = file.inputStream().use { input ->
-            val digest = MessageDigest.getInstance("SHA-256")
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-            digest.digest().joinToString("") { "%02x".format(it) }
-        }
+        fun sha256(file: java.io.File) = sha256File(file)
         val apksigner = android.sdkDirectory
             .resolve("build-tools/${android.buildToolsVersion}/apksigner")
         check(apksigner.isFile) { "Android SDK apksigner is missing: $apksigner" }
@@ -101,10 +132,74 @@ val writeFormalAgentTrust by tasks.registering {
             .map { it.groupValues[1].lowercase() }
             .toList()
         check(certificates.size == 1) { "Formal Agent APK must have exactly one verified signer" }
+        val signerSha256 = certificates.single()
+        val apkSha256 = sha256(apk)
+        val anchor = JsonSlurper().parseText(repositoryAgentTrustAnchor.asFile.readText()) as Map<*, *>
+        check((anchor["schemaVersion"] as? Number)?.toInt() == 1) {
+            "Unsupported repository Agent trust anchor schema"
+        }
+        check(anchor["packageName"] == "com.yinxin.uavfir" && anchor["healthContract"] == "agent-sdk-health-v1") {
+            "Repository Agent trust anchor targets the wrong package/health contract"
+        }
+        val allowedSigners = (anchor["allowedSigningCertificates"] as? List<*>)
+            ?.map { it as String }
+            ?.toSet()
+            ?: emptySet()
+        val approvedReleases = (anchor["approvedReleases"] as? List<*>)
+            ?.map { it as Map<*, *> }
+            ?: emptyList()
+        check(allowedSigners.isNotEmpty() && approvedReleases.isNotEmpty()) {
+            "Formal Agent trust anchor is unconfigured; add a reviewed release signer/APK/version/buildId"
+        }
+        check(signerSha256 in allowedSigners) {
+            "Formal Agent signer is not in the repository-controlled allowlist"
+        }
+        val aapt = android.sdkDirectory.resolve("build-tools/${android.buildToolsVersion}/aapt")
+        check(aapt.isFile) { "Android SDK aapt is missing: $aapt" }
+        val badgingOutput = ByteArrayOutputStream()
+        val badging = project.exec {
+            commandLine(aapt, "dump", "badging", apk)
+            standardOutput = badgingOutput
+            errorOutput = badgingOutput
+            isIgnoreExitValue = true
+        }
+        check(badging.exitValue == 0) { "Unable to inspect Formal Agent package metadata" }
+        val packageMatch = Regex(
+            """package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'""",
+        ).find(badgingOutput.toString(Charsets.UTF_8))
+            ?: error("Formal Agent APK lacks package/version metadata")
+        check(packageMatch.groupValues[1] == "com.yinxin.uavfir") { "Formal Agent APK has the wrong package" }
+        val versionCode = packageMatch.groupValues[2].toLong()
+        val versionName = packageMatch.groupValues[3]
+        val buildId = "uavfire-agent-$versionName-$versionCode"
+        val approved = approvedReleases.singleOrNull { release ->
+            release["signingCertificateSha256"] == signerSha256 &&
+                release["apkSha256"] == apkSha256 &&
+                release["versionName"] == versionName &&
+                (release["versionCode"] as? Number)?.toLong() == versionCode &&
+                release["buildId"] == buildId
+        }
+        check(approved != null) {
+            "Formal Agent APK is not an approved repository release"
+        }
+        val manifestOutput = ByteArrayOutputStream()
+        val manifestInspection = project.exec {
+            commandLine(aapt, "dump", "xmltree", apk, "AndroidManifest.xml")
+            standardOutput = manifestOutput
+            errorOutput = manifestOutput
+            isIgnoreExitValue = true
+        }
+        val manifest = manifestOutput.toString(Charsets.UTF_8)
+        check(
+            manifestInspection.exitValue == 0 &&
+                manifest.contains("com.yinxin.uavfir.sdk.AgentSdkHealthProvider") &&
+                manifest.contains("com.yinxin.uavfir.sdk-health") &&
+                manifest.contains("com.yinxin.uavfir.permission.READ_SDK_HEALTH"),
+        ) { "Formal Agent APK lacks the signature-protected SDK health provider" }
         val output = formalAgentTrustOutput.get().asFile
         output.parentFile.mkdirs()
         output.writeText(
-            """{"packageName":"com.yinxin.uavfir","apkSha256":"${sha256(apk)}","signingCertificateSha256":"${certificates.single()}"}""",
+            """{"schemaVersion":2,"packageName":"com.yinxin.uavfir","apkSha256":"$apkSha256","signingCertificateSha256":"$signerSha256","versionName":"$versionName","versionCode":$versionCode,"buildId":"$buildId"}""",
         )
     }
 }
@@ -247,19 +342,9 @@ val buildNcnnBridgeFromSource = tasks.register("buildNcnnBridgeFromSource") {
         }
         val bridge = bridgeBuild.resolve("libfire_detector_ncnn.so")
         check(bridge.isFile) { "Current-source NCNN JNI bridge was not produced" }
-        val bridgeSources = listOf(
-            layout.projectDirectory.file("src/main/cpp/CMakeLists.txt").asFile,
-            layout.projectDirectory.file("src/main/cpp/ncnn_bridge.cpp").asFile,
-        )
-        val sourceIdentity = bridgeSources.sortedBy { it.name }.joinToString("\n") {
-            "${it.name}:${sha256(it)}"
-        }
-        val sourceSha256 = MessageDigest.getInstance("SHA-256")
-            .digest(sourceIdentity.toByteArray())
-            .joinToString("") { "%02x".format(it) }
         trustFile.parentFile.mkdirs()
         trustFile.writeText(
-            """{"version":"$NCNN_VERSION","packageArchiveSha256":"$NCNN_ARCHIVE_SHA256","bridgeSourceSha256":"$sourceSha256","runtimeSha256":"${sha256(runtime)}","bridgeSha256":"${sha256(bridge)}"}""",
+            """{"version":"$NCNN_VERSION","packageArchiveSha256":"$NCNN_ARCHIVE_SHA256","bridgeSourceSha256":"$reviewedNcnnBridgeSourceSha256","runtimeSha256":"${sha256(runtime)}","bridgeSha256":"${sha256(bridge)}"}""",
         )
     }
 }
@@ -330,7 +415,7 @@ val createApkDeltaMetadataFixture = tasks.register("createApkDeltaMetadataFixtur
                     .digest(bytes)
                     .joinToString("") { "%02x".format(it) }
                 entries["assets/ncnn-runtime-trust.json"] =
-                    """{"version":"$NCNN_VERSION","packageArchiveSha256":"$NCNN_ARCHIVE_SHA256","bridgeSourceSha256":"${"8".repeat(64)}","runtimeSha256":"${sha256(entries.getValue("lib/arm64-v8a/libncnn.so"))}","bridgeSha256":"${sha256(entries.getValue("lib/arm64-v8a/libfire_detector_ncnn.so"))}"}"""
+                    """{"version":"$NCNN_VERSION","packageArchiveSha256":"$NCNN_ARCHIVE_SHA256","bridgeSourceSha256":"$reviewedNcnnBridgeSourceSha256","runtimeSha256":"${sha256(entries.getValue("lib/arm64-v8a/libncnn.so"))}","bridgeSha256":"${sha256(entries.getValue("lib/arm64-v8a/libfire_detector_ncnn.so"))}"}"""
                         .toByteArray()
             }
             writeFixtureApk(candidate, entries)

@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,6 +20,24 @@ val agentWaylineSharedSecret = providers.gradleProperty("agentWaylineSharedSecre
 val agentAircraftSn = providers.gradleProperty("agentAircraftSn").orElse("")
 val agentGatewaySn = providers.gradleProperty("agentGatewaySn").orElse("")
 val realUxsdkBuild = project(":uxsdk").projectDir.canonicalFile != rootProject.file("uxsdk-stub").canonicalFile
+val agentVersionCode = 3
+val agentVersionName = "0.1.2"
+val agentBuildId = "uavfire-agent-$agentVersionName-$agentVersionCode"
+val uxsdkSourceSha256 = if (realUxsdkBuild) {
+    val sourceFiles = project(":uxsdk").projectDir.walkTopDown()
+        .filter { it.isFile && "build" !in it.toPath().map { part -> part.toString() } }
+        .sortedBy { it.relativeTo(project(":uxsdk").projectDir).invariantSeparatorsPath }
+        .toList()
+    val digest = MessageDigest.getInstance("SHA-256")
+    sourceFiles.forEach { file ->
+        digest.update(file.relativeTo(project(":uxsdk").projectDir).invariantSeparatorsPath.toByteArray())
+        digest.update(0)
+        digest.update(file.readBytes())
+    }
+    digest.digest().joinToString("") { "%02x".format(it) }
+} else {
+    ""
+}
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -33,14 +53,16 @@ android {
         applicationId = "com.yinxin.uavfir"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = agentVersionCode
+        versionName = agentVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["DJI_API_KEY"] = djiApiKey.get()
         manifestPlaceholders["MAPLIBRE_TOKEN"] = maplibreToken.get()
         manifestPlaceholders["UAVFIRE_REAL_UXSDK"] = realUxsdkBuild.toString()
         manifestPlaceholders["UAVFIRE_AGENT_HEALTH_CONTRACT"] = "agent-process-v1"
+        buildConfigField("String", "AGENT_BUILD_ID", "\"$agentBuildId\"")
+        buildConfigField("String", "UXSDK_SOURCE_SHA256", "\"$uxsdkSourceSha256\"")
         buildConfigField("String", "AGENT_BACKEND_BASE_URL", "\"${agentBackendBaseUrl.get()}\"")
         buildConfigField("String", "AGENT_AI_SERVICE_BASE_URL", "\"${agentAiServiceBaseUrl.get()}\"")
         buildConfigField("String", "AGENT_MEDIA_HOST", "\"${agentMediaHost.get()}\"")

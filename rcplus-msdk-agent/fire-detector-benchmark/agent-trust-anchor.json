@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.yinxin.uavfir",
+  "healthContract": "agent-sdk-health-v1",
+  "allowedSigningCertificates": [],
+  "approvedReleases": []
+}

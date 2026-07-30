@@ -13,7 +13,7 @@ class BenchmarkPartialResultsTest {
         assertEquals("harness-generated-nonce", session.getString("gateSessionNonce"))
         assertEquals("boot-identity", session.getString("bootId"))
         assertNotEquals("", session.getString("provenanceDigest"))
-        BenchmarkPartialResults.requireFreshSession(session, NOW + 1, "boot-identity")
+        BenchmarkPartialResults.requireFreshSession(session, NOW + 1, "boot-identity", ELAPSED + 1)
     }
 
     @Test
@@ -47,19 +47,19 @@ class BenchmarkPartialResultsTest {
 
     @Test(expected = IllegalStateException::class)
     fun requireFreshSession_rejectsExpiredEvidence() {
-        BenchmarkPartialResults.requireFreshSession(provenance(), EXPIRES_AT + 1, "boot-identity")
+        BenchmarkPartialResults.requireFreshSession(provenance(), NOW + 1, "boot-identity", ELAPSED_EXPIRES + 1)
     }
 
     @Test(expected = IllegalStateException::class)
     fun requireFreshSession_rejectsCrossBootEvidence() {
-        BenchmarkPartialResults.requireFreshSession(provenance(), NOW + 1, "different-boot")
+        BenchmarkPartialResults.requireFreshSession(provenance(), NOW + 1, "different-boot", ELAPSED + 1)
     }
 
     @Test(expected = IllegalStateException::class)
     fun requireFreshSession_rejectsTamperedProvenanceDigest() {
         val provenance = provenance().put("agentVersionName", "tampered")
 
-        BenchmarkPartialResults.requireFreshSession(provenance, NOW + 1, "boot-identity")
+        BenchmarkPartialResults.requireFreshSession(provenance, NOW + 1, "boot-identity", ELAPSED + 1)
     }
 
     @Test(expected = IllegalStateException::class)
@@ -85,6 +85,14 @@ class BenchmarkPartialResultsTest {
     }
 
     @Test(expected = IllegalStateException::class)
+    fun merge_rejectsPersistedMetricsChangedAfterReportWasSealed() {
+        val provenance = provenance()
+        val tampered = report(Engine.NCNN, provenance).put("recall", 0.1)
+
+        BenchmarkPartialResults.merge(null, provenance, Engine.NCNN, tampered)
+    }
+
+    @Test(expected = IllegalStateException::class)
     fun merge_rejectsLegacyPartialsWithoutProvenance() {
         val provenance = provenance()
         BenchmarkPartialResults.merge(
@@ -102,6 +110,8 @@ class BenchmarkPartialResultsTest {
             bootId = "boot-identity",
             startedAtEpochMillis = NOW,
             expiresAtEpochMillis = EXPIRES_AT,
+            startedElapsedRealtimeMillis = ELAPSED,
+            expiresElapsedRealtimeMillis = ELAPSED_EXPIRES,
         )
 
     private fun staticProvenance() = JSONObject(
@@ -113,26 +123,32 @@ class BenchmarkPartialResultsTest {
           "deviceFingerprint":"dji/rcplus/test",
           "deviceIdSha256":"${"1".repeat(64)}",
           "benchmarkApkSha256":"${"d".repeat(64)}",
+          "benchmarkSigningCertificateSha256":"${"9".repeat(64)}",
           "instrumentationApkSha256":"${"2".repeat(64)}",
           "agentPackage":"com.yinxin.uavfir",
           "agentVersionName":"0.1.2",
           "agentVersionCode":3,
           "agentApkSha256":"${"e".repeat(64)}",
           "agentSigningCertificateSha256":"${"f".repeat(64)}",
+          "agentBuildId":"uavfire-agent-0.1.2-3",
           "agentRealUxsdk":true,
-          "agentHealthContract":"agent-process-v1",
+          "agentHealthContract":"agent-sdk-health-v1",
           "agentRunning":true
         }
         """.trimIndent(),
     ).put("agentVersionCode", 3L)
 
-    private fun report(engine: Engine, provenance: JSONObject) = JSONObject()
-        .put("engine", engine.name.lowercase())
-        .put("provenanceDigest", provenance.getString("provenanceDigest"))
-        .put("recall", 0.9)
+    private fun report(engine: Engine, provenance: JSONObject) =
+        BenchmarkPartialResults.sealReport(
+            engine,
+            provenance,
+            JSONObject().put("recall", 0.9),
+        )
 
     private companion object {
         const val NOW = 1_000_000L
         const val EXPIRES_AT = NOW + 6 * 60 * 60 * 1_000L
+        const val ELAPSED = 200_000L
+        const val ELAPSED_EXPIRES = ELAPSED + 6 * 60 * 60 * 1_000L
     }
 }

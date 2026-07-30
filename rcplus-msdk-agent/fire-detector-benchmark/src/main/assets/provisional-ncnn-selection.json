@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "status": "PROVISIONAL_NCNN_SELECTED",
+  "engine": "ncnn",
+  "evidenceModality": "thermal",
+  "inputSize": 640,
+  "recall": 0.985,
+  "p95InferenceMillis": 152.0,
+  "firstFiveMinuteP95Millis": 138.0,
+  "finalFiveMinuteP95Millis": 153.0,
+  "task3DevelopmentBuildAllowed": true,
+  "visible960GatePassed": false,
+  "defaultDetectionEnabled": false,
+  "productionReleaseAllowed": false,
+  "requiredFollowup": "RC Plus 2 formal visible-960 three-engine rerun"
+}

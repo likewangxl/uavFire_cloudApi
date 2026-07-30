@@ -25,9 +25,12 @@ adb -s "$UAVFIRE_ADB_SERIAL" get-state
   -PformalAgentApk="$FORMAL_AGENT_APK" \
   -PncnnArchive="$NCNN_ARCHIVE" \
   -PncnnAndroidNdkDir="$ANDROID_NDK_DIR"
-adb -s "$UAVFIRE_ADB_SERIAL" pull \
-  /sdcard/Android/data/com.yinxin.uavfir.benchmark/files/fire-detector-benchmark.json \
-  build/visible-960-fire-detector-benchmark.json
+adb -s "$UAVFIRE_ADB_SERIAL" shell am instrument -w \
+  -e exportOnly true \
+  com.yinxin.uavfir.benchmark.test/androidx.test.runner.AndroidJUnitRunner
+adb -s "$UAVFIRE_ADB_SERIAL" exec-out run-as com.yinxin.uavfir.benchmark \
+  cat files/fire-detector-benchmark.json \
+  > build/visible-960-fire-detector-benchmark.json
 ```
 
 The device test verifies every candidate and image SHA-256, requires both visible
@@ -43,16 +46,23 @@ runtime or weaken these limits.
 
 The gate fails unless `com.yinxin.uavfir` is installed and its installed base APK and
 signing-certificate hashes match the build-bound `formal-agent-trust.json`. Gradle
-derives that trust asset from the local APK with Android SDK `apksigner`; no
-instrumentation argument can self-attest Agent identity. The installed Agent must
-declare real UXSDK metadata and `agent-process-v1`, and its process must be healthy at
+accepts an APK only when its signer, whole-APK hash, version, and build ID exactly
+match a reviewed entry in the committed `agent-trust-anchor.json`; the checked-in
+anchor is intentionally empty and packaging fails closed until a formal release is
+reviewed. Add only the exact release signer/APK/version/build ID approved for this
+gate. The APK must expose the signature-protected `agent-sdk-health-v1` provider, and
+the benchmark APK must use the same approved signer. The provider reports healthy
+only after the real UXSDK class/source, MSDK initialization, and SDK registration
+have all succeeded. No instrumentation argument can self-attest Agent identity.
+The installed Agent process and provider must remain healthy at
 the start, throughout, and end of every soak. The final JSON records the exact model, benchmark, PyTorch
 baseline, benchmark APK, instrumentation APK, device fingerprint, hashed Android ID,
 Agent version/APK/signing certificate, real-UXSDK marker, health checks, candidate APK,
 runtime libraries, and NCNN package/source/bridge hashes.
 
 Partial engine results are merged only when every provenance field, harness-generated
-session nonce, boot ID, six-hour expiry, and provenance digest matches. Operators do
+session nonce, boot ID, six-hour monotonic-clock expiry, provenance digest, adapter
+target, and per-report digest matches. Operators do
 not supply a run ID. For thermal safety on RC Plus 2, start the split sequence with
 ONNX and then continue the same on-device session:
 
@@ -67,10 +77,23 @@ ONNX and then continue the same on-device session:
 -Pandroid.testInstrumentationRunnerArguments.sessionAction=continue
 ```
 
-Starting a gate deletes old final/partial files in both app storage locations. A
-schema-less result or a partial without exact schema-v2 provenance is legacy evidence
+Starting a gate deletes old final/partial files in both app storage locations.
+`exportOnly` never exports partial evidence: it revalidates freshness, all three
+report digests, actual adapter identities, final-result digest, and recomputes NCNN
+selection before copying the completed result into `filesDir`. A schema-less result
+or a partial without exact current provenance is legacy evidence
 and must never be used for selection. Previously generated thermal results belong
 under `build/quarantine/*.quarantined`, not at the normal result path.
+
+## Human override: development-only NCNN selection
+
+The older RC Plus thermal-640 result (recall 0.985, P95 152 ms, first-window
+138 ms, final-window 153 ms) is recorded separately in
+`src/main/assets/provisional-ncnn-selection.json` as
+`PROVISIONAL_NCNN_SELECTED`. It may unblock Task 3 development builds only. It
+does not set `VISIBLE_960_GATE_PASSED`, enable the detector by default, or authorize
+a production release. Those remain blocked until a fresh formal RC Plus visible-960
+three-engine run passes this harness.
 
 ## NCNN provisioning contract
 
@@ -148,3 +171,7 @@ baseline. It writes `build/generated/apkDeltaMetadata/apk-delta.json`; the devic
 test fails closed when that file is not packaged. Each runtime entry carries its
 archive SHA-256; NCNN metadata additionally binds the locked archive/version,
 current bridge source, packaged runtime, packaged bridge, and whole candidate APK.
+Candidate APK metadata is size/provenance evidence only. During the NCNN run the
+harness separately hashes the benchmark APK that is actually executing and the
+`libncnn.so`/`libfire_detector_ncnn.so` entries inside it, then requires those hashes
+and the BuildConfig-pinned reviewed source digest to match `ncnn-runtime-trust.json`.

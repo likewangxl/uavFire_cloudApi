@@ -24,9 +24,14 @@ internal object ApkDeltaMetadata {
     fun load(context: Context, manifest: ModelManifest): Map<Engine, MeasuredApkDelta> = parse(
         json = context.assets.open("apk-delta.json").bufferedReader().use { it.readText() },
         manifest = manifest,
+        reviewedNcnnBridgeSourceSha256 = BuildConfig.NCNN_BRIDGE_SOURCE_SHA256,
     )
 
-    fun parse(json: String, manifest: ModelManifest): Map<Engine, MeasuredApkDelta> {
+    fun parse(
+        json: String,
+        manifest: ModelManifest,
+        reviewedNcnnBridgeSourceSha256: String = BuildConfig.NCNN_BRIDGE_SOURCE_SHA256,
+    ): Map<Engine, MeasuredApkDelta> {
         val root = JSONObject(json)
         check(root.getString("abi") == APK_DELTA_ABI) { "APK delta metadata must be arm64-v8a" }
         check(root.getString("modelCandidatesSha256") == manifest.sha256) { "APK delta metadata is stale for the current model manifest" }
@@ -54,7 +59,8 @@ internal object ApkDeltaMetadata {
                 val bridgeSha256 = ncnnBuild.getString("bridgeSha256")
                 check(
                     version == APPROVED_NCNN_VERSION &&
-                        archiveSha256 == APPROVED_NCNN_ARCHIVE_SHA256,
+                        archiveSha256 == APPROVED_NCNN_ARCHIVE_SHA256 &&
+                        bridgeSourceSha256 == reviewedNcnnBridgeSourceSha256,
                 ) { "NCNN package version/archive hash is not approved" }
                 check(listOf(archiveSha256, bridgeSourceSha256, runtimeSha256, bridgeSha256).all { it.matches(SHA256) }) {
                     "NCNN build identity is incomplete"
