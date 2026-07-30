@@ -15,7 +15,47 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicReference
+
+internal class SerializedSnapshotObserver<T>(
+    private val callback: (T) -> Unit,
+) {
+    private val lock = Any()
+    private val pending = ArrayDeque<T>()
+    private var draining = false
+    private var active = true
+
+    fun enqueue(value: T) {
+        synchronized(lock) {
+            if (active) pending.addLast(value)
+        }
+    }
+
+    fun drain() {
+        synchronized(lock) {
+            if (!active || draining) return
+            draining = true
+        }
+        while (true) {
+            val next = synchronized(lock) {
+                if (!active || pending.isEmpty()) {
+                    draining = false
+                    return
+                }
+                pending.removeFirst()
+            }
+            callback(next)
+        }
+    }
+
+    fun deactivate() {
+        synchronized(lock) {
+            active = false
+            pending.clear()
+        }
+    }
+}
 
 data class WaypointMissionIdentity(
     val missionId: String,
@@ -58,14 +98,14 @@ class WaypointMissionExecutor(
 
     private val missionLock = Any()
     private val executionSnapshot = AtomicReference(MissionExecutionSnapshot(null, null, 0, 0))
-    private val missionObservers = linkedSetOf<(MissionExecutionSnapshot) -> Unit>()
+    private val missionObservers = linkedSetOf<SerializedSnapshotObserver<MissionExecutionSnapshot>>()
 
     fun activeMissionId(): String? = executionSnapshot.get().identity?.missionId
     fun activeMissionFileName(): String? = executionSnapshot.get().identity?.missionFileName
     fun currentMissionExecution(): MissionExecutionSnapshot = executionSnapshot.get()
 
     private val stateListener = WaypointMissionExecuteStateListener { newState ->
-        val (previous, eventMissionId) = synchronized(missionLock) {
+        val (transition, observersToDrain) = synchronized(missionLock) {
             val current = executionSnapshot.get()
             val terminal = newState in NO_ACTIVE_STATES
             val next = if (terminal && current.identity != null) {
@@ -78,10 +118,11 @@ class WaypointMissionExecutor(
                 current.copy(state = newState)
             }
             executionSnapshot.set(next)
-            missionObservers.forEach { it(next) }
-            current.state to current.identity?.missionId
+            missionObservers.forEach { it.enqueue(next) }
+            (current.state to current.identity?.missionId) to missionObservers.toList()
         }
-        listener.onState(eventMissionId, newState, previous)
+        observersToDrain.forEach { it.drain() }
+        listener.onState(transition.second, newState, transition.first)
     }
 
     private val progressListener = object : WaylineExecutingInfoListener {
@@ -156,7 +197,7 @@ class WaypointMissionExecutor(
     }
 
     fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
-        synchronized(missionLock) {
+        val observersToDrain = synchronized(missionLock) {
             val current = executionSnapshot.get()
             val next = current.copy(
                 identity = WaypointMissionIdentity(missionId, missionFileName),
@@ -164,8 +205,10 @@ class WaypointMissionExecutor(
                 missionGeneration = current.missionGeneration + 1,
             )
             executionSnapshot.set(next)
-            missionObservers.forEach { it(next) }
+            missionObservers.forEach { it.enqueue(next) }
+            missionObservers.toList()
         }
+        observersToDrain.forEach { it.drain() }
         Log.i(
             TAG,
             WaypointMissionDiagnosticFormatter.formatAvailableWaylineIds(
@@ -182,14 +225,17 @@ class WaypointMissionExecutor(
         }
     }
 
-    fun pauseMission() {
-        WaypointMissionManager.getInstance().pauseMission(simpleCallback(activeMissionId(), "pauseMission"))
+    fun pauseMission() = submitLegacyCommand(
+        stage = "pauseMission",
+    ) { callback ->
+        WaypointMissionManager.getInstance().pauseMission(callback)
     }
 
-    fun pauseMission(onComplete: (IDJIError?) -> Unit) {
-        WaypointMissionManager.getInstance().pauseMission(
-            callback(activeMissionId(), "pauseMission", onComplete),
-        )
+    fun pauseMission(onComplete: (IDJIError?) -> Unit) = submitLegacyCommand(
+        stage = "pauseMission",
+        onComplete = onComplete,
+    ) { callback ->
+        WaypointMissionManager.getInstance().pauseMission(callback)
     }
 
     fun pauseMission(
@@ -205,18 +251,20 @@ class WaypointMissionExecutor(
         WaypointMissionManager.getInstance().pauseMission(callback)
     }
 
-    fun resumeMission() {
-        WaypointMissionManager.getInstance().resumeMission(simpleCallback(activeMissionId(), "resumeMission"))
+    fun resumeMission() = submitLegacyCommand(
+        stage = "resumeMission",
+    ) { callback ->
+        WaypointMissionManager.getInstance().resumeMission(callback)
     }
 
     fun resumeMission(
         breakpoint: BreakPointInfo,
         onComplete: (IDJIError?) -> Unit,
-    ) {
-        WaypointMissionManager.getInstance().resumeMission(
-            breakpoint,
-            callback(activeMissionId(), "resumeMission", onComplete),
-        )
+    ) = submitLegacyCommand(
+        stage = "resumeMission",
+        onComplete = onComplete,
+    ) { callback ->
+        WaypointMissionManager.getInstance().resumeMission(breakpoint, callback)
     }
 
     fun resumeMission(
@@ -234,11 +282,16 @@ class WaypointMissionExecutor(
     }
 
     fun observeMissionExecution(observer: (MissionExecutionSnapshot) -> Unit): () -> Unit {
+        val registration = SerializedSnapshotObserver(observer)
         synchronized(missionLock) {
-            missionObservers += observer
-            observer(executionSnapshot.get())
+            missionObservers += registration
+            registration.enqueue(executionSnapshot.get())
         }
-        return { synchronized(missionLock) { missionObservers -= observer } }
+        registration.drain()
+        return {
+            synchronized(missionLock) { missionObservers -= registration }
+            registration.deactivate()
+        }
     }
 
     fun stopActiveMission() {
@@ -306,23 +359,45 @@ class WaypointMissionExecutor(
         }
     }
 
+    private fun submitLegacyCommand(
+        stage: String,
+        onComplete: (IDJIError?) -> Unit = {},
+        submit: (CommonCallbacks.CompletionCallback) -> Unit,
+    ) {
+        checkNotNull(
+            submitCommand(
+                expected = null,
+                stage = stage,
+                onSubmissionBoundary = {},
+                onComplete = { _, error -> onComplete(error) },
+                submit = submit,
+            ),
+        )
+    }
+
     private fun submitCommand(
-        expected: MissionExecutionSnapshot,
+        expected: MissionExecutionSnapshot?,
         stage: String,
         onSubmissionBoundary: (MissionExecutionSnapshot) -> Unit,
         onComplete: (MissionExecutionSnapshot, IDJIError?) -> Unit,
         submit: (CommonCallbacks.CompletionCallback) -> Unit,
-    ): MissionCommandSubmission? = synchronized(missionLock) {
-        val current = executionSnapshot.get()
-        if (current.identity != expected.identity ||
-            current.missionGeneration != expected.missionGeneration ||
-            current.state != expected.state
-        ) {
-            return@synchronized null
-        }
-        val submitted = current.copy(commandGeneration = current.commandGeneration + 1)
-        executionSnapshot.set(submitted)
-        missionObservers.forEach { it(submitted) }
+    ): MissionCommandSubmission? {
+        val (submitted, observersToDrain) = synchronized(missionLock) {
+            val current = executionSnapshot.get()
+            if (expected != null &&
+                (current.identity != expected.identity ||
+                    current.missionGeneration != expected.missionGeneration ||
+                    current.commandGeneration != expected.commandGeneration ||
+                    current.state != expected.state)
+            ) {
+                return@synchronized null
+            }
+            val next = current.copy(commandGeneration = current.commandGeneration + 1)
+            executionSnapshot.set(next)
+            missionObservers.forEach { it.enqueue(next) }
+            next to missionObservers.toList()
+        } ?: return null
+        observersToDrain.forEach { it.drain() }
         val callback = object : CommonCallbacks.CompletionCallback {
             override fun onSuccess() {
                 onComplete(submitted, null)
@@ -338,7 +413,7 @@ class WaypointMissionExecutor(
         // throws or the coroutine is cancelled.
         onSubmissionBoundary(submitted)
         submit(callback)
-        MissionCommandSubmission(submitted)
+        return MissionCommandSubmission(submitted)
     }
 
     private fun tiltGimbalToNadir(missionId: String?) {

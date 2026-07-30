@@ -72,4 +72,25 @@ class WaypointMissionExecutorSourceTest {
         assertTrue(!source.contains("private val activeMission ="))
         assertTrue(!source.contains("private val lastState ="))
     }
+
+    @Test
+    fun everyLegacyPauseAndResumeRoutesThroughGenerationPrimitive() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
+
+        assertTrue(source.contains("fun pauseMission() = submitLegacyCommand("))
+        assertTrue(source.contains("fun pauseMission(onComplete: (IDJIError?) -> Unit) = submitLegacyCommand("))
+        assertTrue(source.contains("fun resumeMission() = submitLegacyCommand("))
+        assertTrue(source.contains(") = submitLegacyCommand(\n        stage = \"resumeMission\""))
+    }
+
+    @Test
+    fun observerCallbacksAreQueuedUnderLockAndDrainedOutsideIt() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
+
+        assertTrue(source.contains("SerializedSnapshotObserver"))
+        assertTrue(source.contains("observersToDrain.forEach { it.drain() }"))
+        assertTrue(source.contains("missionObservers -= registration"))
+        assertTrue(source.contains("registration.deactivate()"))
+        assertTrue(!source.contains("missionObservers.forEach { it("))
+    }
 }

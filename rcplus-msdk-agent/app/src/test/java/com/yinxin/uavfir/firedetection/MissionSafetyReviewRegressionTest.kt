@@ -193,7 +193,7 @@ class MissionSafetyReviewRegressionTest {
         val provider = OwnedResumeSafetyEvidenceProvider()
         val first = validEvidence(controlA, missionA, breakpoint)
         assertTrue(provider.publish(first))
-        assertEquals(first, provider.current(controlA))
+        assertEquals(first, provider.current(controlA)?.evidence)
 
         assertFalse(provider.publish(first.copy(observedAtMonotonicMs = 999)))
         assertEquals(null, provider.current(controlA))
@@ -211,7 +211,7 @@ class MissionSafetyReviewRegressionTest {
 
         assertTrue(provider.publish(nextGeneration))
         assertFalse(provider.invalidate(controlA))
-        assertEquals(nextGeneration, provider.current(nextControl))
+        assertEquals(nextGeneration, provider.current(nextControl)?.evidence)
         assertTrue(provider.invalidate(nextControl))
         assertEquals(null, provider.current(nextControl))
     }
@@ -249,11 +249,32 @@ class MissionSafetyReviewRegressionTest {
         var reads = 0
         var onRead: (() -> Unit)? = null
         val gate = sharedGate
+        private var activeClaim: ResumeSafetyEvidenceClaim? = null
 
-        override fun current(controlSession: FireControlSessionKey): ResumeSafetyEvidence? {
+        override fun current(controlSession: FireControlSessionKey): VersionedResumeSafetyEvidence? {
             reads++
             onRead?.invoke()
             return evidence
+                ?.takeIf { it.controlSession == controlSession }
+                ?.let { VersionedResumeSafetyEvidence(it, reads.toLong()) }
+        }
+
+        override fun claim(versioned: VersionedResumeSafetyEvidence): ResumeSafetyEvidenceClaim? {
+            if (activeClaim != null || versioned.evidence != evidence) return null
+            return ResumeSafetyEvidenceClaim(versioned, reads.toLong()).also { activeClaim = it }
+        }
+
+        override fun commitSubmitted(claim: ResumeSafetyEvidenceClaim): Boolean {
+            if (activeClaim !== claim) return false
+            activeClaim = null
+            evidence = null
+            return true
+        }
+
+        override fun release(claim: ResumeSafetyEvidenceClaim): Boolean {
+            if (activeClaim !== claim) return false
+            activeClaim = null
+            return true
         }
 
         companion object {

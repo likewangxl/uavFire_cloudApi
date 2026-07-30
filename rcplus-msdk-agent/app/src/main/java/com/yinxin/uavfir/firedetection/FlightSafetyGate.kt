@@ -1,8 +1,6 @@
 package com.yinxin.uavfir.firedetection
 
-import java.util.IdentityHashMap
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 
 object FlightSafetyPolicy {
@@ -114,6 +112,7 @@ data class FlightTelemetrySample(
 
 class StableHoverEvidence internal constructor(
     internal val binding: HoverControlBinding,
+    internal val hoverEpoch: Long,
     internal val issuedAtMonotonicMs: Long,
     internal val nonce: Long,
 )
@@ -139,12 +138,29 @@ data class ResumeSafetyEvidence internal constructor(
     val observedAtMonotonicMs: Long,
 )
 
-fun interface ResumeSafetyEvidenceProvider {
-    fun current(controlSession: FireControlSessionKey): ResumeSafetyEvidence?
+@ConsistentCopyVisibility
+data class VersionedResumeSafetyEvidence internal constructor(
+    val evidence: ResumeSafetyEvidence,
+    val version: Long,
+)
+
+class ResumeSafetyEvidenceClaim internal constructor(
+    internal val versioned: VersionedResumeSafetyEvidence,
+    internal val nonce: Long,
+)
+
+interface ResumeSafetyEvidenceProvider {
+    fun current(controlSession: FireControlSessionKey): VersionedResumeSafetyEvidence?
+    fun claim(versioned: VersionedResumeSafetyEvidence): ResumeSafetyEvidenceClaim?
+    fun commitSubmitted(claim: ResumeSafetyEvidenceClaim): Boolean
+    fun release(claim: ResumeSafetyEvidenceClaim): Boolean
 }
 
 object FailClosedResumeSafetyEvidenceProvider : ResumeSafetyEvidenceProvider {
-    override fun current(controlSession: FireControlSessionKey): ResumeSafetyEvidence? = null
+    override fun current(controlSession: FireControlSessionKey): VersionedResumeSafetyEvidence? = null
+    override fun claim(versioned: VersionedResumeSafetyEvidence): ResumeSafetyEvidenceClaim? = null
+    override fun commitSubmitted(claim: ResumeSafetyEvidenceClaim): Boolean = false
+    override fun release(claim: ResumeSafetyEvidenceClaim): Boolean = false
 }
 
 /**
@@ -153,43 +169,101 @@ object FailClosedResumeSafetyEvidenceProvider : ResumeSafetyEvidenceProvider {
  * exact controlling-session generation.
  */
 internal class OwnedResumeSafetyEvidenceProvider : ResumeSafetyEvidenceProvider {
-    private val current = AtomicReference<ResumeSafetyEvidence?>(null)
-
-    internal fun publish(evidence: ResumeSafetyEvidence): Boolean {
-        while (true) {
-            val previous = current.get()
-            if (previous != null) {
-                val sameControlGeneration = previous.controlSession == evidence.controlSession
-                val sameMissionGeneration = previous.mission == evidence.mission
-                val timeDidNotRegress =
-                    evidence.observedAtMonotonicMs >= previous.observedAtMonotonicMs
-                if (!sameControlGeneration || !sameMissionGeneration || !timeDidNotRegress) {
-                    if (current.compareAndSet(previous, null)) {
-                        return false
-                    }
-                    continue
-                }
-            }
-            if (current.compareAndSet(previous, evidence)) {
-                return true
-            }
-        }
+    private sealed interface PendingMutation {
+        data object Invalidate : PendingMutation
+        data class Replace(val evidence: ResumeSafetyEvidence) : PendingMutation
     }
 
+    private var evidence: ResumeSafetyEvidence? = null
+    private var version = 0L
+    private var activeClaim: ResumeSafetyEvidenceClaim? = null
+    private var pendingMutation: PendingMutation? = null
+    private var claimNonce = 0L
+
+    @Synchronized
+    internal fun publish(value: ResumeSafetyEvidence): Boolean {
+        if (activeClaim != null) {
+            if (pendingMutation !is PendingMutation.Invalidate) {
+                pendingMutation = PendingMutation.Replace(value)
+            }
+            return true
+        }
+        val previous = evidence
+        if (previous != null &&
+            (previous.controlSession != value.controlSession ||
+                previous.mission != value.mission ||
+                value.observedAtMonotonicMs < previous.observedAtMonotonicMs)
+        ) {
+            evidence = null
+            version++
+            return false
+        }
+        evidence = value
+        version++
+        return true
+    }
+
+    @Synchronized
     internal fun invalidate(controlSession: FireControlSessionKey? = null): Boolean {
-        while (true) {
-            val previous = current.get() ?: return false
-            if (controlSession != null && previous.controlSession != controlSession) {
-                return false
-            }
-            if (current.compareAndSet(previous, null)) {
-                return true
-            }
+        val previous = evidence ?: return false
+        if (controlSession != null && previous.controlSession != controlSession) return false
+        if (activeClaim != null) {
+            pendingMutation = PendingMutation.Invalidate
+            return true
         }
+        evidence = null
+        version++
+        return true
     }
 
-    override fun current(controlSession: FireControlSessionKey): ResumeSafetyEvidence? =
-        current.get()?.takeIf { it.controlSession == controlSession }
+    @Synchronized
+    override fun current(controlSession: FireControlSessionKey): VersionedResumeSafetyEvidence? =
+        evidence
+            ?.takeIf { it.controlSession == controlSession }
+            ?.let { VersionedResumeSafetyEvidence(it, version) }
+
+    @Synchronized
+    override fun claim(versioned: VersionedResumeSafetyEvidence): ResumeSafetyEvidenceClaim? {
+        if (activeClaim != null ||
+            versioned.version != version ||
+            versioned.evidence != evidence
+        ) {
+            return null
+        }
+        return ResumeSafetyEvidenceClaim(versioned, ++claimNonce).also { activeClaim = it }
+    }
+
+    @Synchronized
+    override fun commitSubmitted(claim: ResumeSafetyEvidenceClaim): Boolean {
+        if (activeClaim !== claim) return false
+        activeClaim = null
+        if (pendingMutation != null) {
+            applyPendingMutation()
+            return false
+        }
+        pendingMutation = null
+        evidence = null
+        version++
+        return true
+    }
+
+    @Synchronized
+    override fun release(claim: ResumeSafetyEvidenceClaim): Boolean {
+        if (activeClaim !== claim) return false
+        activeClaim = null
+        applyPendingMutation()
+        return true
+    }
+
+    private fun applyPendingMutation() {
+        when (val pending = pendingMutation) {
+            PendingMutation.Invalidate -> evidence = null
+            is PendingMutation.Replace -> evidence = pending.evidence
+            null -> return
+        }
+        pendingMutation = null
+        version++
+    }
 }
 
 sealed interface ResumeSafetyDecision {
@@ -202,7 +276,8 @@ class FlightSafetyGate {
     private var stableSinceMs: Long? = null
     private var lastFreshObservedAtMs: Long? = null
     private var lastObservedAtMs: Long? = null
-    private val issuedEvidence = IdentityHashMap<StableHoverEvidence, HoverControlBinding>()
+    private var hoverEpoch = 0L
+    private var currentProof: StableHoverEvidence? = null
     private val nonce = AtomicLong()
 
     @Synchronized
@@ -245,21 +320,24 @@ class FlightSafetyGate {
             invalidate()
             return HoverSafetyDecision.ManualHold(FlightSafetyReason.TELEMETRY_UNAVAILABLE)
         }
+        if (sample.capturedAtMonotonicMs > sample.observedAtMonotonicMs) {
+            invalidate()
+            return HoverSafetyDecision.ManualHold(FlightSafetyReason.TELEMETRY_STALE)
+        }
         if (!isFreshAndStable(sample, nowMs)) {
             invalidate()
             return HoverSafetyDecision.Waiting
         }
         if (lastFreshObservedAtMs?.let { nowMs - it > FlightSafetyPolicy.TELEMETRY_STALE_AFTER_MS } == true) {
-            stableSinceMs = null
-            issuedEvidence.clear()
+            invalidate()
         }
         lastFreshObservedAtMs = nowMs
         val startedAt = stableSinceMs ?: nowMs.also { stableSinceMs = it }
         if (nowMs - startedAt < FlightSafetyPolicy.REQUIRED_STABLE_HOVER_MS) {
             return HoverSafetyDecision.Waiting
         }
-        val evidence = StableHoverEvidence(binding, nowMs, nonce.incrementAndGet())
-        issuedEvidence[evidence] = binding
+        val evidence = StableHoverEvidence(binding, hoverEpoch, nowMs, nonce.incrementAndGet())
+        currentProof = evidence
         return HoverSafetyDecision.Stable(evidence)
     }
 
@@ -286,18 +364,30 @@ class FlightSafetyGate {
             evidence.telemetry.observedAtMonotonicMs != evidence.observedAtMonotonicMs ->
                 FlightSafetyReason.TELEMETRY_STALE
             !isFreshAndStable(evidence.telemetry, nowMs) -> FlightSafetyReason.TELEMETRY_STALE
+            lastFreshObservedAtMs == null ||
+                nowMs - lastFreshObservedAtMs!! !in 0..FlightSafetyPolicy.TELEMETRY_STALE_AFTER_MS ->
+                FlightSafetyReason.HOVER_NOT_STABLE
+            evidence.observedAtMonotonicMs != lastFreshObservedAtMs ->
+                FlightSafetyReason.HOVER_NOT_STABLE
             evidence.stableHoverEvidence == null -> FlightSafetyReason.HOVER_NOT_STABLE
-            issuedEvidence[evidence.stableHoverEvidence] != HoverControlBinding(controlSession, mission) ->
+            currentProof !== evidence.stableHoverEvidence ||
+                evidence.stableHoverEvidence.hoverEpoch != hoverEpoch ||
+                evidence.stableHoverEvidence.binding != HoverControlBinding(controlSession, mission) ->
                 FlightSafetyReason.HOVER_NOT_STABLE
             else -> null
         }
-        if (reason != null) invalidate()
+        if (reason != null) {
+            invalidate()
+        } else {
+            currentProof = null
+        }
         return reason?.let(ResumeSafetyDecision::ManualHold) ?: ResumeSafetyDecision.Permitted
     }
 
     private fun isFreshAndStable(sample: FlightTelemetrySample, nowMs: Long): Boolean {
         val age = nowMs - sample.capturedAtMonotonicMs
-        return sample.observedAtMonotonicMs <= nowMs &&
+        return sample.capturedAtMonotonicMs <= sample.observedAtMonotonicMs &&
+            sample.observedAtMonotonicMs <= nowMs &&
             age in 0..FlightSafetyPolicy.TELEMETRY_STALE_AFTER_MS &&
             sample.horizontalSpeedMps.isFinite() &&
             sample.verticalSpeedMps.isFinite() &&
@@ -315,8 +405,9 @@ class FlightSafetyGate {
     }
 
     private fun invalidate() {
+        hoverEpoch++
         stableSinceMs = null
         lastFreshObservedAtMs = null
-        issuedEvidence.clear()
+        currentProof = null
     }
 }
