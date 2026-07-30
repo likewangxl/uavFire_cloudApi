@@ -13,6 +13,11 @@ data class EngineBenchmark(
     val firstWindowP95Millis: Double,
     val finalWindowP95Millis: Double,
     val apkDeltaBytes: Long,
+    val stabilityDurationMillis: Long,
+    val falsePositives: Int,
+    val inferenceSampleCount: Int,
+    val firstWindowSampleCount: Int,
+    val finalWindowSampleCount: Int,
 )
 
 /**
@@ -25,26 +30,26 @@ object EngineSelectionPolicy {
     const val APK_DELTA_P95_WINDOW = 1.10
 
     fun select(pytorchRecall: Double, candidates: List<EngineBenchmark>): EngineBenchmark? {
-        val passing = candidates.filter { candidate ->
-            candidate.recall >= pytorchRecall - MAX_RECALL_DROP &&
-                candidate.p95Millis <= MAX_P95_MILLIS &&
-                candidate.firstWindowP95Millis > 0.0 &&
-                candidate.finalWindowP95Millis <= candidate.firstWindowP95Millis * MAX_STABILITY_SLOWDOWN
+        if (candidates.size != Engine.entries.size) return null
+        if (candidates.map(EngineBenchmark::engine).toSet() != Engine.entries.toSet()) return null
+        if (candidates.any { !it.hasCompleteEvidence() }) return null
+        val ncnn = candidates.singleOrNull { it.engine == Engine.NCNN } ?: return null
+        return ncnn.takeIf {
+            it.recall >= pytorchRecall - MAX_RECALL_DROP &&
+                it.p95Millis <= MAX_P95_MILLIS &&
+                it.finalWindowP95Millis <= it.firstWindowP95Millis * MAX_STABILITY_SLOWDOWN
         }
-        val fastest = passing.minOfOrNull(EngineBenchmark::p95Millis) ?: return null
-        return passing
-            .filter { it.p95Millis <= fastest * APK_DELTA_P95_WINDOW }
-            .sortedWith(
-                compareBy<EngineBenchmark> { it.apkDeltaBytes }
-                    .thenBy { it.p95Millis }
-                    .thenBy { engineTieBreak(it.engine) },
-            )
-            .firstOrNull()
     }
 
-    private fun engineTieBreak(engine: Engine): Int = when (engine) {
-        Engine.ONNX -> 0
-        Engine.TFLITE -> 1
-        Engine.NCNN -> 2
-    }
+    private fun EngineBenchmark.hasCompleteEvidence(): Boolean =
+        recall in 0.0..1.0 &&
+            p95Millis > 0.0 &&
+            firstWindowP95Millis > 0.0 &&
+            finalWindowP95Millis > 0.0 &&
+            apkDeltaBytes >= 0 &&
+            stabilityDurationMillis >= BenchmarkRunContract.RUN_DURATION_MILLIS &&
+            falsePositives >= 0 &&
+            inferenceSampleCount > 0 &&
+            firstWindowSampleCount > 0 &&
+            finalWindowSampleCount > 0
 }

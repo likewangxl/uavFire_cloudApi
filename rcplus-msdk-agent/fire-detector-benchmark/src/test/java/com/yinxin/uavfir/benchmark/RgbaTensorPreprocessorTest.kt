@@ -21,18 +21,18 @@ class RgbaTensorPreprocessorTest {
         assertEquals(128f / 255f, prepared.nhwc.getFloat(Float.SIZE_BYTES), 0.0001f)
         assertEquals(64f / 255f, prepared.nhwc.getFloat(Float.SIZE_BYTES * 2), 0.0001f)
         assertEquals(1f, prepared.nchw.getFloat(0), 0.0001f)
-        assertEquals(128f / 255f, prepared.nchw.getFloat(640 * 640 * Float.SIZE_BYTES), 0.0001f)
-        assertEquals(64f / 255f, prepared.nchw.getFloat(2 * 640 * 640 * Float.SIZE_BYTES), 0.0001f)
+        assertEquals(128f / 255f, prepared.nchw.getFloat(960 * 960 * Float.SIZE_BYTES), 0.0001f)
+        assertEquals(64f / 255f, prepared.nchw.getFloat(2 * 960 * 960 * Float.SIZE_BYTES), 0.0001f)
     }
 
     @Test
     fun mapToSource_removesLetterboxPaddingAndNormalizesCoordinates() {
         val preprocessor = RgbaTensorPreprocessor(testManifest())
         val prepared = preprocessor.prepare(
-            RgbaFrame(ByteArray(640 * 320 * 4), width = 640, height = 320, capturedAtMs = 1L),
+            RgbaFrame(ByteArray(960 * 480 * 4), width = 960, height = 480, capturedAtMs = 1L),
         )
 
-        val detection = preprocessor.mapToSource(prepared, cx = 320f, cy = 320f, width = 320f, height = 160f)
+        val detection = preprocessor.mapToSource(prepared, cx = 480f, cy = 480f, width = 480f, height = 240f)
 
         assertNotNull(detection)
         assertEquals(0.25f, detection!!.left, 0.0001f)
@@ -44,7 +44,7 @@ class RgbaTensorPreprocessorTest {
     @Test
     fun prepare_reusesTheSameDirectBuffersAcrossFrames() {
         val preprocessor = RgbaTensorPreprocessor(testManifest())
-        val frame = RgbaFrame(ByteArray(640 * 640 * 4), 640, 640, 1L)
+        val frame = RgbaFrame(ByteArray(960 * 960 * 4), 960, 960, 1L)
 
         val first = preprocessor.prepare(frame)
         val second = preprocessor.prepare(frame)

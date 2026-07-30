@@ -7,6 +7,11 @@ internal data class ModelArtifact(val path: String, val sha256: String)
 
 internal data class ModelManifest(
     val sha256: String,
+    val schemaVersion: Int,
+    val modelVersion: String,
+    val sourceName: String,
+    val sourceSha256: String,
+    val classNames: List<String>,
     val inputWidth: Int,
     val inputHeight: Int,
     val normalizationScale: Float,
@@ -15,17 +20,40 @@ internal data class ModelManifest(
     private val artifactsByEngine: Map<Engine, List<ModelArtifact>>,
 ) {
     fun artifact(engine: Engine): List<ModelArtifact> = artifactsByEngine.getValue(engine)
+    val outputChannels: Int get() = 4 + classNames.size
+    val candidateCount: Int get() = listOf(8, 16, 32).sumOf { stride ->
+        (inputWidth / stride) * (inputHeight / stride)
+    }
 }
 
 internal object ModelManifestParser {
+    private const val EXPECTED_SCHEMA_VERSION = 2
+    private const val EXPECTED_INPUT_SIZE = 960
     private const val EXPECTED_OUTPUT_LAYOUT = "xywh, class scores; postprocess with NMS"
+    private val EXPECTED_CLASSES = listOf("fire", "smoke")
 
     fun parse(json: String): ModelManifest {
         val root = JSONObject(json)
-        val inputSize = root.getJSONArray("inputSize")
-        check(inputSize.length() == 2) { "Model manifest inputSize must have two dimensions" }
-        val normalization = root.getJSONObject("normalization")
-        check(root.getString("outputLayout") == EXPECTED_OUTPUT_LAYOUT) { "Unsupported model output contract" }
+        check(root.optInt("schemaVersion", -1) == EXPECTED_SCHEMA_VERSION) {
+            "Only visible model manifest schema v2 is supported"
+        }
+        val modelVersion = root.getString("modelVersion")
+        val source = root.getJSONObject("source")
+        check(modelVersion.startsWith("visible-") && source.getString("name").startsWith("visible-")) {
+            "Thermal model manifests are not accepted by the visible benchmark"
+        }
+        val classes = root.getJSONArray("classes").strings()
+        check(classes == EXPECTED_CLASSES) { "Visible benchmark classes must be fire and smoke" }
+        val input = root.getJSONObject("input")
+        check(input.getInt("width") == EXPECTED_INPUT_SIZE && input.getInt("height") == EXPECTED_INPUT_SIZE) {
+            "Visible benchmark input must be 960x960"
+        }
+        check(input.getInt("channels") == 3 && input.getString("colorSpace") == "RGB") {
+            "Visible benchmark input must be three-channel RGB"
+        }
+        val normalization = input.getJSONObject("normalization")
+        val postprocess = root.getJSONObject("postprocess")
+        check(postprocess.getString("outputLayout") == EXPECTED_OUTPUT_LAYOUT) { "Unsupported model output contract" }
         val artifacts = root.getJSONArray("candidates").mapObjects { candidate ->
             Engine.valueOf(candidate.getString("engine").uppercase()) to candidate.getJSONArray("artifacts").mapObjects {
                 artifact -> ModelArtifact(artifact.getString("path"), artifact.getString("sha256"))
@@ -37,20 +65,24 @@ internal object ModelManifestParser {
         }
         return ModelManifest(
             sha256 = java.security.MessageDigest.getInstance("SHA-256").digest(json.toByteArray()).joinToString("") { "%02x".format(it) },
-            inputWidth = inputSize.getInt(0),
-            inputHeight = inputSize.getInt(1),
+            schemaVersion = root.getInt("schemaVersion"),
+            modelVersion = modelVersion,
+            sourceName = source.getString("name"),
+            sourceSha256 = source.getString("sha256"),
+            classNames = classes,
+            inputWidth = input.getInt("width"),
+            inputHeight = input.getInt("height"),
             normalizationScale = normalization.getDouble("scale").toFloat(),
-            confidenceThreshold = root.getDouble("confidenceThreshold").toFloat(),
-            iouThreshold = root.getDouble("iouThreshold").toFloat(),
+            confidenceThreshold = postprocess.getDouble("confidenceThreshold").toFloat(),
+            iouThreshold = postprocess.getDouble("iouThreshold").toFloat(),
             artifactsByEngine = artifacts,
-        ).also {
-            check(it.inputWidth == 640 && it.inputHeight == 640) { "Unsupported model input dimensions" }
-        }
+        )
     }
 }
 
 private fun JSONArray.isZeroes(): Boolean = (0 until length()).all { getDouble(it) == 0.0 }
 private fun JSONArray.isOnes(): Boolean = (0 until length()).all { getDouble(it) == 1.0 }
+private fun JSONArray.strings(): List<String> = (0 until length()).map(::getString)
 private fun <T> JSONArray.mapObjects(transform: (JSONObject) -> T): List<T> = buildList {
     for (index in 0 until this@mapObjects.length()) add(transform(this@mapObjects.getJSONObject(index)))
 }

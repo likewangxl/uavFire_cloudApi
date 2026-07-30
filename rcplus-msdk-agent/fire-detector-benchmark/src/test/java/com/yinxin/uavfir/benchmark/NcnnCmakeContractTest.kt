@@ -22,6 +22,8 @@ class NcnnCmakeContractTest {
         assertTrue(bridge.contains("extractor.input(\"in0\""))
         assertTrue(bridge.contains("extractor.extract(\"out0\""))
         assertTrue(bridge.contains("use_vulkan_compute = true"))
+        assertTrue(bridge.contains("kInputWidth = 960"))
+        assertTrue(bridge.contains("kOutputElements = 6 * 18900"))
     }
 
     @Test

@@ -1,16 +1,24 @@
 package com.yinxin.uavfir.benchmark
 
+import android.app.ActivityManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.SystemClock
+import android.os.Build
+import android.content.pm.PackageManager
+import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.FileInputStream
+import java.security.MessageDigest
+import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class FireDetectorBenchmarkInstrumentedTest {
@@ -51,6 +59,16 @@ class FireDetectorBenchmarkInstrumentedTest {
         val dryRun = arguments.getString("dryRun") == "true"
         val targets = if (engineArgument == null) Engine.values().toList()
             else listOf(Engine.valueOf(engineArgument.uppercase()))
+        val provenance = if (dryRun) {
+            null
+        } else {
+            val runId = arguments.getString("runId")
+                ?: if (engineArgument == null) UUID.randomUUID().toString()
+                else error("Single-engine gate runs require the same explicit -e runId for all three engines")
+            val expectedAgentApkSha256 = arguments.getString("agentApkSha256")
+                ?: error("Formal Agent/UXSDK APK SHA-256 must be provided as -e agentApkSha256")
+            captureRunProvenance(assets, runId, expectedAgentApkSha256)
+        }
         if (engineArgument == null && !dryRun) partialFile().delete()
         for (target in targets) {
             val adapter = when (target) {
@@ -68,36 +86,39 @@ class FireDetectorBenchmarkInstrumentedTest {
                 continue
             }
             val report = runEngine(adapter, samples, apkDeltas.getValue(target).apkDeltaBytes)
-            mergePartial(report)
+            mergePartial(report, checkNotNull(provenance))
         }
         if (dryRun) return
-        val partials = loadPartials()
+        val partials = loadPartials(checkNotNull(provenance))
         if (partials.size < Engine.values().size) return
         val selected = EngineSelectionPolicy.select(
             pytorchMetrics.recall,
             partials.values.map(::selectionInput),
         )
-        writeResult(pytorchMetrics, partials, selected?.engine)
+        writeResult(pytorchMetrics, partials, selected?.engine, provenance)
         assertNotNull("No engine passed the immutable production gate", selected)
+        assertEquals("NCNN is the approved production target", Engine.NCNN, selected?.engine)
     }
 
     private fun partialFile() = File(context.getExternalFilesDir(null), "fire-detector-benchmark-partial.json")
 
-    private fun mergePartial(report: EngineReport) {
-        val current = if (partialFile().exists()) JSONObject(partialFile().readText()) else JSONObject()
-        current.put(report.engine.name.lowercase(), report.toJson())
-        val serialized = current.toString(2)
+    private fun mergePartial(report: EngineReport, provenance: JSONObject) {
+        val current = partialFile().takeIf(File::exists)?.let { JSONObject(it.readText()) }
+        val merged = BenchmarkPartialResults.merge(current, provenance, report.engine, report.toJson())
+        val serialized = merged.toString(2)
         partialFile().writeText(serialized)
         // 双写内部存储:外部目录 adb/run-as 均不可读,且 gradle 跑完会随卸载被清。
         File(context.filesDir, partialFile().name).writeText(serialized)
     }
 
-    private fun loadPartials(): Map<String, JSONObject> {
+    private fun loadPartials(provenance: JSONObject): Map<String, JSONObject> {
         if (!partialFile().exists()) return emptyMap()
         val current = JSONObject(partialFile().readText())
+        BenchmarkPartialResults.requireMatchingProvenance(current, provenance)
+        val engines = current.getJSONObject("engines")
         return Engine.values().mapNotNull { engine ->
             val key = engine.name.lowercase()
-            current.optJSONObject(key)?.let { key to it }
+            engines.optJSONObject(key)?.let { key to it }
         }.toMap()
     }
 
@@ -108,6 +129,11 @@ class FireDetectorBenchmarkInstrumentedTest {
         firstWindowP95Millis = json.getDouble("firstFiveMinuteP95Millis"),
         finalWindowP95Millis = json.getDouble("finalFiveMinuteP95Millis"),
         apkDeltaBytes = json.getLong("apkDeltaBytes"),
+        stabilityDurationMillis = json.getLong("stabilityDurationMillis"),
+        falsePositives = json.getInt("falsePositives"),
+        inferenceSampleCount = json.getJSONArray("inferenceSamples").length(),
+        firstWindowSampleCount = json.getInt("firstFiveMinuteSampleCount"),
+        finalWindowSampleCount = json.getInt("finalFiveMinuteSampleCount"),
     )
 
     private fun runEngine(adapter: EngineAdapter, samples: List<BenchmarkSample>, apkDeltaBytes: Long): EngineReport = adapter.use {
@@ -138,6 +164,10 @@ class FireDetectorBenchmarkInstrumentedTest {
             sampleIndex += 1
         }
         check(firstWindow.isNotEmpty() && finalWindow.isNotEmpty()) { "Incomplete 30-minute stability windows" }
+        val stabilityDurationMillis = SystemClock.elapsedRealtime() - startedAt
+        check(stabilityDurationMillis >= BenchmarkRunContract.RUN_DURATION_MILLIS) {
+            "Incomplete 30-minute stability evidence"
+        }
         EngineReport(
             engine = adapter.engine,
             correctness = correctnessMetrics,
@@ -145,6 +175,9 @@ class FireDetectorBenchmarkInstrumentedTest {
             firstWindowP95Millis = percentile(firstWindow),
             finalWindowP95Millis = percentile(finalWindow),
             apkDeltaBytes = apkDeltaBytes,
+            stabilityDurationMillis = stabilityDurationMillis,
+            firstWindowSampleCount = firstWindow.size,
+            finalWindowSampleCount = finalWindow.size,
             observations = observations,
         )
     }
@@ -166,8 +199,11 @@ class FireDetectorBenchmarkInstrumentedTest {
         pytorch: CorrectnessMetrics,
         partials: Map<String, JSONObject>,
         selectedEngine: Engine?,
+        provenance: JSONObject,
     ) {
         val result = JSONObject()
+            .put("schemaVersion", 2)
+            .put("provenance", JSONObject(provenance.toString()))
             .put("pytorchRecall", pytorch.recall)
             .put("pytorchFalsePositives", pytorch.falsePositives)
             .put("selectedEngine", selectedEngine?.name?.lowercase())
@@ -176,6 +212,69 @@ class FireDetectorBenchmarkInstrumentedTest {
         File(context.getExternalFilesDir(null), "fire-detector-benchmark.json").writeText(serialized)
         File(context.filesDir, "fire-detector-benchmark.json").writeText(serialized)
     }
+
+    private fun captureRunProvenance(
+        assets: BenchmarkAssets,
+        runId: String,
+        expectedAgentApkSha256: String,
+    ): JSONObject {
+        check(expectedAgentApkSha256.matches(Regex("[0-9a-f]{64}"))) {
+            "agentApkSha256 must be a lowercase SHA-256"
+        }
+        val packageInfo = context.packageManager.getPackageInfo(
+            FORMAL_AGENT_PACKAGE,
+            PackageManager.GET_SIGNING_CERTIFICATES,
+        )
+        val agentApplication = checkNotNull(packageInfo.applicationInfo) { "Formal Agent application info is unavailable" }
+        val agentApkSha256 = sha256(File(agentApplication.sourceDir))
+        check(agentApkSha256 == expectedAgentApkSha256) {
+            "Installed Agent APK does not match the formal Agent/UXSDK build"
+        }
+        val signers = checkNotNull(packageInfo.signingInfo) { "Formal Agent signing info is unavailable" }
+            .apkContentsSigners
+        check(signers.size == 1) { "Formal Agent APK must have one current signing certificate" }
+        val activityManager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as ActivityManager
+        val agentRunning = activityManager.runningAppProcesses
+            ?.any { it.processName == FORMAL_AGENT_PACKAGE }
+            ?: false
+        val androidId = checkNotNull(
+            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID),
+        ) { "Stable Android device ID is unavailable" }
+        check(androidId.isNotBlank()) { "Stable Android device ID is unavailable" }
+        val instrumentationContext = androidx.test.platform.app.InstrumentationRegistry
+            .getInstrumentation()
+            .context
+        return JSONObject()
+            .put("runId", runId)
+            .put("modelManifestSha256", assets.modelManifest.sha256)
+            .put("benchmarkManifestSha256", assets.benchmarkManifestSha256)
+            .put("pytorchBaselineSha256", assets.pytorchBaselineSha256)
+            .put("deviceFingerprint", Build.FINGERPRINT)
+            .put("deviceIdSha256", sha256(androidId.toByteArray()))
+            .put("benchmarkApkSha256", sha256(File(context.applicationInfo.sourceDir)))
+            .put("instrumentationApkSha256", sha256(File(instrumentationContext.applicationInfo.sourceDir)))
+            .put("agentPackage", FORMAL_AGENT_PACKAGE)
+            .put("agentVersionName", checkNotNull(packageInfo.versionName))
+            .put("agentVersionCode", packageInfo.longVersionCode)
+            .put("agentApkSha256", agentApkSha256)
+            .put("agentSigningCertificateSha256", sha256(signers.single().toByteArray()))
+            .put("agentRunning", agentRunning)
+    }
+
+    private fun sha256(file: File): String = FileInputStream(file).use { input ->
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { "%02x".format(it) }
 
     private fun percentile(values: List<Double>): Double {
         val sorted = values.sorted()
@@ -202,6 +301,9 @@ class FireDetectorBenchmarkInstrumentedTest {
         val firstWindowP95Millis: Double,
         val finalWindowP95Millis: Double,
         val apkDeltaBytes: Long,
+        val stabilityDurationMillis: Long,
+        val firstWindowSampleCount: Int,
+        val finalWindowSampleCount: Int,
         val observations: List<InferenceObservation>,
     ) {
         fun toJson() = JSONObject()
@@ -212,6 +314,13 @@ class FireDetectorBenchmarkInstrumentedTest {
             .put("firstFiveMinuteP95Millis", firstWindowP95Millis)
             .put("finalFiveMinuteP95Millis", finalWindowP95Millis)
             .put("apkDeltaBytes", apkDeltaBytes)
+            .put("stabilityDurationMillis", stabilityDurationMillis)
+            .put("firstFiveMinuteSampleCount", firstWindowSampleCount)
+            .put("finalFiveMinuteSampleCount", finalWindowSampleCount)
             .put("inferenceSamples", JSONArray(observations.map(InferenceObservation::toJson)))
+    }
+
+    private companion object {
+        const val FORMAL_AGENT_PACKAGE = "com.yinxin.uavfir"
     }
 }

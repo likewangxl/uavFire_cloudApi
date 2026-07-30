@@ -11,11 +11,13 @@ class BaselineNormalizerTest {
             sourceWidth = 958,
             sourceHeight = 764,
             confidence = 0.9f,
+            classIndex = 1,
         )
 
         assertEquals(0.1f, detection.left, 0.0001f)
         assertEquals(0.1f, detection.top, 0.0001f)
         assertEquals(0.5f, detection.right, 0.0001f)
         assertEquals(0.5f, detection.bottom, 0.0001f)
+        assertEquals(1, detection.classIndex)
     }
 }

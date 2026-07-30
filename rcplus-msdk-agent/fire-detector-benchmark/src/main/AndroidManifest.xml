@@ -1,3 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="com.yinxin.uavfir" />
+    </queries>
     <application android:label="Fire Detector Benchmark" android:allowBackup="false" />
 </manifest>

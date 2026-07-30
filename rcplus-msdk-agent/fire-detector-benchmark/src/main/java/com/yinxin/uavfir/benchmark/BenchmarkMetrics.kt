@@ -21,7 +21,7 @@ internal object CorrectnessEvaluator {
             val matched = BooleanArray(sample.expected.size)
             for (detection in detections) {
                 val matchIndex = sample.expected.indices
-                    .filter { !matched[it] }
+                    .filter { !matched[it] && sample.expected[it].classIndex == detection.classIndex }
                     .maxByOrNull { YoloPostprocessor.intersectionOverUnion(detection, sample.expected[it]) }
                 if (matchIndex != null && YoloPostprocessor.intersectionOverUnion(detection, sample.expected[matchIndex]) >= 0.5f) {
                     matched[matchIndex] = true
@@ -53,7 +53,7 @@ internal object DeviceMetrics {
 }
 
 internal object BaselineNormalizer {
-    fun normalize(xyxy: FloatArray, sourceWidth: Int, sourceHeight: Int, confidence: Float): Detection {
+    fun normalize(xyxy: FloatArray, sourceWidth: Int, sourceHeight: Int, confidence: Float, classIndex: Int): Detection {
         require(xyxy.size == 4 && sourceWidth > 0 && sourceHeight > 0)
         return Detection(
             left = (xyxy[0] / sourceWidth).coerceIn(0f, 1f),
@@ -61,6 +61,7 @@ internal object BaselineNormalizer {
             right = (xyxy[2] / sourceWidth).coerceIn(0f, 1f),
             bottom = (xyxy[3] / sourceHeight).coerceIn(0f, 1f),
             confidence = confidence,
+            classIndex = classIndex,
         )
     }
 }

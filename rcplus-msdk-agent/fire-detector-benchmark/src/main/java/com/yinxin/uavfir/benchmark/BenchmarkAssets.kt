@@ -8,12 +8,18 @@ import java.security.MessageDigest
 
 internal class BenchmarkAssets(private val context: Context) {
     private val assets = context.assets
-    val manifest = JSONObject(read("benchmark-set/manifest.json"))
-    val baseline = JSONObject(read("benchmark-set/pytorch-baseline.json"))
+    private val manifestJson = read("benchmark-set/manifest.json")
+    private val baselineJson = read("benchmark-set/pytorch-baseline.json")
+    val manifest = JSONObject(manifestJson)
+    val baseline = JSONObject(baselineJson)
     private val modelManifestJson = read("model-candidates.json")
     val modelManifest = ModelManifestParser.parse(modelManifestJson)
+    val benchmarkManifestSha256 = sha256(manifestJson.toByteArray())
+    val pytorchBaselineSha256 = sha256(baselineJson.toByteArray())
 
     fun verifyIntegrity() {
+        BenchmarkRunContract.validateVisibleDataset(manifest, modelManifest.classNames)
+        BenchmarkRunContract.validateVisibleBaseline(baseline, manifest, modelManifest)
         for (engine in Engine.entries) {
             for (artifact in modelManifest.artifact(engine)) {
                 verifyHash(artifact.path, artifact.sha256)
@@ -41,6 +47,7 @@ internal class BenchmarkAssets(private val context: Context) {
                     right = (expected.getDouble("x") + expected.getDouble("width") / 2.0).toFloat().coerceIn(0f, 1f),
                     bottom = (expected.getDouble("y") + expected.getDouble("height") / 2.0).toFloat().coerceIn(0f, 1f),
                     confidence = 1f,
+                    classIndex = expected.getInt("class"),
                 )
             },
         )
@@ -55,6 +62,7 @@ internal class BenchmarkAssets(private val context: Context) {
                 sourceWidth = sample.sourceWidth,
                 sourceHeight = sample.sourceHeight,
                 confidence = detection.getDouble("confidence").toFloat(),
+                classIndex = detection.getInt("class"),
             )
         }
     }
@@ -76,6 +84,10 @@ internal class BenchmarkAssets(private val context: Context) {
     }
 
     private fun read(asset: String): String = assets.open(asset).bufferedReader().use { it.readText() }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { "%02x".format(it) }
 
     private fun imageDimensions(asset: String): Pair<Int, Int> {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }

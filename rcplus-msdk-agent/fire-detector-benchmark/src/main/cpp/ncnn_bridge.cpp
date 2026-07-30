@@ -4,9 +4,9 @@
 #include <memory>
 
 namespace {
-constexpr int kInputWidth = 640;
-constexpr int kInputHeight = 640;
-constexpr int kOutputElements = 5 * 8400;
+constexpr int kInputWidth = 960;
+constexpr int kInputHeight = 960;
+constexpr int kOutputElements = 6 * 18900;
 
 struct Model { ncnn::Net net; };
 

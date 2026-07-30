@@ -5,18 +5,20 @@ import org.junit.Test
 
 class YoloPostprocessorTest {
     @Test
-    fun process_appliesConfidenceThresholdAndNms() {
-        val output = FloatArray(5 * 8400)
-        putCandidate(output, index = 0, cx = 320f, cy = 320f, width = 320f, height = 320f, confidence = 0.90f)
-        putCandidate(output, index = 1, cx = 322f, cy = 322f, width = 320f, height = 320f, confidence = 0.80f)
-        putCandidate(output, index = 2, cx = 80f, cy = 80f, width = 80f, height = 80f, confidence = 0.24f)
+    fun process_appliesPerClassConfidenceThresholdAndClassAwareNmsAt960() {
+        val output = FloatArray(6 * 18900)
+        putCandidate(output, index = 0, cx = 480f, cy = 480f, width = 480f, height = 480f, fire = 0.90f, smoke = 0.10f)
+        putCandidate(output, index = 1, cx = 482f, cy = 482f, width = 480f, height = 480f, fire = 0.80f, smoke = 0.10f)
+        putCandidate(output, index = 2, cx = 480f, cy = 480f, width = 480f, height = 480f, fire = 0.10f, smoke = 0.85f)
+        putCandidate(output, index = 3, cx = 80f, cy = 80f, width = 80f, height = 80f, fire = 0.24f, smoke = 0.10f)
         val preprocessor = RgbaTensorPreprocessor(testManifest())
-        val input = preprocessor.prepare(RgbaFrame(ByteArray(640 * 640 * 4), 640, 640, 1L))
+        val input = preprocessor.prepare(RgbaFrame(ByteArray(960 * 960 * 4), 960, 960, 1L))
 
         val detections = YoloPostprocessor(testManifest(), preprocessor).process(output, input)
 
-        assertEquals(1, detections.size)
-        assertEquals(0.90f, detections.single().confidence, 0.0001f)
+        assertEquals(2, detections.size)
+        assertEquals(listOf(0, 1), detections.map(Detection::classIndex))
+        assertEquals(listOf(0.90f, 0.85f), detections.map(Detection::confidence))
     }
 
     private fun putCandidate(
@@ -26,12 +28,14 @@ class YoloPostprocessorTest {
         cy: Float,
         width: Float,
         height: Float,
-        confidence: Float,
+        fire: Float,
+        smoke: Float,
     ) {
         output[index] = cx
-        output[8400 + index] = cy
-        output[2 * 8400 + index] = width
-        output[3 * 8400 + index] = height
-        output[4 * 8400 + index] = confidence
+        output[18900 + index] = cy
+        output[2 * 18900 + index] = width
+        output[3 * 18900 + index] = height
+        output[4 * 18900 + index] = fire
+        output[5 * 18900 + index] = smoke
     }
 }

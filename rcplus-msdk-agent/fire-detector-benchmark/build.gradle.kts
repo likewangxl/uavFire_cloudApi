@@ -41,34 +41,54 @@ android {
 }
 
 val stageBenchmarkAssets by tasks.registering(Sync::class) {
-    from(layout.projectDirectory.dir("../../ai-service/mobile-model")) {
+    from(layout.projectDirectory.dir("../../ai-service/mobile-model/visible-960")) {
         include("model-candidates.json")
         include("benchmark-set/manifest.json")
         include("benchmark-set/pytorch-baseline.json")
         include("benchmark-set/images/**")
-        if (measurementCandidate == "benchmark" || measurementCandidate == "onnx") include("thermal-fire-yolov8n-640-gt-20260709.onnx")
-        if (measurementCandidate == "benchmark" || measurementCandidate == "tflite") include("thermal-fire-yolov8n-640-gt-20260709_float32.tflite")
+        if (measurementCandidate == "benchmark" || measurementCandidate == "onnx") include("visible-fire-wechat-best2-20260728.onnx")
+        if (measurementCandidate == "benchmark" || measurementCandidate == "tflite") include("visible-fire-wechat-best2-20260728_float32.tflite")
         if (measurementCandidate == "benchmark" || measurementCandidate == "ncnn") {
-            include("thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.bin")
-            include("thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.param")
-            include("thermal-fire-yolov8n-640-gt-20260709_ncnn_model/metadata.yaml")
-            include("thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model_ncnn.py")
+            include("visible-fire-wechat-best2-20260728_ncnn_model/model.ncnn.bin")
+            include("visible-fire-wechat-best2-20260728_ncnn_model/model.ncnn.param")
+            include("visible-fire-wechat-best2-20260728_ncnn_model/metadata.yaml")
+            include("visible-fire-wechat-best2-20260728_ncnn_model/model_ncnn.py")
         }
     }
     into(layout.buildDirectory.dir("generated/benchmarkAssets"))
 }
 
+val visibleBenchmarkRoot = layout.projectDirectory.dir("../../ai-service/mobile-model/visible-960/benchmark-set")
+val verifyVisibleBenchmarkInputs by tasks.registering {
+    doLast {
+        val root = visibleBenchmarkRoot.asFile
+        check(root.resolve("manifest.json").isFile) {
+            "Missing visible-960 benchmark manifest: ${root.resolve("manifest.json")}"
+        }
+        check(root.resolve("pytorch-baseline.json").isFile) {
+            "Missing visible-960 PyTorch baseline: ${root.resolve("pytorch-baseline.json")}"
+        }
+        val images = root.resolve("images").walkTopDown()
+            .filter { it.isFile && it.extension.lowercase() in setOf("jpg", "jpeg", "png", "bmp", "webp") }
+            .count()
+        check(images == 400) { "Expected exactly 400 visible benchmark images; found $images in ${root.resolve("images")}" }
+    }
+}
+
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/benchmarkAssets"))
 android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/apkDeltaMetadata"))
 tasks.named("preBuild").configure { dependsOn(stageBenchmarkAssets) }
+tasks.matching { it.name == "mergeDebugAssets" }.configureEach {
+    dependsOn(verifyVisibleBenchmarkInputs)
+}
 
 val measurementApkDir = layout.buildDirectory.dir("apk-delta-input")
 val apkDeltaFixtureDir = layout.buildDirectory.dir("apk-delta-fixture")
-val repositoryModelManifest = layout.projectDirectory.file("../../ai-service/mobile-model/model-candidates.json")
+val repositoryModelManifest = layout.projectDirectory.file("../../ai-service/mobile-model/visible-960/model-candidates.json")
 val expectedCandidateModels = mapOf(
-    "onnx" to listOf("thermal-fire-yolov8n-640-gt-20260709.onnx"),
-    "tflite" to listOf("thermal-fire-yolov8n-640-gt-20260709_float32.tflite"),
-    "ncnn" to listOf("thermal-fire-yolov8n-640-gt-20260709_ncnn_model/metadata.yaml", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.bin", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model.ncnn.param", "thermal-fire-yolov8n-640-gt-20260709_ncnn_model/model_ncnn.py"),
+    "onnx" to listOf("visible-fire-wechat-best2-20260728.onnx"),
+    "tflite" to listOf("visible-fire-wechat-best2-20260728_float32.tflite"),
+    "ncnn" to listOf("visible-fire-wechat-best2-20260728_ncnn_model/metadata.yaml", "visible-fire-wechat-best2-20260728_ncnn_model/model.ncnn.bin", "visible-fire-wechat-best2-20260728_ncnn_model/model.ncnn.param", "visible-fire-wechat-best2-20260728_ncnn_model/model_ncnn.py"),
 )
 val expectedCandidateRuntimes = mapOf(
     "onnx" to listOf("lib/arm64-v8a/libonnxruntime4j_jni.so"),
@@ -221,6 +241,9 @@ tasks.register("verifyWriteApkDeltaMetadataFixture") {
         check(metadata.isFile) { "APK delta fixture did not produce metadata" }
         check(metadata.readText().contains("\"modelCandidatesSha256\": \"$expectedManifestSha256\"")) {
             "APK delta fixture metadata is not bound to the repository model manifest"
+        }
+        check(metadata.delete()) {
+            "Synthetic APK delta metadata must not remain available to a device gate"
         }
     }
 }

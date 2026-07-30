@@ -14,7 +14,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
-internal class OnnxEngineAdapter(context: Context, manifest: ModelManifest) : EngineAdapter {
+internal class OnnxEngineAdapter(context: Context, private val manifest: ModelManifest) : EngineAdapter {
     override val engine = Engine.ONNX
     private val preprocessor = RgbaTensorPreprocessor(manifest)
     private val postprocessor = YoloPostprocessor(manifest, preprocessor)
@@ -26,7 +26,11 @@ internal class OnnxEngineAdapter(context: Context, manifest: ModelManifest) : En
 
     override fun infer(frame: RgbaFrame): List<Detection> {
         val input = preprocessor.prepare(frame)
-        OnnxTensor.createTensor(environment, input.nchw.asFloatBuffer(), longArrayOf(1, 3, 640, 640)).use { tensor ->
+        OnnxTensor.createTensor(
+            environment,
+            input.nchw.asFloatBuffer(),
+            longArrayOf(1, 3, manifest.inputHeight.toLong(), manifest.inputWidth.toLong()),
+        ).use { tensor ->
             session.run(mapOf(session.inputNames.single() to tensor)).use { results ->
                 @Suppress("UNCHECKED_CAST")
                 val output = (results[0].value as Array<Array<FloatArray>>)[0]
@@ -42,7 +46,7 @@ internal class TfliteEngineAdapter(context: Context, manifest: ModelManifest) : 
     override val engine = Engine.TFLITE
     private val preprocessor = RgbaTensorPreprocessor(manifest)
     private val postprocessor = YoloPostprocessor(manifest, preprocessor)
-    private val output = Array(1) { Array(5) { FloatArray(8400) } }
+    private val output = Array(1) { Array(manifest.outputChannels) { FloatArray(manifest.candidateCount) } }
     private val interpreter = Interpreter(BenchmarkAssetStore.map(context, manifest.artifact(engine).single()))
 
     override fun infer(frame: RgbaFrame): List<Detection> {
