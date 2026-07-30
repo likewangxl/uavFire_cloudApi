@@ -97,7 +97,7 @@ data class HoverControlBinding(
     val pausedCommandGeneration: Long,
 ) {
     init {
-        require(pausedCommandGeneration > 0)
+        require(pausedCommandGeneration >= 0)
     }
 }
 
@@ -145,7 +145,7 @@ data class ResumeSafetyEvidence internal constructor(
     val observedAtMonotonicMs: Long,
 ) {
     init {
-        require(pausedCommandGeneration > 0)
+        require(pausedCommandGeneration >= 0)
     }
 }
 

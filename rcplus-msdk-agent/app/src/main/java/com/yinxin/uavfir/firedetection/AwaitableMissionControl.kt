@@ -217,7 +217,7 @@ data class MissionHoldToken(
     val holdGeneration: Long = 1,
 ) {
     init {
-        require(pausedCommandGeneration > 0 && holdGeneration > 0)
+        require(pausedCommandGeneration >= 0 && holdGeneration > 0)
     }
 }
 
