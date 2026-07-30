@@ -62,13 +62,17 @@ data class VisibleConfirmation(
     val kind: DetectionKind,
     val confidence: Float,
     val roi: NormalizedRoi,
-    val frameTimestampsMillis: List<Long>,
+    val firstFrameTimestampMillis: Long,
+    val secondFrameTimestampMillis: Long,
     val policyVersion: String,
 ) {
+    val frameTimestampsMillis: List<Long>
+        get() = mutableListOf(firstFrameTimestampMillis, secondFrameTimestampMillis)
+
     init {
         require(confidence in 0f..1f)
-        require(frameTimestampsMillis.size == 2)
-        require(frameTimestampsMillis.zipWithNext().all { (first, second) -> second > first })
+        require(firstFrameTimestampMillis >= 0L)
+        require(secondFrameTimestampMillis > firstFrameTimestampMillis)
         require(policyVersion.isNotBlank())
     }
 }
@@ -108,6 +112,53 @@ enum class FireSessionFailure {
     RESUME_FAILURE,
 }
 
+data class TerminalPersistenceRequest(
+    val requestId: String,
+    val locationStatus: LocationStatus,
+    val geoMethod: GeoMethod,
+) {
+    val isValidTerminalMapping: Boolean
+        get() = (locationStatus == LocationStatus.PRECISE &&
+            geoMethod == GeoMethod.LASER_RANGEFINDER) ||
+            (locationStatus == LocationStatus.DEGRADED_OSD &&
+                geoMethod == GeoMethod.AIRCRAFT_OBSERVATION)
+
+    init {
+        require(requestId.isNotBlank()) { "Terminal persistence request ID is required" }
+    }
+}
+
+data class FireSessionPhase(
+    val state: FireSessionState,
+    val pendingTerminal: TerminalPersistenceRequest? = null,
+    val durableTerminal: TerminalPersistenceRequest? = null,
+) {
+    val terminalPersistenceVerified: Boolean
+        get() = durableTerminal != null
+
+    init {
+        require(pendingTerminal == null || state == FireSessionState.LASER_MEASURING) {
+            "Pending terminal persistence is only valid while laser measurement is active"
+        }
+        require(durableTerminal == null || state == FireSessionState.RESULT_DURABLE) {
+            "Terminal persistence proof is only valid for a durable result"
+        }
+        require(pendingTerminal == null || durableTerminal == null) {
+            "Terminal persistence cannot be pending and verified simultaneously"
+        }
+        require(pendingTerminal?.isValidTerminalMapping != false) {
+            "Pending terminal persistence mapping is invalid"
+        }
+        require(durableTerminal?.isValidTerminalMapping != false) {
+            "Durable terminal persistence mapping is invalid"
+        }
+    }
+
+    companion object {
+        fun unproven(state: FireSessionState) = FireSessionPhase(state)
+    }
+}
+
 sealed interface FireSessionEvent {
     data object ArmRequested : FireSessionEvent
     data object Armed : FireSessionEvent
@@ -118,11 +169,12 @@ sealed interface FireSessionEvent {
     data object MissionPaused : FireSessionEvent
     data object HoverStable : FireSessionEvent
     data object TargetAligned : FireSessionEvent
-    data class TerminalResultReady(
-        val locationStatus: LocationStatus,
-        val geoMethod: GeoMethod,
-    ) : FireSessionEvent
-    data object TerminalResultDurable : FireSessionEvent
+    data class TerminalResultReady(val request: TerminalPersistenceRequest) : FireSessionEvent
+    data class TerminalResultDurable(val requestId: String) : FireSessionEvent {
+        init {
+            require(requestId.isNotBlank())
+        }
+    }
     data object ResumeRequested : FireSessionEvent
     data object MissionResumeConfirmed : FireSessionEvent
     data object ScanContinued : FireSessionEvent
@@ -136,26 +188,15 @@ sealed interface FireSessionEffect {
     data object PauseMission : FireSessionEffect
     data object AlignTarget : FireSessionEffect
     data object MeasureLaser : FireSessionEffect
-    data class PersistTerminalResult(
-        val locationStatus: LocationStatus,
-        val geoMethod: GeoMethod,
-    ) : FireSessionEffect {
-        init {
-            require(locationStatus != LocationStatus.LASER_LOCATING) {
-                "A locating status is not a terminal result"
-            }
-            require(
-                (locationStatus == LocationStatus.PRECISE && geoMethod == GeoMethod.LASER_RANGEFINDER) ||
-                    (locationStatus == LocationStatus.DEGRADED_OSD &&
-                        geoMethod == GeoMethod.AIRCRAFT_OBSERVATION),
-            ) { "Terminal location status and geo method do not match" }
-        }
-    }
+    data class PersistTerminalResult(val request: TerminalPersistenceRequest) : FireSessionEffect
     data object ResumeMission : FireSessionEffect
 }
 
 data class FireSessionReduction(
-    val state: FireSessionState,
+    val phase: FireSessionPhase,
     val effects: List<FireSessionEffect> = emptyList(),
     val accepted: Boolean,
-)
+) {
+    val state: FireSessionState
+        get() = phase.state
+}

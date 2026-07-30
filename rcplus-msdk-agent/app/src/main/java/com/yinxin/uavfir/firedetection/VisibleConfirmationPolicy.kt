@@ -22,6 +22,9 @@ data class VisibleConfirmationPolicy(
         require(fireConfidence in 0f..1f && smokeConfidence in 0f..1f && nmsIou in 0f..1f) {
             "Detection thresholds must be normalized"
         }
+        require(nmsIou == VisibleDetectorContract.NMS_IOU_THRESHOLD) {
+            "Confirmation NMS must match the packaged detector contract"
+        }
         require(fireColorRedMin in 0..255 && fireColorGreenMin in 0..255 && fireColorBlueMax in 0..255) {
             "Fire-color channel thresholds must be bytes"
         }

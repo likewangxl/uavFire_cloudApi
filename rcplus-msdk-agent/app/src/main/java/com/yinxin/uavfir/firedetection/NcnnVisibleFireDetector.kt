@@ -15,6 +15,11 @@ internal data class VisibleFireModelArtifact(
     val sha256: String,
 )
 
+internal object VisibleDetectorContract {
+    const val DETECTOR_CONFIDENCE_THRESHOLD = 0.25f
+    const val NMS_IOU_THRESHOLD = 0.7f
+}
+
 internal data class VisibleFireModelManifest(
     val status: String,
     val enabledByDefault: Boolean,
@@ -103,7 +108,10 @@ internal object VisibleFireModelManifestParser {
         val postprocess = root.objectValue("postprocess")
         val confidenceThreshold = postprocess.float("confidenceThreshold")
         val iouThreshold = postprocess.float("iouThreshold")
-        check(confidenceThreshold == 0.25f && iouThreshold == 0.7f) {
+        check(
+            confidenceThreshold == VisibleDetectorContract.DETECTOR_CONFIDENCE_THRESHOLD &&
+                iouThreshold == VisibleDetectorContract.NMS_IOU_THRESHOLD,
+        ) {
             "Visible detector thresholds must match the approved export"
         }
         check(postprocess.string("outputLayout") == OUTPUT_LAYOUT) { "Unsupported visible detector output layout" }

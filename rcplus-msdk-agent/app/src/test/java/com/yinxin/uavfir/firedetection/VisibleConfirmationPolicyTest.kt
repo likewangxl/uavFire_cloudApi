@@ -11,7 +11,7 @@ class VisibleConfirmationPolicyTest {
             maxCenterDistance = 0.08,
             fireConfidence = 0.70f,
             smokeConfidence = 0.65f,
-            nmsIou = 0.45f,
+            nmsIou = VisibleDetectorContract.NMS_IOU_THRESHOLD,
         )
 
         assertEquals("agent-visible-v1", policy.policyVersion)
@@ -31,7 +31,25 @@ class VisibleConfirmationPolicyTest {
             maxCenterDistance = 0.08,
             fireConfidence = 0.70f,
             smokeConfidence = 0.65f,
-            nmsIou = 0.45f,
+            nmsIou = VisibleDetectorContract.NMS_IOU_THRESHOLD,
         )
+    }
+
+    @Test
+    fun bindsNmsToPackagedDetectorManifestAndRejectsMismatch() {
+        val manifest = VisibleFireModelManifestParser.parse(
+            java.io.File("src/main/assets/fire-detection/model-manifest.json").readText(),
+        )
+        val policy = VisibleConfirmationPolicy(
+            maxCenterDistance = 0.08,
+            fireConfidence = 0.70f,
+            smokeConfidence = 0.65f,
+            nmsIou = manifest.iouThreshold,
+        )
+
+        assertEquals(manifest.iouThreshold, policy.nmsIou)
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            policy.copy(nmsIou = manifest.iouThreshold - 0.01f)
+        }
     }
 }

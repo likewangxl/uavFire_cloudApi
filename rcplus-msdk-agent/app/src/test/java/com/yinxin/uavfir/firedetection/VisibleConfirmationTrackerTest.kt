@@ -13,7 +13,7 @@ class VisibleConfirmationTrackerTest {
         maxCenterDistance = 0.08,
         fireConfidence = 0.70f,
         smokeConfidence = 0.65f,
-        nmsIou = 0.45f,
+        nmsIou = VisibleDetectorContract.NMS_IOU_THRESHOLD,
     )
 
     @Test
@@ -31,10 +31,10 @@ class VisibleConfirmationTrackerTest {
     fun exactlyMaximumAgeIsFreshButOlderFrameResetsSequence() {
         val tracker = VisibleConfirmationTracker(policy)
 
-        assertNull(tracker.observe(input(1_000, 1_300, smoke())).confirmation)
+        assertNull(tracker.observe(input(1_000, 1_001, smoke())).confirmation)
         assertEquals(
             DetectionKind.SMOKE,
-            tracker.observe(input(1_200, 1_500, smoke(left = 0.22f))).confirmation?.kind,
+            tracker.observe(input(1_200, 1_300, smoke(left = 0.22f))).confirmation?.kind,
         )
 
         assertNull(tracker.observe(input(2_000, 2_301, smoke())).confirmation)
@@ -156,6 +156,73 @@ class VisibleConfirmationTrackerTest {
                 .confirmation,
         )
         assertNull(tracker.observe(input(1_200, 1_250, smoke())).confirmation)
+    }
+
+    @Test
+    fun revalidatesFirstFrameFreshnessAtSecondObservationInclusiveBoundary() {
+        val inclusive = VisibleConfirmationTracker(policy)
+        assertNull(inclusive.observe(input(1_000, 1_001, smoke())).confirmation)
+        assertEquals(
+            DetectionKind.SMOKE,
+            inclusive.observe(input(1_200, 1_300, smoke(left = 0.22f))).confirmation?.kind,
+        )
+
+        val expired = VisibleConfirmationTracker(policy)
+        assertNull(expired.observe(input(2_000, 2_001, smoke())).confirmation)
+        val reset = expired.observe(input(2_200, 2_301, smoke(left = 0.22f)))
+        assertNull(reset.confirmation)
+        assertTrue(reset.reset)
+        assertEquals(
+            DetectionKind.SMOKE,
+            expired.observe(input(2_300, 2_302, smoke(left = 0.23f))).confirmation?.kind,
+        )
+    }
+
+    @Test
+    fun invalidFutureAndMismatchedInputsDoNotPoisonAcceptedTimestampWatermarks() {
+        val tracker = VisibleConfirmationTracker(policy)
+        val futureFrame = solidFrame(9_999_999, intArrayOf(20, 20, 20, 255))
+        assertNull(
+            tracker.observe(
+                VisibleConfirmationInput(
+                    frame = futureFrame,
+                    result = VisibleDetectionResult(9_999_999, listOf(smoke())),
+                    observedAtMillis = 100,
+                    health = defaultHealth(),
+                ),
+            ).confirmation,
+        )
+        val mismatchedFrame = solidFrame(150, intArrayOf(20, 20, 20, 255))
+        assertNull(
+            tracker.observe(
+                VisibleConfirmationInput(
+                    frame = mismatchedFrame,
+                    result = VisibleDetectionResult(8_888_888, listOf(smoke())),
+                    observedAtMillis = 200,
+                    health = defaultHealth(),
+                ),
+            ).confirmation,
+        )
+
+        assertNull(tracker.observe(input(300, 350, smoke())).confirmation)
+        assertEquals(
+            DetectionKind.SMOKE,
+            tracker.observe(input(400, 450, smoke(left = 0.22f))).confirmation?.kind,
+        )
+        assertNull(tracker.observe(input(400, 460, smoke(left = 0.22f))).confirmation)
+    }
+
+    @Test
+    fun observationClockMustIncreaseButInvalidObservationDoesNotPoisonWatermark() {
+        val tracker = VisibleConfirmationTracker(policy)
+        assertNull(tracker.observe(input(1_000, 1_100, smoke())).confirmation)
+        assertNull(tracker.observe(input(1_050, 1_100, smoke(left = 0.21f))).confirmation)
+        assertNull(tracker.observe(input(1_100, 1_099, smoke(left = 0.22f))).confirmation)
+        assertNull(tracker.observe(input(1_200, 1_201, smoke(left = 0.22f))).confirmation)
+        assertEquals(
+            DetectionKind.SMOKE,
+            tracker.observe(input(1_300, 1_301, smoke(left = 0.23f))).confirmation?.kind,
+        )
     }
 
     private fun input(

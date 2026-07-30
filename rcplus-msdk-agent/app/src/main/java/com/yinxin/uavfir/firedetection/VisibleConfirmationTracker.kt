@@ -9,16 +9,10 @@ class VisibleConfirmationTracker(
 ) {
     private var pending: Candidate? = null
     private var greatestFrameTimestampMillis: Long? = null
+    private var greatestObservedAtMillis: Long? = null
 
     fun observe(input: VisibleConfirmationInput): VisibleConfirmationOutcome {
         val timestamp = input.result.frameCapturedAtMillis
-        val greatestTimestamp = greatestFrameTimestampMillis
-        if (greatestTimestamp != null && timestamp <= greatestTimestamp) {
-            pending = null
-            return VisibleConfirmationOutcome(reset = true)
-        }
-        greatestFrameTimestampMillis = timestamp
-
         val ageMillis = input.observedAtMillis - timestamp
         if (timestamp != input.frame.capturedAtMillis ||
             ageMillis < 0L ||
@@ -29,11 +23,22 @@ class VisibleConfirmationTracker(
             return VisibleConfirmationOutcome(reset = true)
         }
 
+        val greatestTimestamp = greatestFrameTimestampMillis
+        val greatestObservation = greatestObservedAtMillis
+        if ((greatestTimestamp != null && timestamp <= greatestTimestamp) ||
+            (greatestObservation != null && input.observedAtMillis <= greatestObservation)
+        ) {
+            pending = null
+            return VisibleConfirmationOutcome(reset = true)
+        }
+
         val candidate = selectBestCandidate(input)
         if (candidate == null) {
             pending = null
             return VisibleConfirmationOutcome(reset = true)
         }
+        greatestFrameTimestampMillis = timestamp
+        greatestObservedAtMillis = input.observedAtMillis
 
         val previous = pending
         if (previous == null) {
@@ -41,7 +46,8 @@ class VisibleConfirmationTracker(
             return VisibleConfirmationOutcome()
         }
 
-        if (previous.kind != candidate.kind ||
+        if (input.observedAtMillis - previous.frameTimestampMillis > policy.maxFrameAgeMs ||
+            previous.kind != candidate.kind ||
             centerDistance(previous.roi, candidate.roi) > policy.maxCenterDistance
         ) {
             pending = candidate
@@ -54,7 +60,8 @@ class VisibleConfirmationTracker(
                 kind = candidate.kind,
                 confidence = minOf(previous.confidence, candidate.confidence),
                 roi = candidate.roi,
-                frameTimestampsMillis = listOf(previous.frameTimestampMillis, candidate.frameTimestampMillis),
+                firstFrameTimestampMillis = previous.frameTimestampMillis,
+                secondFrameTimestampMillis = candidate.frameTimestampMillis,
                 policyVersion = policy.policyVersion,
             ),
         )
@@ -87,7 +94,7 @@ class VisibleConfirmationTracker(
             .maxWithOrNull(compareBy<Candidate> { it.confidence }.thenByDescending { it.kind.ordinal })
 
     private fun passesFireColorGate(frame: VisibleRgbaFrame, roi: NormalizedRoi): Boolean {
-        return runCatching {
+        return try {
             val left = floor(roi.left * frame.width).toInt().coerceIn(0, frame.width - 1)
             val top = floor(roi.top * frame.height).toInt().coerceIn(0, frame.height - 1)
             val rightExclusive = ceil(roi.right * frame.width).toInt().coerceIn(left + 1, frame.width)
@@ -111,7 +118,9 @@ class VisibleConfirmationTracker(
                 }
             }
             false
-        }.getOrDefault(false)
+        } catch (_: IllegalStateException) {
+            false
+        }
     }
 
     private fun centerDistance(first: NormalizedRoi, second: NormalizedRoi): Double =

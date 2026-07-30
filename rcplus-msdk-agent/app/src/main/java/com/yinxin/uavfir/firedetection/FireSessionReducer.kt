@@ -4,7 +4,13 @@ class FireSessionReducer {
     fun reduce(
         state: FireSessionState,
         event: FireSessionEvent,
+    ): FireSessionReduction = reduce(FireSessionPhase.unproven(state), event)
+
+    fun reduce(
+        phase: FireSessionPhase,
+        event: FireSessionEvent,
     ): FireSessionReduction {
+        val state = phase.state
         if (event is FireSessionEvent.UnsafeFailure) {
             return accepted(FireSessionState.MANUAL_HOLD)
         }
@@ -34,11 +40,15 @@ class FireSessionReducer {
                 accepted(FireSessionState.TARGET_ALIGNING, FireSessionEffect.AlignTarget)
             state == FireSessionState.TARGET_ALIGNING && event == FireSessionEvent.TargetAligned ->
                 accepted(FireSessionState.LASER_MEASURING, FireSessionEffect.MeasureLaser)
-            state == FireSessionState.LASER_MEASURING && event is FireSessionEvent.TerminalResultReady ->
-                terminalResultReady(state, event)
-            state == FireSessionState.LASER_MEASURING && event == FireSessionEvent.TerminalResultDurable ->
-                accepted(FireSessionState.RESULT_DURABLE)
-            state == FireSessionState.RESULT_DURABLE && event == FireSessionEvent.ResumeRequested ->
+            state == FireSessionState.LASER_MEASURING &&
+                event is FireSessionEvent.TerminalResultReady ->
+                terminalResultReady(phase, event)
+            state == FireSessionState.LASER_MEASURING &&
+                event is FireSessionEvent.TerminalResultDurable ->
+                terminalResultDurable(phase, event)
+            state == FireSessionState.RESULT_DURABLE &&
+                phase.terminalPersistenceVerified &&
+                event == FireSessionEvent.ResumeRequested ->
                 accepted(FireSessionState.RESUME_REQUESTED, FireSessionEffect.ResumeMission)
             state == FireSessionState.RESUME_REQUESTED && event == FireSessionEvent.MissionResumeConfirmed ->
                 accepted(FireSessionState.MISSION_RESUMED)
@@ -51,20 +61,47 @@ class FireSessionReducer {
     }
 
     private fun terminalResultReady(
-        state: FireSessionState,
+        phase: FireSessionPhase,
         event: FireSessionEvent.TerminalResultReady,
-    ): FireSessionReduction = runCatching {
-        FireSessionEffect.PersistTerminalResult(event.locationStatus, event.geoMethod)
-    }.fold(
-        onSuccess = { effect -> accepted(state, effect) },
-        onFailure = { rejected(state) },
-    )
+    ): FireSessionReduction {
+        if (phase.pendingTerminal != null || !event.request.isValidTerminalMapping) {
+            return rejected(phase)
+        }
+        return accepted(
+            phase.copy(pendingTerminal = event.request),
+            FireSessionEffect.PersistTerminalResult(event.request),
+        )
+    }
+
+    private fun terminalResultDurable(
+        phase: FireSessionPhase,
+        event: FireSessionEvent.TerminalResultDurable,
+    ): FireSessionReduction {
+        val pending = phase.pendingTerminal
+        if (pending == null || pending.requestId != event.requestId) {
+            return rejected(phase)
+        }
+        return accepted(
+            FireSessionPhase(
+                state = FireSessionState.RESULT_DURABLE,
+                durableTerminal = pending,
+            ),
+        )
+    }
 
     private fun accepted(
         state: FireSessionState,
         vararg effects: FireSessionEffect,
-    ) = FireSessionReduction(state = state, effects = effects.toList(), accepted = true)
+    ) = accepted(FireSessionPhase.unproven(state), *effects)
+
+    private fun accepted(
+        phase: FireSessionPhase,
+        vararg effects: FireSessionEffect,
+    ) = FireSessionReduction(phase = phase, effects = effects.toList(), accepted = true)
 
     private fun rejected(state: FireSessionState) =
-        FireSessionReduction(state = state, accepted = false)
+        rejected(FireSessionPhase.unproven(state))
+
+    private fun rejected(phase: FireSessionPhase) =
+        FireSessionReduction(phase = phase, accepted = false)
 }

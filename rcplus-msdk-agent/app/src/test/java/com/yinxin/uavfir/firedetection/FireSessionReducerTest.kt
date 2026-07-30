@@ -17,11 +17,15 @@ class FireSessionReducerTest {
         FireSessionEvent.MissionPaused,
         FireSessionEvent.HoverStable,
         FireSessionEvent.TargetAligned,
-        FireSessionEvent.TerminalResultReady(LocationStatus.PRECISE, GeoMethod.LASER_RANGEFINDER),
-        FireSessionEvent.TerminalResultReady(LocationStatus.DEGRADED_OSD, GeoMethod.AIRCRAFT_OBSERVATION),
-        FireSessionEvent.TerminalResultReady(LocationStatus.LASER_LOCATING, GeoMethod.LASER_RANGEFINDER),
-        FireSessionEvent.TerminalResultReady(LocationStatus.PRECISE, GeoMethod.AIRCRAFT_OBSERVATION),
-        FireSessionEvent.TerminalResultDurable,
+        terminalReady(),
+        degradedReady(),
+        FireSessionEvent.TerminalResultReady(
+            TerminalPersistenceRequest("invalid-locating", LocationStatus.LASER_LOCATING, GeoMethod.LASER_RANGEFINDER),
+        ),
+        FireSessionEvent.TerminalResultReady(
+            TerminalPersistenceRequest("invalid-method", LocationStatus.PRECISE, GeoMethod.AIRCRAFT_OBSERVATION),
+        ),
+        FireSessionEvent.TerminalResultDurable("precise-1"),
         FireSessionEvent.ResumeRequested,
         FireSessionEvent.MissionResumeConfirmed,
         FireSessionEvent.ScanContinued,
@@ -62,25 +66,13 @@ class FireSessionReducerTest {
             ),
             Case(
                 FireSessionState.LASER_MEASURING,
-                FireSessionEvent.TerminalResultReady(LocationStatus.PRECISE, GeoMethod.LASER_RANGEFINDER),
+                terminalReady(),
                 FireSessionState.LASER_MEASURING,
                 listOf(
                     FireSessionEffect.PersistTerminalResult(
-                        LocationStatus.PRECISE,
-                        GeoMethod.LASER_RANGEFINDER,
+                        terminalRequest(),
                     ),
                 ),
-            ),
-            Case(
-                FireSessionState.LASER_MEASURING,
-                FireSessionEvent.TerminalResultDurable,
-                FireSessionState.RESULT_DURABLE,
-            ),
-            Case(
-                FireSessionState.RESULT_DURABLE,
-                FireSessionEvent.ResumeRequested,
-                FireSessionState.RESUME_REQUESTED,
-                listOf(FireSessionEffect.ResumeMission),
             ),
             Case(
                 FireSessionState.RESUME_REQUESTED,
@@ -97,6 +89,14 @@ class FireSessionReducerTest {
             assertEquals(case.effects, actual.effects)
             assertEquals(actual, reducer.reduce(case.from, case.event))
         }
+
+        val requested = reducer.reduce(FireSessionState.LASER_MEASURING, terminalReady())
+        val durable = reducer.reduce(requested.phase, FireSessionEvent.TerminalResultDurable("precise-1"))
+        assertTrue(durable.accepted)
+        assertEquals(FireSessionState.RESULT_DURABLE, durable.state)
+        val resume = reducer.reduce(durable.phase, FireSessionEvent.ResumeRequested)
+        assertTrue(resume.accepted)
+        assertEquals(listOf(FireSessionEffect.ResumeMission), resume.effects)
     }
 
     @Test
@@ -166,16 +166,12 @@ class FireSessionReducerTest {
 
         val degraded = reducer.reduce(
             FireSessionState.LASER_MEASURING,
-            FireSessionEvent.TerminalResultReady(
-                LocationStatus.DEGRADED_OSD,
-                GeoMethod.AIRCRAFT_OBSERVATION,
-            ),
+            degradedReady(),
         )
         assertEquals(
             listOf(
                 FireSessionEffect.PersistTerminalResult(
-                    LocationStatus.DEGRADED_OSD,
-                    GeoMethod.AIRCRAFT_OBSERVATION,
+                    degradedRequest(),
                 ),
             ),
             degraded.effects,
@@ -202,18 +198,8 @@ class FireSessionReducerTest {
             FireSessionState.TARGET_ALIGNING
         map.getValue(FireSessionState.TARGET_ALIGNING)[FireSessionEvent.TargetAligned] =
             FireSessionState.LASER_MEASURING
-        map.getValue(FireSessionState.LASER_MEASURING)[FireSessionEvent.TerminalResultReady(
-            LocationStatus.PRECISE,
-            GeoMethod.LASER_RANGEFINDER,
-        )] = FireSessionState.LASER_MEASURING
-        map.getValue(FireSessionState.LASER_MEASURING)[FireSessionEvent.TerminalResultReady(
-            LocationStatus.DEGRADED_OSD,
-            GeoMethod.AIRCRAFT_OBSERVATION,
-        )] = FireSessionState.LASER_MEASURING
-        map.getValue(FireSessionState.LASER_MEASURING)[FireSessionEvent.TerminalResultDurable] =
-            FireSessionState.RESULT_DURABLE
-        map.getValue(FireSessionState.RESULT_DURABLE)[FireSessionEvent.ResumeRequested] =
-            FireSessionState.RESUME_REQUESTED
+        map.getValue(FireSessionState.LASER_MEASURING)[terminalReady()] = FireSessionState.LASER_MEASURING
+        map.getValue(FireSessionState.LASER_MEASURING)[degradedReady()] = FireSessionState.LASER_MEASURING
         map.getValue(FireSessionState.RESUME_REQUESTED)[FireSessionEvent.MissionResumeConfirmed] =
             FireSessionState.MISSION_RESUMED
         map.getValue(FireSessionState.MISSION_RESUMED)[FireSessionEvent.ScanContinued] =
@@ -230,9 +216,73 @@ class FireSessionReducerTest {
         kind = DetectionKind.FIRE,
         confidence = 0.9f,
         roi = NormalizedRoi(0.2f, 0.2f, 0.4f, 0.4f),
-        frameTimestampsMillis = listOf(1_000, 1_100),
+        firstFrameTimestampMillis = 1_000,
+        secondFrameTimestampMillis = 1_100,
         policyVersion = "agent-visible-v1",
     )
+
+    @Test
+    fun terminalDurabilityRequiresMatchingPendingRequestAndRejectsConflicts() {
+        val beforeRequest = reducer.reduce(
+            FireSessionState.LASER_MEASURING,
+            FireSessionEvent.TerminalResultDurable("precise-1"),
+        )
+        assertFalse(beforeRequest.accepted)
+
+        val pending = reducer.reduce(FireSessionState.LASER_MEASURING, terminalReady())
+        assertTrue(pending.accepted)
+        assertEquals(terminalRequest(), pending.phase.pendingTerminal)
+        assertFalse(reducer.reduce(pending.phase, terminalReady()).accepted)
+        assertFalse(reducer.reduce(pending.phase, degradedReady()).accepted)
+        assertFalse(
+            reducer.reduce(pending.phase, FireSessionEvent.TerminalResultDurable("wrong-request")).accepted,
+        )
+
+        val durable = reducer.reduce(
+            pending.phase,
+            FireSessionEvent.TerminalResultDurable(terminalRequest().requestId),
+        )
+        assertEquals(FireSessionState.RESULT_DURABLE, durable.state)
+        assertTrue(durable.phase.terminalPersistenceVerified)
+        assertEquals(terminalRequest(), durable.phase.durableTerminal)
+        assertFalse(
+            reducer.reduce(durable.phase, FireSessionEvent.TerminalResultDurable("precise-1")).accepted,
+        )
+        assertFalse(reducer.reduce(FireSessionState.RESULT_DURABLE, FireSessionEvent.ResumeRequested).accepted)
+        assertTrue(reducer.reduce(durable.phase, FireSessionEvent.ResumeRequested).accepted)
+    }
+
+    @Test
+    fun confirmationTimestampsAreDefensivelyImmutableAcrossEffects() {
+        val confirmation = confirmation()
+        val mutableView = confirmation.frameTimestampsMillis as MutableList<Long>
+        val reduction = reducer.reduce(
+            FireSessionState.VISUAL_CONFIRMING,
+            FireSessionEvent.VisualConfirmed(confirmation),
+        )
+        mutableView[0] = 999_999
+
+        assertEquals(listOf(1_000L, 1_100L), confirmation.frameTimestampsMillis)
+        val persisted = reduction.effects.single() as FireSessionEffect.PersistInitialAlert
+        assertEquals(1_000L, persisted.confirmation.firstFrameTimestampMillis)
+        assertEquals(1_100L, persisted.confirmation.secondFrameTimestampMillis)
+    }
+
+    private fun terminalRequest() = TerminalPersistenceRequest(
+        requestId = "precise-1",
+        locationStatus = LocationStatus.PRECISE,
+        geoMethod = GeoMethod.LASER_RANGEFINDER,
+    )
+
+    private fun degradedRequest() = TerminalPersistenceRequest(
+        requestId = "degraded-1",
+        locationStatus = LocationStatus.DEGRADED_OSD,
+        geoMethod = GeoMethod.AIRCRAFT_OBSERVATION,
+    )
+
+    private fun terminalReady() = FireSessionEvent.TerminalResultReady(terminalRequest())
+
+    private fun degradedReady() = FireSessionEvent.TerminalResultReady(degradedRequest())
 
     private data class Case(
         val from: FireSessionState,
