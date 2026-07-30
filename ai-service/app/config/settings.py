@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     visible_detector_mode: str = "color"
     visible_yolo_model_path: str = ""
     visible_yolo_imgsz: int = 1280
+    visible_yolo_device: str = "auto"
     visible_confidence_floor: float = 0.25
     visible_box_display_floor: float = 0.25
     visible_target_classes: str = "fire,smoke"
