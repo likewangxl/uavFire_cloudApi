@@ -20,9 +20,10 @@ class SqliteFireSessionStore(
 
     fun persistInitialConfirmation(record: InitialConfirmationRecord): DurableWriteResult =
         durableTransaction { database ->
+            val canonical = CanonicalFireReport.initial(record)
             val existing = outboxByKey(database, record.request.eventId, 1)
             if (existing != null) {
-                return@durableTransaction initialDuplicateResult(database, record, existing)
+                return@durableTransaction initialDuplicateResult(database, record, canonical, existing)
             }
             if (sessionById(database, record.request.sessionId) != null ||
                 sessionByEvent(database, record.request.eventId) != null
@@ -57,14 +58,15 @@ class SqliteFireSessionStore(
                 eventId = record.request.eventId,
                 sequence = 1,
                 eventTimestampWallMillis = record.eventTimestampWallMillis,
-                payload = record.payload,
-                payloadSha256 = record.payloadSha256,
+                state = FireSessionState.VISUAL_CONFIRMED,
+                report = canonical,
             )
             DurableWriteResult.Written
         }
 
     fun persistTerminalResult(record: TerminalResultRecord): DurableWriteResult =
         durableTransaction { database ->
+            val canonical = CanonicalFireReport.terminal(record)
             val session = sessionById(database, record.request.sessionId)
                 ?: return@durableTransaction DurableWriteResult.Rejected("Initial session is not durable")
             if (session.eventId != record.request.eventId) {
@@ -72,7 +74,18 @@ class SqliteFireSessionStore(
             }
             val existing = outboxByKey(database, record.request.eventId, record.sequence)
             if (session.terminalRequestId != null || existing != null) {
-                return@durableTransaction terminalDuplicateResult(database, session, existing, record)
+                return@durableTransaction terminalDuplicateResult(
+                    database,
+                    session,
+                    existing,
+                    record,
+                    canonical,
+                )
+            }
+            if (session.state != FireSessionState.LASER_MEASURING) {
+                return@durableTransaction DurableWriteResult.Rejected(
+                    "Terminal result requires LASER_MEASURING",
+                )
             }
             if (!hasOutboxSequence(database, record.request.eventId, 1)) {
                 return@durableTransaction DurableWriteResult.Rejected("Initial report is not durable")
@@ -92,8 +105,12 @@ class SqliteFireSessionStore(
                 database.update(
                     FireStoreContract.Session.TABLE,
                     values,
-                    "session_id=? AND terminal_request_id IS NULL",
-                    arrayOf(record.request.sessionId),
+                    "session_id=? AND event_id=? AND state=? AND terminal_request_id IS NULL",
+                    arrayOf(
+                        record.request.sessionId,
+                        record.request.eventId,
+                        FireSessionState.LASER_MEASURING.name,
+                    ),
                 ) == 1,
             )
             insertEvidence(
@@ -109,14 +126,15 @@ class SqliteFireSessionStore(
                 record.request.eventId,
                 record.sequence,
                 record.eventTimestampWallMillis,
-                record.payload,
-                record.payloadSha256,
+                FireSessionState.RESULT_DURABLE,
+                canonical,
             )
             DurableWriteResult.Written
         }
 
     fun persistStage(record: StagePersistenceRecord): DurableWriteResult =
         durableTransaction { database ->
+            val canonical = CanonicalFireReport.stage(record)
             val session = sessionById(database, record.sessionId)
                 ?: return@durableTransaction DurableWriteResult.Rejected("Session is not durable")
             if (session.eventId != record.eventId) {
@@ -124,9 +142,14 @@ class SqliteFireSessionStore(
             }
             val existing = outboxByKey(database, record.eventId, record.sequence)
             if (existing != null) {
-                return@durableTransaction if (existing.payloadSha256 == record.payloadSha256 &&
-                    existing.payload == record.payload &&
-                    existing.eventTimestampWallMillis == record.eventTimestampWallMillis
+                return@durableTransaction if (
+                    existing.eventId == record.eventId &&
+                    existing.sessionId == record.sessionId &&
+                    existing.sequence == record.sequence &&
+                    existing.eventTimestampWallMillis == record.eventTimestampWallMillis &&
+                    existing.state == record.state &&
+                    existing.payload == canonical.payload &&
+                    existing.payloadSha256 == canonical.sha256
                 ) {
                     DurableWriteResult.ExactDuplicate
                 } else {
@@ -159,8 +182,8 @@ class SqliteFireSessionStore(
                 record.eventId,
                 record.sequence,
                 record.eventTimestampWallMillis,
-                record.payload,
-                record.payloadSha256,
+                record.state,
+                canonical,
             )
             DurableWriteResult.Written
         }
@@ -183,7 +206,16 @@ class SqliteFireSessionStore(
     fun loadEvidence(eventId: String): List<FireEvidenceReference> =
         db.query(
             FireStoreContract.Evidence.TABLE,
-            arrayOf("path", "sha256", "media_type", "captured_at_wall_ms", "byte_size", "metadata_json"),
+            arrayOf(
+                "path",
+                "sha256",
+                "media_type",
+                "captured_at_wall_ms",
+                "byte_size",
+                "width_pixels",
+                "height_pixels",
+                "rotation_degrees",
+            ),
             "event_id=?",
             arrayOf(eventId),
             null,
@@ -199,7 +231,9 @@ class SqliteFireSessionStore(
                             mediaType = cursor.getString(2),
                             capturedAtWallMillis = cursor.getLong(3),
                             byteSize = cursor.getLong(4),
-                            metadataJson = cursor.getString(5),
+                            widthPixels = cursor.getInt(5),
+                            heightPixels = cursor.getInt(6),
+                            rotationDegrees = cursor.getInt(7),
                         ),
                     )
                 }
@@ -300,9 +334,7 @@ class SqliteFireSessionStore(
         reason: String?,
         retry: Boolean,
     ): Boolean = transaction { database ->
-        val current = outboxByKey(database, lease.row.eventId, lease.row.sequence)
-            ?: return@transaction false
-        if (current.status != OutboxStatus.IN_FLIGHT) return@transaction false
+        val nowElapsed = clock.elapsedRealtimeMillis()
         val values = ContentValues().apply {
             put("status", status.name)
             putNull("lease_token")
@@ -310,11 +342,11 @@ class SqliteFireSessionStore(
             put("last_error", reason?.let(::sanitizePersistedError))
             put("updated_at_wall_ms", clock.wallTimeMillis())
             if (retry) {
-                val attempts = current.attemptCount + 1
+                val attempts = lease.row.attemptCount + 1
                 put("attempt_count", attempts)
                 put(
                     "next_attempt_elapsed_ms",
-                    checkedAdd(clock.elapsedRealtimeMillis(), retryDelayMillis(attempts)),
+                    checkedAdd(nowElapsed, retryDelayMillis(attempts)),
                 )
                 put("monotonic_epoch", clock.monotonicEpochId())
             }
@@ -322,12 +354,18 @@ class SqliteFireSessionStore(
         database.update(
             FireStoreContract.Outbox.TABLE,
             values,
-            "event_id=? AND sequence=? AND status=? AND lease_token=?",
+            """
+            event_id=? AND session_id=? AND sequence=? AND status=? AND lease_token=?
+            AND monotonic_epoch=? AND lease_until_elapsed_ms>?
+            """.trimIndent(),
             arrayOf(
                 lease.row.eventId,
+                lease.row.sessionId,
                 lease.row.sequence.toString(),
                 OutboxStatus.IN_FLIGHT.name,
                 lease.token,
+                clock.monotonicEpochId(),
+                nowElapsed.toString(),
             ),
         ) == 1
     }
@@ -373,7 +411,7 @@ class SqliteFireSessionStore(
             unsafe.forEach { (sessionId, eventId) ->
                 val sequence = nextSequence(database, eventId)
                 val wall = clock.wallTimeMillis()
-                val payload = """{"eventId":"$eventId","sessionId":"$sessionId","sequence":$sequence,"eventTimestamp":$wall,"state":"MANUAL_HOLD","reason":"STARTUP_FLIGHT_STATE_UNRECONCILED"}"""
+                val report = CanonicalFireReport.manualHold(eventId, sessionId, sequence, wall)
                 val values = ContentValues().apply {
                     put("state", FireSessionState.MANUAL_HOLD.name)
                     put("updated_at_wall_ms", wall)
@@ -386,7 +424,15 @@ class SqliteFireSessionStore(
                         arrayOf(sessionId, eventId),
                     ) == 1,
                 )
-                insertOutbox(database, sessionId, eventId, sequence, wall, payload, sha256(payload))
+                insertOutbox(
+                    database,
+                    sessionId,
+                    eventId,
+                    sequence,
+                    wall,
+                    FireSessionState.MANUAL_HOLD,
+                    report,
+                )
             }
         }
     }
@@ -408,7 +454,9 @@ class SqliteFireSessionStore(
                 put("media_type", item.mediaType)
                 put("captured_at_wall_ms", item.capturedAtWallMillis)
                 put("byte_size", item.byteSize)
-                put("metadata_json", item.metadataJson)
+                put("width_pixels", item.widthPixels)
+                put("height_pixels", item.heightPixels)
+                put("rotation_degrees", item.rotationDegrees)
             }
             check(database.insertOrThrow(FireStoreContract.Evidence.TABLE, null, values) != -1L)
         }
@@ -420,8 +468,8 @@ class SqliteFireSessionStore(
         eventId: String,
         sequence: Long,
         eventTimestampWallMillis: Long,
-        payload: String,
-        payloadSha256: String,
+        state: FireSessionState,
+        report: CanonicalReport,
     ) {
         val nowElapsed = clock.elapsedRealtimeMillis()
         val nowWall = clock.wallTimeMillis()
@@ -430,8 +478,9 @@ class SqliteFireSessionStore(
             put("event_id", eventId)
             put("sequence", sequence)
             put("event_timestamp_wall_ms", eventTimestampWallMillis)
-            put("payload", payload)
-            put("payload_sha256", payloadSha256.lowercase())
+            put("state", state.name)
+            put("payload", report.payload)
+            put("payload_sha256", report.sha256)
             put("status", OutboxStatus.PENDING.name)
             put("attempt_count", 0)
             put("next_attempt_elapsed_ms", nowElapsed)
@@ -448,6 +497,7 @@ class SqliteFireSessionStore(
     private fun initialDuplicateResult(
         database: SQLiteDatabase,
         record: InitialConfirmationRecord,
+        canonical: CanonicalReport,
         existing: OutboxRow,
     ): DurableWriteResult {
         val session = sessionById(database, record.request.sessionId)
@@ -462,8 +512,12 @@ class SqliteFireSessionStore(
             session.modelHash == record.modelHash.lowercase() &&
             session.inputSize == record.inputSize &&
             session.runtime == record.runtime &&
-            existing.payload == record.payload &&
-            existing.payloadSha256 == record.payloadSha256 &&
+            existing.eventId == record.request.eventId &&
+            existing.sessionId == record.request.sessionId &&
+            existing.sequence == 1L &&
+            existing.state == FireSessionState.VISUAL_CONFIRMED &&
+            existing.payload == canonical.payload &&
+            existing.payloadSha256 == canonical.sha256 &&
             existing.eventTimestampWallMillis == record.eventTimestampWallMillis &&
             evidenceMatches(database, record.request.eventId, 1, record.evidence)
         return if (same) DurableWriteResult.ExactDuplicate
@@ -475,13 +529,18 @@ class SqliteFireSessionStore(
         session: SessionRow,
         existing: OutboxRow?,
         record: TerminalResultRecord,
+        canonical: CanonicalReport,
     ): DurableWriteResult {
         val same = existing != null &&
             session.terminalRequestId == record.request.requestId &&
             session.locationStatus == record.request.locationStatus &&
             session.geoMethod == record.request.geoMethod &&
-            existing.payload == record.payload &&
-            existing.payloadSha256 == record.payloadSha256 &&
+            existing.eventId == record.request.eventId &&
+            existing.sessionId == record.request.sessionId &&
+            existing.sequence == record.sequence &&
+            existing.state == FireSessionState.RESULT_DURABLE &&
+            existing.payload == canonical.payload &&
+            existing.payloadSha256 == canonical.sha256 &&
             existing.eventTimestampWallMillis == record.eventTimestampWallMillis &&
             evidenceMatches(database, record.request.eventId, record.sequence, record.evidence)
         return if (same) DurableWriteResult.ExactDuplicate
@@ -496,7 +555,16 @@ class SqliteFireSessionStore(
     ): Boolean {
         val actual = database.query(
             FireStoreContract.Evidence.TABLE,
-            arrayOf("path", "sha256", "media_type", "captured_at_wall_ms", "byte_size", "metadata_json"),
+            arrayOf(
+                "path",
+                "sha256",
+                "media_type",
+                "captured_at_wall_ms",
+                "byte_size",
+                "width_pixels",
+                "height_pixels",
+                "rotation_degrees",
+            ),
             "event_id=? AND report_sequence=?",
             arrayOf(eventId, sequence.toString()),
             null,
@@ -512,7 +580,9 @@ class SqliteFireSessionStore(
                             cursor.getString(2),
                             cursor.getLong(3),
                             cursor.getLong(4),
-                            cursor.getString(5),
+                            cursor.getInt(5),
+                            cursor.getInt(6),
+                            cursor.getInt(7),
                         ),
                     )
                 }
@@ -638,13 +708,14 @@ class SqliteFireSessionStore(
         sessionId = getString(1),
         sequence = getLong(2),
         eventTimestampWallMillis = getLong(3),
-        payload = getString(4),
-        payloadSha256 = getString(5),
-        status = OutboxStatus.valueOf(getString(6)),
-        attemptCount = getInt(7),
-        nextAttemptElapsedMillis = getLong(8),
-        leaseUntilElapsedMillis = getLongOrNull(9),
-        lastError = getStringOrNull(10),
+        state = FireSessionState.valueOf(getString(4)),
+        payload = getString(5),
+        payloadSha256 = getString(6),
+        status = OutboxStatus.valueOf(getString(7)),
+        attemptCount = getInt(8),
+        nextAttemptElapsedMillis = getLong(9),
+        leaseUntilElapsedMillis = getLongOrNull(10),
+        lastError = getStringOrNull(11),
     )
 
     private fun Cursor.getStringOrNull(index: Int): String? =
@@ -712,6 +783,7 @@ class SqliteFireSessionStore(
             "session_id",
             "sequence",
             "event_timestamp_wall_ms",
+            "state",
             "payload",
             "payload_sha256",
             "status",

@@ -73,6 +73,7 @@ class FireOutboxDispatcherTest {
             sessionId = "session",
             sequence = sequence,
             eventTimestampWallMillis = 1,
+            state = com.yinxin.uavfir.firedetection.FireSessionState.VISUAL_CONFIRMED,
             payload = "{}",
             payloadSha256 = "a".repeat(64),
             status = OutboxStatus.IN_FLIGHT,

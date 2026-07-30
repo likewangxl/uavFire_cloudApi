@@ -36,7 +36,8 @@ class FireStoreOpenHelper(
                 location_status TEXT NOT NULL,
                 geo_method TEXT,
                 created_at_wall_ms INTEGER NOT NULL,
-                updated_at_wall_ms INTEGER NOT NULL
+                updated_at_wall_ms INTEGER NOT NULL,
+                UNIQUE(session_id, event_id)
             )
             """.trimIndent(),
         )
@@ -52,10 +53,12 @@ class FireStoreOpenHelper(
                 media_type TEXT NOT NULL,
                 captured_at_wall_ms INTEGER NOT NULL,
                 byte_size INTEGER NOT NULL,
-                metadata_json TEXT NOT NULL,
+                width_pixels INTEGER NOT NULL,
+                height_pixels INTEGER NOT NULL,
+                rotation_degrees INTEGER NOT NULL,
                 UNIQUE(event_id, report_sequence, path),
-                FOREIGN KEY(session_id) REFERENCES fire_session(session_id) ON DELETE RESTRICT,
-                FOREIGN KEY(event_id) REFERENCES fire_session(event_id) ON DELETE RESTRICT
+                FOREIGN KEY(session_id, event_id)
+                    REFERENCES fire_session(session_id, event_id) ON DELETE RESTRICT
             )
             """.trimIndent(),
         )
@@ -67,6 +70,7 @@ class FireStoreOpenHelper(
                 event_id TEXT NOT NULL,
                 sequence INTEGER NOT NULL,
                 event_timestamp_wall_ms INTEGER NOT NULL,
+                state TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 payload_sha256 TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -79,8 +83,8 @@ class FireStoreOpenHelper(
                 created_at_wall_ms INTEGER NOT NULL,
                 updated_at_wall_ms INTEGER NOT NULL,
                 UNIQUE(event_id, sequence),
-                FOREIGN KEY(session_id) REFERENCES fire_session(session_id) ON DELETE RESTRICT,
-                FOREIGN KEY(event_id) REFERENCES fire_session(event_id) ON DELETE RESTRICT
+                FOREIGN KEY(session_id, event_id)
+                    REFERENCES fire_session(session_id, event_id) ON DELETE RESTRICT
             )
             """.trimIndent(),
         )
