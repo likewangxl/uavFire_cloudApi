@@ -1,3 +1,4 @@
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 
 plugins {
@@ -9,7 +10,7 @@ val djiMsdkVersion = providers.gradleProperty("djiMsdkVersion").orElse("5.18.0")
 val djiApiKey = providers.gradleProperty("djiApiKey").orElse("")
 val maplibreToken = providers.gradleProperty("maplibreToken").orElse("unused")
 val agentBackendBaseUrl = providers.gradleProperty("agentBackendBaseUrl").orElse("http://127.0.0.1:6789/")
-val agentAiServiceBaseUrl = providers.gradleProperty("agentAiServiceBaseUrl").orElse("http://127.0.0.1:9000/")
+val agentSnapshotServiceBaseUrl = providers.gradleProperty("agentSnapshotServiceBaseUrl").orElse("http://127.0.0.1:9000/")
 val agentMediaHost = providers.gradleProperty("agentMediaHost").orElse("127.0.0.1")
 val agentMediaRtmpPort = providers.gradleProperty("agentMediaRtmpPort").orElse("1935")
 val agentMediaStreamApp = providers.gradleProperty("agentMediaStreamApp").orElse("live")
@@ -23,6 +24,30 @@ val realUxsdkBuild = project(":uxsdk").projectDir.canonicalFile != rootProject.f
 val agentVersionCode = 3
 val agentVersionName = "0.1.2"
 val agentBuildId = "uavfire-agent-$agentVersionName-$agentVersionCode"
+val ncnnVersion = "20260526"
+val ncnnArchiveSha256 = "eb205b332274974511890903828451ae7a4c19c309f21431536e0a8c9f3dd0c1"
+fun sha256File(file: java.io.File): String = file.inputStream().use { input ->
+    val digest = MessageDigest.getInstance("SHA-256")
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        digest.update(buffer, 0, count)
+    }
+    digest.digest().joinToString("") { "%02x".format(it) }
+}
+val visibleFireNcnnBridgeSources = listOf(
+    layout.projectDirectory.file("src/main/cpp/CMakeLists.txt").asFile,
+    layout.projectDirectory.file("src/main/cpp/visible_fire_ncnn_bridge.cpp").asFile,
+)
+val visibleFireNcnnBridgeSourceSha256 = MessageDigest.getInstance("SHA-256")
+    .digest(
+        visibleFireNcnnBridgeSources
+            .sortedBy { it.name }
+            .joinToString("\n") { "${it.name}:${sha256File(it)}" }
+            .toByteArray(),
+    )
+    .joinToString("") { "%02x".format(it) }
 val uxsdkSourceSha256 = if (realUxsdkBuild) {
     val sourceFiles = project(":uxsdk").projectDir.walkTopDown()
         .filter { it.isFile && "build" !in it.toPath().map { part -> part.toString() } }
@@ -64,7 +89,11 @@ android {
         buildConfigField("String", "AGENT_BUILD_ID", "\"$agentBuildId\"")
         buildConfigField("String", "UXSDK_SOURCE_SHA256", "\"$uxsdkSourceSha256\"")
         buildConfigField("String", "AGENT_BACKEND_BASE_URL", "\"${agentBackendBaseUrl.get()}\"")
-        buildConfigField("String", "AGENT_AI_SERVICE_BASE_URL", "\"${agentAiServiceBaseUrl.get()}\"")
+        buildConfigField("String", "AGENT_SNAPSHOT_SERVICE_BASE_URL", "\"${agentSnapshotServiceBaseUrl.get()}\"")
+        buildConfigField("boolean", "VISIBLE_FIRE_DETECTION_ENABLED", "false")
+        buildConfigField("String", "VISIBLE_FIRE_NCNN_VERSION", "\"$ncnnVersion\"")
+        buildConfigField("String", "VISIBLE_FIRE_NCNN_ARCHIVE_SHA256", "\"$ncnnArchiveSha256\"")
+        buildConfigField("String", "VISIBLE_FIRE_NCNN_BRIDGE_SOURCE_SHA256", "\"$visibleFireNcnnBridgeSourceSha256\"")
         buildConfigField("String", "AGENT_MEDIA_HOST", "\"${agentMediaHost.get()}\"")
         buildConfigField("int", "AGENT_MEDIA_RTMP_PORT", agentMediaRtmpPort.get())
         buildConfigField("String", "AGENT_MEDIA_STREAM_APP", "\"${agentMediaStreamApp.get()}\"")
@@ -86,6 +115,10 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    aaptOptions {
+        noCompress += setOf("bin", "param")
     }
 
     packaging {
@@ -121,6 +154,149 @@ android {
             )
         }
     }
+}
+
+val ncnnArchive = providers.gradleProperty("ncnnArchive")
+    .map(::file)
+    .orElse(
+        provider {
+            rootProject.file(
+                "fire-detector-benchmark/build/toolchains/ncnn-$ncnnVersion-android-vulkan-shared.zip",
+            )
+        },
+    )
+val ncnnAndroidNdkDir = providers.gradleProperty("ncnnAndroidNdkDir")
+    .orElse(providers.environmentVariable("ANDROID_NDK_HOME"))
+    .map(::file)
+val ncnnCmakeExecutable = providers.gradleProperty("ncnnCmakeExecutable").orElse("cmake")
+val ncnnExtractOutputDir = layout.buildDirectory.dir("generated/visibleFireNcnnPackage")
+val ncnnBridgeBuildOutputDir = layout.buildDirectory.dir("generated/visibleFireNcnnBridge")
+val ncnnJniOutputDir = layout.buildDirectory.dir("generated/visibleFireNcnnJni")
+val ncnnTrustOutput = layout.buildDirectory.file(
+    "generated/visibleFireNcnnTrust/fire-detection/ncnn-runtime-trust.json",
+)
+
+val buildVisibleFireNcnnFromPinnedArchive = tasks.register("buildVisibleFireNcnnFromPinnedArchive") {
+    inputs.files(visibleFireNcnnBridgeSources)
+    inputs.file(ncnnArchive)
+    inputs.property("ncnnVersion", ncnnVersion)
+    inputs.property("ncnnArchiveSha256", ncnnArchiveSha256)
+    outputs.dir(ncnnExtractOutputDir)
+    outputs.dir(ncnnBridgeBuildOutputDir)
+    outputs.file(ncnnTrustOutput)
+    outputs.upToDateWhen { false }
+    doLast {
+        val extracted = ncnnExtractOutputDir.get().asFile
+        val bridgeBuild = ncnnBridgeBuildOutputDir.get().asFile
+        val trustFile = ncnnTrustOutput.get().asFile
+        listOf(extracted, bridgeBuild).forEach { directory ->
+            check(directory.deleteRecursively() || !directory.exists()) {
+                "Cannot clear stale NCNN build directory $directory"
+            }
+        }
+        check(trustFile.delete() || !trustFile.exists()) { "Cannot clear stale NCNN runtime trust" }
+        check(ncnnAndroidNdkDir.isPresent) {
+            "Agent NCNN packaging requires -PncnnAndroidNdkDir=<Android NDK> or ANDROID_NDK_HOME"
+        }
+        val archive = ncnnArchive.get()
+        check(archive.isFile) {
+            "Pinned Task 2 NCNN archive is missing: $archive; provision it with -PncnnArchive"
+        }
+        check(sha256File(archive) == ncnnArchiveSha256) {
+            "NCNN archive SHA-256 does not match the committed $ncnnVersion lock"
+        }
+        copy {
+            from(zipTree(archive))
+            into(extracted)
+        }
+        val packageRoot = extracted.resolve("ncnn-$ncnnVersion-android-vulkan-shared/arm64-v8a")
+        val ncnnConfig = packageRoot.resolve("lib/cmake/ncnn/ncnnConfig.cmake")
+        val runtime = packageRoot.resolve("lib/libncnn.so")
+        check(ncnnConfig.isFile && runtime.isFile) {
+            "Pinned NCNN archive lacks the arm64-v8a Vulkan CMake package/runtime"
+        }
+        val toolchain = ncnnAndroidNdkDir.get().resolve("build/cmake/android.toolchain.cmake")
+        check(toolchain.isFile) { "Android NDK CMake toolchain is missing: $toolchain" }
+
+        val configureOutput = ByteArrayOutputStream()
+        val configure = project.exec {
+            commandLine(
+                ncnnCmakeExecutable.get(),
+                "-S", layout.projectDirectory.dir("src/main/cpp").asFile,
+                "-B", bridgeBuild,
+                "-DANDROID_ABI=arm64-v8a",
+                "-DANDROID_PLATFORM=android-26",
+                "-DANDROID_STL=c++_shared",
+                "-DCMAKE_BUILD_TYPE=Release",
+                "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+                "-Dncnn_DIR=${ncnnConfig.parentFile}",
+            )
+            standardOutput = configureOutput
+            errorOutput = configureOutput
+            isIgnoreExitValue = true
+        }
+        check(configure.exitValue == 0) {
+            "Visible NCNN bridge configure failed: ${configureOutput.toString(Charsets.UTF_8)}"
+        }
+        val buildOutput = ByteArrayOutputStream()
+        val build = project.exec {
+            commandLine(
+                ncnnCmakeExecutable.get(),
+                "--build", bridgeBuild,
+                "--config", "Release",
+            )
+            standardOutput = buildOutput
+            errorOutput = buildOutput
+            isIgnoreExitValue = true
+        }
+        check(build.exitValue == 0) {
+            "Visible NCNN bridge build failed: ${buildOutput.toString(Charsets.UTF_8)}"
+        }
+        val bridge = bridgeBuild.resolve("libvisible_fire_ncnn.so")
+        check(bridge.isFile) { "Current-source visible NCNN JNI bridge was not produced" }
+        trustFile.parentFile.mkdirs()
+        trustFile.writeText(
+            """{"schemaVersion":1,"version":"$ncnnVersion","packageArchiveSha256":"$ncnnArchiveSha256","bridgeSourceSha256":"$visibleFireNcnnBridgeSourceSha256","runtimeSha256":"${sha256File(runtime)}","bridgeSha256":"${sha256File(bridge)}"}""",
+        )
+    }
+}
+
+val stageVisibleFireNcnnRuntime = tasks.register("stageVisibleFireNcnnRuntime") {
+    dependsOn(buildVisibleFireNcnnFromPinnedArchive)
+    outputs.dir(ncnnJniOutputDir)
+    outputs.upToDateWhen { false }
+    doLast {
+        val outputDirectory = ncnnJniOutputDir.get().asFile
+        check(outputDirectory.deleteRecursively() || !outputDirectory.exists()) {
+            "Cannot clear staged visible NCNN JNI libraries"
+        }
+        val packageRoot = ncnnExtractOutputDir.get().asFile
+            .resolve("ncnn-$ncnnVersion-android-vulkan-shared/arm64-v8a")
+        val runtime = packageRoot.resolve("lib/libncnn.so")
+        val bridge = ncnnBridgeBuildOutputDir.get().asFile.resolve("libvisible_fire_ncnn.so")
+        check(runtime.isFile && bridge.isFile && ncnnTrustOutput.get().asFile.isFile) {
+            "Pinned NCNN runtime/current-source bridge identity is incomplete"
+        }
+        copy {
+            from(runtime)
+            from(bridge)
+            into(outputDirectory.resolve("arm64-v8a"))
+        }
+    }
+}
+
+android.sourceSets.getByName("main").jniLibs.srcDir(ncnnJniOutputDir)
+android.sourceSets.getByName("main").assets.srcDir(
+    layout.buildDirectory.dir("generated/visibleFireNcnnTrust"),
+)
+tasks.matching { it.name.matches(Regex("merge(Debug|Release)JniLibFolders")) }.configureEach {
+    dependsOn(stageVisibleFireNcnnRuntime)
+}
+tasks.matching { it.name.matches(Regex("merge(Debug|Release)Assets")) }.configureEach {
+    dependsOn(buildVisibleFireNcnnFromPinnedArchive)
+}
+tasks.matching { it.name == "testDebugUnitTest" }.configureEach {
+    dependsOn("packageDebug")
 }
 
 dependencies {

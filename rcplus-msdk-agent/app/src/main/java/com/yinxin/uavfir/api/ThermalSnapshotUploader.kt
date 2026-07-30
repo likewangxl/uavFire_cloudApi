@@ -27,7 +27,7 @@ interface VisibleSnapshotConfirmer {
 }
 
 class AiServiceThermalSnapshotUploader(
-    private val baseUrl: String = BuildConfig.AGENT_AI_SERVICE_BASE_URL,
+    private val baseUrl: String = BuildConfig.AGENT_SNAPSHOT_SERVICE_BASE_URL,
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
@@ -94,7 +94,7 @@ class AiServiceThermalSnapshotUploader(
 }
 
 class AiServiceVisibleSnapshotConfirmer(
-    private val baseUrl: String = BuildConfig.AGENT_AI_SERVICE_BASE_URL,
+    private val baseUrl: String = BuildConfig.AGENT_SNAPSHOT_SERVICE_BASE_URL,
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
