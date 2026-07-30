@@ -10,10 +10,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.mobile_model import (
-    BENCHMARK_NEGATIVE_COUNT,
-    BENCHMARK_POSITIVE_COUNT,
     BENCHMARK_SEED,
+    CONFIDENCE_THRESHOLD,
+    IOU_THRESHOLD,
+    PRODUCTION_VISIBLE_MODEL_SHA256,
+    VISIBLE_INPUT_SIZE,
     build_benchmark_set,
+    validate_production_visible_model,
     write_json_atomically,
 )
 
@@ -28,13 +31,25 @@ def run_pytorch_baseline(model: Path, benchmark: Path) -> None:
     detector = YOLO(model)
     detections = []
     for sample in manifest["samples"]:
-        result = detector(benchmark / sample["image"], verbose=False)[0]
+        result = detector(
+            benchmark / sample["image"],
+            imgsz=VISIBLE_INPUT_SIZE,
+            conf=CONFIDENCE_THRESHOLD,
+            iou=IOU_THRESHOLD,
+            verbose=False,
+        )[0]
         boxes = []
         for box in result.boxes:
             xyxy = [float(value) for value in box.xyxy[0].tolist()]
             boxes.append({"class": int(box.cls[0]), "confidence": float(box.conf[0]), "xyxy": xyxy})
         detections.append({"id": sample["id"], "detections": boxes})
-    write_json_atomically(benchmark / "pytorch-baseline.json", {"model": model.name, "samples": detections})
+    write_json_atomically(benchmark / "pytorch-baseline.json", {
+        "model": {"name": model.name, "sha256": PRODUCTION_VISIBLE_MODEL_SHA256},
+        "inputSize": VISIBLE_INPUT_SIZE,
+        "confidenceThreshold": CONFIDENCE_THRESHOLD,
+        "iouThreshold": IOU_THRESHOLD,
+        "samples": detections,
+    })
 
 
 def _required_value(expected: int):
@@ -51,18 +66,19 @@ def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--positive-count", required=True, type=_required_value(BENCHMARK_POSITIVE_COUNT))
-    parser.add_argument("--negative-count", required=True, type=_required_value(BENCHMARK_NEGATIVE_COUNT))
     parser.add_argument("--seed", required=True, type=_required_value(BENCHMARK_SEED))
-    parser.add_argument("--model", type=Path, default=Path("weights/thermal-fire-yolov8n-640-gt-20260709.pt"))
+    parser.add_argument("--model", type=Path, default=Path("weights/visible-fire-wechat-best2-20260728.pt"))
     return parser.parse_args(arguments)
 
 
 def main() -> None:
     args = parse_arguments()
-    build_benchmark_set(args.dataset, args.output)
     if not args.model.is_file():
         raise SystemExit(f"Baseline model does not exist: {args.model}")
+    from ultralytics import YOLO
+
+    validate_production_visible_model(args.model, YOLO(args.model).names)
+    build_benchmark_set(args.dataset, args.output, seed=args.seed)
     run_pytorch_baseline(args.model, args.output)
 
 

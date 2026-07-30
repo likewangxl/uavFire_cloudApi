@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 import os
+import platform
 import random
+import re
 import shutil
 import tempfile
 from pathlib import Path, PureWindowsPath
@@ -15,14 +18,24 @@ import yaml
 
 
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
-MODEL_INPUT_SIZE = [640, 640]
-CLASS_NAMES = ["fire"]
+PRODUCTION_VISIBLE_MODEL_NAME = "visible-fire-wechat-best2-20260728.pt"
+PRODUCTION_VISIBLE_MODEL_SHA256 = "957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650"
+VISIBLE_CLASS_NAMES = ["fire", "smoke"]
+VISIBLE_INPUT_SIZE = 960
 CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.7
 OUTPUT_LAYOUT = "xywh, class scores; postprocess with NMS"
-BENCHMARK_POSITIVE_COUNT = 200
-BENCHMARK_NEGATIVE_COUNT = 200
-BENCHMARK_SEED = 20260727
+BENCHMARK_SEED = 20260730
+REQUIRED_BENCHMARK_TAGS = frozenset({
+    "fire",
+    "smoke",
+    "hard-negative-orange-red",
+    "night-dark",
+    "small-target",
+    "zoomed-roi",
+})
+SAFE_SAMPLE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+SMALL_TARGET_MAX_RELATIVE_AREA = 0.02
 
 
 def sha256_file(path: Path) -> str:
@@ -38,16 +51,70 @@ def _model_version(source_model: Path) -> str:
 
 
 def _candidate_artifacts(path: Path) -> list[dict[str, str]]:
-    files = [path] if path.is_file() else sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
+    files = [path] if path.is_file() else sorted(
+        candidate
+        for candidate in path.rglob("*")
+        if candidate.is_file() and "__pycache__" not in candidate.parts and candidate.suffix != ".pyc"
+    )
     if not files:
         raise ValueError(f"Exported artifact is empty: {path}")
     return [{"path": str(file.relative_to(path.parent)), "sha256": sha256_file(file)} for file in files]
 
 
-def build_candidate_manifest(source_model: Path, exported_files: Iterable[tuple[str, Path]]) -> dict[str, Any]:
+def _normalized_class_names(class_names: list[str] | dict[int, str]) -> list[str]:
+    if isinstance(class_names, dict):
+        return [class_names[index] for index in sorted(class_names)]
+    return list(class_names)
+
+
+def validate_production_visible_model(source_model: Path, class_names: list[str] | dict[int, str]) -> None:
+    """Reject inputs that cannot be the approved visible-light production release."""
     source_model = Path(source_model)
     if not source_model.is_file():
         raise ValueError(f"Source model does not exist: {source_model}")
+    if source_model.name != PRODUCTION_VISIBLE_MODEL_NAME:
+        raise ValueError(f"Expected production visible model {PRODUCTION_VISIBLE_MODEL_NAME}; found {source_model.name}")
+    if sha256_file(source_model) != PRODUCTION_VISIBLE_MODEL_SHA256:
+        raise ValueError("Source model SHA-256 does not match the approved production visible model")
+    if _normalized_class_names(class_names) != VISIBLE_CLASS_NAMES:
+        raise ValueError(f"Source model classes must be {VISIBLE_CLASS_NAMES}")
+
+
+def _exporter_versions() -> dict[str, str]:
+    def version(distribution: str) -> str:
+        try:
+            return importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            return "not-installed"
+
+    return {
+        "python": platform.python_version(),
+        "torch": version("torch"),
+        "ultralytics": version("ultralytics"),
+        "onnx": version("onnx"),
+        "onnxslim": version("onnxslim"),
+        "tensorflow": version("tensorflow"),
+        "onnx2tf": version("onnx2tf"),
+        "ncnn": version("ncnn"),
+        "pnnx": version("pnnx"),
+    }
+
+
+def build_candidate_manifest(
+    source_model: Path,
+    exported_files: Iterable[tuple[str, Path]],
+    *,
+    input_size: int,
+    class_names: list[str] | dict[int, str] | None = None,
+    exporter_versions: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    source_model = Path(source_model)
+    validate_production_visible_model(
+        source_model,
+        VISIBLE_CLASS_NAMES if class_names is None else class_names,
+    )
+    if input_size != VISIBLE_INPUT_SIZE:
+        raise ValueError(f"Visible mobile export input size must be {VISIBLE_INPUT_SIZE}")
 
     candidates = []
     for engine, artifact in exported_files:
@@ -59,18 +126,27 @@ def build_candidate_manifest(source_model: Path, exported_files: Iterable[tuple[
         candidates.append({"engine": engine, "sha256": aggregate, "artifacts": artifacts})
 
     engines = {candidate["engine"] for candidate in candidates}
-    if engines != {"onnx", "tflite", "ncnn"}:
-        raise ValueError(f"Expected ONNX, TFLite, and NCNN exports; found {sorted(engines)}")
+    if len(candidates) != 3 or engines != {"onnx", "tflite", "ncnn"}:
+        raise ValueError(f"Expected exactly one ONNX, TFLite, and NCNN export; found {sorted(engines)}")
 
     return {
+        "schemaVersion": 2,
         "modelVersion": _model_version(source_model),
-        "source": {"path": str(source_model), "sha256": sha256_file(source_model)},
-        "inputSize": MODEL_INPUT_SIZE,
-        "classNames": CLASS_NAMES,
-        "normalization": {"scale": 1 / 255, "mean": [0, 0, 0], "std": [1, 1, 1]},
-        "confidenceThreshold": CONFIDENCE_THRESHOLD,
-        "iouThreshold": IOU_THRESHOLD,
-        "outputLayout": OUTPUT_LAYOUT,
+        "source": {"name": source_model.name, "sha256": PRODUCTION_VISIBLE_MODEL_SHA256},
+        "classes": VISIBLE_CLASS_NAMES,
+        "input": {
+            "width": input_size,
+            "height": input_size,
+            "channels": 3,
+            "colorSpace": "RGB",
+            "normalization": {"scale": 1 / 255, "mean": [0, 0, 0], "std": [1, 1, 1]},
+        },
+        "postprocess": {
+            "confidenceThreshold": CONFIDENCE_THRESHOLD,
+            "iouThreshold": IOU_THRESHOLD,
+            "outputLayout": OUTPUT_LAYOUT,
+        },
+        "exporter": exporter_versions or _exporter_versions(),
         "candidates": sorted(candidates, key=lambda candidate: candidate["engine"]),
     }
 
@@ -140,39 +216,101 @@ def _read_yolo_boxes(label: Path) -> list[dict[str, float | int]]:
     return boxes
 
 
-def build_benchmark_manifest(source_dataset: Path, samples: Iterable[tuple[Path, Path, list[dict[str, float | int]]]], seed: int) -> dict[str, Any]:
+def build_benchmark_manifest(
+    samples: Iterable[tuple[str, list[str], Path, Path, list[dict[str, float | int]]]], seed: int
+) -> dict[str, Any]:
     entries = []
-    for index, (image, label, boxes) in enumerate(samples, start=1):
+    for sample_id, tags, image, label, boxes in samples:
         entries.append({
-            "id": f"sample-{index:04d}",
-            "sourcePath": str(image),
-            "labelPath": str(label),
+            "id": sample_id,
+            "tags": tags,
             "imageSha256": sha256_file(image),
+            "labelSha256": sha256_file(label),
             "expectedBoxes": boxes,
         })
-    return {"sourceDataset": str(source_dataset), "seed": seed, "samples": entries}
+    return {"schemaVersion": 2, "seed": seed, "samples": entries}
 
 
-def build_benchmark_set(dataset: Path, output: Path) -> dict[str, Any]:
-    images = _validation_images(Path(dataset))
-    positives = [item for item in images if item[2]]
-    negatives = [item for item in images if not item[2]]
-    if len(positives) < BENCHMARK_POSITIVE_COUNT or len(negatives) < BENCHMARK_NEGATIVE_COUNT:
-        raise ValueError(
-            f"Validation split needs {BENCHMARK_POSITIVE_COUNT} positive and {BENCHMARK_NEGATIVE_COUNT} negative images; "
-            f"found {len(positives)} positive and {len(negatives)} negative"
-        )
-    selector = random.Random(BENCHMARK_SEED)
-    selected = selector.sample(positives, BENCHMARK_POSITIVE_COUNT) + selector.sample(negatives, BENCHMARK_NEGATIVE_COUNT)
-    selected.sort(key=lambda item: str(item[0]))
-    manifest = build_benchmark_manifest(Path(dataset), selected, BENCHMARK_SEED)
+def _load_benchmark_tags(dataset: Path) -> dict[str, tuple[str, list[str]]]:
+    tags_path = dataset / "benchmark-tags.json"
+    if not tags_path.is_file():
+        raise ValueError(f"Visible benchmark dataset must provide {tags_path.name}")
+    payload = json.loads(tags_path.read_text(encoding="utf-8"))
+    records = payload.get("samples") if isinstance(payload, dict) else None
+    if not isinstance(records, list):
+        raise ValueError(f"{tags_path.name} must contain a samples list")
+    tagged: dict[str, tuple[str, list[str]]] = {}
+    ids: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise ValueError(f"Invalid sample in {tags_path.name}")
+        sample_id, image, tags = record.get("id"), record.get("image"), record.get("tags")
+        if not isinstance(sample_id, str) or not sample_id or not isinstance(image, str) or not isinstance(tags, list):
+            raise ValueError(f"Each {tags_path.name} sample needs id, image, and tags")
+        if not SAFE_SAMPLE_ID.fullmatch(sample_id):
+            raise ValueError(f"Sample id must be a safe filename: {sample_id!r}")
+        if sample_id in ids or image in tagged:
+            raise ValueError(f"Duplicate sample id or image in {tags_path.name}")
+        if not all(isinstance(tag, str) for tag in tags):
+            raise ValueError(f"Sample {sample_id} has invalid tags")
+        ids.add(sample_id)
+        tagged[Path(image).as_posix()] = (sample_id, sorted(set(tags)))
+    return tagged
+
+
+def _validate_tag_semantics(sample_id: str, tags: list[str], boxes: list[dict[str, float | int]]) -> None:
+    classes = {int(box["class"]) for box in boxes}
+    has_small_target = any(float(box["width"]) * float(box["height"]) <= SMALL_TARGET_MAX_RELATIVE_AREA for box in boxes)
+    invalid = (
+        ("fire" in tags and 0 not in classes)
+        or ("smoke" in tags and 1 not in classes)
+        or ("hard-negative-orange-red" in tags and bool(boxes))
+        or ("small-target" in tags and not has_small_target)
+    )
+    if invalid:
+        raise ValueError(f"Benchmark tags for {sample_id} do not match labels")
+
+
+def _tagged_validation_samples(
+    dataset: Path, images: list[tuple[Path, Path, list[dict[str, float | int]]]], seed: int
+) -> list[tuple[str, list[str], Path, Path, list[dict[str, float | int]]]]:
+    tagged = _load_benchmark_tags(dataset)
+    available = {image.relative_to(dataset).as_posix(): (image, label, boxes) for image, label, boxes in images}
+    if set(tagged) != set(available):
+        missing_tags = sorted(set(available) - set(tagged))
+        missing_images = sorted(set(tagged) - set(available))
+        raise ValueError(f"benchmark-tags.json must match validation images; missing tags={missing_tags}, missing images={missing_images}")
+    tagged_samples = []
+    for relative_image in sorted(tagged):
+        sample_id, tags = tagged[relative_image]
+        image, label, boxes = available[relative_image]
+        _validate_tag_semantics(sample_id, tags, boxes)
+        tagged_samples.append((sample_id, tags, image, label, boxes))
+    found_tags = {tag for _, tags, _, _, _ in tagged_samples for tag in tags}
+    missing_required_tags = sorted(REQUIRED_BENCHMARK_TAGS - found_tags)
+    if missing_required_tags:
+        raise ValueError(f"Visible benchmark set is missing required categories: {missing_required_tags}")
+    selector = random.Random(seed)
+    selector.shuffle(tagged_samples)
+    return tagged_samples
+
+
+def build_benchmark_set(dataset: Path, output: Path, *, seed: int = BENCHMARK_SEED) -> dict[str, Any]:
+    dataset = Path(dataset).resolve()
+    selected = _tagged_validation_samples(dataset, _validation_images(dataset), seed)
+    manifest = build_benchmark_manifest(selected, seed)
 
     output = Path(output)
     images_output = output / "images"
     labels_output = output / "labels"
-    for sample, (image, label, _) in zip(manifest["samples"], selected, strict=True):
+    for sample, (_, _, image, label, _) in zip(manifest["samples"], selected, strict=True):
         image_destination = images_output / f"{sample['id']}{image.suffix.lower()}"
         label_destination = labels_output / f"{sample['id']}.txt"
+        try:
+            image_destination.resolve().relative_to(images_output.resolve())
+            label_destination.resolve().relative_to(labels_output.resolve())
+        except ValueError as error:
+            raise ValueError(f"Sample id escapes benchmark output: {sample['id']!r}") from error
         image_destination.parent.mkdir(parents=True, exist_ok=True)
         label_destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(image, image_destination)

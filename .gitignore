@@ -40,6 +40,9 @@ msdk_assets_pack/
 .env
 ai-service/data/
 ai-service/.env
+# Reproducible visible-model exports and staged validation data are local gate inputs/results.
+ai-service/mobile-model/source-visible-validation/
+ai-service/mobile-model/visible-960/
 ai-service/mobile-model/*
 !ai-service/mobile-model/README.md
 sample-run*.out.log
