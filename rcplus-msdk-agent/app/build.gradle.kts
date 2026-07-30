@@ -262,6 +262,16 @@ val buildVisibleFireNcnnFromPinnedArchive = tasks.register("buildVisibleFireNcnn
 
 val stageVisibleFireNcnnRuntime = tasks.register("stageVisibleFireNcnnRuntime") {
     dependsOn(buildVisibleFireNcnnFromPinnedArchive)
+    inputs.file(
+        ncnnExtractOutputDir.map {
+            it.file("ncnn-$ncnnVersion-android-vulkan-shared/arm64-v8a/lib/libncnn.so")
+        },
+    )
+    inputs.file(
+        ncnnBridgeBuildOutputDir.map {
+            it.file("libvisible_fire_ncnn.so")
+        },
+    )
     outputs.dir(ncnnJniOutputDir)
     doLast {
         val outputDirectory = ncnnJniOutputDir.get().asFile
