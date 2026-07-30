@@ -5,13 +5,19 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import dji.v5.manager.SDKManager
 
 class AgentSdkHealthProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         check(method == METHOD_HEALTH) { "Unsupported Agent health method" }
-        val health = AgentSdkHealthState.tracker.snapshot()
+        val liveRegistered = runCatching { SDKManager.getInstance().isRegistered }
+            .getOrElse {
+                AgentSdkHealthState.tracker.markMsdkUnavailable()
+                false
+            }
+        val health = AgentSdkHealthState.tracker.snapshot(liveSdkRegistered = liveRegistered)
         return Bundle().apply {
             putInt("schemaVersion", health.schemaVersion)
             putBoolean("sdkRegistered", health.sdkRegistered)
@@ -20,6 +26,8 @@ class AgentSdkHealthProvider : ContentProvider() {
             putString("buildId", health.buildId)
             putString("versionName", health.versionName)
             putLong("versionCode", health.versionCode)
+            putLong("observedAtElapsedRealtimeMillis", health.observedAtElapsedRealtimeMillis)
+            putLong("maxAgeMillis", health.maxAgeMillis)
         }
     }
 

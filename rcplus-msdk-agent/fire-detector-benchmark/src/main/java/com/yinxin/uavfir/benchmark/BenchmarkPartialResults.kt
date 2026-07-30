@@ -87,6 +87,7 @@ internal object BenchmarkPartialResults {
         check(report.optString("reportDigest") == reportDigest(report)) {
             "Benchmark report digest does not match its contents"
         }
+        validatePersistedReport(engine, report, provenance)
         val document = current ?: JSONObject()
             .put("provenance", JSONObject(provenance.toString()))
             .put("engines", JSONObject())
@@ -225,6 +226,16 @@ internal object BenchmarkPartialResults {
         check(report.optString("reportDigest") == reportDigest(report)) {
             "Persisted benchmark report digest does not match its contents"
         }
+        val evidence = selectionInput(report)
+        check(evidence.engine == engine && EngineSelectionPolicy.hasCompleteEvidence(evidence)) {
+            "Persisted benchmark report evidence is incomplete"
+        }
+        if (engine == Engine.NCNN) {
+            check(
+                evidence.executingBenchmarkApkSha256 ==
+                    provenance.getString("benchmarkApkSha256"),
+            ) { "NCNN execution APK does not match the benchmark APK in session provenance" }
+        }
     }
 
     private fun validateProvenance(provenance: JSONObject) {
@@ -308,17 +319,13 @@ internal object BenchmarkPartialResults {
     private fun reportDigest(report: JSONObject): String {
         val copy = JSONObject(report.toString())
         copy.remove("reportDigest")
-        return MessageDigest.getInstance("SHA-256")
-            .digest(canonicalJson(copy).toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+        return BenchmarkEvidenceDigest.sha256(copy)
     }
 
     private fun finalResultDigest(result: JSONObject): String {
         val copy = JSONObject(result.toString())
         copy.remove("finalResultDigest")
-        return MessageDigest.getInstance("SHA-256")
-            .digest(canonicalJson(copy).toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+        return BenchmarkEvidenceDigest.sha256(copy)
     }
 
     private fun selectionInput(json: JSONObject): EngineBenchmark = EngineBenchmark(
@@ -352,19 +359,6 @@ internal object BenchmarkPartialResults {
         executingNcnnBridgeSha256 = json.optString("executingNcnnBridgeSha256").takeIf(String::isNotBlank),
         reviewedNcnnBridgeSourceSha256 = json.optString("reviewedNcnnBridgeSourceSha256").takeIf(String::isNotBlank),
     )
-
-    private fun canonicalJson(value: Any?): String = when (value) {
-        is JSONObject -> value.keysSet().sorted().joinToString(prefix = "{", postfix = "}") { key ->
-            "${key.length}:$key=${canonicalJson(value.get(key))}"
-        }
-        is JSONArray -> (0 until value.length()).joinToString(prefix = "[", postfix = "]") {
-            canonicalJson(value.get(it))
-        }
-        is Boolean -> "b:$value"
-        is Number -> "n:$value"
-        JSONObject.NULL, null -> "null"
-        else -> "s:${value.toString().length}:$value"
-    }
 
     private fun valuesMatch(first: JSONObject, second: JSONObject, field: String): Boolean = when (field) {
         "agentVersionCode", "sessionStartedAtEpochMillis", "sessionExpiresAtEpochMillis",

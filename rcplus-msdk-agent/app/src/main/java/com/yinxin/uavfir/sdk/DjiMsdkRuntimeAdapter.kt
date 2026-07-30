@@ -13,11 +13,16 @@ class DjiMsdkRuntimeAdapter(
 
     override suspend fun initialize(): Boolean {
         if (!sdkClient.initialize()) {
+            AgentSdkHealthState.tracker.markMsdkUnavailable()
             return false
         }
         AgentSdkHealthState.tracker.markMsdkInitialized()
         val registered = sdkClient.registerApp()
-        if (registered) AgentSdkHealthState.tracker.markSdkRegistered()
+        if (registered) {
+            AgentSdkHealthState.tracker.markSdkRegistered()
+        } else {
+            AgentSdkHealthState.tracker.markMsdkUnavailable()
+        }
         return registered
     }
 

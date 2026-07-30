@@ -12,15 +12,18 @@ class FormalAgentHealthContractTest {
     fun parse_acceptsHealthyRuntimeResponseBoundToTrustedRelease() {
         val health = FormalAgentHealthContract.parse(
             mapOf(
-                "schemaVersion" to 1,
+                "schemaVersion" to 2,
                 "sdkRegistered" to true,
                 "uxsdkReal" to true,
                 "msdkReady" to true,
                 "buildId" to "uavfire-agent-0.1.3-4",
                 "versionName" to "0.1.3",
                 "versionCode" to 4L,
+                "observedAtElapsedRealtimeMillis" to 10_000L,
+                "maxAgeMillis" to 5_000L,
             ),
             trust,
+            nowElapsedRealtimeMillis = 10_100L,
         )
 
         assertEquals("uavfire-agent-0.1.3-4", health.buildId)
@@ -30,15 +33,37 @@ class FormalAgentHealthContractTest {
     fun parse_rejectsMetadataOnlyClaimBeforeMsdkRegistration() {
         FormalAgentHealthContract.parse(
             mapOf(
-                "schemaVersion" to 1,
+                "schemaVersion" to 2,
                 "sdkRegistered" to false,
                 "uxsdkReal" to true,
                 "msdkReady" to true,
                 "buildId" to "uavfire-agent-0.1.3-4",
                 "versionName" to "0.1.3",
                 "versionCode" to 4L,
+                "observedAtElapsedRealtimeMillis" to 10_000L,
+                "maxAgeMillis" to 5_000L,
             ),
             trust,
+            nowElapsedRealtimeMillis = 10_100L,
+        )
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun parse_rejectsStaleHealthObservation() {
+        FormalAgentHealthContract.parse(
+            mapOf(
+                "schemaVersion" to 2,
+                "sdkRegistered" to true,
+                "uxsdkReal" to true,
+                "msdkReady" to true,
+                "buildId" to "uavfire-agent-0.1.3-4",
+                "versionName" to "0.1.3",
+                "versionCode" to 4L,
+                "observedAtElapsedRealtimeMillis" to 10_000L,
+                "maxAgeMillis" to 5_000L,
+            ),
+            trust,
+            nowElapsedRealtimeMillis = 15_001L,
         )
     }
 }

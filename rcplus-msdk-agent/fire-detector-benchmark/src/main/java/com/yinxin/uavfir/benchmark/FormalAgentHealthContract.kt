@@ -7,7 +7,11 @@ internal data class FormalAgentHealth(
 )
 
 internal object FormalAgentHealthContract {
-    fun parse(values: Map<String, Any?>, trust: FormalAgentTrust): FormalAgentHealth {
+    fun parse(
+        values: Map<String, Any?>,
+        trust: FormalAgentTrust,
+        nowElapsedRealtimeMillis: Long,
+    ): FormalAgentHealth {
         check(values.keys == setOf(
             "schemaVersion",
             "sdkRegistered",
@@ -16,8 +20,10 @@ internal object FormalAgentHealthContract {
             "buildId",
             "versionName",
             "versionCode",
+            "observedAtElapsedRealtimeMillis",
+            "maxAgeMillis",
         )) { "Agent health response is incomplete" }
-        check((values["schemaVersion"] as? Number)?.toInt() == 1) {
+        check((values["schemaVersion"] as? Number)?.toInt() == 2) {
             "Unsupported Agent health schema"
         }
         check(values["sdkRegistered"] == true && values["uxsdkReal"] == true && values["msdkReady"] == true) {
@@ -27,6 +33,16 @@ internal object FormalAgentHealthContract {
         val versionName = values["versionName"] as? String ?: error("Agent health versionName is invalid")
         val versionCode = (values["versionCode"] as? Number)?.toLong()
             ?: error("Agent health versionCode is invalid")
+        val observedAt = (values["observedAtElapsedRealtimeMillis"] as? Number)?.toLong()
+            ?: error("Agent health observation time is invalid")
+        val maxAge = (values["maxAgeMillis"] as? Number)?.toLong()
+            ?: error("Agent health maximum age is invalid")
+        check(
+            maxAge in 1..MAX_ALLOWED_AGE_MILLIS &&
+                observedAt in (nowElapsedRealtimeMillis - maxAge)..nowElapsedRealtimeMillis,
+        ) {
+            "Formal Agent SDK health observation is stale"
+        }
         check(
             buildId == trust.buildId &&
                 versionName == trust.versionName &&
@@ -34,4 +50,6 @@ internal object FormalAgentHealthContract {
         ) { "Agent health response does not match the trusted release" }
         return FormalAgentHealth(buildId, versionName, versionCode)
     }
+
+    private const val MAX_ALLOWED_AGE_MILLIS = 5_000L
 }

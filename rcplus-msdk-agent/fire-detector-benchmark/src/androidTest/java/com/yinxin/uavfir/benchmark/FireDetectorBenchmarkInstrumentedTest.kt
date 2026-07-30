@@ -37,6 +37,12 @@ class FireDetectorBenchmarkInstrumentedTest {
                 "No completed formal visible-960 result is available"
             }
             val result = JSONObject(source.readText())
+            val assets = BenchmarkAssets(context).also(BenchmarkAssets::verifyIntegrity)
+            val currentStaticProvenance = captureStaticProvenance(assets)
+            BenchmarkPartialResults.requireMatchingStaticProvenance(
+                result.getJSONObject("provenance"),
+                currentStaticProvenance,
+            )
             BenchmarkPartialResults.validateFinalResult(
                 result,
                 System.currentTimeMillis(),

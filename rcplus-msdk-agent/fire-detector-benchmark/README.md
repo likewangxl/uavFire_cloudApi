@@ -53,7 +53,12 @@ reviewed. Add only the exact release signer/APK/version/build ID approved for th
 gate. The APK must expose the signature-protected `agent-sdk-health-v1` provider, and
 the benchmark APK must use the same approved signer. The provider reports healthy
 only after the real UXSDK class/source, MSDK initialization, and SDK registration
-have all succeeded. No instrumentation argument can self-attest Agent identity.
+have all succeeded. Each provider call re-reads the current DJI SDK registration
+state and returns a monotonic observation time plus a five-second maximum age.
+Initialization or registration failure resets readiness, and stale or
+lost-registration responses fail the soak immediately. Provider discovery uses
+normal unlocked-user PackageManager semantics, so the direct-boot-unaware provider
+is reachable. No instrumentation argument can self-attest Agent identity.
 The installed Agent process and provider must remain healthy at
 the start, throughout, and end of every soak. The final JSON records the exact model, benchmark, PyTorch
 baseline, benchmark APK, instrumentation APK, device fingerprint, hashed Android ID,
@@ -62,7 +67,10 @@ runtime libraries, and NCNN package/source/bridge hashes.
 
 Partial engine results are merged only when every provenance field, harness-generated
 session nonce, boot ID, six-hour monotonic-clock expiry, provenance digest, adapter
-target, and per-report digest matches. Operators do
+target, and per-report digest matches. Equivalent JSON numbers such as `152.0` and
+`152` have the same digest representation; non-finite values are rejected. The
+NCNN executing benchmark APK must equal the APK captured in session provenance.
+Operators do
 not supply a run ID. For thermal safety on RC Plus 2, start the split sequence with
 ONNX and then continue the same on-device session:
 
@@ -78,9 +86,12 @@ ONNX and then continue the same on-device session:
 ```
 
 Starting a gate deletes old final/partial files in both app storage locations.
-`exportOnly` never exports partial evidence: it revalidates freshness, all three
-report digests, actual adapter identities, final-result digest, and recomputes NCNN
-selection before copying the completed result into `filesDir`. A schema-less result
+`exportOnly` never exports partial evidence: it first recaptures the current Agent,
+benchmark APK, instrumentation APK, signing certificates, model assets, device
+identity, and live Agent health and requires them to match the session. It then
+revalidates freshness, all three report digests, actual adapter identities,
+final-result digest, and recomputes NCNN selection before copying the completed
+result into `filesDir`. A schema-less result
 or a partial without exact current provenance is legacy evidence
 and must never be used for selection. Previously generated thermal results belong
 under `build/quarantine/*.quarantined`, not at the normal result path.

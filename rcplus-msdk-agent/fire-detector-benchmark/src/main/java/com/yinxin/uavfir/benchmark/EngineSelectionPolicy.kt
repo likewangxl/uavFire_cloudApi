@@ -43,7 +43,7 @@ object EngineSelectionPolicy {
     fun select(pytorchRecall: Double, candidates: List<EngineBenchmark>): EngineBenchmark? {
         if (candidates.size != Engine.entries.size) return null
         if (candidates.map(EngineBenchmark::engine).toSet() != Engine.entries.toSet()) return null
-        if (candidates.any { !it.hasCompleteEvidence() }) return null
+        if (candidates.any { !hasCompleteEvidence(it) }) return null
         val ncnn = candidates.singleOrNull { it.engine == Engine.NCNN } ?: return null
         return ncnn.takeIf {
             it.recall >= pytorchRecall - MAX_RECALL_DROP &&
@@ -52,7 +52,7 @@ object EngineSelectionPolicy {
         }
     }
 
-    private fun EngineBenchmark.hasCompleteEvidence(): Boolean =
+    internal fun hasCompleteEvidence(candidate: EngineBenchmark): Boolean = with(candidate) {
         recall in 0.0..1.0 &&
             p95Millis > 0.0 &&
             firstWindowP95Millis > 0.0 &&
@@ -88,6 +88,7 @@ object EngineSelectionPolicy {
                         executingNcnnBridgeSha256 == null &&
                         reviewedNcnnBridgeSourceSha256 == null
             }
+    }
 
     private val SHA256 = Regex("[0-9a-f]{64}")
 }
