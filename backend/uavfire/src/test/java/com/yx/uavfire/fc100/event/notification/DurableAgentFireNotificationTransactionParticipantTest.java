@@ -10,6 +10,7 @@ import com.yx.uavfire.fc100.event.notification.service.DurableAgentFireNotificat
 import com.yx.uavfire.fc100.event.notification.service.FireNotificationDispatcher;
 import com.yx.uavfire.fc100.event.service.AgentFireNotificationConflictException;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
@@ -29,6 +30,10 @@ class DurableAgentFireNotificationTransactionParticipantTest {
     private final DurableAgentFireNotificationTransactionParticipant participant =
         new DurableAgentFireNotificationTransactionParticipant(mapper, json, () -> 2_000L, dispatcher);
 
+    @BeforeEach void beginSynchronization() {
+        TransactionSynchronizationManager.initSynchronization();
+    }
+
     @AfterEach void clearSynchronization() {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.clearSynchronization();
@@ -37,7 +42,6 @@ class DurableAgentFireNotificationTransactionParticipantTest {
 
     @Test void initialFireUsesExactChinesePayloadAndWakesOnlyAfterCommit() throws Exception {
         when(mapper.insertOutbox(any())).thenReturn(1);
-        TransactionSynchronizationManager.initSynchronization();
         assertTrue(participant.enqueue(event("FIRE", "LASER_LOCATING"), report("FIRE", "LASER_LOCATING"), 1));
         verify(dispatcher, never()).wakeAfterCommit();
 
@@ -57,6 +61,14 @@ class DurableAgentFireNotificationTransactionParticipantTest {
         assertEquals(1, callbacks.size());
         callbacks.get(0).afterCommit();
         verify(dispatcher).wakeAfterCommit();
+    }
+
+    @Test void missingTransactionSynchronizationFailsClosedWithoutInsertOrDirectWake() {
+        TransactionSynchronizationManager.clearSynchronization();
+        assertThrows(com.yx.uavfire.fc100.event.service.AgentFireIngressUnavailableException.class,
+            () -> participant.enqueue(event("FIRE", "LASER_LOCATING"), report("FIRE", "LASER_LOCATING"), 1));
+        verify(mapper, never()).insertOutbox(any());
+        verify(dispatcher, never()).wakeAfterCommit();
     }
 
     @Test void preciseSmokeCarriesOnlyGroundFireCoordinatesAndExactMessage() throws Exception {

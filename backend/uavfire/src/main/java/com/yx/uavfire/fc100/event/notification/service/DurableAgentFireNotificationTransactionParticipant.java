@@ -10,6 +10,7 @@ import com.yx.uavfire.fc100.event.notification.model.FireNotificationOutboxEntit
 import com.yx.uavfire.fc100.event.notification.model.FireNotificationPayload;
 import com.yx.uavfire.fc100.event.service.AgentFireNotificationTransactionParticipant;
 import com.yx.uavfire.fc100.event.service.AgentFireNotificationConflictException;
+import com.yx.uavfire.fc100.event.service.AgentFireIngressUnavailableException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -43,6 +44,10 @@ public class DurableAgentFireNotificationTransactionParticipant
     @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean enqueue(FireEventEntity event, AgentFireReportParam report, int notificationVersion) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new AgentFireIngressUnavailableException(
+                "fire notification Outbox requires after-commit transaction synchronization");
+        }
         FireNotificationOutboxEntity desired = build(event, report, notificationVersion);
         FireNotificationOutboxEntity existing = mapper.selectIdentity(event.getEventId(), notificationVersion);
         if (existing != null) return exact(existing, desired);
@@ -101,13 +106,9 @@ public class DurableAgentFireNotificationTransactionParticipant
     }
 
     private void wakeOnlyAfterCommit() {
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override public void afterCommit() { dispatcher.wakeAfterCommit(); }
-            });
-        } else {
-            dispatcher.wakeAfterCommit();
-        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override public void afterCommit() { dispatcher.wakeAfterCommit(); }
+        });
     }
 
     private String write(FireNotificationPayload payload) {

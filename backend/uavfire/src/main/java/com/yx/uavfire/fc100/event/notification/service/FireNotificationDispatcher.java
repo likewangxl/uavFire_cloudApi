@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 @Slf4j
@@ -24,7 +25,8 @@ public class FireNotificationDispatcher {
     private final ObjectMapper json;
     private final Clock clock;
     private final Executor executor;
-    private final AtomicBoolean wakeQueued = new AtomicBoolean();
+    private final AtomicBoolean workerScheduled = new AtomicBoolean();
+    private final AtomicLong requestedEpoch = new AtomicLong();
 
     public FireNotificationDispatcher(FireNotificationOutboxStore store,
                                       IWebSocketMessageService webSocket,
@@ -35,16 +37,35 @@ public class FireNotificationDispatcher {
     }
 
     public void wakeAfterCommit() {
-        if (!wakeQueued.compareAndSet(false, true)) return;
+        requestedEpoch.incrementAndGet();
+        scheduleWorker();
+    }
+
+    private void scheduleWorker() {
+        if (!workerScheduled.compareAndSet(false, true)) return;
         try {
-            executor.execute(() -> {
-                try { dispatchDue(); }
-                catch (RuntimeException failure) { log.warn("Fire notification after-commit dispatch failed", failure); }
-                finally { wakeQueued.set(false); }
-            });
+            executor.execute(this::drainCommittedWakes);
         } catch (RuntimeException rejected) {
-            wakeQueued.set(false);
+            workerScheduled.set(false);
             log.warn("Fire notification after-commit wake rejected", rejected);
+        }
+    }
+
+    private void drainCommittedWakes() {
+        long handledEpoch = 0L;
+        while (true) {
+            long targetEpoch = requestedEpoch.get();
+            try { dispatchDue(); }
+            catch (RuntimeException failure) { log.warn("Fire notification after-commit dispatch failed", failure); }
+            handledEpoch = targetEpoch;
+            if (requestedEpoch.get() != handledEpoch) continue;
+
+            workerScheduled.set(false);
+            if (requestedEpoch.get() == handledEpoch) return;
+            // A wake raced with the final clear. Either this worker reacquires
+            // ownership and drains it, or the waking caller already scheduled
+            // the sole executor and this worker can return.
+            if (!workerScheduled.compareAndSet(false, true)) return;
         }
     }
 

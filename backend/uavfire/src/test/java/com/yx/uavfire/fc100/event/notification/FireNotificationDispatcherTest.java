@@ -11,6 +11,10 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -80,6 +84,37 @@ class FireNotificationDispatcherTest {
             store, webSocket, new ObjectMapper(), () -> 1_000L, rejected);
         assertDoesNotThrow(rejecting::wakeAfterCommit);
         verifyNoInteractions(webSocket);
+    }
+
+    @Test void wakeDuringActiveDispatchIsDrainedImmediatelyWithoutScheduler() throws Exception {
+        ExecutorService single = Executors.newSingleThreadExecutor();
+        try {
+            FireNotificationDispatcher concurrent = new FireNotificationDispatcher(
+                store, webSocket, new ObjectMapper(), () -> 1_000L, single);
+            FireNotificationOutboxEntity first = row(1L, "{}", "lease-1");
+            FireNotificationOutboxEntity second = row(2L, "{}", "lease-2");
+            when(store.claim(25, 1_000L)).thenReturn(
+                Collections.singletonList(first), Collections.singletonList(second));
+            CountDownLatch firstSendEntered = new CountDownLatch(1);
+            CountDownLatch releaseFirstSend = new CountDownLatch(1);
+            when(webSocket.sendStrict(any(), any(), any())).thenAnswer(invocation -> {
+                firstSendEntered.countDown();
+                assertTrue(releaseFirstSend.await(5, TimeUnit.SECONDS));
+                return new IWebSocketMessageService.DeliveryResult(1, 1, null);
+            }).thenReturn(new IWebSocketMessageService.DeliveryResult(1, 1, null));
+            when(store.markSent(any(), eq(1_000L))).thenReturn(true);
+
+            concurrent.wakeAfterCommit();
+            assertTrue(firstSendEntered.await(5, TimeUnit.SECONDS));
+            concurrent.wakeAfterCommit();
+            releaseFirstSend.countDown();
+
+            verify(store, timeout(5_000).times(2)).claim(25, 1_000L);
+            verify(store, timeout(5_000)).markSent(second, 1_000L);
+            verify(store, times(2)).claim(25, 1_000L);
+        } finally {
+            single.shutdownNow();
+        }
     }
 
     private FireNotificationOutboxEntity row(long id, String payload, String lease) {
