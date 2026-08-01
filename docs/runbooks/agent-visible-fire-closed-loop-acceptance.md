@@ -49,9 +49,12 @@ git status --short >"$ACCEPTANCE_DIR/worktree-status.txt"
 (cd backend/uavfire && mvn -q test) \
   2>&1 | tee "$ACCEPTANCE_DIR/automated/backend-test.log"
 
-(cd rcplus-msdk-agent && ./gradlew --console=plain \
+(cd rcplus-msdk-agent && \
+  : "${NCNN_ANDROID_NDK_DIR:?set NCNN_ANDROID_NDK_DIR to the reviewed Android NDK}" && \
+  ./gradlew --console=plain --rerun-tasks \
+  -PncnnAndroidNdkDir="$NCNN_ANDROID_NDK_DIR" \
   :fire-detector-benchmark:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug) \
-  2>&1 | tee "$ACCEPTANCE_DIR/automated/agent-build.log"
+  2>&1 | tee "$ACCEPTANCE_DIR/automated/agent-build-with-local-ndk.log"
 
 (cd frontend && node --test src/pages/page-web/projects/__tests__/*.test.mjs scripts/*.test.mjs) \
   2>&1 | tee "$ACCEPTANCE_DIR/automated/frontend-test.log"
@@ -61,14 +64,36 @@ git status --short >"$ACCEPTANCE_DIR/worktree-status.txt"
 
 while IFS= read -r file; do
   shasum -a 256 "$file"
-done < <(rg --files "$ACCEPTANCE_DIR/automated" | LC_ALL=C sort) \
+done < <(rg --files --no-ignore "$ACCEPTANCE_DIR/automated" \
+  | rg -v '/SHA256SUMS$' | LC_ALL=C sort) \
   >"$ACCEPTANCE_DIR/automated/SHA256SUMS"
 ```
 
 ### 2026-08-01 当前自动化记录
 
-Task 14 fix 尚在同一 worktree 收尾期间，完整 clean-worktree gate 尚未执行。不得引用早期模块
-结果作为 Task 15 完整通过。真实执行后在这里填写命令时间、测试数、失败基线和日志哈希。
+代码验收提交：`05829aac47cc89ba5ee15b0e8b0be69b36c633a8`；开始时间
+`2026-08-01T10:17:23Z`。执行前 `git status --short` 为空。日志目录：
+`/Users/likewang/uavfire/.worktrees/agent-fire-detection/artifacts/acceptance/agent-visible-fire/20260801T101718Z-05829aa/automated/`。
+
+| 门禁 | 结果 |
+| --- | --- |
+| 生产静态策略 fixture + 当前 checkout | 通过 |
+| 离线工具 pytest | 199 通过、1 跳过、0 失败 |
+| backend Maven | 514 通过、0 失败 |
+| Agent JVM | 491 通过、0 失败 |
+| detector benchmark JVM | 76 通过、0 失败 |
+| Agent debug APK | 构建成功，93 个 task 全部强制执行 |
+| frontend Node tests | 303 通过、0 失败 |
+| frontend production build | 成功，3009 modules transformed |
+
+首次使用 `--rerun-tasks` 的 Agent 打包因为没有提供 Android NDK 路径而真实失败；日志保留在
+`agent-build.log`。随后显式传入已安装的 NDK，并在 `agent-build-with-local-ndk.log` 中完成
+全量强制构建。此项归类为构建环境前置条件，不掩盖为缓存通过。自动化门禁结论为
+`AUTOMATED_PASS`，日志和产物 SHA-256 见同目录校验清单。
+
+之前 frontend 的 19 项失败均为断言仍指向已退役的 UI/控制入口；提交 `775ced7` 将断言对齐
+当前生产控制，不作为“既有失败”忽略。设备门禁仍全部阻塞，因此总体发布结论不变，仍为
+`NOT_READY_DEFAULT_OFF`。
 
 ## 5. 设备门禁（严格顺序）
 

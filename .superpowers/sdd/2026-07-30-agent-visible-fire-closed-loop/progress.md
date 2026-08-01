@@ -84,3 +84,6 @@ Task 13: implementation complete (backend 494/494, Agent 479/479, debug APK and 
 - Preserved detector heartbeat fields through cache and Redis restore.
 - Removed obsolete commented/vacuous tests.
 - Verification: backend 500/500, Agent 484/484, debug APK assembled; RC Plus acceptance remains pending.
+Task 13: complete (final commit 05829aa, independent rereview APPROVE; Critical 0 / Important 0 / Minor 0). Detector observations are monotonic across backend nodes; RC Plus device acceptance remains pending.
+Task 14: complete (final commit 1ae5fd3, independent rereview APPROVE; Critical 0 / Important 0 / Minor 0). Frontend reconciles authoritative fire snapshots and renders controlled Chinese status text.
+Task 15: complete (commits 8701e5e and 775ced7; static production policy and acceptance/rollback documentation complete). Clean code baseline 05829aa gates: static PASS, offline pytest 199 passed/1 skipped, backend 514/514, Agent 491/491, benchmark 76/76, frontend 303/303, Agent APK/frontend production builds green. The Agent forced build requires an explicit reviewed Android NDK path. All RC Plus, visible-960 three-engine, soak, real-laser, no-prop, and controlled-flight gates remain BLOCKED_PENDING_DEVICE; release status is NOT_READY_DEFAULT_OFF.
