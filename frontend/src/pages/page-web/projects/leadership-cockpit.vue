@@ -237,7 +237,7 @@
                   <div class="fire-event-detail-stats">
                     <section>
                       <span>优先级</span>
-                      <strong>{{ event.fireLevel || '--' }}</strong>
+                      <strong>{{ formatFireLevel(event.fireLevel) }}</strong>
                     </section>
                     <section>
                       <span>置信度</span>
@@ -733,9 +733,11 @@ import {
   formatDetectionStatus,
   formatEventSource,
   formatEventStatus,
+  formatFireLevel,
   formatGeoQuality,
   formatLocationExplanation,
   formatMissionStatus,
+  mergeFireEventSnapshot,
   reconcileFireEventUpdate
 } from './fire/fire-event-status.mjs'
 
@@ -1899,7 +1901,7 @@ async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
   try {
     const res = await fireEventApi.list()
     const events = res.data.data ?? []
-    fireEventState.events = events
+    fireEventState.events = mergeFireEventSnapshot(fireEventState.events, events) as FireEventDTO[]
     fireEventState.error = ''
     cockpitLastRefreshAt.value = Date.now()
     const missionNos = Array.from(new Set(events.map(event => event.missionNo).filter(Boolean))) as string[]

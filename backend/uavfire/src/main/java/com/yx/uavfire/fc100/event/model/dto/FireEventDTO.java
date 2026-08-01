@@ -37,6 +37,10 @@ public class FireEventDTO {
     private Integer reportCount;
     private String lastSourceEventId;
     private Integer notificationVersion;
+    private String detectionKind;
+    private String detectionStatus;
+    private String locationStatus;
+    private String flightStatus;
     private String status;
     private String confirmedStatus;
     private Long linkedIncidentId;

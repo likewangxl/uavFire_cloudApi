@@ -15,6 +15,8 @@ public class FireNotificationPayload {
     private String state;
     private String locationStatus;
     private String flightStatus;
+    private String geoMethod;
+    private Double geoErrorRadiusM;
     private Double fireLat;
     private Double fireLng;
     private Double fireAlt;

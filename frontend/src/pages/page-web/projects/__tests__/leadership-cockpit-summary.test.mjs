@@ -51,7 +51,7 @@ test('builds cockpit metrics from connected backend data sources', () => {
   })
 
   assert.equal(summary.metrics.find(item => item.key === 'activeFireEvents').value, '2')
-  assert.equal(summary.metrics.find(item => item.key === 'highestFireLevel').value, 'HIGH')
+  assert.equal(summary.metrics.find(item => item.key === 'highestFireLevel').value, '高风险')
   assert.equal(summary.metrics.find(item => item.key === 'aiEvents').note, '2 条风险记录')
   assert.equal(summary.metrics.find(item => item.key === 'liveOnline').value, '2')
   assert.equal(summary.metrics.find(item => item.key === 'aircraftOnline').value, '2/3')
@@ -128,6 +128,18 @@ test('normalizes numeric FC100 model keys before showing cockpit cards', () => {
   assert.equal(summary.aircraftRows.find(item => item.sn === 'FC100-001').name, 'DJI Flycart100')
 })
 
+test('renders unknown fire levels and monitor fallbacks in Chinese', () => {
+  const summary = buildCockpitSummary({
+    fireEvents: [{ eventId: 'event-unknown', fireLevel: 'UNKNOWN', status: 'NEW' }],
+    msdkDevices: [{ aircraftSn: 'MONITOR-0001', online: true }]
+  })
+
+  assert.equal(summary.metrics.find(item => item.key === 'highestFireLevel').value, '未知等级')
+  assert.equal(summary.metrics.find(item => item.key === 'activeFireEvents').detailPopover.rows[0].title, '未知等级 · event-unknown')
+  assert.equal(summary.aircraftRows[0].name, '监测机 0001')
+  assert.doesNotMatch(JSON.stringify(summary.metrics), /\bUNKNOWN\b|\bHIGH\b|\bMED\b|\bLOW\b/)
+})
+
 test('builds rich hover details for highlighted cockpit summary cards', () => {
   const summary = buildCockpitSummary({
     fireEvents: [
@@ -200,12 +212,12 @@ test('builds rich hover details for highlighted cockpit summary cards', () => {
 
   const activeFireDetails = summary.metrics.find(item => item.key === 'activeFireEvents').detailPopover
   assert.equal(activeFireDetails.stats.find(item => item.key === 'total').value, '2')
-  assert.equal(activeFireDetails.rows[0].title, 'HIGH · HIGH-FIRE-001')
+  assert.equal(activeFireDetails.rows[0].title, '高风险 · HIGH-FIRE-001')
   assert.match(activeFireDetails.rows[0].detail, /34\.66791, 109\.32667/)
 
   const highestDetails = summary.metrics.find(item => item.key === 'highestFireLevel').detailPopover
   assert.equal(highestDetails.stats.find(item => item.key === 'highestCount').value, '1')
-  assert.equal(highestDetails.rows[0].title, 'HIGH · HIGH-FIRE-001')
+  assert.equal(highestDetails.rows[0].title, '高风险 · HIGH-FIRE-001')
 
   const aiDetails = summary.metrics.find(item => item.key === 'aiEvents').detailPopover
   assert.equal(aiDetails.stats.find(item => item.key === 'total').value, '1')

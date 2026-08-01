@@ -75,11 +75,14 @@ class DurableAgentFireNotificationTransactionParticipantTest {
         when(mapper.insertOutbox(any())).thenReturn(1);
         FireEventEntity event = event("SMOKE", "PRECISE");
         event.setLat(34.1); event.setLng(108.9); event.setAlt(123.0);
+        event.setGeoErrorRadiusM(2.5);
         event.setAircraftLat(34.2); event.setAircraftLng(109.0); event.setAircraftAlt(130.0);
         assertTrue(participant.enqueue(event, report("SMOKE", "PRECISE"), 2));
         JsonNode payload = json.readTree(inserted().getPayload());
         assertEquals("目标已完成激光定位", payload.get("message").asText());
         assertEquals("SMOKE", payload.get("detectionKind").asText());
+        assertEquals("LASER_RANGEFINDER", payload.get("geoMethod").asText());
+        assertEquals(2.5, payload.get("geoErrorRadiusM").asDouble());
         assertEquals(34.1, payload.get("fireLat").asDouble());
         assertEquals(108.9, payload.get("fireLng").asDouble());
         assertTrue(payload.get("aircraftLat").isNull());
@@ -95,6 +98,7 @@ class DurableAgentFireNotificationTransactionParticipantTest {
         assertTrue(payload.get("fireLat").isNull()); assertTrue(payload.get("fireLng").isNull());
         assertEquals(34.2, payload.get("aircraftLat").asDouble());
         assertEquals(109.0, payload.get("aircraftLng").asDouble());
+        assertEquals("AIRCRAFT_OBSERVATION", payload.get("geoMethod").asText());
     }
 
     @Test void exactExistingIdentityIsIdempotentButDifferentContentConflicts() {

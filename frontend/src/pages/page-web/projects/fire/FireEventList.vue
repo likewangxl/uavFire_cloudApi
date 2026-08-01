@@ -242,6 +242,7 @@ import {
   formatEventStatus,
   formatGeoQuality,
   formatLocationExplanation,
+  mergeFireEventSnapshot,
   reconcileFireEventUpdate
 } from './fire-event-status.mjs'
 
@@ -432,7 +433,7 @@ async function loadEvents () {
       eventApi.list(),
       missionApi.list({ size: 500 }),
     ])
-    events.value = eventRes.data.data ?? []
+    events.value = mergeFireEventSnapshot(events.value, eventRes.data.data ?? []) as FireEventDTO[]
     // 后端任务列表按 create_time 倒序，同一事件多次尝试时保留首个(=最新)
     const map: Record<number, FireMissionDTO> = {}
     for (const m of missionRes.data.data ?? []) {

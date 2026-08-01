@@ -976,6 +976,11 @@ class FireEventServiceImplMergeTest {
     @Test
     void listIncludesActiveMissionNoAndStatusForFireEventActions() {
         FireEventEntity event = existingEvent(7L, 34.658600, 109.340600, "HIGH", "0.95", 1779163200000L);
+        event.setDetectionKind("FIRE");
+        event.setDetectionStatus("RESULT_DURABLE");
+        event.setLocationStatus("PRECISE");
+        event.setFlightStatus("MISSION_RESUMED");
+        event.setGeoMethod("LASER_RANGEFINDER");
         FireMissionEntity mission = new FireMissionEntity();
         mission.setMissionNo("MISSION-001");
         mission.setStatus("WAITING_REVIEW");
@@ -987,6 +992,35 @@ class FireEventServiceImplMergeTest {
 
         assertEquals("MISSION-001", list.get(0).getMissionNo());
         assertEquals("WAITING_REVIEW", list.get(0).getMissionStatus());
+        assertEquals("FIRE", list.get(0).getDetectionKind());
+        assertEquals("RESULT_DURABLE", list.get(0).getDetectionStatus());
+        assertEquals("PRECISE", list.get(0).getLocationStatus());
+        assertEquals("MISSION_RESUMED", list.get(0).getFlightStatus());
+        assertEquals("LASER_RANGEFINDER", list.get(0).getGeoMethod());
+    }
+
+    @Test
+    void historyProjectsAgentDetectionAndLocationContractFields() {
+        FireEventEntity event = existingEvent(7L, 34.658600, 109.340600, "HIGH", "0.95", 1779163200000L);
+        FireEventHistoryEntity history = new FireEventHistoryEntity();
+        history.setFireEventId(7L);
+        history.setEventId("event-history-1");
+        history.setDetectionKind("SMOKE");
+        history.setDetectionStatus("RESULT_DURABLE");
+        history.setLocationStatus("PRECISE");
+        history.setFlightStatus("MISSION_RESUMED");
+        history.setGeoMethod("LASER_RANGEFINDER");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(event);
+        when(histories.selectList(any(QueryWrapper.class))).thenReturn(List.of(history));
+
+        var result = build().listHistory(event.getEventId(), 50);
+
+        assertEquals(1, result.size());
+        assertEquals("SMOKE", result.get(0).getDetectionKind());
+        assertEquals("RESULT_DURABLE", result.get(0).getDetectionStatus());
+        assertEquals("PRECISE", result.get(0).getLocationStatus());
+        assertEquals("MISSION_RESUMED", result.get(0).getFlightStatus());
+        assertEquals("LASER_RANGEFINDER", result.get(0).getGeoMethod());
     }
 
     @Test

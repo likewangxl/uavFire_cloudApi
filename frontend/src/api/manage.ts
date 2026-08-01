@@ -17,6 +17,8 @@ export interface FireEventUpdatePayload {
   state?: string
   locationStatus?: string
   flightStatus?: string
+  geoMethod?: string
+  geoErrorRadiusM?: number | null
   fireLat?: number | null
   fireLng?: number | null
   fireAlt?: number | null

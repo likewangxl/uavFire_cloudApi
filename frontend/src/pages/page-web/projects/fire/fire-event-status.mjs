@@ -79,6 +79,7 @@ const MISSION_STATUS_LABELS = Object.freeze({
   PAUSED: '已暂停',
   FINISHED: '已完成',
   COMPLETED: '已完成',
+  REJECTED: '已驳回',
   STOPPED: '已停止',
   CANCELED: '已取消',
   CANCELLED: '已取消',
@@ -115,6 +116,13 @@ const GEO_QUALITY_LABELS = Object.freeze({
   LOW_ACCURACY: '定位精度不足'
 })
 
+const FIRE_LEVEL_LABELS = Object.freeze({
+  HIGH: '高风险',
+  MEDIUM: '中风险',
+  LOW: '低风险',
+  UNKNOWN: '未知等级'
+})
+
 export const formatDetectionStatus = value => formatKnown(DETECTION_STATUS_LABELS, value)
 export const formatLocationStatus = value => formatKnown(LOCATION_STATUS_LABELS, value)
 export const formatFlightStatus = value => formatKnown(FLIGHT_STATUS_LABELS, value)
@@ -124,6 +132,7 @@ export const formatEventStatus = value => formatKnown(EVENT_STATUS_LABELS, value
 export const formatMissionStatus = value => formatKnown(MISSION_STATUS_LABELS, value)
 export const formatEventSource = value => formatKnown(EVENT_SOURCE_LABELS, value)
 export const formatGeoQuality = value => formatKnown(GEO_QUALITY_LABELS, value)
+export const formatFireLevel = value => formatKnown(FIRE_LEVEL_LABELS, value)
 
 export function formatLocationExplanation (event = {}) {
   const location = codeOf(event.locationStatus ?? event.location_status ?? event.geoQuality ?? event.geo_quality)
@@ -189,6 +198,27 @@ export function reconcileFireEventUpdate (events = [], update = {}) {
   return { events: [inserted, ...currentEvents], event: inserted, accepted: true, replaced: false }
 }
 
+export function mergeFireEventSnapshot (events = [], snapshot = []) {
+  const next = Array.isArray(events) ? events.slice() : []
+  for (const raw of Array.isArray(snapshot) ? snapshot : []) {
+    const incoming = normalizeFireEventUpdate(raw)
+    const eventId = incoming.eventId == null ? '' : String(incoming.eventId).trim()
+    if (!eventId) continue
+    const index = next.findIndex(event => String(event?.eventId ?? event?.event_id ?? '') === eventId)
+    if (index < 0) {
+      next.push(compactDefined({ ...incoming, eventId }))
+      continue
+    }
+    const current = next[index]
+    const currentVersion = toVersion(current?.notificationVersion ?? current?.notification_version)
+    const incomingVersion = toVersion(incoming.notificationVersion)
+    next[index] = incomingVersion > currentVersion
+      ? mergeDefined(current, incoming)
+      : fillMissing(current, incoming)
+  }
+  return next
+}
+
 export function fireEventNotificationKey (eventOrId) {
   const eventId = typeof eventOrId === 'object' && eventOrId !== null
     ? eventOrId.eventId ?? eventOrId.event_id
@@ -207,6 +237,22 @@ function codeOf (value) {
 function toVersion (value) {
   const version = Number(value)
   return Number.isInteger(version) && version > 0 ? version : 0
+}
+
+function compactDefined (value) {
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined))
+}
+
+function mergeDefined (base, overlay) {
+  return { ...base, ...compactDefined(overlay) }
+}
+
+function fillMissing (base, fallback) {
+  const result = { ...base }
+  for (const [key, value] of Object.entries(fallback)) {
+    if ((result[key] === undefined || result[key] === null) && value !== undefined && value !== null) result[key] = value
+  }
+  return result
 }
 
 function firePoint (event) {

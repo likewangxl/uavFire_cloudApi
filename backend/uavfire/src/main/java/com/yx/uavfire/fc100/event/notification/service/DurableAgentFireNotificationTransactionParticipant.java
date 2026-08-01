@@ -80,8 +80,10 @@ public class DurableAgentFireNotificationTransactionParticipant
         payload.setFlightStatus(event.getFlightStatus()); payload.setEventTimestamp(report.getEventTimestamp());
         payload.setMessage(message);
         if ("PRECISE".equals(type)) {
+            payload.setGeoMethod("LASER_RANGEFINDER"); payload.setGeoErrorRadiusM(event.getGeoErrorRadiusM());
             payload.setFireLat(event.getLat()); payload.setFireLng(event.getLng()); payload.setFireAlt(event.getAlt());
         } else if ("DEGRADED_OSD".equals(type)) {
+            payload.setGeoMethod("AIRCRAFT_OBSERVATION");
             payload.setAircraftLat(event.getAircraftLat()); payload.setAircraftLng(event.getAircraftLng());
             payload.setAircraftAlt(event.getAircraftAlt());
         }

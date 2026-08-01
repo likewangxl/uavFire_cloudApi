@@ -14,10 +14,12 @@ import {
   formatMissionStatus,
   formatEventSource,
   formatGeoQuality,
+  formatFireLevel,
   formatLocationExplanation,
   isPreciseLaserFireLocation,
   isRouteReadyFireEvent,
   reconcileFireEventUpdate,
+  mergeFireEventSnapshot,
   fireEventNotificationKey
 } from '../fire/fire-event-status.mjs'
 
@@ -33,6 +35,12 @@ const FLIGHT_STATES = [
 ]
 const GEO_METHODS = ['LASER_RANGEFINDER', 'AIRCRAFT_OBSERVATION']
 const DETECTION_KINDS = ['FIRE', 'SMOKE']
+const MISSION_STATES = [
+  'CREATED', 'WAITING_REVIEW', 'APPROVED', 'ROUTE_GENERATED', 'ROUTE_EXPORTED',
+  'SENT_TO_DELIVERY', 'ACCEPTED_BY_PILOT', 'IN_PROGRESS', 'PAYLOAD_RELEASE_PENDING',
+  'PAYLOAD_RELEASED', 'RETURNING', 'REVIEWING', 'COMPLETED', 'REJECTED', 'CANCELLED',
+  'FAILED', 'MANUAL_TAKEOVER', 'PAYLOAD_RELEASE_FAILED', 'RETURN_FAILED', 'ARCHIVED'
+]
 const frontendRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..')
 
 test('every canonical Agent code has an intentional Chinese label', () => {
@@ -41,6 +49,8 @@ test('every canonical Agent code has an intentional Chinese label', () => {
   for (const code of FLIGHT_STATES) assertChinese(formatFlightStatus(code), code)
   for (const code of GEO_METHODS) assertChinese(formatGeoMethod(code), code)
   for (const code of DETECTION_KINDS) assertChinese(formatDetectionKind(code), code)
+  for (const code of MISSION_STATES) assertChinese(formatMissionStatus(code), code)
+  for (const code of ['HIGH', 'MEDIUM', 'LOW', 'UNKNOWN']) assertChinese(formatFireLevel(code), code)
 })
 
 test('unknown and empty codes never echo raw values', () => {
@@ -53,12 +63,43 @@ test('unknown and empty codes never echo raw values', () => {
     formatEventStatus,
     formatMissionStatus,
     formatEventSource,
-    formatGeoQuality
+    formatGeoQuality,
+    formatFireLevel
   ]) {
     for (const value of [null, undefined, '', 'TOTALLY_UNKNOWN_RAW']) {
       assert.equal(formatter(value), '未知状态')
     }
   }
+})
+
+test('a delayed HTTP v1 snapshot cannot overwrite websocket v2 and can still enrich missing fields', async () => {
+  let resolveSnapshot
+  let resolveWebsocket
+  const slowSnapshot = new Promise(resolve => { resolveSnapshot = resolve })
+  const fastWebsocket = new Promise(resolve => { resolveWebsocket = resolve })
+  let events = [{ eventId: 'event-1', notificationVersion: 1, source: 'AGENT_VISIBLE' }]
+
+  const pendingHttp = slowSnapshot.then(snapshot => {
+    events = mergeFireEventSnapshot(events, snapshot)
+  })
+  const pendingWebsocket = fastWebsocket.then(update => {
+    events = reconcileFireEventUpdate(events, update).events
+  })
+  resolveWebsocket({
+    eventId: 'event-1', notificationVersion: 2, detectionKind: 'FIRE', state: 'RESULT_DURABLE',
+    locationStatus: 'PRECISE', geoMethod: 'LASER_RANGEFINDER', fireLat: 34.8, fireLng: 109.2
+  })
+  await pendingWebsocket
+  resolveSnapshot([{
+    eventId: 'event-1', notificationVersion: 1, detectionKind: 'SMOKE', detectionStatus: 'VISUAL_CONFIRMED',
+    locationStatus: 'LASER_LOCATING', source: 'AGENT_VISIBLE', deviceSn: 'drone-1'
+  }])
+  await pendingHttp
+
+  assert.equal(events[0].notificationVersion, 2)
+  assert.equal(events[0].detectionKind, 'FIRE')
+  assert.equal(events[0].locationStatus, 'PRECISE')
+  assert.equal(events[0].deviceSn, 'drone-1')
 })
 
 test('degraded and smoke precise locations use explicit safe explanations', () => {
@@ -121,6 +162,7 @@ test('fire event pages consume websocket updates with the shared monotonic recon
     assert.match(source, /useConnectWebSocket/)
     assert.match(source, /parseFireEventUpdateMessage/)
     assert.match(source, /reconcileFireEventUpdate/)
+    assert.match(source, /mergeFireEventSnapshot/)
     assert.match(source, /fireEventNotificationKey/)
   }
   assert.match(manageSource, /FIRE_EVENT_UPDATE_BIZ_CODE\s*=\s*'fire_event_update'/)

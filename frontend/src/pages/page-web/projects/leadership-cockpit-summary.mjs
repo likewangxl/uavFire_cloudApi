@@ -126,7 +126,7 @@ export function buildCockpitSummary ({
       {
         key: 'highestFireLevel',
         label: '最高等级',
-        value: highestFireLevel === 'UNKNOWN' ? '--' : highestFireLevel,
+        value: formatFireLevel(highestFireLevel),
         note: pendingFireEvents > 0 ? `${pendingFireEvents} 个待处置` : `${missionLinked} 个已关联任务`,
         tone: highestFireLevel === 'HIGH' || highestFireLevel === 'MEDIUM' ? 'danger' : 'safe',
         source: '/api/fire/events',
@@ -588,9 +588,9 @@ function buildActiveFirePopover ({
     emptyText: '暂无活跃火情事件',
     stats: [
       { key: 'total', label: '活跃总数', value: String(activeFireEvents.length), tone: activeFireEvents.length > 0 ? 'danger' : 'default' },
-      { key: 'high', label: 'HIGH', value: String(fireLevelCounts.HIGH || 0), tone: fireLevelCounts.HIGH ? 'danger' : 'default' },
-      { key: 'medium', label: 'MED', value: String(fireLevelCounts.MEDIUM || 0), tone: fireLevelCounts.MEDIUM ? 'warning' : 'default' },
-      { key: 'low', label: 'LOW', value: String(fireLevelCounts.LOW || 0), tone: 'safe' },
+      { key: 'high', label: '高风险', value: String(fireLevelCounts.HIGH || 0), tone: fireLevelCounts.HIGH ? 'danger' : 'default' },
+      { key: 'medium', label: '中风险', value: String(fireLevelCounts.MEDIUM || 0), tone: fireLevelCounts.MEDIUM ? 'warning' : 'default' },
+      { key: 'low', label: '低风险', value: String(fireLevelCounts.LOW || 0), tone: 'safe' },
       { key: 'pending', label: '待处置', value: statByKey.get('pending')?.value || '0', tone: Number(statByKey.get('pending')?.value) > 0 ? 'warning' : 'default' },
       { key: 'missionLinked', label: '已关联', value: statByKey.get('missionLinked')?.value || '0', tone: 'safe' },
       { key: 'routeReady', label: '可生成航线', value: statByKey.get('routeReady')?.value || '0', tone: 'safe' }
@@ -615,12 +615,12 @@ function buildHighestFireLevelPopover ({
   return {
     title: '最高等级火情',
     subtitle: '火情等级研判',
-    statusLabel: fireEventsError ? '接口异常' : (highestFireLevel === 'UNKNOWN' ? '暂无等级' : highestFireLevel),
+    statusLabel: fireEventsError ? '接口异常' : formatFireLevel(highestFireLevel),
     statusTone: highestFireLevel === 'HIGH' || highestFireLevel === 'MEDIUM' ? 'danger' : 'safe',
     error: fireEventsError,
     emptyText: '暂无最高等级火情',
     stats: [
-      { key: 'highest', label: '最高等级', value: highestFireLevel === 'UNKNOWN' ? '--' : highestFireLevel, tone: highestFireLevel === 'HIGH' || highestFireLevel === 'MEDIUM' ? 'danger' : 'safe' },
+      { key: 'highest', label: '最高等级', value: formatFireLevel(highestFireLevel), tone: highestFireLevel === 'HIGH' || highestFireLevel === 'MEDIUM' ? 'danger' : 'safe' },
       { key: 'highestCount', label: '同级事件', value: String(highestRows.length), tone: highestRows.length > 0 ? 'danger' : 'default' },
       { key: 'pending', label: '待处置', value: String(pendingFireEvents), tone: pendingFireEvents > 0 ? 'warning' : 'default' },
       { key: 'routeReady', label: '定位可用', value: String(routeReady), tone: 'safe' }
@@ -642,7 +642,7 @@ function buildAiEventsPopover ({
     return {
       key: `ai:${title}:${event?.sourceTs || event?.eventTimestamp || event?.createTime || index}`,
       title,
-      status: level === 'UNKNOWN' ? 'UNKNOWN' : level,
+      status: formatFireLevel(level),
       statusTone: level === 'HIGH' || level === 'MEDIUM' ? 'danger' : (level === 'LOW' ? 'safe' : 'default'),
       meta: formatTimeLabel(event?.sourceTs || event?.eventTimestamp || event?.createTime),
       detail: `${event?.analysisChannel || '通道未知'} · 可见光 ${visibleScore} · 融合 ${fusionScore} · ${formatAiReviewText(event?.reviewStatus)}`,
@@ -665,7 +665,7 @@ function buildAiEventsPopover ({
     stats: [
       { key: 'total', label: '识别事件', value: String(aiEvents.length), tone: aiEvents.length > 0 ? 'default' : 'default' },
       { key: 'risk', label: '风险记录', value: String(highRiskAiEvents.length), tone: highRiskAiEvents.length > 0 ? 'danger' : 'default' },
-      { key: 'high', label: 'HIGH', value: String(aiEvents.filter(event => normalizeLevel(event?.riskLevel) === 'HIGH').length), tone: 'danger' },
+      { key: 'high', label: '高风险', value: String(aiEvents.filter(event => normalizeLevel(event?.riskLevel) === 'HIGH').length), tone: 'danger' },
       { key: 'latest', label: '最新通道', value: latest?.metrics.find(item => item.key === 'channel')?.value || '--', tone: 'default' }
     ],
     rows
@@ -716,7 +716,7 @@ function buildFirePopoverRow (event, index = 0) {
     : (event?.missionStatus ? formatMissionStatus(event.missionStatus) : formatEventStatus(event?.status))
   return {
     key: `fire:${id}`,
-    title: `${level === 'UNKNOWN' ? 'UNKNOWN' : level} · ${id}`,
+    title: `${formatFireLevel(level)} · ${id}`,
     status,
     statusTone: level === 'HIGH' || level === 'MEDIUM' ? 'danger' : (level === 'LOW' ? 'safe' : 'default'),
     meta: formatTimeLabel(event?.lastSeenTime || event?.eventTimestamp || event?.createTime),
@@ -843,7 +843,7 @@ function formatAiReviewText (value) {
 }
 
 function resolveMonitorModel (device) {
-  return device?.model || device?.deviceName || (device?.aircraftSn ? `Monitor ${device.aircraftSn.slice(-4)}` : 'Monitor aircraft')
+  return device?.model || device?.deviceName || (device?.aircraftSn ? `监测机 ${device.aircraftSn.slice(-4)}` : '火情监测机')
 }
 
 function resolveDeliveryModel (target) {
@@ -900,7 +900,7 @@ function selectDeliveryTarget (deliveryTargets) {
 function formatFireFocus (event) {
   if (!event) return '等待火情'
   const level = normalizeLevel(event.fireLevel)
-  return `${level === 'UNKNOWN' ? '未分级' : level} · ${event.eventId || event.id || event.fireId || '火情'}`
+  return `${formatFireLevel(level)} · ${event.eventId || event.id || event.fireId || '火情'}`
 }
 
 function formatFireDetail (event) {
@@ -1003,9 +1003,9 @@ function formatTimeLabel (value) {
 
 function formatFireLevelCounts (counts) {
   const parts = [
-    counts.HIGH ? `HIGH ${counts.HIGH}` : '',
-    counts.MEDIUM ? `MED ${counts.MEDIUM}` : '',
-    counts.LOW ? `LOW ${counts.LOW}` : ''
+    counts.HIGH ? `高风险 ${counts.HIGH}` : '',
+    counts.MEDIUM ? `中风险 ${counts.MEDIUM}` : '',
+    counts.LOW ? `低风险 ${counts.LOW}` : ''
   ].filter(Boolean)
   return parts.length > 0 ? parts.join(' / ') : '暂无风险等级'
 }
@@ -1023,6 +1023,7 @@ import {
 import {
   formatDetectionStatus,
   formatEventStatus,
+  formatFireLevel,
   formatGeoQuality,
   formatLocationExplanation,
   formatMissionStatus

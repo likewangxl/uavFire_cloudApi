@@ -1,5 +1,6 @@
 import {
   formatEventStatus,
+  formatFireLevel,
   formatGeoQuality,
   formatLocationExplanation,
   formatMissionStatus,
@@ -56,7 +57,7 @@ export function buildSituationLayers ({
       color: style.color,
       priority: style.priority,
       popup: {
-        title: `${level} · ${event?.eventId || event?.id || '火情'}`,
+        title: `${formatFireLevel(level)} · ${event?.eventId || event?.id || '火情'}`,
         detail: [
           `置信度 ${formatConfidence(event?.confidence)}`,
           `定位 ${formatGeoQuality(event?.geoQuality || event?.locationStatus)}`,

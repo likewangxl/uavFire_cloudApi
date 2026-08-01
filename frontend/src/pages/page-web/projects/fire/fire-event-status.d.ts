@@ -38,6 +38,7 @@ export function formatEventStatus(value?: unknown): string;
 export function formatMissionStatus(value?: unknown): string;
 export function formatEventSource(value?: unknown): string;
 export function formatGeoQuality(value?: unknown): string;
+export function formatFireLevel(value?: unknown): string;
 export function formatLocationExplanation(event?: FireEventLike): string;
 export function isPreciseLaserFireLocation(event?: FireEventLike): boolean;
 export function isRouteReadyFireEvent(event?: FireEventLike): boolean;
@@ -50,4 +51,5 @@ export function reconcileFireEventUpdate<T extends FireEventLike>(events: T[], u
   accepted: boolean;
   replaced: boolean;
 };
+export function mergeFireEventSnapshot<T extends FireEventLike>(events: T[], snapshot: FireEventLike[]): Array<T | FireEventLike>;
 export function fireEventNotificationKey(eventOrId?: FireEventLike | string): string;
