@@ -225,6 +225,9 @@ class WaylineAgentEventListenerTest {
     void onEvent_persistsReadyAfterExecutingAsFinishedWithFullProgress() throws Exception {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         setField(listener, "plannedWaylineMapper", mapper);
+        com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+        setField(listener, "agentFlightExecutionBindingLedger", ledger);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
         String payload = "{\"tid\":\"t-1\",\"method\":\"wayline_state_change\",\"timestamp\":1000,"
                 + "\"data\":{\"mission_id\":\"m-finished\",\"msdk_state\":\"READY\","
@@ -237,6 +240,8 @@ class WaylineAgentEventListenerTest {
         Map<String, Object> params = captor.getValue().getParamNameValuePairs();
         assertTrue(params.containsValue("finished"));
         assertTrue(params.containsValue(100));
+        verify(ledger).recordRuntimeStatus(eq("m-finished"), eq("SN-A"), eq("finished"),
+                org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test

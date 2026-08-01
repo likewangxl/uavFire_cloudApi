@@ -40,8 +40,9 @@ public class AgentFireReportValidator {
     public void validate(AgentFireReportParam p) {
         required(p, "report");
         if (!p.getUnknownFields().isEmpty()) fail("unknown report fields are not allowed");
-        text(p.getAgentId(), "agentId"); text(p.getDroneSn(), "droneSn"); text(p.getTaskId(), "taskId");
-        text(p.getEventId(), "eventId"); text(p.getSessionId(), "sessionId");
+        text(p.getAgentId(), "agentId", 64); text(p.getDroneSn(), "droneSn", 64);
+        text(p.getTaskId(), "taskId", 64); text(p.getEventId(), "eventId", 64);
+        text(p.getSessionId(), "sessionId", 128);
         if (p.getSequence() == null || p.getSequence() <= 0) fail("sequence must be positive");
         long now = clock.millis();
         if (p.getEventTimestamp() == null || p.getEventTimestamp() < now - MAX_REPLAY_AGE_MILLIS)
@@ -143,7 +144,9 @@ public class AgentFireReportValidator {
             Math.cos(a1) * Math.cos(a2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
         return 2 * 6_371_000 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, h))));
     }
-    private void text(String v, String name) { if (v == null || v.trim().isEmpty() || v.length() > 128) fail(name + " is invalid"); }
+    private void text(String v, String name, int maxLength) {
+        if (v == null || v.trim().isEmpty() || v.length() > maxLength) fail(name + " is invalid");
+    }
     private void required(Object v, String name) { if (v == null) fail(name + " is required"); }
     private boolean any(Object... values) { for (Object v : values) if (v != null) return true; return false; }
     private static void fail(String message) { throw new IllegalArgumentException(message); }

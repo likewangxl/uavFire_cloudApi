@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -149,6 +150,27 @@ class AgentFireReportControllerTest {
             .andExpect(status().isBadRequest());
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(precise().replace("\"rangeMeters\":60.0", "\"rangeMeters\":-1.0"))).andExpect(status().isBadRequest());
+        verify(ingress, never()).accept(any(), any(), anyString());
+    }
+
+    @Test void identityLengthsMatchEveryPersistenceDestinationAndRejectOverflowAs400() throws Exception {
+        when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.committed(true));
+        String maxAgent = "a".repeat(64), maxDrone = "d".repeat(64), maxEvent = "e".repeat(64);
+        String max = initial()
+            .replace("\"agentId\":\"agent-1\"", "\"agentId\":\"" + maxAgent + "\"")
+            .replace("\"droneSn\":\"drone-1\"", "\"droneSn\":\"" + maxDrone + "\"")
+            .replace("\"eventId\":\"event-1\"", "\"eventId\":\"" + maxEvent + "\"");
+        mvc.perform(reportRequest(token(maxDrone, 60_000)).contentType(MediaType.APPLICATION_JSON).content(max))
+            .andExpect(status().isOk());
+
+        reset(ingress);
+        String overAgent = initial().replace("\"agentId\":\"agent-1\"", "\"agentId\":\"" + "a".repeat(65) + "\"");
+        String overDrone = initial().replace("\"droneSn\":\"drone-1\"", "\"droneSn\":\"" + "d".repeat(65) + "\"");
+        String overEvent = initial().replace("\"eventId\":\"event-1\"", "\"eventId\":\"" + "e".repeat(65) + "\"");
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(overAgent)).andExpect(status().isBadRequest());
+        mvc.perform(reportRequest(token("d".repeat(65), 60_000)).contentType(MediaType.APPLICATION_JSON).content(overDrone))
+            .andExpect(status().isBadRequest());
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(overEvent)).andExpect(status().isBadRequest());
         verify(ingress, never()).accept(any(), any(), anyString());
     }
 

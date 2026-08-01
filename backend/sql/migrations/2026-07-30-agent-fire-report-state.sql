@@ -17,26 +17,6 @@ BEGIN
 END$$
 DELIMITER ;
 
-DROP PROCEDURE IF EXISTS `uavfire_add_index_if_missing`;
-DELIMITER $$
-CREATE PROCEDURE `uavfire_add_index_if_missing`(
-  IN p_table varchar(64), IN p_index varchar(64), IN p_definition text)
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.statistics
-    WHERE table_schema = DATABASE() AND table_name = p_table AND index_name = p_index
-  ) THEN
-    SET @ddl = CONCAT('ALTER TABLE `', p_table, '` ADD ', p_definition);
-    PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-  END IF;
-END$$
-DELIMITER ;
-
--- flight_id is the immutable Agent task identity. A unique current-read target
--- avoids ambiguous bindings and keeps the sequence-1 lock narrow.
-CALL uavfire_add_index_if_missing('planned_wayline','uk_planned_wayline_flight_id',
-  'UNIQUE KEY `uk_planned_wayline_flight_id` (`flight_id`)');
-
 CALL uavfire_add_column_if_missing('fire_event','detection_kind',
   'varchar(16) NULL COMMENT ''FIRE / SMOKE'' AFTER `notification_version`');
 CALL uavfire_add_column_if_missing('fire_event','detection_status',
@@ -78,6 +58,57 @@ ALTER TABLE `fire_event_history`
   MODIFY COLUMN `lng` double NULL,
   MODIFY COLUMN `action` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL;
 
+CREATE TABLE IF NOT EXISTS `agent_flight_execution_binding` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `flight_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `planned_wayline_pk` int unsigned NOT NULL,
+  `planned_wayline_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `workspace_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `assigned_drone_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `prepared_at` bigint NOT NULL,
+  `execution_started_at` bigint DEFAULT NULL,
+  `terminal_at` bigint DEFAULT NULL,
+  `execution_status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+  `terminal_status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `create_time` bigint NOT NULL,
+  `update_time` bigint NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_agent_flight_execution_flight` (`flight_id`),
+  KEY `idx_agent_flight_execution_plan` (`planned_wayline_pk`,`prepared_at`),
+  KEY `idx_agent_flight_execution_workspace` (`workspace_id`,`execution_started_at`),
+  CONSTRAINT `chk_agent_flight_execution_window`
+    CHECK (`terminal_at` IS NULL OR `terminal_at` >= COALESCE(`execution_started_at`,`prepared_at`))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COMMENT='Immutable per-flight Agent execution binding ledger';
+
+-- Existing mutable rows cannot prove an immutable terminal instant. Backfill
+-- active executions only when start/workspace/drone are authoritative; every
+-- other legacy row is explicit LEGACY_UNBOUND and report binding fails closed.
+INSERT IGNORE INTO `agent_flight_execution_binding` (
+  `flight_id`,`planned_wayline_pk`,`planned_wayline_id`,`workspace_id`,`assigned_drone_sn`,
+  `prepared_at`,`execution_started_at`,`terminal_at`,`execution_status`,`terminal_status`,`create_time`,`update_time`)
+SELECT `flight_id`,`id`,`planned_wayline_id`,`workspace_id`,
+  CASE
+    WHEN NULLIF(`drone_sn`,'') IS NOT NULL AND NULLIF(`aircraft_sn`,'') IS NOT NULL
+         AND `drone_sn` <> `aircraft_sn` THEN NULL
+    ELSE COALESCE(NULLIF(`drone_sn`,''),NULLIF(`aircraft_sn`,''))
+  END,
+  COALESCE(`prepared_time`,`publish_time`,`create_time`),
+  CASE WHEN LOWER(COALESCE(`task_status`,'')) IN ('executing','paused') THEN `executed_time` ELSE NULL END,
+  NULL,
+  CASE
+    WHEN LOWER(COALESCE(`task_status`,'')) IN ('executing','paused')
+         AND `executed_time` IS NOT NULL
+         AND COALESCE(NULLIF(`drone_sn`,''),NULLIF(`aircraft_sn`,'')) IS NOT NULL
+      THEN LOWER(`task_status`)
+    ELSE 'LEGACY_UNBOUND'
+  END,
+  CASE WHEN LOWER(COALESCE(`task_status`,'')) IN ('finished','stopped','failed','canceled')
+    THEN LOWER(`task_status`) ELSE NULL END,
+  COALESCE(`prepared_time`,`publish_time`,`create_time`),
+  COALESCE(`prepared_time`,`publish_time`,`create_time`)
+FROM `planned_wayline`
+WHERE NULLIF(`flight_id`,'') IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS `agent_fire_report` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `fire_event_id` bigint unsigned NOT NULL,
@@ -115,4 +146,3 @@ CREATE TABLE IF NOT EXISTS `agent_fire_report` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Immutable authenticated Agent fire reports';
 
 DROP PROCEDURE IF EXISTS `uavfire_add_column_if_missing`;
-DROP PROCEDURE IF EXISTS `uavfire_add_index_if_missing`;

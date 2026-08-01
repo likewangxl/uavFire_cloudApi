@@ -55,6 +55,9 @@ public class WaylineAgentEventListener {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private FireDetectionService fireDetectionService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger agentFlightExecutionBindingLedger;
+
     @ServiceActivator(inputChannel = WaylineAgentMqttChannel.INBOUND)
     public void onEvent(Message<byte[]> message) {
         String topic = (String) message.getHeaders().get(MqttHeaders.RECEIVED_TOPIC);
@@ -129,11 +132,11 @@ public class WaylineAgentEventListener {
         if (plannedWaylineMapper != null && missionId != null && !missionId.isEmpty()) {
             try {
                 if (decoded instanceof WaylineProgressDTO) {
-                    persistProgress(missionId, (WaylineProgressDTO) decoded);
+                    persistProgress(missionId, droneSn, (WaylineProgressDTO) decoded);
                 } else if (decoded instanceof WaylineStateChangeDTO) {
-                    persistStateChange(missionId, (WaylineStateChangeDTO) decoded);
+                    persistStateChange(missionId, droneSn, (WaylineStateChangeDTO) decoded);
                 } else if (decoded instanceof WaylineDispatchResultDTO) {
-                    persistDispatchResult(missionId, (WaylineDispatchResultDTO) decoded);
+                    persistDispatchResult(missionId, droneSn, (WaylineDispatchResultDTO) decoded);
                 }
             } catch (RuntimeException persistErr) {
                 log.warn("wayline-agent persist to planned_wayline failed mission={}: {}", missionId, persistErr.getMessage());
@@ -207,7 +210,10 @@ public class WaylineAgentEventListener {
         }
     }
 
-    private void persistProgress(String missionId, WaylineProgressDTO pr) {
+    private void persistProgress(String missionId, String droneSn, WaylineProgressDTO pr) {
+        if (agentFlightExecutionBindingLedger != null) {
+            agentFlightExecutionBindingLedger.recordRuntimeStatus(missionId, droneSn, "executing", System.currentTimeMillis());
+        }
         Optional<PlannedWaylineEntity> existing = findPlannedWaylineByFlightId(missionId);
         Integer totalWaypoints = firstPositive(pr.getTotalWaypoints(),
                 existing.map(PlannedWaylineEntity::getTotalWaypoints).orElse(null),
@@ -236,10 +242,13 @@ public class WaylineAgentEventListener {
         plannedWaylineMapper.update(null, update);
     }
 
-    private void persistDispatchResult(String missionId, WaylineDispatchResultDTO dr) {
+    private void persistDispatchResult(String missionId, String droneSn, WaylineDispatchResultDTO dr) {
         long now = System.currentTimeMillis();
         Integer result = dr.getResult();
         boolean ok = result != null && result == 0;
+        if (agentFlightExecutionBindingLedger != null) {
+            agentFlightExecutionBindingLedger.recordRuntimeStatus(missionId, droneSn, ok ? "executing" : "failed", now);
+        }
         LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
                 .eq(PlannedWaylineEntity::getFlightId, missionId)
                 .set(PlannedWaylineEntity::getLastProgressTime, now)
@@ -260,7 +269,7 @@ public class WaylineAgentEventListener {
     /** 航线“真正飞过”才经历的 MSDK 状态（ENTER_WAYLINE 只是进入、尚未执行，不算）。 */
     static final String NO_EXECUTE_FINISH_REASON = "航线未进入执行，可能电量不足或未起飞";
 
-    private void persistStateChange(String missionId, WaylineStateChangeDTO sc) {
+    private void persistStateChange(String missionId, String droneSn, WaylineStateChangeDTO sc) {
         String mappedStatus = mapBusinessState(sc.getBusinessState());
         if (mappedStatus == null) {
             mappedStatus = mapMsdkState(sc.getMsdkState(), sc.getPreviousMsdkState());
@@ -283,6 +292,9 @@ public class WaylineAgentEventListener {
             mappedStatus = "failed";
         }
         long now = System.currentTimeMillis();
+        if (agentFlightExecutionBindingLedger != null && mappedStatus != null) {
+            agentFlightExecutionBindingLedger.recordRuntimeStatus(missionId, droneSn, mappedStatus, now);
+        }
         LambdaUpdateWrapper<PlannedWaylineEntity> update = new LambdaUpdateWrapper<PlannedWaylineEntity>()
                 .eq(PlannedWaylineEntity::getFlightId, missionId)
                 .set(PlannedWaylineEntity::getLastProgressTime, now)

@@ -493,7 +493,6 @@ class PlannedWaylineServiceTest {
         when(mapper.selectOne(any())).thenReturn(existing);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
                 mapper, new ObjectMapper(), mock(IWaylineFileService.class));
-
         IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
                 () -> service.update("workspace-001", "pw-001", UpdatePlannedWaylineParam.builder()
                         .name("Survey B")
@@ -920,7 +919,7 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
-    void prepareTaskShouldAssignFlightIdAndPublishingStatus() {
+    void prepareTaskShouldAssignFlightIdAndPublishingStatus() throws Exception {
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         when(mapper.selectOne(any())).thenReturn(PlannedWaylineEntity.builder()
                 .id(1)
@@ -932,6 +931,9 @@ class PlannedWaylineServiceTest {
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
                 mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+        com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+        setField(service, "agentFlightExecutionBindingLedger", ledger);
         com.yx.uavfire.wayline.model.param.PreparePlannedWaylineTaskParam param =
                 new com.yx.uavfire.wayline.model.param.PreparePlannedWaylineTaskParam();
         param.setDockSn("DOCK-001");
@@ -949,6 +951,8 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(prepared.getPublishTime() > 0));
         ArgumentCaptor<PlannedWaylineEntity> updateCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
         verify(mapper).updateById(updateCaptor.capture());
+        verify(ledger).recordPrepared(org.mockito.ArgumentMatchers.any(PlannedWaylineEntity.class),
+                org.mockito.ArgumentMatchers.anyLong());
         assertAll(
                 () -> assertEquals("publishing", updateCaptor.getValue().getStatus()),
                 () -> assertEquals("publishing", updateCaptor.getValue().getTaskStatus()),
@@ -1808,6 +1812,9 @@ class PlannedWaylineServiceTest {
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
+        com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+        setField(service, "agentFlightExecutionBindingLedger", ledger);
 
         service.executeTask("workspace-001", "pw-agent-ai");
 
@@ -1885,10 +1892,17 @@ class PlannedWaylineServiceTest {
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
+        com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+        setField(service, "agentFlightExecutionBindingLedger", ledger);
 
         PreparePlannedWaylineTaskParam param = new PreparePlannedWaylineTaskParam();
         param.setDroneSn("1581F7K3D249W00AF7PE");
         service.executeTask("workspace-001", "pw-agent-request-target", param);
+
+        verify(ledger).recordExecutionStarted(org.mockito.ArgumentMatchers.argThat(task ->
+                "flight-agent-request-target".equals(task.getFlightId()) &&
+                "1581F7K3D249W00AF7PE".equals(task.getDroneSn())), org.mockito.ArgumentMatchers.anyLong());
 
         verify(waylineAgentService).prepareKmz(
                 eq("1581F7K3D249W00AF7PE"),

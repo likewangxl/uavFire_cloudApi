@@ -86,6 +86,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     private MsdkDeviceStateService msdkDeviceStateService;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger agentFlightExecutionBindingLedger;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
     private SDKWaylineService sdkWaylineService;
 
     @org.springframework.beans.factory.annotation.Value("${wayline-agent.server-url:http://localhost:6789}")
@@ -537,6 +540,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setUpdateTime(now);
         existing.setPreparedTime(now);
 
+        if (agentFlightExecutionBindingLedger != null) {
+            agentFlightExecutionBindingLedger.recordPrepared(existing, now);
+        }
+
         // P3: 如果是 dock 路径,真发 flighttaskPrepare MQTT 给机场
         if (StringUtils.hasText(existing.getDockSn())) {
             invokeDockPrepare(existing, param);
@@ -564,6 +571,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setTaskStatus(STATUS_EXECUTING);
         existing.setExecutedTime(now);
         existing.setUpdateTime(now);
+
+        if (agentFlightExecutionBindingLedger != null) {
+            agentFlightExecutionBindingLedger.recordExecutionStarted(existing, now);
+        }
 
         // 按 dockSn 路由发命令
         if (StringUtils.hasText(existing.getDockSn())) {
@@ -643,6 +654,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         existing.setTaskStatusReason(null);
         existing.setUpdateTime(now);
 
+        if (agentFlightExecutionBindingLedger != null) {
+            agentFlightExecutionBindingLedger.recordRuntimeStatus(
+                    existing.getFlightId(), waylineDroneSn(existing), STATUS_CANCELED, now);
+        }
+
         updateTaskFields(existing);
         return entity2Dto(existing);
     }
@@ -698,6 +714,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 break;
         }
         existing.setUpdateTime(now);
+        if (agentFlightExecutionBindingLedger != null && op != ControlOp.QUERY_BREAKPOINT) {
+            agentFlightExecutionBindingLedger.recordRuntimeStatus(
+                    existing.getFlightId(), waylineDroneSn(existing), existing.getTaskStatus(), now);
+        }
         updateTaskFields(existing);
         return entity2Dto(existing);
     }
