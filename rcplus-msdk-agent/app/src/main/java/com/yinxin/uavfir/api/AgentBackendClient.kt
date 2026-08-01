@@ -12,8 +12,8 @@ class AgentBackendClient(
     private val api: DualStreamApi,
 ) {
     /** Task 10 staged report path; the transport sends the durable payload unchanged. */
-    suspend fun sendAgentFireReport(row: OutboxRow): SendOutcome =
-        AgentFireReportTransport(api).send(row)
+    suspend fun sendAgentFireReport(row: OutboxRow, agentToken: String): SendOutcome =
+        AgentFireReportTransport(api) { agentToken }.send(row)
 
     suspend fun sendHeartbeat(
         droneSn: String,

@@ -8,21 +8,37 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import com.google.gson.JsonParser
+import retrofit2.HttpException
 
 /** Sends the exact durable Outbox JSON. Identity is never rebuilt here. */
 class AgentFireReportTransport(
     private val api: DualStreamApi,
+    private val tokenProvider: suspend (droneSn: String) -> String,
 ) : FireReportTransport {
     override suspend fun send(row: OutboxRow): SendOutcome {
         if (sha256(row.payload) != row.payloadSha256) {
             return SendOutcome.PayloadConflict("durable-payload-hash-mismatch")
         }
+        val droneSn = try {
+            JsonParser.parseString(row.payload).asJsonObject.get("droneSn").asString
+                .also { require(it.isNotBlank()) }
+        } catch (invalid: RuntimeException) {
+            return SendOutcome.PayloadConflict("durable-drone-identity-missing")
+        }
         val response = try {
-            api.reportAgentFire(row.payload.toRequestBody(JSON))
+            val token = tokenProvider(droneSn)
+            api.reportAgentFire(token, row.payload.toRequestBody(JSON))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (io: IOException) {
             return SendOutcome.TransientFailure(io.message ?: "network-io")
+        } catch (http: HttpException) {
+            return if (http.code() in TRANSIENT_HTTP) {
+                SendOutcome.TransientFailure("token-http-${http.code()}")
+            } else {
+                SendOutcome.PayloadConflict("token-http-${http.code()}")
+            }
         } catch (malformed: RuntimeException) {
             return SendOutcome.PayloadConflict("malformed-response:${malformed.javaClass.simpleName}")
         }

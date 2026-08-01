@@ -24,14 +24,15 @@ class AgentBackendClientTest {
     fun sendAgentFireReport_preservesDurablePayload() = runTest {
         val api = RecordingDualStreamApi()
         val client = AgentBackendClient(api)
-        val payload = """{"eventId":"event-1","sequence":1}"""
+        val payload = """{"droneSn":"drone-1","eventId":"event-1","sequence":1}"""
         val row = OutboxRow(
             "event-1", "session-1", 1, 100_000, FireSessionState.VISUAL_CONFIRMED,
             payload, sha256(payload), OutboxStatus.PENDING, 0, 0, null, null,
         )
 
-        assertEquals(SendOutcome.Acknowledged, client.sendAgentFireReport(row))
+        assertEquals(SendOutcome.Acknowledged, client.sendAgentFireReport(row, "trusted-token"))
         assertEquals(payload, api.lastAgentFireBody)
+        assertEquals("trusted-token", api.lastAgentFireToken)
     }
 
     @Test
@@ -413,10 +414,14 @@ class AgentBackendClientTest {
 
     private class RecordingDualStreamApi : DualStreamApi {
         var lastAgentFireBody: String? = null
-        override suspend fun reportAgentFire(body: RequestBody): Response<okhttp3.ResponseBody> =
+        var lastAgentFireToken: String? = null
+        override suspend fun reportAgentFire(agentToken: String, body: RequestBody): Response<okhttp3.ResponseBody> =
             Response.success(okhttp3.ResponseBody.create(null,
                 """{"eventId":"event-1","acceptedSequence":1,"eventPersisted":true,"notificationQueued":false}"""))
-                .also { lastAgentFireBody = Buffer().also { buffer -> body.writeTo(buffer) }.readUtf8() }
+                .also {
+                    lastAgentFireToken = agentToken
+                    lastAgentFireBody = Buffer().also { buffer -> body.writeTo(buffer) }.readUtf8()
+                }
         var lastHeartbeatDroneSn: String? = null
         var lastHeartbeatBody: AgentHeartbeatRequest? = null
         var lastStatusDroneSn: String? = null

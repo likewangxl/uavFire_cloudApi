@@ -40,6 +40,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         String waylineAgentBase = "/" + waylineAgentPrefix + waylineAgentVersion;
+        String agentFireReportPath = "/" + managePrefix + manageVersion + "/fire-events/agent-report";
 
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/token/refresh");
@@ -48,7 +49,9 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/events");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/latest-visible-roi");
-        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/fire-events/agent-report");
+        // Excluded only from browser-user auth; the dedicated Agent JWT
+        // interceptor below authenticates this exact machine endpoint.
+        EXCLUDE_PATHS.add(agentFireReportPath);
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/state");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/*/commands/poll");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/*/commands/ack");
@@ -64,7 +67,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         registry.addInterceptor(authInterceptor).addPathPatterns("/**").excludePathPatterns(EXCLUDE_PATHS);
 
         registry.addInterceptor(waylineAgentAuthInterceptor)
-                .addPathPatterns(waylineAgentBase + "/agents/**");
+                .addPathPatterns(waylineAgentBase + "/agents/**", agentFireReportPath);
     }
 
     @Override

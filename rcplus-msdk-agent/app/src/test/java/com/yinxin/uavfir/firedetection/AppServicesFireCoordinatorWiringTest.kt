@@ -19,7 +19,7 @@ class AppServicesFireCoordinatorWiringTest {
             "AgentFireClosedLoopCoordinator(",
             "AgentFireRecoveryCoordinator(",
         ).forEach { assertTrue("missing $it", source.contains(it)) }
-        assertTrue(source.contains("AgentFireReportTransport(api)"))
+        assertTrue(source.contains("AgentFireReportTransport(api, waylineClient::ensureToken)"))
         assertFalse(source.contains("task10-transport-unavailable"))
         assertFalse(source.contains("SendOutcome.Acknowledged"))
         assertFalse(source.contains("holdLocal("))

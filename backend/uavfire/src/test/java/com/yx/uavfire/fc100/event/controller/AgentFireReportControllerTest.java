@@ -1,13 +1,23 @@
 package com.yx.uavfire.fc100.event.controller;
 
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.algorithms.Algorithm;
+import com.yx.uavfire.common.util.JwtUtil;
 import com.yx.uavfire.fc100.event.service.AgentFireReportIngress;
 import com.yx.uavfire.fc100.event.service.AgentFireReportValidator;
 import com.yx.uavfire.fc100.event.service.impl.UnavailableAgentFireReportIngress;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentClaim;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.Date;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -22,6 +32,10 @@ class AgentFireReportControllerTest {
     private AgentFireReportIngress ingress;
     private MockMvc mvc;
 
+    @BeforeAll static void initJwt() {
+        ReflectionTestUtils.setField(JwtUtil.class, "algorithm", Algorithm.HMAC256("agent-report-test-secret"));
+    }
+
     @BeforeEach void setUp() {
         ingress = mock(AgentFireReportIngress.class);
         AgentFireReportController controller = new AgentFireReportController(
@@ -29,12 +43,13 @@ class AgentFireReportControllerTest {
         mvc = MockMvcBuilders.standaloneSetup(controller)
             .addPlaceholderValue("url.manage.prefix", "/manage")
             .addPlaceholderValue("url.manage.version", "/api/v1")
+            .addInterceptors(new WaylineAgentAuthInterceptor())
             .build();
     }
 
     @Test void validInitialReturnsCommittedIdentity() throws Exception {
         when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.committed(true));
-        mvc.perform(post("/manage/api/v1/fire-events/agent-report")
+        mvc.perform(reportRequest()
                 .contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.eventId").value("event-1"))
@@ -46,18 +61,18 @@ class AgentFireReportControllerTest {
 
     @Test void exactDuplicateIs200AndConflictIs409() throws Exception {
         when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.duplicate(false));
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON).content(initial()))
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.duplicate").value(true));
         when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.conflict("payload hash mismatch"));
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON).content(initial()))
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isConflict());
     }
 
     @Test void acceptsPreciseAndDegradedTerminalMappings() throws Exception {
         when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.committed(false));
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON).content(precise()))
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(precise()))
             .andExpect(status().isOk());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON).content(degraded()))
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(degraded()))
             .andExpect(status().isOk());
     }
 
@@ -66,44 +81,69 @@ class AgentFireReportControllerTest {
             new UnavailableAgentFireReportIngress(), new AgentFireReportValidator());
         MockMvc unavailableMvc = MockMvcBuilders.standaloneSetup(controller)
             .addPlaceholderValue("url.manage.prefix", "/manage")
-            .addPlaceholderValue("url.manage.version", "/api/v1").build();
-        unavailableMvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON).content(initial()))
+            .addPlaceholderValue("url.manage.version", "/api/v1")
+            .addInterceptors(new WaylineAgentAuthInterceptor()).build();
+        unavailableMvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test void requiresAuthenticUnexpiredSameDroneAgentToken() throws Exception {
+        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON).content(initial()))
+            .andExpect(status().isUnauthorized());
+        String forged = JWT.create().withClaim("role", WaylineAgentClaim.ROLE).withClaim("droneSn", "drone-1")
+            .sign(Algorithm.HMAC256("forged-secret"));
+        mvc.perform(reportRequest(forged).contentType(MediaType.APPLICATION_JSON).content(initial()))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(reportRequest(token("drone-1", -1_000)).contentType(MediaType.APPLICATION_JSON).content(initial()))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(reportRequest(token("other-drone", 60_000)).contentType(MediaType.APPLICATION_JSON).content(initial()))
+            .andExpect(status().isForbidden());
+        verify(ingress, never()).accept(any());
     }
 
     @Test void rejectsPartialCoordinatesUnknownEnumsAndCrossStateFieldsBeforeIngress() throws Exception {
         String partial = degraded().replace("\"aircraft\":{\"lat\":34.1,\"lng\":108.9,\"alt\":120.0}",
             "\"aircraft\":{\"lat\":34.1,\"lng\":108.9}");
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON).content(partial)).andExpect(status().isBadRequest());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(partial)).andExpect(status().isBadRequest());
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replace("\"FIRE\"", "\"EMBER\""))).andExpect(status().isBadRequest());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replace("\"locationStatus\":\"LASER_LOCATING\"",
                 "\"locationStatus\":\"LASER_LOCATING\",\"fireLat\":34.0"))).andExpect(status().isBadRequest());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replaceFirst("}$", ",\"imageBase64\":\"forbidden\"}")))
             .andExpect(status().isBadRequest());
         verify(ingress, never()).accept(any());
     }
 
     @Test void rejectsRoiReleaseIdentityClockSkewAndInvalidTerminalSamples() throws Exception {
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replace("\"width\":0.2", "\"width\":0.8"))).andExpect(status().isBadRequest());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replace("visible-fire-wechat-best2-20260728", "unapproved"))).andExpect(status().isBadRequest());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replaceFirst("\\\"eventTimestamp\\\":\\d+", "\\\"eventTimestamp\\\":1")))
             .andExpect(status().isBadRequest());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replaceFirst("\\\"eventTimestamp\\\":\\d+",
                 "\\\"eventTimestamp\\\":" + Long.MIN_VALUE)))
             .andExpect(status().isBadRequest());
-        mvc.perform(post(path()).contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(precise().replace("\"rangeMeters\":60.0", "\"rangeMeters\":-1.0"))).andExpect(status().isBadRequest());
         verify(ingress, never()).accept(any());
     }
 
     private String path() { return "/manage/api/v1/fire-events/agent-report"; }
+    private MockHttpServletRequestBuilder reportRequest() {
+        return reportRequest(token("drone-1", 60_000));
+    }
+    private MockHttpServletRequestBuilder reportRequest(String token) {
+        return post(path()).header(WaylineAgentAuthInterceptor.HEADER_AGENT_TOKEN, token);
+    }
+    private String token(String droneSn, long expiresInMillis) {
+        return JWT.create().withClaim("role", WaylineAgentClaim.ROLE).withClaim("droneSn", droneSn)
+            .withExpiresAt(new Date(System.currentTimeMillis() + expiresInMillis)).sign(JwtUtil.algorithm);
+    }
     private long now() { return System.currentTimeMillis(); }
     private String common(String state, long seq) {
         return "\"agentId\":\"agent-1\",\"droneSn\":\"drone-1\",\"taskId\":\"task-1\"," +

@@ -5,12 +5,16 @@ import com.yx.uavfire.fc100.event.model.param.AgentFireReportParam;
 import com.yx.uavfire.fc100.event.service.AgentFireIngressUnavailableException;
 import com.yx.uavfire.fc100.event.service.AgentFireReportIngress;
 import com.yx.uavfire.fc100.event.service.AgentFireReportValidator;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentClaim;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import javax.servlet.http.HttpServletRequest;
+import java.util.Objects;
 
 /** Staged Agent ingress; Task 11 owns the durable implementation of its port. */
 @RestController
@@ -25,8 +29,13 @@ public class AgentFireReportController {
     }
 
     @PostMapping("/agent-report")
-    public ResponseEntity<AgentFireReportResponse> report(@RequestBody AgentFireReportParam param) {
+    public ResponseEntity<AgentFireReportResponse> report(@RequestBody AgentFireReportParam param,
+                                                          HttpServletRequest request) {
         try {
+            WaylineAgentClaim claim = (WaylineAgentClaim) request.getAttribute(WaylineAgentAuthInterceptor.ATTR_CLAIM);
+            if (claim == null || !Objects.equals(param.getDroneSn(), claim.getDroneSn())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
             validator.validate(param);
             AgentFireReportIngress.Result result = ingress.accept(param);
             if (result.getStatus() == AgentFireReportIngress.Result.Status.CONFLICT) {

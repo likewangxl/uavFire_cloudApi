@@ -15,12 +15,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GlobalMVCConfigurerTest {
 
     private GlobalMVCConfigurer configurer;
+    private WaylineAgentAuthInterceptor waylineAgentAuthInterceptor;
 
     @BeforeEach
     void setUp() {
         configurer = new GlobalMVCConfigurer();
         ReflectionTestUtils.setField(configurer, "authInterceptor", new AuthInterceptor());
-        ReflectionTestUtils.setField(configurer, "waylineAgentAuthInterceptor", new WaylineAgentAuthInterceptor());
+        waylineAgentAuthInterceptor = new WaylineAgentAuthInterceptor();
+        ReflectionTestUtils.setField(configurer, "waylineAgentAuthInterceptor", waylineAgentAuthInterceptor);
         ReflectionTestUtils.setField(configurer, "managePrefix", "manage/api");
         ReflectionTestUtils.setField(configurer, "manageVersion", "/v1");
         ReflectionTestUtils.setField(configurer, "waylineAgentPrefix", "wayline-agent");
@@ -64,5 +66,21 @@ class GlobalMVCConfigurerTest {
         List<String> excludePaths = (List<String>) ReflectionTestUtils.getField(GlobalMVCConfigurer.class, "EXCLUDE_PATHS");
 
         assertTrue(excludePaths.contains("/wayline-agent/api/v1/**"));
+    }
+
+    @Test
+    void addInterceptors_protectsAgentFireReportWithAgentJwt() {
+        InterceptorRegistry registry = new InterceptorRegistry();
+        configurer.addInterceptors(registry);
+
+        @SuppressWarnings("unchecked")
+        List<Object> registrations = (List<Object>) ReflectionTestUtils.getField(registry, "registrations");
+        assertTrue(registrations.stream().anyMatch(registration -> {
+            Object interceptor = ReflectionTestUtils.getField(registration, "interceptor");
+            @SuppressWarnings("unchecked")
+            List<String> patterns = (List<String>) ReflectionTestUtils.getField(registration, "includePatterns");
+            return interceptor == waylineAgentAuthInterceptor && patterns != null &&
+                patterns.contains("/manage/api/v1/fire-events/agent-report");
+        }));
     }
 }

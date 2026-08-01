@@ -25,7 +25,7 @@ class AgentFireReportTransportTest {
     @Before fun setUp() {
         server = MockWebServer().also { it.start() }
         val api = AgentBackendApiFactory.create(AgentBackendConfig(server.url("/").toString()))
-        transport = AgentFireReportTransport(api)
+        transport = AgentFireReportTransport(api) { "trusted-agent-token" }
     }
 
     @After fun tearDown() = server.shutdown()
@@ -38,6 +38,7 @@ class AgentFireReportTransportTest {
 
         val request = server.takeRequest(1, TimeUnit.SECONDS)!!
         assertEquals("/manage/api/v1/fire-events/agent-report", request.path)
+        assertEquals("trusted-agent-token", request.getHeader("x-agent-token"))
         assertEquals(row.payload, request.body.readUtf8())
     }
 

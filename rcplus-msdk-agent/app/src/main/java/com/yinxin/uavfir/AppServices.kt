@@ -102,6 +102,11 @@ class AppServices(
     private val localKmzDir = File(application.filesDir, "wayline-local")
     private val api = AgentBackendApiFactory.create()
     private val backendClient = AgentBackendClient(api)
+    private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
+    private val waylineClient = WaylineAgentClient(
+        api = waylineApi,
+        sharedSecret = BuildConfig.AGENT_WAYLINE_SHARED_SECRET,
+    )
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val latestVisibleFrameBuffer = LatestVisibleFrameBuffer()
@@ -144,7 +149,7 @@ class AppServices(
         fireSessionStore,
         FireOutboxDispatcher(
             fireSessionStore,
-            AgentFireReportTransport(api),
+            AgentFireReportTransport(api, waylineClient::ensureToken),
         ),
         appScope,
     )
@@ -206,11 +211,6 @@ class AppServices(
         commandExecutionDeduplicator = legacyCommandDeduplicator,
     )
     // Wayline-agent control plane (HTTP) + event plane (MQTT).
-    private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
-    private val waylineClient = WaylineAgentClient(
-        api = waylineApi,
-        sharedSecret = BuildConfig.AGENT_WAYLINE_SHARED_SECRET,
-    )
     private val mqttPublisher = WaylineMqttPublisher(
         brokerUrl = BuildConfig.AGENT_MQTT_BROKER_URL,
         clientIdPrefix = "wayline-agent",
