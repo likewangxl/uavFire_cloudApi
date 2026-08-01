@@ -3,6 +3,7 @@ package com.yx.uavfire.fc100.event.controller;
 import com.yx.uavfire.fc100.event.model.dto.AgentFireReportResponse;
 import com.yx.uavfire.fc100.event.model.param.AgentFireReportParam;
 import com.yx.uavfire.fc100.event.service.AgentFireIngressUnavailableException;
+import com.yx.uavfire.fc100.event.service.AgentFireNotificationConflictException;
 import com.yx.uavfire.fc100.event.service.AgentFireReportIngress;
 import com.yx.uavfire.fc100.event.service.AgentFireReportValidator;
 import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
@@ -62,6 +63,8 @@ public class AgentFireReportController {
             return ResponseEntity.badRequest().build();
         } catch (AgentFireIngressUnavailableException unavailable) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        } catch (AgentFireNotificationConflictException conflict) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
     }
 

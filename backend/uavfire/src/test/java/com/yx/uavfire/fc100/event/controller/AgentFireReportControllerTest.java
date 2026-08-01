@@ -5,6 +5,7 @@ import com.auth0.jwt.algorithms.Algorithm;
 import com.yx.uavfire.common.util.JwtUtil;
 import com.yx.uavfire.fc100.event.service.AgentFireReportIngress;
 import com.yx.uavfire.fc100.event.service.AgentFireReportValidator;
+import com.yx.uavfire.fc100.event.service.AgentFireNotificationConflictException;
 import com.yx.uavfire.fc100.event.service.impl.UnavailableAgentFireReportIngress;
 import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
 import com.yx.uavfire.wayline.agent.security.WaylineAgentClaim;
@@ -29,6 +30,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -84,6 +86,13 @@ class AgentFireReportControllerTest {
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.duplicate").value(true));
         when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.conflict("payload hash mismatch"));
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
+            .andExpect(status().isConflict());
+    }
+
+    @Test void durableNotificationIdentityConflictRollsBackAs409() throws Exception {
+        doThrow(new AgentFireNotificationConflictException("event-1:1 differs"))
+            .when(ingress).accept(any(), any(), anyString());
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isConflict());
     }

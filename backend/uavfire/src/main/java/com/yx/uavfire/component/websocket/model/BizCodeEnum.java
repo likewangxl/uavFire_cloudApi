@@ -81,6 +81,8 @@ public enum BizCodeEnum {
 
     FLIGHT_AREAS_UPDATE("flight_areas_update"),
 
+    FIRE_EVENT_UPDATE("fire_event_update"),
+
     ;
 
     private String code;

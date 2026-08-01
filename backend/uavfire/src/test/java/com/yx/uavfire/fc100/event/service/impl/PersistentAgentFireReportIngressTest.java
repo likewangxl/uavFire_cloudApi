@@ -12,6 +12,10 @@ import com.yx.uavfire.fc100.event.model.param.AgentFireReportParam;
 import com.yx.uavfire.fc100.event.service.AgentFireNotificationTransactionParticipant;
 import com.yx.uavfire.fc100.event.service.AgentFireReportIngress;
 import com.yx.uavfire.fc100.event.service.AgentFireTaskBindingResolver;
+import com.yx.uavfire.fc100.event.notification.dao.FireNotificationOutboxMapper;
+import com.yx.uavfire.fc100.event.notification.model.FireNotificationOutboxEntity;
+import com.yx.uavfire.fc100.event.notification.service.DurableAgentFireNotificationTransactionParticipant;
+import com.yx.uavfire.fc100.event.notification.service.FireNotificationDispatcher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.TransactionDefinition;
@@ -42,6 +46,7 @@ class PersistentAgentFireReportIngressTest {
     private final Map<String, FireEventEntity> eventRows = new HashMap<>();
     private final Map<String, AgentFireReportEntity> reportRows = new HashMap<>();
     private final List<FireEventHistoryEntity> historyRows = new ArrayList<>();
+    private final Map<String, FireNotificationOutboxEntity> outboxRows = new HashMap<>();
     private PersistentAgentFireReportIngress ingress;
 
     @BeforeEach void setUp() {
@@ -210,6 +215,47 @@ class PersistentAgentFireReportIngressTest {
         assertEquals(1, eventRows.size()); assertEquals(1, reportRows.size()); assertEquals(1, historyRows.size());
     }
 
+    @Test void durableOutboxAndRealIngressCommitOrRollbackAsOneTransaction() throws Exception {
+        FireNotificationOutboxMapper outbox = mock(FireNotificationOutboxMapper.class);
+        FireNotificationDispatcher dispatcher = mock(FireNotificationDispatcher.class);
+        when(outbox.selectIdentity(any(), anyInt())).thenAnswer(i -> outboxRows.get(i.getArgument(0) + ":" + i.getArgument(1)));
+        when(outbox.selectIdentityForUpdate(any(), anyInt())).thenAnswer(i -> outboxRows.get(i.getArgument(0) + ":" + i.getArgument(1)));
+        when(outbox.insertOutbox(any())).thenAnswer(i -> {
+            FireNotificationOutboxEntity row = i.getArgument(0);
+            outboxRows.put(row.getEventId() + ":" + row.getNotificationVersion(), row);
+            return 1;
+        });
+        AgentFireNotificationTransactionParticipant durable =
+            new DurableAgentFireNotificationTransactionParticipant(outbox, json, () -> 2_000L, dispatcher);
+        PersistentAgentFireReportIngress realIngress = new PersistentAgentFireReportIngress(
+            events, histories, reports, durable, () -> 2_000L, json, taskBindings);
+        TransactionTemplate tx = new TransactionTemplate(new SnapshotTransactionManager());
+        AgentFireReportParam initial = initial();
+        byte[] raw = json.writeValueAsBytes(initial); String hash = sha(raw);
+
+        reset(histories);
+        when(histories.insert(any())).thenThrow(new IllegalStateException("injected after outbox insert"));
+        assertThrows(IllegalStateException.class,
+            () -> tx.execute(ignored -> realIngress.accept(initial, raw, hash)));
+        assertTrue(eventRows.isEmpty(), "event rows rolled back: " + eventRows.keySet());
+        assertTrue(reportRows.isEmpty(), "report rows rolled back: " + reportRows.keySet());
+        assertTrue(historyRows.isEmpty(), "history rows rolled back: " + historyRows.size());
+        assertTrue(outboxRows.isEmpty(), "outbox rows rolled back: " + outboxRows.keySet());
+        verify(dispatcher, never()).wakeAfterCommit();
+
+        reset(histories);
+        when(histories.insert(any())).thenAnswer(i -> { historyRows.add(i.getArgument(0)); return 1; });
+        AgentFireReportIngress.Result committed = tx.execute(ignored -> realIngress.accept(initial, raw, hash));
+        assertNotNull(committed); assertTrue(committed.isNotificationQueued());
+        assertEquals(1, eventRows.size()); assertEquals(1, historyRows.size()); assertEquals(1, reportRows.size());
+        assertEquals(1, outboxRows.size());
+        verify(dispatcher).wakeAfterCommit();
+
+        AgentFireReportIngress.Result duplicate = tx.execute(ignored -> realIngress.accept(initial, raw, hash));
+        assertNotNull(duplicate); assertEquals(AgentFireReportIngress.Result.Status.EXACT_DUPLICATE, duplicate.getStatus());
+        assertEquals(1, outboxRows.size()); verify(dispatcher, times(1)).wakeAfterCommit();
+    }
+
     @Test void resumeAfterTerminalIsMonotonicAndProgressOnly() throws Exception {
         advanceToLaser(); accept(precise(6));
         AgentFireReportParam resume = stage(7, "RESUME_REQUESTED"); resume.setFlightStatus("RESUME_REQUESTED");
@@ -270,16 +316,19 @@ class PersistentAgentFireReportIngressTest {
         private Map<String, FireEventEntity> eventSnapshot;
         private Map<String, AgentFireReportEntity> reportSnapshot;
         private List<FireEventHistoryEntity> historySnapshot;
+        private Map<String, FireNotificationOutboxEntity> outboxSnapshot;
         @Override protected Object doGetTransaction() { return new Object(); }
         @Override protected void doBegin(Object transaction, TransactionDefinition definition) {
             eventSnapshot = new HashMap<>(eventRows); reportSnapshot = new HashMap<>(reportRows);
             historySnapshot = new ArrayList<>(historyRows);
+            outboxSnapshot = new HashMap<>(outboxRows);
         }
         @Override protected void doCommit(DefaultTransactionStatus status) { }
         @Override protected void doRollback(DefaultTransactionStatus status) {
             eventRows.clear(); eventRows.putAll(eventSnapshot);
             reportRows.clear(); reportRows.putAll(reportSnapshot);
             historyRows.clear(); historyRows.addAll(historySnapshot);
+            outboxRows.clear(); outboxRows.putAll(outboxSnapshot);
         }
     }
 }

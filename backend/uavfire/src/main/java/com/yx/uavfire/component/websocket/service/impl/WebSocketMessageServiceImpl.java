@@ -96,4 +96,43 @@ public class WebSocketMessageServiceImpl implements IWebSocketMessageService {
     public void sendBatch(String workspaceId, String bizCode, Object data) {
         this.sendBatch(workspaceId, null, bizCode, data);
     }
+
+    @Override
+    public DeliveryResult sendStrict(String workspaceId, String bizCode, Object data) {
+        if (!StringUtils.hasText(workspaceId)) {
+            return new DeliveryResult(0, 0, "workspace ID is blank");
+        }
+        Collection<MyConcurrentWebSocketSession> sessions =
+            webSocketManageService.getValueWithWorkspace(workspaceId);
+        if (sessions == null || sessions.isEmpty()) {
+            return new DeliveryResult(0, 0, "no connected workspace recipients");
+        }
+
+        WebSocketMessageResponse response = new WebSocketMessageResponse()
+            .setData(Objects.requireNonNullElse(data, ""))
+            .setTimestamp(System.currentTimeMillis())
+            .setBizCode(bizCode);
+        final TextMessage message;
+        try {
+            message = new TextMessage(mapper.writeValueAsBytes(response));
+        } catch (IOException serializationFailure) {
+            return new DeliveryResult(sessions.size(), 0, serializationFailure.getMessage());
+        }
+
+        int accepted = 0;
+        String failure = null;
+        for (MyConcurrentWebSocketSession session : sessions) {
+            if (session == null || !session.isOpen()) {
+                failure = "workspace session is closed";
+                continue;
+            }
+            try {
+                session.sendMessage(message);
+                accepted++;
+            } catch (IOException sendFailure) {
+                failure = sendFailure.getMessage() == null ? "websocket send failed" : sendFailure.getMessage();
+            }
+        }
+        return new DeliveryResult(sessions.size(), accepted, failure);
+    }
 }

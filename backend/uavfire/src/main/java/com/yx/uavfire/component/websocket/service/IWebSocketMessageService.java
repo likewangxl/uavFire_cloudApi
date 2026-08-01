@@ -13,6 +13,29 @@ import java.util.Collection;
 public interface IWebSocketMessageService {
 
     /**
+     * Observable delivery result for durable message dispatchers. Legacy void
+     * methods intentionally retain their historical best-effort contract.
+     */
+    final class DeliveryResult {
+        private final int intendedRecipients;
+        private final int acceptedRecipients;
+        private final String failure;
+
+        public DeliveryResult(int intendedRecipients, int acceptedRecipients, String failure) {
+            this.intendedRecipients = intendedRecipients;
+            this.acceptedRecipients = acceptedRecipients;
+            this.failure = failure;
+        }
+
+        public int getIntendedRecipients() { return intendedRecipients; }
+        public int getAcceptedRecipients() { return acceptedRecipients; }
+        public String getFailure() { return failure; }
+        public boolean isDelivered() {
+            return intendedRecipients > 0 && acceptedRecipients > 0 && failure == null;
+        }
+    }
+
+    /**
      * Send a message to the specific connection.
      * @param session   A WebSocket connection object
      * @param message   message
@@ -29,4 +52,10 @@ public interface IWebSocketMessageService {
     void sendBatch(String workspaceId, Integer userType, String bizCode, Object data);
 
     void sendBatch(String workspaceId, String bizCode, Object data);
+
+    /**
+     * Sends to every currently connected session in the workspace and exposes
+     * zero-recipient, closed-session and I/O failures to the caller.
+     */
+    DeliveryResult sendStrict(String workspaceId, String bizCode, Object data);
 }
