@@ -157,10 +157,15 @@ export const isPreciseFireMarkerAllowed = isPreciseLaserFireLocation
 export const isAutomaticRouteAllowed = isPreciseLaserFireLocation
 
 export function normalizeFireEventUpdate (update = {}) {
+  const sequence = toSequence(update.agentSequence ?? update.agent_sequence ?? update.lastAgentSequence ?? update.last_agent_sequence) || undefined
+  const updateTime = toTimestamp(update.updateTime ?? update.update_time ?? update.updatedAt) || undefined
   return {
     ...update,
     eventId: update.eventId ?? update.event_id,
     notificationVersion: toVersion(update.notificationVersion ?? update.notification_version),
+    agentSequence: sequence,
+    lastAgentSequence: sequence,
+    updateTime,
     detectionKind: update.detectionKind ?? update.detection_kind,
     detectionStatus: update.detectionStatus ?? update.detection_status ?? update.state,
     state: update.state ?? update.detectionStatus ?? update.detection_status,
@@ -179,23 +184,29 @@ export function normalizeFireEventUpdate (update = {}) {
 export function reconcileFireEventUpdate (events = [], update = {}) {
   const normalized = normalizeFireEventUpdate(update)
   const eventId = normalized.eventId == null ? '' : String(normalized.eventId).trim()
-  const version = normalized.notificationVersion
   const currentEvents = Array.isArray(events) ? events : []
-  if (!eventId || version < 1) return { events: currentEvents, event: null, accepted: false, replaced: false }
+  if (!eventId) return { events: currentEvents, event: null, accepted: false, replaced: false, notificationAdvanced: false }
 
   const index = currentEvents.findIndex(event => String(event?.eventId ?? event?.event_id ?? '') === eventId)
   if (index >= 0) {
     const current = currentEvents[index]
-    const currentVersion = toVersion(current?.notificationVersion ?? current?.notification_version)
-    if (version <= currentVersion) return { events: currentEvents, event: current, accepted: false, replaced: true }
-    const merged = { ...current, ...normalized, eventId, notificationVersion: version }
+    const merged = mergeProjection(current, normalized)
+    const notificationAdvanced = normalized.notificationVersion > toVersion(current?.notificationVersion ?? current?.notification_version)
+    const accepted = hasChanged(current, merged)
+    if (!accepted) return { events: currentEvents, event: current, accepted: false, replaced: true, notificationAdvanced: false }
     const next = currentEvents.slice()
     next[index] = merged
-    return { events: next, event: merged, accepted: true, replaced: true }
+    return { events: next, event: merged, accepted: true, replaced: true, notificationAdvanced }
   }
 
-  const inserted = { ...normalized, eventId, notificationVersion: version }
-  return { events: [inserted, ...currentEvents], event: inserted, accepted: true, replaced: false }
+  const inserted = compactDefined({ ...normalized, eventId })
+  return {
+    events: [inserted, ...currentEvents],
+    event: inserted,
+    accepted: true,
+    replaced: false,
+    notificationAdvanced: normalized.notificationVersion > 0
+  }
 }
 
 export function mergeFireEventSnapshot (events = [], snapshot = []) {
@@ -210,11 +221,7 @@ export function mergeFireEventSnapshot (events = [], snapshot = []) {
       continue
     }
     const current = next[index]
-    const currentVersion = toVersion(current?.notificationVersion ?? current?.notification_version)
-    const incomingVersion = toVersion(incoming.notificationVersion)
-    next[index] = incomingVersion > currentVersion
-      ? mergeDefined(current, incoming)
-      : fillMissing(current, incoming)
+    next[index] = mergeProjection(current, incoming)
   }
   return next
 }
@@ -239,6 +246,16 @@ function toVersion (value) {
   return Number.isInteger(version) && version > 0 ? version : 0
 }
 
+function toSequence (value) {
+  const sequence = Number(value)
+  return Number.isInteger(sequence) && sequence > 0 ? sequence : 0
+}
+
+function toTimestamp (value) {
+  const timestamp = Number(value)
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0
+}
+
 function compactDefined (value) {
   return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined))
 }
@@ -253,6 +270,67 @@ function fillMissing (base, fallback) {
     if ((result[key] === undefined || result[key] === null) && value !== undefined && value !== null) result[key] = value
   }
   return result
+}
+
+const AGENT_PROJECTION_FIELDS = new Set([
+  'agentSequence', 'lastAgentSequence', 'detectionKind', 'detectionStatus', 'state',
+  'locationStatus', 'flightStatus', 'geoMethod', 'geoQuality', 'lat', 'lng', 'alt',
+  'aircraftLat', 'aircraftLng', 'aircraftAlt', 'geoErrorRadiusM', 'geoSourceTs',
+  'lastSeenTime', 'lastSourceEventId', 'eventTimestamp'
+])
+
+function mergeProjection (current, incoming) {
+  const currentSequence = sequenceOf(current)
+  const incomingSequence = sequenceOf(incoming)
+  let merged = current
+
+  if (currentSequence > 0 || incomingSequence > 0) {
+    if (incomingSequence > currentSequence) merged = mergeDefined(current, incoming)
+    else if (incomingSequence === currentSequence && incomingSequence > 0) {
+      merged = fillMissing(current, incoming)
+      const currentDetectionStatus = current?.detectionStatus ?? current?.detection_status ?? current?.state
+      if (currentDetectionStatus != null) {
+        merged = { ...merged, detectionStatus: currentDetectionStatus, state: currentDetectionStatus }
+      }
+      if (projectionTimeOf(incoming) > projectionTimeOf(current)) merged = mergeNonAgentFields(merged, incoming)
+    }
+  } else {
+    const currentTime = projectionTimeOf(current)
+    const incomingTime = projectionTimeOf(incoming)
+    if (incomingTime > currentTime) merged = mergeDefined(current, incoming)
+    else if (incomingTime === currentTime) merged = fillMissing(current, incoming)
+  }
+
+  const maxNotificationVersion = Math.max(
+    toVersion(current?.notificationVersion ?? current?.notification_version),
+    toVersion(incoming?.notificationVersion ?? incoming?.notification_version)
+  )
+  if (maxNotificationVersion > 0 && merged.notificationVersion !== maxNotificationVersion) {
+    merged = { ...merged, notificationVersion: maxNotificationVersion }
+  }
+  return merged
+}
+
+function mergeNonAgentFields (base, incoming) {
+  const result = { ...base }
+  for (const [key, value] of Object.entries(incoming)) {
+    if (!AGENT_PROJECTION_FIELDS.has(key) && value !== undefined) result[key] = value
+  }
+  return result
+}
+
+function sequenceOf (event) {
+  return toSequence(event?.agentSequence ?? event?.agent_sequence ?? event?.lastAgentSequence ?? event?.last_agent_sequence)
+}
+
+function projectionTimeOf (event) {
+  return toTimestamp(event?.updateTime ?? event?.update_time ?? event?.updatedAt)
+}
+
+function hasChanged (before, after) {
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})])
+  for (const key of keys) if (!Object.is(before?.[key], after?.[key])) return true
+  return false
 }
 
 function firePoint (event) {

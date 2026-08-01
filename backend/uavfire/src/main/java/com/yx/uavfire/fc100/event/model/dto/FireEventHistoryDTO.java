@@ -35,6 +35,7 @@ public class FireEventHistoryDTO {
     private String thermalImageUrl;
     private String visibleImageUrl;
     private Long eventTimestamp;
+    private Long agentSequence;
     private String detectionKind;
     private String detectionStatus;
     private String locationStatus;

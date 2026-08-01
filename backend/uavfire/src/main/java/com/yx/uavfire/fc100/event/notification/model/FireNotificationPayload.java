@@ -8,6 +8,7 @@ public class FireNotificationPayload {
     private String notificationId;
     private String eventId;
     private Integer notificationVersion;
+    private Long agentSequence;
     private String workspaceId;
     private String taskId;
     private String droneSn;

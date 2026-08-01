@@ -37,6 +37,9 @@ export interface FireEventDTO {
   reportCount: number | null;
   lastSourceEventId: string | null;
   notificationVersion: number | null;
+  lastAgentSequence?: number | null;
+  agentSequence?: number | null;
+  updateTime?: number | null;
   detectionKind?: string | null;
   detectionStatus?: string | null;
   state?: string | null;
@@ -84,6 +87,7 @@ export interface FireEventHistoryDTO {
   thermalImageUrl: string | null;
   visibleImageUrl: string | null;
   eventTimestamp: number | null;
+  agentSequence?: number | null;
   action: 'CREATED' | 'MERGED' | 'VISIBLE_CONFIRM' | string;
   detectionKind?: string | null;
   detectionStatus?: string | null;

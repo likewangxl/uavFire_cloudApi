@@ -74,6 +74,7 @@ public class DurableAgentFireNotificationTransactionParticipant
         FireNotificationPayload payload = new FireNotificationPayload();
         payload.setNotificationId(event.getEventId() + ":" + version);
         payload.setEventId(event.getEventId()); payload.setNotificationVersion(version);
+        payload.setAgentSequence(report.getSequence());
         payload.setWorkspaceId(event.getWorkspaceId()); payload.setTaskId(report.getTaskId());
         payload.setDroneSn(report.getDroneSn()); payload.setDetectionKind(report.getDetectionKind());
         payload.setState(report.getState()); payload.setLocationStatus(event.getLocationStatus());

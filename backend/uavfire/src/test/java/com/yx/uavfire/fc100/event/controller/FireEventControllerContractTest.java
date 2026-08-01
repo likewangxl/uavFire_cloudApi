@@ -24,6 +24,8 @@ class FireEventControllerContractTest {
         FireEventDTO event = new FireEventDTO();
         event.setEventId("event-1");
         event.setNotificationVersion(2);
+        event.setLastAgentSequence(9L);
+        event.setUpdateTime(2_000L);
         event.setDetectionKind("FIRE");
         event.setDetectionStatus("RESULT_DURABLE");
         event.setLocationStatus("PRECISE");
@@ -38,6 +40,8 @@ class FireEventControllerContractTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data[0].eventId").value("event-1"))
             .andExpect(jsonPath("$.data[0].notificationVersion").value(2))
+            .andExpect(jsonPath("$.data[0].lastAgentSequence").value(9))
+            .andExpect(jsonPath("$.data[0].updateTime").value(2000))
             .andExpect(jsonPath("$.data[0].detectionKind").value("FIRE"))
             .andExpect(jsonPath("$.data[0].detectionStatus").value("RESULT_DURABLE"))
             .andExpect(jsonPath("$.data[0].locationStatus").value("PRECISE"))

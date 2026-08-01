@@ -1892,7 +1892,7 @@ useConnectWebSocket((payload: any) => {
   const reconciled = reconcileFireEventUpdate(fireEventState.events, update)
   if (!reconciled.accepted || !reconciled.event) return
   fireEventState.events = reconciled.events as FireEventDTO[]
-  showFireEventNotification(reconciled.event as FireEventDTO)
+  if (reconciled.notificationAdvanced) showFireEventNotification(reconciled.event as FireEventDTO)
   loadCockpitFireEvents()
 })
 

@@ -10,6 +10,7 @@ export interface FireEventUpdatePayload {
   notificationId?: string
   eventId: string
   notificationVersion: number
+  agentSequence?: number
   workspaceId?: string
   taskId?: string
   droneSn?: string

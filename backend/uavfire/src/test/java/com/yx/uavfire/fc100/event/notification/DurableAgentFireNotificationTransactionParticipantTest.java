@@ -52,6 +52,7 @@ class DurableAgentFireNotificationTransactionParticipantTest {
         assertEquals("workspace-1", payload.get("workspaceId").asText());
         assertEquals("task-1", payload.get("taskId").asText());
         assertEquals("FIRE", payload.get("detectionKind").asText());
+        assertEquals(1L, payload.get("agentSequence").asLong());
         assertTrue(payload.get("fireLat").isNull());
         assertTrue(payload.get("aircraftLat").isNull());
         assertEquals("INITIAL", row.getNotificationType());
@@ -81,6 +82,7 @@ class DurableAgentFireNotificationTransactionParticipantTest {
         JsonNode payload = json.readTree(inserted().getPayload());
         assertEquals("目标已完成激光定位", payload.get("message").asText());
         assertEquals("SMOKE", payload.get("detectionKind").asText());
+        assertEquals(2L, payload.get("agentSequence").asLong());
         assertEquals("LASER_RANGEFINDER", payload.get("geoMethod").asText());
         assertEquals(2.5, payload.get("geoErrorRadiusM").asDouble());
         assertEquals(34.1, payload.get("fireLat").asDouble());
@@ -135,6 +137,7 @@ class DurableAgentFireNotificationTransactionParticipantTest {
     }
     private AgentFireReportParam report(String kind, String location) {
         AgentFireReportParam p = new AgentFireReportParam(); p.setEventId("event-1"); p.setTaskId("task-1");
+        p.setSequence(location.equals("LASER_LOCATING") ? 1L : 2L);
         p.setDroneSn("drone-1"); p.setDetectionKind(kind); p.setState(location.equals("LASER_LOCATING") ? "VISUAL_CONFIRMED" : "RESULT_DURABLE");
         p.setLocationStatus(location); p.setFlightStatus("HOVERING"); p.setEventTimestamp(1_000L); return p;
     }

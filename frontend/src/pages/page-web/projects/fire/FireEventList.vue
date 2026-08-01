@@ -257,11 +257,13 @@ useConnectWebSocket((payload: any) => {
   const reconciled = reconcileFireEventUpdate(events.value, update)
   if (!reconciled.accepted) return
   events.value = reconciled.events as FireEventDTO[]
-  message.warning({
-    key: fireEventNotificationKey(update),
-    content: `${formatDetectionKind(update.detectionKind)}：${formatDetectionStatus(update.state)}`,
-    duration: 6
-  })
+  if (reconciled.notificationAdvanced) {
+    message.warning({
+      key: fireEventNotificationKey(update),
+      content: `${formatDetectionKind(update.detectionKind)}：${formatDetectionStatus(update.state)}`,
+      duration: 6
+    })
+  }
   loadEvents()
 })
 

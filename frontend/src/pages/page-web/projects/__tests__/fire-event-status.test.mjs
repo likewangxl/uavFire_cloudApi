@@ -72,12 +72,12 @@ test('unknown and empty codes never echo raw values', () => {
   }
 })
 
-test('a delayed HTTP v1 snapshot cannot overwrite websocket v2 and can still enrich missing fields', async () => {
+test('a delayed lower-sequence HTTP v1 snapshot cannot overwrite websocket v2', async () => {
   let resolveSnapshot
   let resolveWebsocket
   const slowSnapshot = new Promise(resolve => { resolveSnapshot = resolve })
   const fastWebsocket = new Promise(resolve => { resolveWebsocket = resolve })
-  let events = [{ eventId: 'event-1', notificationVersion: 1, source: 'AGENT_VISIBLE' }]
+  let events = [{ eventId: 'event-1', notificationVersion: 1, lastAgentSequence: 1, source: 'AGENT_VISIBLE' }]
 
   const pendingHttp = slowSnapshot.then(snapshot => {
     events = mergeFireEventSnapshot(events, snapshot)
@@ -86,12 +86,12 @@ test('a delayed HTTP v1 snapshot cannot overwrite websocket v2 and can still enr
     events = reconcileFireEventUpdate(events, update).events
   })
   resolveWebsocket({
-    eventId: 'event-1', notificationVersion: 2, detectionKind: 'FIRE', state: 'RESULT_DURABLE',
+    eventId: 'event-1', notificationVersion: 2, agentSequence: 5, detectionKind: 'FIRE', state: 'RESULT_DURABLE',
     locationStatus: 'PRECISE', geoMethod: 'LASER_RANGEFINDER', fireLat: 34.8, fireLng: 109.2
   })
   await pendingWebsocket
   resolveSnapshot([{
-    eventId: 'event-1', notificationVersion: 1, detectionKind: 'SMOKE', detectionStatus: 'VISUAL_CONFIRMED',
+    eventId: 'event-1', notificationVersion: 1, lastAgentSequence: 1, detectionKind: 'SMOKE', detectionStatus: 'VISUAL_CONFIRMED',
     locationStatus: 'LASER_LOCATING', source: 'AGENT_VISIBLE', deviceSn: 'drone-1'
   }])
   await pendingHttp
@@ -99,7 +99,7 @@ test('a delayed HTTP v1 snapshot cannot overwrite websocket v2 and can still enr
   assert.equal(events[0].notificationVersion, 2)
   assert.equal(events[0].detectionKind, 'FIRE')
   assert.equal(events[0].locationStatus, 'PRECISE')
-  assert.equal(events[0].deviceSn, 'drone-1')
+  assert.equal(events[0].deviceSn, undefined)
 })
 
 test('degraded and smoke precise locations use explicit safe explanations', () => {
@@ -127,30 +127,85 @@ test('only a valid precise laser fire point is marker and route ready', () => {
   assert.equal(isRouteReadyFireEvent({ ...precise, lat: 0, lng: 0 }), false)
 })
 
-test('fire updates reconcile by eventId and strictly increasing notificationVersion', () => {
-  const initial = [{ eventId: 'event-1', notificationVersion: 1, state: 'VISUAL_CONFIRMED', confidence: 0.8 }]
+test('notificationVersion gates toast while agentSequence gates state progression', () => {
+  const initial = [{ eventId: 'event-1', notificationVersion: 1, lastAgentSequence: 4, state: 'LASER_MEASURING', confidence: 0.8 }]
   const updated = reconcileFireEventUpdate(initial, {
-    eventId: 'event-1', notificationVersion: 2, state: 'RESULT_DURABLE', locationStatus: 'PRECISE'
+    eventId: 'event-1', notificationVersion: 2, agentSequence: 5, state: 'RESULT_DURABLE', locationStatus: 'PRECISE'
   })
   assert.equal(updated.accepted, true)
+  assert.equal(updated.notificationAdvanced, true)
   assert.equal(updated.events.length, 1)
   assert.equal(updated.events[0].confidence, 0.8)
   assert.equal(updated.events[0].state, 'RESULT_DURABLE')
   assert.equal(fireEventNotificationKey(updated.event), 'fire-event:event-1')
 
-  for (const version of [2, 1]) {
-    const ignored = reconcileFireEventUpdate(updated.events, {
-      eventId: 'event-1', notificationVersion: version, state: 'SCANNING'
-    })
-    assert.equal(ignored.accepted, false)
-    assert.deepEqual(ignored.events, updated.events)
-  }
+  const sameNotification = reconcileFireEventUpdate(updated.events, {
+    eventId: 'event-1', notificationVersion: 2, agentSequence: 6, state: 'RESUME_REQUESTED'
+  })
+  assert.equal(sameNotification.accepted, true)
+  assert.equal(sameNotification.notificationAdvanced, false)
+  assert.equal(sameNotification.events[0].state, 'RESUME_REQUESTED')
 
-  const inserted = reconcileFireEventUpdate(updated.events, {
-    eventId: 'event-2', notificationVersion: 1, state: 'VISUAL_CONFIRMED'
+  const ignored = reconcileFireEventUpdate(sameNotification.events, {
+    eventId: 'event-1', notificationVersion: 2, agentSequence: 5, state: 'RESULT_DURABLE'
+  })
+  assert.equal(ignored.accepted, false)
+  assert.deepEqual(ignored.events, sameNotification.events)
+
+  const inserted = reconcileFireEventUpdate(sameNotification.events, {
+    eventId: 'event-2', notificationVersion: 1, agentSequence: 1, state: 'VISUAL_CONFIRMED'
   })
   assert.equal(inserted.accepted, true)
+  assert.equal(inserted.notificationAdvanced, true)
   assert.equal(inserted.events.length, 2)
+})
+
+test('same notification v1 and v2 snapshots advance through the full agent flight loop', () => {
+  let events = [{ eventId: 'event-1', notificationVersion: 1, lastAgentSequence: 1, detectionStatus: 'VISUAL_CONFIRMED' }]
+  for (const [sequence, detectionStatus, flightStatus] of [
+    [2, 'HOLD_REQUESTED', 'HOLD_REQUESTED'],
+    [3, 'HOVER_VERIFYING', 'HOVERING'],
+    [4, 'TARGET_ALIGNING', 'TARGET_ALIGNING'],
+    [5, 'LASER_MEASURING', 'LASER_MEASURING']
+  ]) {
+    events = mergeFireEventSnapshot(events, [{
+      eventId: 'event-1', notificationVersion: 1, lastAgentSequence: sequence, detectionStatus, flightStatus
+    }])
+  }
+  assert.equal(events[0].detectionStatus, 'LASER_MEASURING')
+  assert.equal(events[0].lastAgentSequence, 5)
+
+  events = mergeFireEventSnapshot(events, [{
+    eventId: 'event-1', notificationVersion: 2, lastAgentSequence: 6,
+    detectionStatus: 'RESULT_DURABLE', flightStatus: 'LASER_MEASURING'
+  }])
+  for (const [sequence, detectionStatus, flightStatus] of [
+    [7, 'RESUME_REQUESTED', 'RESUME_REQUESTED'],
+    [8, 'MISSION_RESUMED', 'MISSION_RESUMED'],
+    [9, 'SCANNING', 'SCANNING']
+  ]) {
+    events = mergeFireEventSnapshot(events, [{
+      eventId: 'event-1', notificationVersion: 2, lastAgentSequence: sequence, detectionStatus, flightStatus
+    }])
+  }
+  assert.equal(events[0].detectionStatus, 'SCANNING')
+  assert.equal(events[0].flightStatus, 'SCANNING')
+  assert.equal(events[0].notificationVersion, 2)
+})
+
+test('same sequence only fills fields and legacy v0 uses updateTime without rollback', () => {
+  const sequenced = mergeFireEventSnapshot(
+    [{ eventId: 'event-1', notificationVersion: 2, lastAgentSequence: 8, detectionStatus: 'MISSION_RESUMED' }],
+    [{ eventId: 'event-1', notificationVersion: 2, lastAgentSequence: 8, detectionStatus: 'RESULT_DURABLE', deviceSn: 'drone-1' }]
+  )
+  assert.equal(sequenced[0].detectionStatus, 'MISSION_RESUMED')
+  assert.equal(sequenced[0].deviceSn, 'drone-1')
+
+  let legacy = [{ eventId: 'legacy-1', notificationVersion: 0, updateTime: 200, status: 'CONFIRMED' }]
+  legacy = mergeFireEventSnapshot(legacy, [{ eventId: 'legacy-1', notificationVersion: 0, updateTime: 100, status: 'NEW' }])
+  assert.equal(legacy[0].status, 'CONFIRMED')
+  legacy = mergeFireEventSnapshot(legacy, [{ eventId: 'legacy-1', notificationVersion: 0, updateTime: 300, status: 'ARCHIVED' }])
+  assert.equal(legacy[0].status, 'ARCHIVED')
 })
 
 test('fire event pages consume websocket updates with the shared monotonic reconciliation contract', () => {

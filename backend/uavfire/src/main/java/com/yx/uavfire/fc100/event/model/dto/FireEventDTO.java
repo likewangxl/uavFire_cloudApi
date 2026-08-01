@@ -37,6 +37,7 @@ public class FireEventDTO {
     private Integer reportCount;
     private String lastSourceEventId;
     private Integer notificationVersion;
+    private Long lastAgentSequence;
     private String detectionKind;
     private String detectionStatus;
     private String locationStatus;
@@ -48,4 +49,5 @@ public class FireEventDTO {
     private String missionNo;
     private String missionStatus;
     private Long createTime;
+    private Long updateTime;
 }

@@ -981,6 +981,7 @@ class FireEventServiceImplMergeTest {
         event.setLocationStatus("PRECISE");
         event.setFlightStatus("MISSION_RESUMED");
         event.setGeoMethod("LASER_RANGEFINDER");
+        event.setLastAgentSequence(9L);
         FireMissionEntity mission = new FireMissionEntity();
         mission.setMissionNo("MISSION-001");
         mission.setStatus("WAITING_REVIEW");
@@ -997,6 +998,7 @@ class FireEventServiceImplMergeTest {
         assertEquals("PRECISE", list.get(0).getLocationStatus());
         assertEquals("MISSION_RESUMED", list.get(0).getFlightStatus());
         assertEquals("LASER_RANGEFINDER", list.get(0).getGeoMethod());
+        assertEquals(9L, list.get(0).getLastAgentSequence());
     }
 
     @Test
@@ -1010,6 +1012,7 @@ class FireEventServiceImplMergeTest {
         history.setLocationStatus("PRECISE");
         history.setFlightStatus("MISSION_RESUMED");
         history.setGeoMethod("LASER_RANGEFINDER");
+        history.setAgentSequence(8L);
         when(events.selectOne(any(QueryWrapper.class))).thenReturn(event);
         when(histories.selectList(any(QueryWrapper.class))).thenReturn(List.of(history));
 
@@ -1021,6 +1024,7 @@ class FireEventServiceImplMergeTest {
         assertEquals("PRECISE", result.get(0).getLocationStatus());
         assertEquals("MISSION_RESUMED", result.get(0).getFlightStatus());
         assertEquals("LASER_RANGEFINDER", result.get(0).getGeoMethod());
+        assertEquals(8L, result.get(0).getAgentSequence());
     }
 
     @Test

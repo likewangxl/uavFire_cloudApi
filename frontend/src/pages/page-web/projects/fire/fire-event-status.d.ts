@@ -3,6 +3,12 @@ export interface FireEventLike {
   event_id?: string;
   notificationVersion?: number | null;
   notification_version?: number | null;
+  agentSequence?: number | null;
+  agent_sequence?: number | null;
+  lastAgentSequence?: number | null;
+  last_agent_sequence?: number | null;
+  updateTime?: number | null;
+  update_time?: number | null;
   detectionKind?: string | null;
   detection_kind?: string | null;
   detectionStatus?: string | null;
@@ -50,6 +56,7 @@ export function reconcileFireEventUpdate<T extends FireEventLike>(events: T[], u
   event: T | FireEventLike | null;
   accepted: boolean;
   replaced: boolean;
+  notificationAdvanced: boolean;
 };
 export function mergeFireEventSnapshot<T extends FireEventLike>(events: T[], snapshot: FireEventLike[]): Array<T | FireEventLike>;
 export function fireEventNotificationKey(eventOrId?: FireEventLike | string): string;
