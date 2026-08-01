@@ -11,6 +11,7 @@ import com.yx.uavfire.wayline.agent.security.WaylineAgentClaim;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -18,8 +19,11 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Date;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -48,7 +52,7 @@ class AgentFireReportControllerTest {
     }
 
     @Test void validInitialReturnsCommittedIdentity() throws Exception {
-        when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.committed(true));
+        when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.committed(true));
         mvc.perform(reportRequest()
                 .contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isOk())
@@ -59,17 +63,32 @@ class AgentFireReportControllerTest {
             .andExpect(jsonPath("$.duplicate").value(false));
     }
 
+    @Test void hashesAndPassesTheExactAuthenticatedRequestBytes() throws Exception {
+        when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.committed(true));
+        String raw = "  \n" + initial() + "\n";
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(raw))
+            .andExpect(status().isOk());
+        ArgumentCaptor<byte[]> bytes = ArgumentCaptor.forClass(byte[].class);
+        ArgumentCaptor<String> hash = ArgumentCaptor.forClass(String.class);
+        verify(ingress).accept(any(), bytes.capture(), hash.capture());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(raw.getBytes(StandardCharsets.UTF_8), bytes.getValue());
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8));
+        StringBuilder expected = new StringBuilder();
+        for (byte b : digest) expected.append(String.format("%02x", b & 0xff));
+        org.junit.jupiter.api.Assertions.assertEquals(expected.toString(), hash.getValue());
+    }
+
     @Test void exactDuplicateIs200AndConflictIs409() throws Exception {
-        when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.duplicate(false));
+        when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.duplicate(false));
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.duplicate").value(true));
-        when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.conflict("payload hash mismatch"));
+        when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.conflict("payload hash mismatch"));
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isConflict());
     }
 
     @Test void acceptsPreciseAndDegradedTerminalMappings() throws Exception {
-        when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.committed(false));
+        when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.committed(false));
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(precise()))
             .andExpect(status().isOk());
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON).content(degraded()))
@@ -98,7 +117,7 @@ class AgentFireReportControllerTest {
             .andExpect(status().isUnauthorized());
         mvc.perform(reportRequest(token("other-drone", 60_000)).contentType(MediaType.APPLICATION_JSON).content(initial()))
             .andExpect(status().isForbidden());
-        verify(ingress, never()).accept(any());
+        verify(ingress, never()).accept(any(), any(), anyString());
     }
 
     @Test void rejectsPartialCoordinatesUnknownEnumsAndCrossStateFieldsBeforeIngress() throws Exception {
@@ -113,7 +132,7 @@ class AgentFireReportControllerTest {
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(initial().replaceFirst("}$", ",\"imageBase64\":\"forbidden\"}")))
             .andExpect(status().isBadRequest());
-        verify(ingress, never()).accept(any());
+        verify(ingress, never()).accept(any(), any(), anyString());
     }
 
     @Test void rejectsRoiReleaseIdentityClockSkewAndInvalidTerminalSamples() throws Exception {
@@ -130,16 +149,16 @@ class AgentFireReportControllerTest {
             .andExpect(status().isBadRequest());
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(precise().replace("\"rangeMeters\":60.0", "\"rangeMeters\":-1.0"))).andExpect(status().isBadRequest());
-        verify(ingress, never()).accept(any());
+        verify(ingress, never()).accept(any(), any(), anyString());
     }
 
     @Test void acceptsAuthenticatedHistoricalReplayButRejectsTooOldAndFutureObservations() throws Exception {
-        when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.committed(false));
+        when(ingress.accept(any(), any(), anyString())).thenReturn(AgentFireReportIngress.Result.committed(false));
         long outageReplay = System.currentTimeMillis() - 6 * 60 * 60 * 1000L;
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
             .content(withEventTimestamp(initial(), outageReplay)))
             .andExpect(status().isOk());
-        verify(ingress).accept(any());
+        verify(ingress).accept(any(), any(), anyString());
 
         long tooOld = System.currentTimeMillis() - AgentFireReportValidator.MAX_REPLAY_AGE_MILLIS - 1;
         mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)

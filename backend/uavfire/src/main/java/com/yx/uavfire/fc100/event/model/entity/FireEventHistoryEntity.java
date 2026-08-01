@@ -41,5 +41,12 @@ public class FireEventHistoryEntity {
     private String visibleImageUrl;
     private Long eventTimestamp;
     private String action;
+    private Long agentSequence;
+    private String detectionKind;
+    private String detectionStatus;
+    private String locationStatus;
+    private String flightStatus;
+    private String agentSessionId;
+    private Integer notificationVersion;
     private Long createTime;
 }

@@ -16,7 +16,7 @@ public class AgentFireReportValidator {
     /** Authenticated durable observations may replay after an outage for 30 days. */
     public static final long MAX_REPLAY_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000;
     public static final long MAX_FUTURE_CLOCK_SKEW_MILLIS = 5 * 60 * 1000L;
-    static final long MAX_LASER_SAMPLE_SKEW_MILLIS = 5 * 60 * 1000L;
+    public static final long MAX_LASER_SAMPLE_SKEW_MILLIS = 5 * 60 * 1000L;
     static final String MODEL_VERSION = "visible-fire-wechat-best2-20260728";
     static final String MODEL_HASH = "957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650";
     private static final Set<String> STATES = set("VISUAL_CONFIRMED", "HOLD_REQUESTED", "HOVER_VERIFYING",

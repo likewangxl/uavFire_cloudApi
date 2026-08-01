@@ -4,7 +4,11 @@ import com.yx.uavfire.fc100.event.model.param.AgentFireReportParam;
 
 /** Task 11 implements the one-transaction ordered persistence behind this port. */
 public interface AgentFireReportIngress {
-    Result accept(AgentFireReportParam report);
+    /**
+     * Accepts the parsed report together with the exact authenticated HTTP body and its SHA-256.
+     * The byte identity is part of the idempotency contract; callers must not reserialize the DTO.
+     */
+    Result accept(AgentFireReportParam report, byte[] rawPayload, String payloadSha256);
 
     final class Result {
         public enum Status { COMMITTED, EXACT_DUPLICATE, CONFLICT }
