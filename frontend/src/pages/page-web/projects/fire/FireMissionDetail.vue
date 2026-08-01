@@ -15,6 +15,7 @@ import StatusTag from '/@/components/fire/StatusTag.vue'
 import AmapMissionMap from '/@/components/fire/AmapMissionMap.vue'
 import ActionButtons from '/@/components/fire/ActionButtons.vue'
 import MissionTimeline from '/@/components/fire/MissionTimeline.vue'
+import { formatMissionStatus } from './fire-event-status.mjs'
 
 const props = defineProps<{ no: string }>()
 const router = useRouter()
@@ -245,8 +246,8 @@ onMounted(refresh)
           <a-card title="Delivery 状态" size="small">
             <a-descriptions :column="2" size="small">
               <a-descriptions-item label="DJI 任务 ID">{{ dto?.djiTaskId ?? '-' }}</a-descriptions-item>
-              <a-descriptions-item label="状态">{{ deliveryStatus?.status ?? '-' }}</a-descriptions-item>
-              <a-descriptions-item label="阶段">{{ deliveryStatus?.phase ?? '-' }}</a-descriptions-item>
+              <a-descriptions-item label="状态">{{ formatMissionStatus(deliveryStatus?.status) }}</a-descriptions-item>
+              <a-descriptions-item label="阶段">{{ formatMissionStatus(deliveryStatus?.phase) }}</a-descriptions-item>
               <a-descriptions-item label="进度">
                 {{ deliveryStatus?.progressPercent != null ? `${deliveryStatus.progressPercent}%` : '-' }}
               </a-descriptions-item>

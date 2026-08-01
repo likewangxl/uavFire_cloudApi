@@ -30,6 +30,7 @@ models/
 data/
 screenshots/
 backups/
+artifacts/acceptance/
 exported-kmz/
 kmz/
 msdk_assets_pack/

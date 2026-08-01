@@ -376,7 +376,7 @@ const defaultForm = (): FireEventCreateRequest => ({
 const form = ref<FireEventCreateRequest>(defaultForm())
 
 // 识别图预览：annotated 是带 YOLO 框的标注图，raw 是原始帧。
-// ai-service 文件命名约定 <eventId>-annotated.jpg / <eventId>-raw.jpg，
+// Agent 证据文件沿用 <eventId>-annotated.jpg / <eventId>-raw.jpg，
 // 数据库图片 URL 存的是 annotated，靠后缀替换得到 raw。
 const previewOpen = ref(false)
 const previewBaseUrl = ref<string | null>(null)

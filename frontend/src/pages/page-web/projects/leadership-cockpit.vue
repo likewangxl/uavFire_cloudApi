@@ -1496,7 +1496,7 @@ const onToggleFireDetection = async () => {
       fireDetectionState.phase = 'stopping'
       const res = await requestFireDetectionStop(fireDetectionState.droneSn)
       if (res.code !== 0) {
-        throw new Error(res.message || 'ai-service stop failed')
+        throw new Error(res.message || 'Agent 识别停止失败')
       }
       fireDetectionState.running = false
       fireDetectionState.phase = 'idle'
@@ -1508,7 +1508,7 @@ const onToggleFireDetection = async () => {
       fireDetectionState.phase = 'starting'
       const res = await requestFireDetectionStart(fireDetectionState.droneSn)
       if (res.code !== 0) {
-        throw new Error(res.message || 'ai-service start failed')
+        throw new Error(res.message || 'Agent 识别启动失败')
       }
       fireDetectionState.running = true
       // 纯可见光识别：镜头本来就在可见光时不发 focus-visible——
@@ -1526,7 +1526,7 @@ const onToggleFireDetection = async () => {
     fireDetectionState.phase = fireDetectionState.running ? 'switch_failed' : 'idle'
     notification.error({
       message: fireDetectionState.running ? '停止火情监测失败' : '启动火情监测失败',
-      description: (e as any)?.message || '请检查后端和 ai-service 是否正常运行。'
+      description: (e as any)?.message || '请检查后端连接和 Agent 识别状态。'
     })
   } finally {
     fireDetectionState.loading = false

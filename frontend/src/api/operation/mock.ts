@@ -26,7 +26,7 @@ const incidents: OperationIncidentDTO[] = [
     centerLat: 34.66791,
     centerLng: 109.32667,
     riskRadiusM: 180,
-    createdBy: 'ai-service',
+    createdBy: 'uavfire-agent',
     confirmedBy: 'commander-01',
     createTime: now - 1000 * 60 * 24,
     updateTime: now - 1000 * 60 * 8,
@@ -40,7 +40,7 @@ const incidents: OperationIncidentDTO[] = [
     centerLat: 34.6842,
     centerLng: 109.3475,
     riskRadiusM: 120,
-    createdBy: 'ai-service',
+    createdBy: 'uavfire-agent',
     confirmedBy: 'commander-02',
     createTime: now - 1000 * 60 * 46,
     updateTime: now - 1000 * 60 * 5,
@@ -89,12 +89,12 @@ const assignments: OperationAssignmentDTO[] = [
 
 const timelineByIncident: Record<number, OperationTimelineItem[]> = {
   101: [
-    statusLog('CREATE', undefined, 'CONFIRMED', 'ai-service', '由已确认火情创建事件', now - 1000 * 60 * 24),
+    statusLog('CREATE', undefined, 'CONFIRMED', 'uavfire-agent', '由已确认火情创建事件', now - 1000 * 60 * 24),
     assignmentLog(assignments[0]),
     assignmentLog(assignments[1]),
   ],
   102: [
-    statusLog('CREATE', undefined, 'CONFIRMED', 'ai-service', '由已确认火情创建事件', now - 1000 * 60 * 46),
+    statusLog('CREATE', undefined, 'CONFIRMED', 'uavfire-agent', '由已确认火情创建事件', now - 1000 * 60 * 46),
     assignmentLog(assignments[2]),
     statusLog('DISPATCH', 'CONFIRMED', 'DISPATCHING', 'commander-02', '派发给 FC100-DELIVERY-02', now - 1000 * 60 * 35),
     statusLog('RESPOND', 'DISPATCHING', 'RESPONDING', 'system', '投送资源已响应', now - 1000 * 60 * 34),
