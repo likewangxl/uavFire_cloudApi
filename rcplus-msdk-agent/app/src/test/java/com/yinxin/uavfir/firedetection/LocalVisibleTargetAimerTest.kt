@@ -135,6 +135,10 @@ class LocalVisibleTargetAimerTest {
         eventId = "event-1",
         sourceGeneration = generation,
         capturedAtMonotonicMs = capturedAt,
+        startedAtMonotonicMs = capturedAt,
+        completedAtMonotonicMs = capturedAt,
+        publicationSequence = capturedAt + 1,
+        outcome = if (healthy) VisibleInferenceOutcome.SUCCESS else VisibleInferenceOutcome.FAILURE,
         healthy = healthy,
         detections = detections,
     )
@@ -162,9 +166,11 @@ class LocalVisibleTargetAimerTest {
         private val observations: ArrayDeque<LocalVisibleDetectionObservation>,
     ) : LocalVisibleDetectionSource {
         val requests = mutableListOf<LocalDetectionAwaitRequest>()
-        override suspend fun await(request: LocalDetectionAwaitRequest): LocalVisibleDetectionObservation? {
+        override fun cursor(): Long = 0
+        override suspend fun await(request: LocalDetectionAwaitRequest): LocalDetectionAwaitResult {
             requests += request
-            return observations.removeFirstOrNull()
+            return observations.removeFirstOrNull()?.let(LocalDetectionAwaitResult::Observed)
+                ?: LocalDetectionAwaitResult.Failed(LocalDetectionAwaitFailure.TIMEOUT)
         }
     }
 }

@@ -1,8 +1,8 @@
 package com.yinxin.uavfir.firedetection
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
+import java.util.Collections
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.hypot
@@ -52,6 +52,7 @@ data class LocalDetectionAwaitRequest(
     val kind: DetectionKind,
     val sourceGeneration: Long,
     val capturedStrictlyAfterMonotonicMs: Long,
+    val afterPublicationSequence: Long,
 )
 
 data class LocalVisibleDetectionObservation(
@@ -59,12 +60,26 @@ data class LocalVisibleDetectionObservation(
     val eventId: String,
     val sourceGeneration: Long,
     val capturedAtMonotonicMs: Long,
+    val startedAtMonotonicMs: Long,
+    val completedAtMonotonicMs: Long,
+    val publicationSequence: Long,
+    val outcome: VisibleInferenceOutcome,
     val healthy: Boolean,
     val detections: List<VisibleDetection>,
 ) {
     val structurallyValid: Boolean
         get() = sessionId.isNotBlank() && eventId.isNotBlank() &&
-            sourceGeneration > 0 && capturedAtMonotonicMs >= 0
+            sourceGeneration > 0 && publicationSequence > 0 &&
+            capturedAtMonotonicMs >= 0 &&
+            capturedAtMonotonicMs <= startedAtMonotonicMs &&
+            startedAtMonotonicMs <= completedAtMonotonicMs
+}
+
+enum class LocalDetectionAwaitFailure { JOURNAL_OVERFLOW, TIMEOUT }
+
+sealed interface LocalDetectionAwaitResult {
+    data class Observed(val observation: LocalVisibleDetectionObservation) : LocalDetectionAwaitResult
+    data class Failed(val reason: LocalDetectionAwaitFailure) : LocalDetectionAwaitResult
 }
 
 /**
@@ -73,17 +88,49 @@ data class LocalVisibleDetectionObservation(
  * Implementations must not run a detector or consume the latest-frame buffer.
  * Cancellation of [await] must unregister any listener owned by the adapter.
  */
-fun interface LocalVisibleDetectionSource {
-    suspend fun await(request: LocalDetectionAwaitRequest): LocalVisibleDetectionObservation?
+interface LocalVisibleDetectionSource {
+    fun cursor(): Long
+    suspend fun await(request: LocalDetectionAwaitRequest): LocalDetectionAwaitResult
+}
+
+enum class VisibleInferenceOutcome { SUCCESS, FAILURE }
+
+class VisibleInferencePublication(
+    val sourceGeneration: Long,
+    val capturedAtMonotonicMs: Long,
+    val startedAtMonotonicMs: Long,
+    val completedAtMonotonicMs: Long,
+    val outcome: VisibleInferenceOutcome,
+    val health: VisibleInferenceStatus,
+    detections: List<VisibleDetection>,
+    val failure: String?,
+) {
+    val detections: List<VisibleDetection> =
+        Collections.unmodifiableList(ArrayList(detections))
+
+    init {
+        require(sourceGeneration > 0)
+        require(capturedAtMonotonicMs >= 0)
+        require(capturedAtMonotonicMs <= startedAtMonotonicMs)
+        require(startedAtMonotonicMs <= completedAtMonotonicMs)
+        require(
+            (outcome == VisibleInferenceOutcome.SUCCESS &&
+                health == VisibleInferenceStatus.HEALTHY && failure == null) ||
+                (outcome == VisibleInferenceOutcome.FAILURE &&
+                    health == VisibleInferenceStatus.DEGRADED && !failure.isNullOrBlank()),
+        )
+    }
 }
 
 data class PublishedVisibleInferenceResult(
-    val sourceGeneration: Long,
-    val result: VisibleDetectionResult,
-)
+    val sequence: Long,
+    val publication: VisibleInferencePublication,
+) {
+    init { require(sequence > 0) }
+}
 
 fun interface VisibleInferenceResultPublisher {
-    fun publish(result: PublishedVisibleInferenceResult)
+    fun publish(result: VisibleInferencePublication)
 
     companion object {
         val NO_OP = VisibleInferenceResultPublisher { }
@@ -94,38 +141,66 @@ fun interface VisibleInferenceResultPublisher {
  * Read-only fan-out of the sole [VisibleInferenceLoop]. It carries no frame
  * ownership and cannot invoke the detector or consume the frame buffer.
  */
-class VisibleInferenceResultStream :
+class VisibleInferenceResultJournal(
+    private val capacity: Int = RESULT_JOURNAL_CAPACITY,
+) :
     VisibleInferenceResultPublisher,
     LocalVisibleDetectionSource {
-    private val results = MutableSharedFlow<PublishedVisibleInferenceResult>(
-        replay = 0,
-        extraBufferCapacity = RESULT_BUFFER_CAPACITY,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    init { require(capacity > 0) }
+
+    private data class State(
+        val lastSequence: Long = 0,
+        val entries: List<PublishedVisibleInferenceResult> = emptyList(),
     )
 
-    override fun publish(result: PublishedVisibleInferenceResult) {
-        results.tryEmit(result)
+    private val monitor = Any()
+    private val state = MutableStateFlow(State())
+
+    override fun cursor(): Long = state.value.lastSequence
+
+    override fun publish(result: VisibleInferencePublication) {
+        synchronized(monitor) {
+            val current = state.value
+            val sequence = current.lastSequence + 1
+            val retained = (current.entries + PublishedVisibleInferenceResult(sequence, result))
+                .takeLast(capacity)
+            state.value = State(sequence, retained)
+        }
     }
 
-    override suspend fun await(
-        request: LocalDetectionAwaitRequest,
-    ): LocalVisibleDetectionObservation {
-        val published = results.first {
-            it.sourceGeneration == request.sourceGeneration &&
-                it.result.frameCapturedAtMillis > request.capturedStrictlyAfterMonotonicMs
+    override suspend fun await(request: LocalDetectionAwaitRequest): LocalDetectionAwaitResult {
+        evaluate(state.value, request)?.let { return it }
+        return withTimeoutOrNull(DEFAULT_AWAIT_TIMEOUT_MS) {
+            state.first { evaluate(it, request) != null }
+                .let { evaluate(it, request)!! }
+        } ?: LocalDetectionAwaitResult.Failed(LocalDetectionAwaitFailure.TIMEOUT)
+    }
+
+    private fun evaluate(state: State, request: LocalDetectionAwaitRequest): LocalDetectionAwaitResult? {
+        val oldest = state.entries.firstOrNull()?.sequence
+        if (oldest != null && request.afterPublicationSequence < oldest - 1) {
+            return LocalDetectionAwaitResult.Failed(LocalDetectionAwaitFailure.JOURNAL_OVERFLOW)
         }
-        return LocalVisibleDetectionObservation(
+        val published = state.entries.firstOrNull { it.sequence > request.afterPublicationSequence }
+            ?: return null
+        val value = published.publication
+        return LocalDetectionAwaitResult.Observed(LocalVisibleDetectionObservation(
             sessionId = request.sessionId,
             eventId = request.eventId,
-            sourceGeneration = published.sourceGeneration,
-            capturedAtMonotonicMs = published.result.frameCapturedAtMillis,
-            healthy = true,
-            detections = published.result.detections,
-        )
+            sourceGeneration = value.sourceGeneration,
+            capturedAtMonotonicMs = value.capturedAtMonotonicMs,
+            startedAtMonotonicMs = value.startedAtMonotonicMs,
+            completedAtMonotonicMs = value.completedAtMonotonicMs,
+            publicationSequence = published.sequence,
+            outcome = value.outcome,
+            healthy = value.health == VisibleInferenceStatus.HEALTHY,
+            detections = value.detections,
+        ))
     }
 
-    private companion object {
-        const val RESULT_BUFFER_CAPACITY = 8
+    companion object {
+        const val RESULT_JOURNAL_CAPACITY = 32
+        const val DEFAULT_AWAIT_TIMEOUT_MS = 2_000L
     }
 }
 
@@ -167,6 +242,7 @@ class LocalVisibleTargetAimer(
         var prior = request.priorRoi
         var sawReticleMiss = false
         repeat(maxCycles) { cycle ->
+            val cursorBeforeAction = detectionSource.cursor()
             val receipt = try {
                 alignmentAction.alignAt(prior.centerX, prior.centerY)
             } catch (cancelled: CancellationException) {
@@ -174,8 +250,14 @@ class LocalVisibleTargetAimer(
             } catch (_: Exception) {
                 return LocalTargetAimResult.Failed(LocalTargetAimFailure.ACTION_FAILED)
             }
-            val newest = awaitEligible(request, prior, receipt)
-                ?: return@repeat
+            val reacquired = awaitEligible(request, prior, receipt, cursorBeforeAction)
+            if (reacquired is EligibleOutcome.Failed) {
+                if (reacquired.reason == LocalTargetAimFailure.DETECTION_TIMEOUT) {
+                    return LocalTargetAimResult.Failed(reacquired.reason)
+                }
+                return@repeat
+            }
+            val newest = (reacquired as EligibleOutcome.Found).detection
             if (newest.roi.contains(receipt.reticleX, receipt.reticleY)) {
                 return LocalTargetAimResult.Aligned(
                     kind = request.kind,
@@ -198,8 +280,10 @@ class LocalVisibleTargetAimer(
         request: LocalTargetAimRequest,
         prior: NormalizedRoi,
         receipt: TargetActionReceipt,
-    ): EligibleDetection? {
+        cursorBeforeAction: Long,
+    ): EligibleOutcome {
         var lastSeen = receipt.completedAtMonotonicMs
+        var cursor = cursorBeforeAction
         repeat(maxObservationsPerCycle) {
             val awaitRequest = LocalDetectionAwaitRequest(
                 sessionId = request.sessionId,
@@ -207,11 +291,20 @@ class LocalVisibleTargetAimer(
                 kind = request.kind,
                 sourceGeneration = receipt.sourceGeneration,
                 capturedStrictlyAfterMonotonicMs = lastSeen,
+                afterPublicationSequence = cursor,
             )
-            val observed = withTimeoutOrNull(observationTimeoutMs) {
+            val awaited = withTimeoutOrNull(observationTimeoutMs) {
                 detectionSource.await(awaitRequest)
+            } ?: return EligibleOutcome.Failed(LocalTargetAimFailure.DETECTION_TIMEOUT)
+            if (awaited is LocalDetectionAwaitResult.Failed) {
+                return EligibleOutcome.Failed(
+                    if (awaited.reason == LocalDetectionAwaitFailure.TIMEOUT)
+                        LocalTargetAimFailure.DETECTION_TIMEOUT
+                    else LocalTargetAimFailure.TARGET_NOT_REACQUIRED,
+                )
             }
-            if (observed == null) return null
+            val observed = (awaited as LocalDetectionAwaitResult.Observed).observation
+            cursor = observed.publicationSequence
             if (observed.structurallyValid &&
                 observed.sessionId == request.sessionId &&
                 observed.eventId == request.eventId &&
@@ -238,12 +331,17 @@ class LocalVisibleTargetAimer(
                         NormalizedRoi.from(it).centerY - prior.centerY,
                     )
                 } ?: return@repeat
-            return EligibleDetection(
+            return EligibleOutcome.Found(EligibleDetection(
                 roi = NormalizedRoi.from(selected),
                 capturedAt = observed.capturedAtMonotonicMs,
-            )
+            ))
         }
-        return null
+        return EligibleOutcome.Failed(LocalTargetAimFailure.TARGET_NOT_REACQUIRED)
+    }
+
+    private sealed interface EligibleOutcome {
+        data class Found(val detection: EligibleDetection) : EligibleOutcome
+        data class Failed(val reason: LocalTargetAimFailure) : EligibleOutcome
     }
 
     private data class EligibleDetection(
@@ -263,13 +361,18 @@ data class AircraftOsdSnapshot(
     val latitude: Double,
     val longitude: Double,
     val altitude: Double,
+    val observationSequence: Long,
     val capturedAtMonotonicMs: Long,
 ) {
     val valid: Boolean
         get() = latitude.isFinite() && latitude in -90.0..90.0 &&
             longitude.isFinite() && longitude in -180.0..180.0 &&
             altitude.isFinite() && altitude in -1_000.0..20_000.0 &&
-            capturedAtMonotonicMs >= 0L
+            observationSequence > 0 && capturedAtMonotonicMs >= 0L
+
+    fun isFreshAt(failureAtMonotonicMs: Long, maxAgeMs: Long): Boolean =
+        valid && maxAgeMs >= 0 && capturedAtMonotonicMs <= failureAtMonotonicMs &&
+            failureAtMonotonicMs - capturedAtMonotonicMs <= maxAgeMs
 }
 
 fun interface AircraftOsdSnapshotProvider {
@@ -291,7 +394,10 @@ data class FireLocalizationRequest(
 enum class FireLocalizationFailure {
     EVENT_SESSION_MISMATCH,
     TARGET_NOT_ALIGNED,
+    TARGET_DETECTION_TIMEOUT,
+    SOURCE_GENERATION_CHANGED,
     LASER_ENABLE_FAILED,
+    LASER_CALLBACK_OVERFLOW,
     LASER_SAMPLES_UNAVAILABLE,
     LASER_SAMPLES_INVALID,
     AIRCRAFT_OSD_UNAVAILABLE,

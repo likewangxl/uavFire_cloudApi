@@ -1,6 +1,12 @@
 package com.yinxin.uavfir.api
 
 import android.util.Log
+import android.os.SystemClock
+import com.yinxin.uavfir.firedetection.BoundLaserObservationClient
+import com.yinxin.uavfir.firedetection.BoundLaserSample
+import com.yinxin.uavfir.firedetection.LaserHardwareAwaitResult
+import com.yinxin.uavfir.firedetection.LaserHardwareOperationToken
+import com.yinxin.uavfir.firedetection.LaserOperationBinding
 import com.yinxin.uavfir.session.DualStreamSessionManager
 import com.yinxin.uavfir.stream.ThermalMeasuredPoint
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
@@ -25,6 +31,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -928,9 +936,40 @@ class DjiBatteryProvider : BatteryProvider {
 class DjiLaserRangefinderClient(
     private val keyManager: KeyManager = KeyManager.getInstance(),
     private val settleMs: Long = 500L,
-) : LaserRangefinderClient {
+) : LaserRangefinderClient, BoundLaserObservationClient {
     private val operationMutex = Mutex()
     private var enabled = false
+    private var activeObservationOperation: ActiveLaserObservationOperation? = null
+
+    private data class ObservationState(
+        val lastSequence: Long = 0,
+        val samples: List<BoundLaserSample> = emptyList(),
+    )
+
+    private class ActiveLaserObservationOperation(
+        val binding: LaserOperationBinding,
+        val listenerOwner: Any = Any(),
+    ) {
+        val observations = MutableStateFlow(ObservationState())
+        var token: LaserHardwareOperationToken? = null
+
+        @Synchronized
+        fun publish(result: LaserRangefinderResult, observedAt: Long) {
+            val current = observations.value
+            val sequence = current.lastSequence + 1
+            val sample = BoundLaserSample(
+                binding = binding,
+                hardwareOperationGeneration = binding.operationGeneration,
+                observationSequence = sequence,
+                sampledAtMonotonicMs = observedAt,
+                measurement = result,
+            )
+            observations.value = ObservationState(
+                lastSequence = sequence,
+                samples = (current.samples + sample).takeLast(LASER_CALLBACK_JOURNAL_CAPACITY),
+            )
+        }
+    }
 
     override suspend fun enable() = operationMutex.withLock {
         if (!enabled) {
@@ -953,6 +992,101 @@ class DjiLaserRangefinderClient(
     }
 
     override suspend fun disable() = operationMutex.withLock {
+        try {
+            setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
+        } finally {
+            enabled = false
+        }
+    }
+
+    override suspend fun beginOperation(
+        binding: LaserOperationBinding,
+    ): LaserHardwareOperationToken = operationMutex.withLock {
+        check(activeObservationOperation == null) { "laser-operation-already-active" }
+        val operation = ActiveLaserObservationOperation(binding)
+        activeObservationOperation = operation
+        val informationKey = laserKey(DJICameraKey.KeyLaserMeasureInformation)
+        keyManager.listen(
+            informationKey,
+            operation.listenerOwner,
+            false,
+            object : CommonCallbacks.KeyListener<LaserMeasureInformation> {
+                override fun onValueChange(
+                    oldValue: LaserMeasureInformation?,
+                    newValue: LaserMeasureInformation?,
+                ) {
+                    newValue?.let { operation.publish(it.toResult(), SystemClock.elapsedRealtime()) }
+                }
+            },
+        )
+        try {
+            enableHardware()
+            delay(settleMs)
+            val enabledAt = SystemClock.elapsedRealtime()
+            val cursor = operation.observations.value.lastSequence
+            LaserHardwareOperationToken(
+                binding = binding,
+                hardwareOperationGeneration = binding.operationGeneration,
+                observationCursorAtEnable = cursor,
+                enabledAtMonotonicMs = enabledAt,
+            ).also { operation.token = it }
+        } catch (error: Throwable) {
+            keyManager.cancelListen(informationKey, operation.listenerOwner)
+            runCatching { disableHardware() }
+            activeObservationOperation = null
+            throw error
+        }
+    }
+
+    override suspend fun awaitNext(
+        token: LaserHardwareOperationToken,
+        afterObservationSequence: Long,
+        timeoutMs: Long,
+    ): LaserHardwareAwaitResult {
+        val operation = operationMutex.withLock {
+            activeObservationOperation?.takeIf { it.token == token }
+        } ?: return LaserHardwareAwaitResult.Timeout
+        fun evaluate(state: ObservationState): LaserHardwareAwaitResult? {
+            val oldest = state.samples.firstOrNull()?.observationSequence
+            if (oldest != null && afterObservationSequence < oldest - 1) {
+                return LaserHardwareAwaitResult.Overflow
+            }
+            val sample = state.samples.firstOrNull {
+                it.observationSequence > maxOf(
+                    afterObservationSequence,
+                    token.observationCursorAtEnable,
+                ) && it.sampledAtMonotonicMs >= token.enabledAtMonotonicMs
+            } ?: return null
+            return LaserHardwareAwaitResult.Observed(sample)
+        }
+        evaluate(operation.observations.value)?.let { return it }
+        return withTimeoutOrNull(timeoutMs) {
+            operation.observations.first { evaluate(it) != null }
+                .let { evaluate(it)!! }
+        } ?: LaserHardwareAwaitResult.Timeout
+    }
+
+    override suspend fun endOperation(token: LaserHardwareOperationToken) =
+        operationMutex.withLock {
+            val operation = activeObservationOperation?.takeIf { it.token == token } ?: return@withLock
+            try {
+                disableHardware()
+            } finally {
+                keyManager.cancelListen(
+                    laserKey(DJICameraKey.KeyLaserMeasureInformation),
+                    operation.listenerOwner,
+                )
+                activeObservationOperation = null
+            }
+        }
+
+    private suspend fun enableHardware() {
+        setValue(laserKey(DJICameraKey.KeyLaserWorkMode), LaserWorkMode.OPEN_ON_DEMAND)
+        setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), true)
+        enabled = true
+    }
+
+    private suspend fun disableHardware() {
         try {
             setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
         } finally {
@@ -991,6 +1125,10 @@ class DjiLaserRangefinderClient(
                 }
             })
         }
+    }
+
+    private companion object {
+        const val LASER_CALLBACK_JOURNAL_CAPACITY = 16
     }
 }
 

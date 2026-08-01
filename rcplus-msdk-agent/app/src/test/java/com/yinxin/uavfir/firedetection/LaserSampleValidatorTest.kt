@@ -95,6 +95,8 @@ class LaserSampleValidatorTest {
         state: String = "NORMAL",
     ) = BoundLaserSample(
         binding = binding,
+        hardwareOperationGeneration = binding.operationGeneration,
+        observationSequence = at,
         sampledAtMonotonicMs = at,
         measurement = LaserRangefinderResult(lat, lng, alt, range, state, .5, .5),
     )

@@ -20,11 +20,11 @@ import com.yinxin.uavfir.api.LegacyCommandDeduplicator
 import com.yinxin.uavfir.api.MissionHoldControl
 import com.yinxin.uavfir.api.VisibleFireLaserLocator
 import com.yinxin.uavfir.api.DjiLocalTargetAlignmentAction
+import com.yinxin.uavfir.api.DjiAircraftOsdTracker
 import com.yinxin.uavfir.api.DjiLaserRangefinderClient
 import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.firedetection.LatestVisibleFrameBuffer
-import com.yinxin.uavfir.firedetection.AircraftOsdSnapshot
 import com.yinxin.uavfir.firedetection.AwaitableMissionControl
 import com.yinxin.uavfir.firedetection.FlightSafetyGate
 import com.yinxin.uavfir.firedetection.OwnedResumeSafetyEvidenceProvider
@@ -32,7 +32,7 @@ import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorFactory
 import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import com.yinxin.uavfir.firedetection.VisibleInferenceLoop
-import com.yinxin.uavfir.firedetection.VisibleInferenceResultStream
+import com.yinxin.uavfir.firedetection.VisibleInferenceResultJournal
 import com.yinxin.uavfir.firedetection.LocalVisibleTargetAimer
 import com.yinxin.uavfir.firedetection.WaypointMissionControlPort
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
@@ -77,7 +77,7 @@ class AppServices(
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val latestVisibleFrameBuffer = LatestVisibleFrameBuffer()
-    private val visibleInferenceResults = VisibleInferenceResultStream()
+    private val visibleInferenceResults = VisibleInferenceResultJournal()
     private val visibleFireDetectorArming = VisibleFireDetectorFactory.create(application)
     private val visibleInferenceLoop = (visibleFireDetectorArming as? VisibleFireDetectorArmingResult.Armed)
         ?.let {
@@ -148,6 +148,7 @@ class AppServices(
         monotonicNow = SystemClock::elapsedRealtime,
     )
     private val visibleFireLaserRangefinder = DjiLaserRangefinderClient()
+    private val aircraftOsdTracker = DjiAircraftOsdTracker()
     private val localVisibleTargetAimer = LocalVisibleTargetAimer(
         alignmentAction = DjiLocalTargetAlignmentAction(
             tapZoomClient = DjiTapZoomClient(),
@@ -160,17 +161,11 @@ class AppServices(
         missionHold = missionHoldControl,
         flightControl = flightControlClient,
         localTargetAimer = localVisibleTargetAimer,
-        aircraftOsdProvider = {
-            DjiAircraftLocationProvider.current()?.let {
-                AircraftOsdSnapshot(
-                    latitude = it.latitude,
-                    longitude = it.longitude,
-                    altitude = it.altitudeM,
-                    capturedAtMonotonicMs = SystemClock.elapsedRealtime(),
-                )
-            }
-        },
+        aircraftOsdProvider = aircraftOsdTracker,
         laserRangefinder = visibleFireLaserRangefinder,
+        laserObservationClient = visibleFireLaserRangefinder,
+        sourceGenerationGuard =
+            latestVisibleFrameBuffer::currentVisibleSourceGeneration,
     ).also(sessionManager::attachVisibleFireLaserLocator)
     private val fireConfirmationProcessor = FireConfirmationProcessor(
         sessionManager = sessionManager,
@@ -349,6 +344,7 @@ class AppServices(
 
     fun shutdown() {
         awaitableMissionControl.close()
+        aircraftOsdTracker.close()
         visibleInferenceLoop?.close() ?: latestVisibleFrameBuffer.close()
         osdReporter.stop()
         hmsReporter.stop()

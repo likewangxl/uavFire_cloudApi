@@ -2,18 +2,24 @@ package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.session.DualStreamSessionManager
 import com.yinxin.uavfir.firedetection.AircraftOsdSnapshotProvider
+import com.yinxin.uavfir.firedetection.AircraftOsdSnapshot
 import com.yinxin.uavfir.firedetection.BoundLaserSample
+import com.yinxin.uavfir.firedetection.BoundLaserObservationClient
 import com.yinxin.uavfir.firedetection.FireLocalizationFailure
 import com.yinxin.uavfir.firedetection.FireLocalizationRequest
 import com.yinxin.uavfir.firedetection.FireLocalizationResult
 import com.yinxin.uavfir.firedetection.LaserOperationBinding
+import com.yinxin.uavfir.firedetection.LaserHardwareAwaitResult
+import com.yinxin.uavfir.firedetection.LaserHardwareOperationToken
 import com.yinxin.uavfir.firedetection.LaserSampleValidator
 import com.yinxin.uavfir.firedetection.LaserValidationResult
 import com.yinxin.uavfir.firedetection.LocalTargetAimRequest
+import com.yinxin.uavfir.firedetection.LocalTargetAimFailure
 import com.yinxin.uavfir.firedetection.LocalTargetAimResult
 import com.yinxin.uavfir.firedetection.LocalVisibleTargetAimerPort
 import com.yinxin.uavfir.firedetection.LocalTargetAlignmentAction
 import com.yinxin.uavfir.firedetection.TargetActionReceipt
+import com.yinxin.uavfir.firedetection.VisibleSourceGenerationGuard
 import dji.sdk.keyvalue.key.FlightControllerKey
 import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.DJIKey
@@ -24,6 +30,7 @@ import dji.sdk.keyvalue.value.common.CameraLensType
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.Velocity3D
+import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.et.create
@@ -42,6 +49,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 data class VelocitySample(
     val horizontalMps: Double,
@@ -159,6 +167,48 @@ class DjiAircraftVelocityProvider : AircraftVelocityProvider {
     }
 }
 
+class DjiAircraftOsdTracker(
+    private val keyManager: KeyManager = KeyManager.getInstance(),
+    private val nowMonotonicMs: () -> Long = android.os.SystemClock::elapsedRealtime,
+) : AircraftOsdSnapshotProvider, AutoCloseable {
+    private val owner = Any()
+    private val sequence = AtomicLong()
+    private val latest = AtomicReference<AircraftOsdSnapshot?>()
+    private val locationKey = FlightControllerKey.KeyAircraftLocation3D.create()
+
+    init {
+        keyManager.listen(
+            locationKey,
+            owner,
+            false,
+            object : CommonCallbacks.KeyListener<LocationCoordinate3D> {
+                override fun onValueChange(
+                    oldValue: LocationCoordinate3D?,
+                    newValue: LocationCoordinate3D?,
+                ) {
+                    val value = newValue ?: return
+                    latest.set(
+                        AircraftOsdSnapshot(
+                            latitude = value.latitude,
+                            longitude = value.longitude,
+                            altitude = value.altitude,
+                            observationSequence = sequence.incrementAndGet(),
+                            capturedAtMonotonicMs = nowMonotonicMs(),
+                        ),
+                    )
+                }
+            },
+        )
+    }
+
+    override fun current(): AircraftOsdSnapshot? = latest.get()
+
+    override fun close() {
+        keyManager.cancelListen(locationKey, owner)
+        latest.set(null)
+    }
+}
+
 class VisibleFireLaserLocator(
     private val missionHold: MissionHoldControl,
     private val flightControl: FlightControlActionClient,
@@ -170,26 +220,70 @@ class VisibleFireLaserLocator(
         AircraftOsdSnapshotProvider { null },
     private val laserSampleValidator: LaserSampleValidator = LaserSampleValidator(),
     private val laserRangefinder: LaserRangefinderClient = NoopLaserRangefinderClient,
+    private val laserObservationClient: BoundLaserObservationClient? =
+        laserRangefinder as? BoundLaserObservationClient,
+    private val sourceGenerationGuard: VisibleSourceGenerationGuard =
+        VisibleSourceGenerationGuard { null },
 ) {
-    @Volatile
-    private var heldEventId: String? = null
-    private val laserOperationGeneration = AtomicLong()
-    private val localizationMutex = Mutex()
+    private sealed interface Ownership {
+        val generation: Long
+        val eventId: String
+        data class LocalHolding(
+            val sessionId: String,
+            override val eventId: String,
+            override val generation: Long,
+        ) : Ownership
+        data class LocalHeld(
+            val sessionId: String,
+            override val eventId: String,
+            override val generation: Long,
+        ) : Ownership
+        data class LocalOperating(
+            val sessionId: String,
+            override val eventId: String,
+            override val generation: Long,
+        ) : Ownership
+        data class LegacyHolding(override val eventId: String, override val generation: Long) : Ownership
+        data class LegacyHeld(override val eventId: String, override val generation: Long) : Ownership
+        data class LegacyOperating(override val eventId: String, override val generation: Long) : Ownership
+    }
 
-    suspend fun hold(eventId: String): DualStreamSessionManager.CommandExecutionResult {
-        if (eventId.isBlank()) {
-            return failure("event-id-required")
+    private val ownershipGeneration = AtomicLong()
+    private val controlMutex = Mutex()
+    private var ownership: Ownership? = null
+
+    suspend fun hold(eventId: String): DualStreamSessionManager.CommandExecutionResult =
+        controlMutex.withLock { holdLocked(sessionId = null, eventId = eventId) }
+
+    suspend fun holdLocal(
+        sessionId: String,
+        eventId: String,
+    ): DualStreamSessionManager.CommandExecutionResult = controlMutex.withLock {
+        if (sessionId.isBlank()) return@withLock failureFor(eventId, "session-id-required")
+        holdLocked(sessionId, eventId)
+    }
+
+    private suspend fun holdLocked(
+        sessionId: String?,
+        eventId: String,
+    ): DualStreamSessionManager.CommandExecutionResult {
+        if (eventId.isBlank()) return failureFor(eventId, "event-id-required")
+        if (ownership != null) return failureFor(eventId, "localization-owner-busy")
+        val generation = ownershipGeneration.incrementAndGet()
+        val holding: Ownership = if (sessionId == null) {
+            Ownership.LegacyHolding(eventId, generation)
+        } else {
+            Ownership.LocalHolding(sessionId, eventId, generation)
         }
+        ownership = holding
         val routePaused = runCatching { missionHold.holdForConfirmation() }.getOrDefault(false)
         if (!routePaused) {
             val hoverFailure = runCatching { flightControl.hover() }.exceptionOrNull()
             if (hoverFailure != null) {
-                heldEventId = null
-                return failure("hover-command-failed")
+                compareAndClear(holding)
+                return failureFor(eventId, "hover-command-failed")
             }
         }
-        heldEventId = eventId
-
         val startedAt = time.nowMs()
         var stableSince: Long? = null
         while (time.nowMs() - startedAt <= HOVER_TIMEOUT_MS) {
@@ -203,6 +297,11 @@ class VisibleFireLaserLocator(
                     stableSince = now
                 }
                 if (now - stableSince >= REQUIRED_STABLE_MS) {
+                    ownership = if (holding is Ownership.LocalHolding) {
+                        Ownership.LocalHeld(holding.sessionId, eventId, generation)
+                    } else {
+                        Ownership.LegacyHeld(eventId, generation)
+                    }
                     return DualStreamSessionManager.CommandExecutionResult(
                         status = "applied",
                         message = "HOVER_STABLE",
@@ -214,17 +313,24 @@ class VisibleFireLaserLocator(
             }
             time.delayMs(VELOCITY_POLL_MS)
         }
-        return failure("hover-stability-timeout")
+        compareAndClear(holding)
+        return failureFor(eventId, "hover-stability-timeout")
     }
 
     suspend fun measure(
         eventId: String,
         taskId: String,
         visibleRoi: Map<String, Double>,
-    ): DualStreamSessionManager.CommandExecutionResult {
-        if (eventId != heldEventId) {
-            return failureFor(eventId, "event-session-mismatch")
-        }
+    ): DualStreamSessionManager.CommandExecutionResult = controlMutex.withLock {
+        val held = ownership as? Ownership.LegacyHeld
+        if (held == null || held.eventId != eventId) return@withLock failureFor(
+            eventId,
+            if (ownership is Ownership.LocalHolding || ownership is Ownership.LocalHeld ||
+                ownership is Ownership.LocalOperating) "legacy-route-blocked-by-local-owner"
+            else "event-session-mismatch",
+        )
+        val operating = Ownership.LegacyOperating(eventId, held.generation)
+        ownership = operating
         try {
             if (!isValidRoi(visibleRoi) || !targetAimer.align(taskId, visibleRoi)) {
                 return failureFor(eventId, "target-not-aligned")
@@ -260,29 +366,40 @@ class VisibleFireLaserLocator(
             )
         } finally {
             runCatching { laserRangefinder.disable() }
-            heldEventId = null
+            compareAndClear(operating)
         }
     }
 
-    suspend fun localize(request: FireLocalizationRequest): FireLocalizationResult =
-        localizationMutex.withLock {
-            try {
-                localizeHeld(request)
-            } finally {
-                withContext(NonCancellable) {
-                    runCatching { laserRangefinder.disable() }
-                }
-                heldEventId = null
-            }
-        }
-
-    private suspend fun localizeHeld(request: FireLocalizationRequest): FireLocalizationResult {
-        if (heldEventId != request.eventId) {
-            return degradedOrManualHold(
+    suspend fun localize(request: FireLocalizationRequest): FireLocalizationResult = controlMutex.withLock {
+        val held = ownership as? Ownership.LocalHeld
+        if (held == null || held.sessionId != request.sessionId || held.eventId != request.eventId) {
+            return@withLock degradedOrManualHold(
                 request,
                 FireLocalizationFailure.EVENT_SESSION_MISMATCH,
             )
         }
+        val operating = Ownership.LocalOperating(held.sessionId, held.eventId, held.generation)
+        ownership = operating
+        var hardwareToken: LaserHardwareOperationToken? = null
+        try {
+            localizeOwned(request, operating) { hardwareToken = it }
+        } finally {
+            hardwareToken?.let { token ->
+                withContext(NonCancellable) {
+                    runCatching { laserObservationClient?.endOperation(token) }
+                }
+            } ?: withContext(NonCancellable) {
+                runCatching { laserRangefinder.disable() }
+            }
+            compareAndClear(operating)
+        }
+    }
+
+    private suspend fun localizeOwned(
+        request: FireLocalizationRequest,
+        operating: Ownership.LocalOperating,
+        onHardwareToken: (LaserHardwareOperationToken) -> Unit,
+    ): FireLocalizationResult {
         val aimer = localTargetAimer ?: return degradedOrManualHold(
             request,
             FireLocalizationFailure.TARGET_NOT_ALIGNED,
@@ -302,42 +419,70 @@ class VisibleFireLaserLocator(
             return degradedOrManualHold(request, FireLocalizationFailure.TARGET_NOT_ALIGNED)
         }
         if (aimed !is LocalTargetAimResult.Aligned || aimed.kind != request.kind) {
-            return degradedOrManualHold(request, FireLocalizationFailure.TARGET_NOT_ALIGNED)
+            val failure = if (aimed is LocalTargetAimResult.Failed &&
+                aimed.reason == LocalTargetAimFailure.DETECTION_TIMEOUT
+            ) FireLocalizationFailure.TARGET_DETECTION_TIMEOUT
+            else FireLocalizationFailure.TARGET_NOT_ALIGNED
+            return degradedOrManualHold(request, failure)
         }
-
-        val operationGeneration = laserOperationGeneration.incrementAndGet()
+        if (!sameVisibleGeneration(aimed.sourceGeneration)) {
+            return degradedOrManualHold(request, FireLocalizationFailure.SOURCE_GENERATION_CHANGED)
+        }
+        val observationClient = laserObservationClient ?: return degradedOrManualHold(
+            request,
+            FireLocalizationFailure.LASER_ENABLE_FAILED,
+        )
         val windowStarted = time.nowMs()
         val binding = LaserOperationBinding(
             sessionId = request.sessionId,
             eventId = request.eventId,
             targetRoi = aimed.roi,
             sourceGeneration = aimed.sourceGeneration,
-            operationGeneration = operationGeneration,
+            operationGeneration = operating.generation,
             windowStartedAtMonotonicMs = windowStarted,
             windowEndsAtMonotonicMs = windowStarted + LASER_OPERATION_WINDOW_MS,
         )
         val accepted = mutableListOf<BoundLaserSample>()
-        try {
-            laserRangefinder.enable()
+        val token = try {
+            observationClient.beginOperation(binding)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             return degradedOrManualHold(request, FireLocalizationFailure.LASER_ENABLE_FAILED)
         }
-        repeat(MAX_LASER_ATTEMPTS) { attempt ->
+        onHardwareToken(token)
+        if (!sameVisibleGeneration(aimed.sourceGeneration)) {
+            return degradedOrManualHold(request, FireLocalizationFailure.SOURCE_GENERATION_CHANGED)
+        }
+        var observationCursor = token.observationCursorAtEnable
+        repeat(MAX_LASER_ATTEMPTS) {
             if (accepted.size == LASER_SAMPLE_COUNT) return@repeat
-            if (attempt > 0) time.delayMs(LASER_SAMPLE_INTERVAL_MS)
-            val value = try {
-                laserRangefinder.measure()
+            val awaited = try {
+                observationClient.awaitNext(token, observationCursor, LASER_OBSERVATION_TIMEOUT_MS)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                null
+                LaserHardwareAwaitResult.Timeout
             }
-            if (value != null) {
-                val bound = BoundLaserSample(binding, time.nowMs(), value)
-                if (laserSampleValidator.isAcceptableCandidate(binding, bound)) {
-                    accepted += bound
+            when (awaited) {
+                LaserHardwareAwaitResult.Overflow -> return degradedOrManualHold(
+                    request,
+                    FireLocalizationFailure.LASER_CALLBACK_OVERFLOW,
+                )
+                LaserHardwareAwaitResult.Timeout -> Unit
+                is LaserHardwareAwaitResult.Observed -> {
+                    val sample = awaited.sample
+                    val isNewObservation = sample.observationSequence > observationCursor
+                    observationCursor = maxOf(observationCursor, sample.observationSequence)
+                    if (!sameVisibleGeneration(aimed.sourceGeneration)) {
+                        return degradedOrManualHold(
+                            request,
+                            FireLocalizationFailure.SOURCE_GENERATION_CHANGED,
+                        )
+                    }
+                    if (isNewObservation &&
+                        laserSampleValidator.isAcceptableCandidate(binding, sample)
+                    ) accepted += sample
                 }
             }
         }
@@ -348,17 +493,23 @@ class VisibleFireLaserLocator(
             )
         }
         return when (val validated = laserSampleValidator.validate(binding, accepted)) {
-            is LaserValidationResult.Valid -> FireLocalizationResult.Precise(
-                kind = request.kind,
-                fireLatitude = validated.latitude,
-                fireLongitude = validated.longitude,
-                fireAltitude = validated.altitude,
-                rangeM = validated.rangeM,
-                errorRadiusM = validated.errorRadiusM,
-                rawSamples = validated.rawSamples,
-                targetRoi = aimed.roi,
-                sourceGeneration = aimed.sourceGeneration,
-            )
+            is LaserValidationResult.Valid -> {
+                if (!sameVisibleGeneration(aimed.sourceGeneration)) {
+                    degradedOrManualHold(request, FireLocalizationFailure.SOURCE_GENERATION_CHANGED)
+                } else {
+                    FireLocalizationResult.Precise(
+                        kind = request.kind,
+                        fireLatitude = validated.latitude,
+                        fireLongitude = validated.longitude,
+                        fireAltitude = validated.altitude,
+                        rangeM = validated.rangeM,
+                        errorRadiusM = validated.errorRadiusM,
+                        rawSamples = validated.rawSamples,
+                        targetRoi = aimed.roi,
+                        sourceGeneration = aimed.sourceGeneration,
+                    )
+                }
+            }
             is LaserValidationResult.Invalid -> degradedOrManualHold(
                 request,
                 FireLocalizationFailure.LASER_SAMPLES_INVALID,
@@ -370,8 +521,11 @@ class VisibleFireLaserLocator(
         request: FireLocalizationRequest,
         failure: FireLocalizationFailure,
     ): FireLocalizationResult {
+        val failureAt = time.nowMs()
         val osd = runCatching { aircraftOsdProvider.current() }.getOrNull()
-        return if (osd != null && osd.valid) {
+        return if (osd != null && osd.valid &&
+            osd.isFreshAt(failureAt, MAX_OSD_AGE_AT_FAILURE_MS)
+        ) {
             FireLocalizationResult.DegradedOsd(request.kind, failure, osd)
         } else {
             FireLocalizationResult.ManualHold(
@@ -381,11 +535,12 @@ class VisibleFireLaserLocator(
         }
     }
 
-    private fun failure(reason: String) = DualStreamSessionManager.CommandExecutionResult(
-        status = "failed",
-        message = "LASER_FAILED:$reason",
-        eventId = heldEventId,
-    )
+    private fun sameVisibleGeneration(expected: Long): Boolean =
+        sourceGenerationGuard.currentVisibleGeneration() == expected
+
+    private fun compareAndClear(expected: Ownership) {
+        if (ownership == expected) ownership = null
+    }
 
     private fun failureFor(eventId: String, reason: String) =
         DualStreamSessionManager.CommandExecutionResult(
@@ -411,6 +566,8 @@ class VisibleFireLaserLocator(
         const val LASER_ERROR_RADIUS_M = 5.0
         const val MAX_LASER_ATTEMPTS = 9
         const val LASER_OPERATION_WINDOW_MS = 20_000L
+        const val LASER_OBSERVATION_TIMEOUT_MS = 1_000L
+        const val MAX_OSD_AGE_AT_FAILURE_MS = 2_000L
     }
 }
 

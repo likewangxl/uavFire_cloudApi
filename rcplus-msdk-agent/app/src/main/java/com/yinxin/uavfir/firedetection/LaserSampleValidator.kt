@@ -25,14 +25,55 @@ data class LaserOperationBinding(
 
 data class BoundLaserSample(
     val binding: LaserOperationBinding,
+    val hardwareOperationGeneration: Long,
+    val observationSequence: Long,
     val sampledAtMonotonicMs: Long,
     val measurement: LaserRangefinderResult,
-)
+) {
+    init {
+        require(hardwareOperationGeneration > 0 && observationSequence > 0)
+        require(sampledAtMonotonicMs >= 0)
+    }
+}
+
+data class LaserHardwareOperationToken(
+    val binding: LaserOperationBinding,
+    val hardwareOperationGeneration: Long,
+    val observationCursorAtEnable: Long,
+    val enabledAtMonotonicMs: Long,
+) {
+    init {
+        require(hardwareOperationGeneration == binding.operationGeneration)
+        require(observationCursorAtEnable >= 0)
+        require(enabledAtMonotonicMs >= binding.windowStartedAtMonotonicMs)
+    }
+}
+
+sealed interface LaserHardwareAwaitResult {
+    data class Observed(val sample: BoundLaserSample) : LaserHardwareAwaitResult
+    data object Timeout : LaserHardwareAwaitResult
+    data object Overflow : LaserHardwareAwaitResult
+}
+
+interface BoundLaserObservationClient {
+    suspend fun beginOperation(binding: LaserOperationBinding): LaserHardwareOperationToken
+    suspend fun awaitNext(
+        token: LaserHardwareOperationToken,
+        afterObservationSequence: Long,
+        timeoutMs: Long,
+    ): LaserHardwareAwaitResult
+    suspend fun endOperation(token: LaserHardwareOperationToken)
+}
+
+fun interface VisibleSourceGenerationGuard {
+    fun currentVisibleGeneration(): Long?
+}
 
 enum class LaserValidationFailure {
     SAMPLE_COUNT,
     BINDING_MISMATCH,
     INVALID_SAMPLE,
+    DUPLICATE_OBSERVATION,
     SAMPLE_INTERVAL,
     SCATTER_EXCEEDED,
 }
@@ -65,6 +106,12 @@ class LaserSampleValidator {
         }
         if (samples.any { it.binding != expected }) {
             return LaserValidationResult.Invalid(LaserValidationFailure.BINDING_MISMATCH)
+        }
+        if (samples.any { it.hardwareOperationGeneration != expected.operationGeneration }) {
+            return LaserValidationResult.Invalid(LaserValidationFailure.BINDING_MISMATCH)
+        }
+        if (samples.map { it.observationSequence }.distinct().size != samples.size) {
+            return LaserValidationResult.Invalid(LaserValidationFailure.DUPLICATE_OBSERVATION)
         }
         if (samples.any { !it.isValid(expected) }) {
             return LaserValidationResult.Invalid(LaserValidationFailure.INVALID_SAMPLE)
@@ -105,6 +152,7 @@ class LaserSampleValidator {
         val targetY = value.targetY
         return sampledAtMonotonicMs in
             expected.windowStartedAtMonotonicMs..expected.windowEndsAtMonotonicMs &&
+            hardwareOperationGeneration == expected.operationGeneration &&
             value.state.equals("NORMAL", ignoreCase = true) &&
             latitude != null && latitude.isFinite() && latitude in -90.0..90.0 &&
             longitude != null && longitude.isFinite() && longitude in -180.0..180.0 &&

@@ -47,7 +47,7 @@ class AppServicesVisibleInferenceSourceTest {
         assertFalse(productionSource.contains("latestVisibleRoi"))
         assertFalse(productionSource.contains("latest-visible-roi"))
         assertFalse(productionSource.contains("BackendVisibleTargetAimer"))
-        assertTrue(appServices.contains("VisibleInferenceResultStream()"))
+        assertTrue(appServices.contains("VisibleInferenceResultJournal()"))
         assertTrue(appServices.contains("resultPublisher = visibleInferenceResults"))
         assertTrue(appServices.contains("detectionSource = visibleInferenceResults"))
         assertEquals(
@@ -55,5 +55,27 @@ class AppServicesVisibleInferenceSourceTest {
             1,
             Regex("VisibleInferenceLoop\\(").findAll(appServices).count(),
         )
+    }
+
+    @Test
+    fun aircraftOsdEvidenceIsStampedOnlyByTheMsdkLocationCallback() {
+        val source = String(
+            Files.readAllBytes(
+                Paths.get("src/main/java/com/yinxin/uavfir/api/VisibleFireLaserLocator.kt"),
+            ),
+        )
+        val tracker = source.substring(
+            source.indexOf("class DjiAircraftOsdTracker"),
+            source.indexOf("class VisibleFireLaserLocator"),
+        )
+
+        assertTrue(tracker.contains("keyManager.listen("))
+        assertTrue(tracker.contains("observationSequence = sequence.incrementAndGet()"))
+        assertTrue(tracker.contains("capturedAtMonotonicMs = nowMonotonicMs()"))
+        assertFalse(
+            "OSD freshness must not be fabricated by polling the MSDK key at read time",
+            tracker.contains("KeyAircraftLocation3D.create().get"),
+        )
+        assertTrue(tracker.contains("override fun current(): AircraftOsdSnapshot? = latest.get()"))
     }
 }

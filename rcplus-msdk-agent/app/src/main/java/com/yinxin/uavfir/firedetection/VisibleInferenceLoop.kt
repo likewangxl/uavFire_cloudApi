@@ -116,16 +116,23 @@ class VisibleInferenceLoop internal constructor(
                 if (result.frameCapturedAtMillis != frame.capturedAtMillis) {
                     error("detector-result-frame-timestamp-mismatch")
                 }
+                val completedAt = nowMillis()
                 resultPublisher.publish(
-                    PublishedVisibleInferenceResult(
+                    VisibleInferencePublication(
                         sourceGeneration = frame.sourceGeneration,
-                        result = result,
+                        capturedAtMonotonicMs = frame.capturedAtMillis,
+                        startedAtMonotonicMs = startedAt,
+                        completedAtMonotonicMs = completedAt,
+                        outcome = VisibleInferenceOutcome.SUCCESS,
+                        health = VisibleInferenceStatus.HEALTHY,
+                        detections = result.detections,
+                        failure = null,
                     ),
                 )
                 updateMetrics {
                     it.copy(
                         status = VisibleInferenceStatus.HEALTHY,
-                        lastCompletedAtMillis = nowMillis(),
+                        lastCompletedAtMillis = completedAt,
                         completedInferences = it.completedInferences + 1,
                         inFlight = false,
                     )
@@ -134,13 +141,31 @@ class VisibleInferenceLoop internal constructor(
                 updateMetrics { it.copy(inFlight = false) }
                 throw cancelled
             } catch (error: Exception) {
+                val completedAt = nowMillis()
+                val failure = error.message ?: error::class.java.simpleName
+                val capturedAt = frame.capturedAtMillis
+                val startedAt = snapshot().lastStartedAtMillis ?: completedAt
+                if (frame.sourceGeneration > 0 && capturedAt <= startedAt && startedAt <= completedAt) {
+                    resultPublisher.publish(
+                        VisibleInferencePublication(
+                            sourceGeneration = frame.sourceGeneration,
+                            capturedAtMonotonicMs = capturedAt,
+                            startedAtMonotonicMs = startedAt,
+                            completedAtMonotonicMs = completedAt,
+                            outcome = VisibleInferenceOutcome.FAILURE,
+                            health = VisibleInferenceStatus.DEGRADED,
+                            detections = emptyList(),
+                            failure = failure,
+                        ),
+                    )
+                }
                 updateMetrics {
                     it.copy(
                         status = VisibleInferenceStatus.DEGRADED,
-                        lastCompletedAtMillis = nowMillis(),
+                        lastCompletedAtMillis = completedAt,
                         failedInferences = it.failedInferences + 1,
                         inFlight = false,
-                        lastFailure = error.message ?: error::class.java.simpleName,
+                        lastFailure = failure,
                     )
                 }
             } finally {

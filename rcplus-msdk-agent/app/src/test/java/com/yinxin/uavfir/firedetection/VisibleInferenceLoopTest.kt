@@ -222,7 +222,7 @@ class VisibleInferenceLoopTest {
 
     @Test
     fun successfulInferencePublishesSameWorkerResultWithFrameGenerationAndTimestamp() = runTest {
-        val stream = VisibleInferenceResultStream()
+        val stream = VisibleInferenceResultJournal()
         val buffer = LatestVisibleFrameBuffer().apply {
             offer(
                 VisibleRgbaFrame(
@@ -242,14 +242,14 @@ class VisibleInferenceLoopTest {
         )
         val waiting = async {
             stream.await(
-                LocalDetectionAwaitRequest("s", "e", DetectionKind.FIRE, 7, 100),
+                LocalDetectionAwaitRequest("s", "e", DetectionKind.FIRE, 7, 100, 0),
             )
         }
         runCurrent()
 
         loop.processLatest()
 
-        val observed = waiting.await()!!
+        val observed = (waiting.await() as LocalDetectionAwaitResult.Observed).observation
         assertEquals(7, observed.sourceGeneration)
         assertEquals(101, observed.capturedAtMonotonicMs)
         assertEquals("s", observed.sessionId)
@@ -258,7 +258,7 @@ class VisibleInferenceLoopTest {
     }
 
     private fun frame(capturedAt: Long, onRelease: () -> Unit = {}) =
-        VisibleRgbaFrame(byteArrayOf(1, 2, 3, 4), 1, 1, capturedAt, onRelease)
+        VisibleRgbaFrame(byteArrayOf(1, 2, 3, 4), 1, 1, capturedAt, onRelease, sourceGeneration = 1)
 
     private class RecordingDetector(
         private val onDetect: suspend () -> Unit = {},

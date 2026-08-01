@@ -8,6 +8,11 @@ import com.yinxin.uavfir.firedetection.FireLocalizationResult
 import com.yinxin.uavfir.firedetection.LocalTargetAimResult
 import com.yinxin.uavfir.firedetection.LocalVisibleTargetAimerPort
 import com.yinxin.uavfir.firedetection.NormalizedRoi
+import com.yinxin.uavfir.firedetection.BoundLaserObservationClient
+import com.yinxin.uavfir.firedetection.BoundLaserSample
+import com.yinxin.uavfir.firedetection.LaserHardwareAwaitResult
+import com.yinxin.uavfir.firedetection.LaserHardwareOperationToken
+import com.yinxin.uavfir.firedetection.LaserOperationBinding
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -15,6 +20,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class VisibleFireLaserLocatorTest {
@@ -158,7 +166,7 @@ class VisibleFireLaserLocatorTest {
                 ),
             )
             val locator = localLocator(laser = laser)
-            locator.hold("event-1")
+            locator.holdLocal("session-1", "event-1")
 
             val result = locator.localize(localRequest(kind))
 
@@ -181,7 +189,7 @@ class VisibleFireLaserLocatorTest {
             },
         )
         val locator = localLocator(laser = laser)
-        locator.hold("event-1")
+        locator.holdLocal("session-1", "event-1")
 
         val result = locator.localize(localRequest(DetectionKind.SMOKE))
 
@@ -203,9 +211,9 @@ class VisibleFireLaserLocatorTest {
     fun laserAndInvalidOsdReturnsManualHoldInsteadOfInventingCoordinates() = runTest {
         val locator = localLocator(
             laser = SequenceLaser(mutableListOf()),
-            osd = AircraftOsdSnapshot(Double.NaN, 109.0, 100.0, 1),
+            osd = AircraftOsdSnapshot(Double.NaN, 109.0, 100.0, 1, 1),
         )
-        locator.hold("event-1")
+        locator.holdLocal("session-1", "event-1")
 
         val result = locator.localize(localRequest(DetectionKind.FIRE))
 
@@ -219,13 +227,13 @@ class VisibleFireLaserLocatorTest {
     fun thrownAndCancelledLaserPathsAlwaysDisable() = runTest {
         val throwing = SequenceLaser(mutableListOf(), error = IllegalStateException("boom"))
         val locator = localLocator(laser = throwing)
-        locator.hold("event-1")
+        locator.holdLocal("session-1", "event-1")
         assertTrue(locator.localize(localRequest(DetectionKind.FIRE)) is FireLocalizationResult.DegradedOsd)
         assertEquals(1, throwing.disableCalls)
 
         val cancelled = SequenceLaser(mutableListOf(), error = CancellationException("stop"))
         val cancelledLocator = localLocator(laser = cancelled)
-        cancelledLocator.hold("event-1")
+        cancelledLocator.holdLocal("session-1", "event-1")
         runCatching { cancelledLocator.localize(localRequest(DetectionKind.FIRE)) }
         assertEquals(1, cancelled.disableCalls)
     }
@@ -234,7 +242,7 @@ class VisibleFireLaserLocatorTest {
     fun aimAndEnableFailuresStillDisableLaserAndReturnTypedDegradation() = runTest {
         val laser = SequenceLaser(mutableListOf(), enableError = IllegalStateException("enable"))
         val enableFailure = localLocator(laser = laser)
-        enableFailure.hold("event-1")
+        enableFailure.holdLocal("session-1", "event-1")
         val enabled = enableFailure.localize(localRequest(DetectionKind.FIRE))
         assertEquals(
             FireLocalizationFailure.LASER_ENABLE_FAILED,
@@ -251,13 +259,101 @@ class VisibleFireLaserLocatorTest {
                 )
             },
         )
-        aimFailure.hold("event-1")
+        aimFailure.holdLocal("session-1", "event-1")
         assertTrue(
             aimFailure.localize(localRequest(DetectionKind.SMOKE)) is
                 FireLocalizationResult.DegradedOsd,
         )
         assertEquals(1, aimLaser.disableCalls)
     }
+
+    @Test
+    fun sourceGenerationChangeBeforeEnableDuringSamplesOrBeforePublishNeverReturnsPrecise() = runTest {
+        suspend fun runWithGuard(guard: () -> Long?): FireLocalizationResult {
+            val locator = localLocator(
+                laser = SequenceLaser(normalSamples()),
+                generationGuard = guard,
+            )
+            locator.holdLocal("session-1", "event-1")
+            return locator.localize(localRequest(DetectionKind.FIRE))
+        }
+
+        assertEquals(
+            FireLocalizationFailure.SOURCE_GENERATION_CHANGED,
+            (runWithGuard { 8 } as FireLocalizationResult.DegradedOsd).reason,
+        )
+
+        var duringCalls = 0
+        assertEquals(
+            FireLocalizationFailure.SOURCE_GENERATION_CHANGED,
+            (runWithGuard { if (++duringCalls < 4) 7 else 8 } as
+                FireLocalizationResult.DegradedOsd).reason,
+        )
+
+        var finalCalls = 0
+        assertEquals(
+            FireLocalizationFailure.SOURCE_GENERATION_CHANGED,
+            (runWithGuard { if (++finalCalls <= 5) 7 else 8 } as
+                FireLocalizationResult.DegradedOsd).reason,
+        )
+    }
+
+    @Test
+    fun mismatchedLocalizeCannotClearLegitimateOwner() = runTest {
+        val laser = SequenceLaser(normalSamples())
+        val locator = localLocator(laser)
+        locator.holdLocal("session-1", "event-1")
+
+        val mismatch = locator.localize(localRequest(DetectionKind.FIRE).copy(eventId = "other"))
+        val legitimate = locator.localize(localRequest(DetectionKind.FIRE))
+
+        assertEquals(FireLocalizationFailure.EVENT_SESSION_MISMATCH, mismatch.reason)
+        assertTrue(legitimate is FireLocalizationResult.Precise)
+        assertEquals(1, laser.disableCalls)
+    }
+
+    @Test
+    fun activeLocalOperationSerializesHoldAndLegacyRouteWithoutPrematureDisable() = runTest {
+        val barrier = CompletableDeferred<Unit>()
+        val laser = SequenceLaser(normalSamples(), awaitBarrier = barrier)
+        val locator = localLocator(laser)
+        locator.holdLocal("session-1", "event-1")
+        val local = async { locator.localize(localRequest(DetectionKind.FIRE)) }
+        runCurrent()
+        val otherHold = async { locator.hold("event-b") }
+        val legacy = async { locator.measure("event-1", "task-1", ROI) }
+        runCurrent()
+
+        assertFalse(otherHold.isCompleted)
+        assertFalse(legacy.isCompleted)
+        assertEquals(0, laser.disableCalls)
+        barrier.complete(Unit)
+
+        assertTrue(local.await() is FireLocalizationResult.Precise)
+        assertEquals("applied", otherHold.await().status)
+        assertEquals("failed", legacy.await().status)
+        assertEquals(1, laser.disableCalls)
+    }
+
+    @Test
+    fun repeatedOrCrossOperationCallbacksCannotBecomeThreeFreshSamples() = runTest {
+        for (laser in listOf(
+            SequenceLaser(normalSamples(), fixedObservationSequence = 1),
+            SequenceLaser(normalSamples(), hardwareGenerationOffset = 1),
+        )) {
+            val locator = localLocator(laser)
+            locator.holdLocal("session-1", "event-1")
+            val result = locator.localize(localRequest(DetectionKind.FIRE))
+            assertTrue(result is FireLocalizationResult.DegradedOsd)
+            assertEquals(9, laser.measureCalls)
+        }
+    }
+
+    private fun normalSamples() = mutableListOf(
+        LaserRangefinderResult(34.0, 109.0, 10.0, 60.0, "NORMAL", .5, .5),
+        LaserRangefinderResult(34.00001, 109.00001, 11.0, 61.0, "NORMAL", .5, .5),
+        LaserRangefinderResult(34.00002, 109.00002, 12.0, 62.0, "NORMAL", .5, .5),
+    )
 
     private fun localRequest(kind: DetectionKind) = FireLocalizationRequest(
         sessionId = "session-1",
@@ -269,7 +365,7 @@ class VisibleFireLaserLocatorTest {
 
     private fun localLocator(
         laser: SequenceLaser,
-        osd: AircraftOsdSnapshot? = AircraftOsdSnapshot(34.1, 109.1, 100.0, 0),
+        osd: AircraftOsdSnapshot? = AircraftOsdSnapshot(34.1, 109.1, 100.0, 1, 0),
         aimer: LocalVisibleTargetAimerPort = LocalVisibleTargetAimerPort {
             LocalTargetAimResult.Aligned(
                 kind = it.kind,
@@ -279,6 +375,7 @@ class VisibleFireLaserLocatorTest {
                 cycles = 1,
             )
         },
+        generationGuard: () -> Long? = { 7 },
     ): VisibleFireLaserLocator = VisibleFireLaserLocator(
         missionHold = RecordingMissionHold(true),
         flightControl = RecordingFlightControl(),
@@ -287,6 +384,8 @@ class VisibleFireLaserLocatorTest {
         localTargetAimer = aimer,
         aircraftOsdProvider = { osd },
         laserRangefinder = laser,
+        laserObservationClient = laser,
+        sourceGenerationGuard = generationGuard,
     )
 
     private fun measuringFixture(
@@ -328,10 +427,15 @@ class VisibleFireLaserLocatorTest {
         private val results: MutableList<LaserRangefinderResult>,
         private val error: Throwable? = null,
         private val enableError: Throwable? = null,
-    ) : LaserRangefinderClient {
+        private val awaitBarrier: CompletableDeferred<Unit>? = null,
+        private val fixedObservationSequence: Long? = null,
+        private val hardwareGenerationOffset: Long = 0,
+    ) : LaserRangefinderClient, BoundLaserObservationClient {
         var disableCalls = 0
         var enableCalls = 0
         var measureCalls = 0
+        private var observationSequence = 0L
+        private var activeBinding: LaserOperationBinding? = null
 
         override suspend fun enable() {
             enableCalls += 1
@@ -346,6 +450,42 @@ class VisibleFireLaserLocatorTest {
 
         override suspend fun disable() {
             disableCalls += 1
+        }
+
+        override suspend fun beginOperation(binding: LaserOperationBinding): LaserHardwareOperationToken {
+            enableCalls += 1
+            enableError?.let { throw it }
+            activeBinding = binding
+            return LaserHardwareOperationToken(binding, binding.operationGeneration, 0, binding.windowStartedAtMonotonicMs)
+        }
+
+        override suspend fun awaitNext(
+            token: LaserHardwareOperationToken,
+            afterObservationSequence: Long,
+            timeoutMs: Long,
+        ): LaserHardwareAwaitResult {
+            measureCalls += 1
+            if (measureCalls == 1) awaitBarrier?.await()
+            error?.let { throw it }
+            if (results.isEmpty()) return LaserHardwareAwaitResult.Timeout
+            val result = results.removeAt(0)
+            observationSequence = fixedObservationSequence ?: observationSequence + 1
+            return LaserHardwareAwaitResult.Observed(
+                BoundLaserSample(
+                    binding = token.binding,
+                    hardwareOperationGeneration =
+                        token.hardwareOperationGeneration + hardwareGenerationOffset,
+                    observationSequence = observationSequence,
+                    sampledAtMonotonicMs = token.binding.windowStartedAtMonotonicMs +
+                        (observationSequence - 1) * 300,
+                    measurement = result,
+                ),
+            )
+        }
+
+        override suspend fun endOperation(token: LaserHardwareOperationToken) {
+            disableCalls += 1
+            activeBinding = null
         }
     }
 
