@@ -84,5 +84,11 @@ frontend 产品逻辑，因此没有重跑全栈，也没有改写上面的原�
 fixture，相同文本放在禁止性行内文档中仍通过；fixture 总数从 16 增至 20，当前 checkout
 再次通过。
 
+第二轮复审发现 systemd 模板实例单元的 `@instance` 仍未纳入 unit token。策略没有枚举
+特定环境名，而是统一支持可选 `uavfire-` 前缀、合法实例 token 和可选 `.service` 后缀；
+`start`、`restart`、`enable --now`、`try-restart` 及既有命令前缀均有实例单元 fixture。
+四个不同实例样例被拒绝，同样的禁止性文档行允许通过；fixture 总数增至 24，当前 checkout
+再次通过。
+
 这些 post-evidence guard fix 只增强未来回归拦截能力，不把任何设备门禁改为通过；发布
 结论仍为 `NOT_READY_DEFAULT_OFF`。

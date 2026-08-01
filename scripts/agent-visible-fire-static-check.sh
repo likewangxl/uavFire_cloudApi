@@ -74,8 +74,9 @@ reject_matches "production-ai-service-operations" \
 # operator guidance. Normalize any leading env/sudo/KEY=value tokens before
 # matching the executable, and accept real systemd unit prefixes/suffixes.
 command_prefix='^[[:space:]]*((env|sudo|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+)[[:space:]]+)*'
-ai_service_unit='([[:alnum:]_.-]+-)?ai[-_]service(\.service)?'
-ai_service_launch_pattern="${command_prefix}(docker([[:space:]]+compose|-compose)[[:space:]][^#]*(up|run|start|restart)[^#]*ai[-_]service([[:space:]]|$)|systemctl[[:space:]][^#]*(start|restart|enable|try-restart)[^#]*${ai_service_unit}([[:space:]]|$)|service[[:space:]]+${ai_service_unit}[[:space:]]+(start|restart)([[:space:]]|$)|launchctl[[:space:]][^#]*(load|bootstrap|kickstart|start)[^#]*${ai_service_unit}([^[:alnum:]_]|$)|((bash|sh)[[:space:]]+)?([^[:space:]]*/)?(start|run|restart)[-_]ai[-_]service(\.sh)?([[:space:]]|$))"
+ai_service_unit='(uavfire-)?ai-service(@[A-Za-z0-9_.:-]+)?(\.service)?'
+unit_boundary='([^[:alnum:]_.:@-]|$)'
+ai_service_launch_pattern="${command_prefix}(docker([[:space:]]+compose|-compose)[[:space:]][^#]*(up|run|start|restart)[^#]*ai[-_]service([[:space:]]|$)|systemctl[[:space:]][^#]*(start|restart|enable|try-restart)[^#]*[[:space:]]+${ai_service_unit}${unit_boundary}|service[[:space:]]+${ai_service_unit}[[:space:]]+(start|restart)([[:space:]]|$)|launchctl[[:space:]][^#]*(load|bootstrap|kickstart|start)[^#]*[[:space:]]+[^[:space:]#]*ai[-_]service([^[:alnum:]_-]|$)|((bash|sh)[[:space:]]+)?([^[:space:]]*/)?(start|run|restart)[-_]ai[-_]service(\.sh)?([[:space:]]|$))"
 reject_matches "production-ai-service-launch-command" \
   "$ai_service_launch_pattern" \
   "${production_docs[@]}" "${production_config[@]}" "${production_scripts[@]}"

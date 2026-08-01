@@ -102,6 +102,25 @@ add_prefixed_systemctl_unit_ai_startup() {
     >"$1/scripts/start-production.sh"
 }
 
+add_systemctl_instance_ai_startup() {
+  printf '%s\n' 'systemctl start ai-service@prod.service' >"$1/scripts/start-production.sh"
+}
+
+add_prefixed_systemctl_instance_ai_startup() {
+  printf '%s\n' 'sudo systemctl restart uavfire-ai-service@rc-plus-2.service' \
+    >"$1/scripts/start-production.sh"
+}
+
+add_env_systemctl_instance_ai_startup() {
+  printf '%s\n' 'env SYSTEMD_COLORS=0 systemctl enable --now ai-service@site_01.service' \
+    >"$1/scripts/start-production.sh"
+}
+
+add_assigned_systemctl_instance_ai_startup() {
+  printf '%s\n' 'SYSTEMD_LOG_LEVEL=warning sudo systemctl try-restart uavfire-ai-service@staging.v2' \
+    >"$1/scripts/start-production.sh"
+}
+
 add_allowed_prohibition_prose_and_tests() {
   local root="$1"
   printf '%s\n' \
@@ -112,6 +131,10 @@ add_allowed_prohibition_prose_and_tests() {
     '不要运行 `env COMPOSE_PROJECT_NAME=uavfire docker compose up -d ai-service`。' \
     '禁止执行 `systemctl restart ai-service.service`。' \
     '禁止执行 `sudo systemctl restart uavfire-ai-service.service`。' \
+    '禁止执行 `systemctl start ai-service@prod.service`。' \
+    '禁止执行 `sudo systemctl restart uavfire-ai-service@rc-plus-2.service`。' \
+    '不要运行 `env SYSTEMD_COLORS=0 systemctl enable --now ai-service@site_01.service`。' \
+    '禁止执行 `SYSTEMD_LOG_LEVEL=warning sudo systemctl try-restart uavfire-ai-service@staging.v2`。' \
     >>"$root/RUNBOOK.md"
   mkdir -p "$root/backend/uavfire/src/test/java" "$root/rcplus-msdk-agent/app/src/test/java"
   printf '%s\n' 'assertLegacyRouteRejected("latest-visible-roi")' \
@@ -160,6 +183,10 @@ expect_fail assigned_compose_ai_startup add_assigned_compose_ai_startup
 expect_fail env_compose_ai_startup add_env_compose_ai_startup
 expect_fail systemctl_unit_suffix_ai_startup add_systemctl_unit_suffix_ai_startup
 expect_fail prefixed_systemctl_unit_ai_startup add_prefixed_systemctl_unit_ai_startup
+expect_fail systemctl_instance_ai_startup add_systemctl_instance_ai_startup
+expect_fail prefixed_systemctl_instance_ai_startup add_prefixed_systemctl_instance_ai_startup
+expect_fail env_systemctl_instance_ai_startup add_env_systemctl_instance_ai_startup
+expect_fail assigned_systemctl_instance_ai_startup add_assigned_systemctl_instance_ai_startup
 expect_fail backend_roi_polling add_backend_roi_polling
 expect_fail agent_roi_polling add_agent_roi_polling
 expect_fail missing_reviewed_ndk_recipe remove_reviewed_ndk_recipe
