@@ -23,6 +23,16 @@ class FireStoreOpenHelper(
             CREATE TABLE fire_session (
                 session_id TEXT NOT NULL PRIMARY KEY,
                 event_id TEXT NOT NULL UNIQUE,
+                task_id TEXT NOT NULL,
+                source_generation INTEGER NOT NULL,
+                coordinator_generation INTEGER NOT NULL,
+                roi_left REAL NOT NULL,
+                roi_top REAL NOT NULL,
+                roi_right REAL NOT NULL,
+                roi_bottom REAL NOT NULL,
+                recovery_proof_version INTEGER,
+                recovery_proof_payload TEXT,
+                recovery_proof_sha256 TEXT,
                 state TEXT NOT NULL,
                 detection_kind TEXT NOT NULL,
                 confidence REAL NOT NULL,
@@ -96,6 +106,19 @@ class FireStoreOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion == 3 && newVersion == 4) {
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN task_id TEXT NOT NULL DEFAULT 'legacy-unbound'")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN source_generation INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN coordinator_generation INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN roi_left REAL NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN roi_top REAL NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN roi_right REAL NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN roi_bottom REAL NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN recovery_proof_version INTEGER")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN recovery_proof_payload TEXT")
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN recovery_proof_sha256 TEXT")
+            return
+        }
         throw IllegalStateException(
             "Unsupported fire store upgrade $oldVersion->$newVersion; production data was not modified",
         )

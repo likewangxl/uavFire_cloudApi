@@ -120,6 +120,14 @@ internal object CanonicalFireReport {
         requireLong(root, "sequence", sequence)
         requireLong(root, "eventTimestamp", eventTimestampWallMillis)
         requireString(root, "state", state.name)
+        if (root.has("taskId") || root.has("sourceGeneration") ||
+            root.has("coordinatorGeneration") || root.has("initialVisibleRoi")
+        ) {
+            root.requiredString("taskId")
+            root.requiredLong("sourceGeneration")
+            root.requiredLong("coordinatorGeneration")
+            validateRoiShape(root.requiredObject("initialVisibleRoi"))
+        }
         return root
     }
 
@@ -219,6 +227,9 @@ internal object CanonicalFireReport {
         requireString(root, "locationStatus", "DEGRADED_OSD")
         requireString(root, "geoMethod", "AIRCRAFT_OBSERVATION")
         bindOptionalPoint(root, "aircraft", report.aircraft)
+        if (root.has("degradedReason")) {
+            requireString(root, "degradedReason", report.reason.name)
+        }
     }
 
     private fun validateRoiShape(roi: JsonObject) {
@@ -455,6 +466,10 @@ internal object CanonicalFireReport {
         "sequence",
         "eventTimestamp",
         "state",
+        "taskId",
+        "sourceGeneration",
+        "coordinatorGeneration",
+        "initialVisibleRoi",
     )
     private val INITIAL_FIELDS = BASE_FIELDS + setOf(
         "detectionKind",
@@ -479,7 +494,8 @@ internal object CanonicalFireReport {
         "errorRadiusMeters",
         "laserSamples",
     )
-    private val DEGRADED_FIELDS = BASE_FIELDS + setOf("locationStatus", "geoMethod", "aircraft")
+    private val DEGRADED_FIELDS = BASE_FIELDS +
+        setOf("locationStatus", "geoMethod", "aircraft", "degradedReason")
     private val ROI_FIELDS = setOf("x", "y", "width", "height")
     private val AIRCRAFT_FIELDS = setOf("lat", "lng", "alt")
     private val LASER_SAMPLE_FIELDS =

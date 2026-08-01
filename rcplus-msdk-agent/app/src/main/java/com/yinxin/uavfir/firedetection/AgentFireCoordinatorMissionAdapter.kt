@@ -20,6 +20,7 @@ class Task7CoordinatorMissionPort internal constructor(
     private val observationSource: CoordinatorFlightObservationSource,
     private val monotonicNow: () -> Long,
     private val delayMillis: suspend (Long) -> Unit = { delay(it) },
+    private val competingOwnerProbe: (CoordinatorSession) -> Boolean = { false },
 ) : CoordinatorMissionPort {
     override suspend fun pauseAndAwait(
         session: CoordinatorSession,
@@ -91,6 +92,23 @@ class Task7CoordinatorMissionPort internal constructor(
         val now = monotonicNow()
         val observation = observationSource.current()
         val control = FireControlSessionKey(session.sessionId, session.generation)
+        val binding = HoverControlBinding(control, token.mission, token.pausedCommandGeneration)
+        if (stable.binding != binding) {
+            return MissionResumeOutcome.Failed(MissionWorkflowFailure.SAFETY_EVIDENCE_INVALID)
+        }
+        val freshStable = when (val decision = safetyGate.observeHover(
+            binding = binding,
+            hoverStartedAtMonotonicMs = now,
+            sample = observation.telemetry,
+            signals = observation.signals,
+            nowMs = now,
+        )) {
+            is HoverSafetyDecision.Stable -> decision.evidence
+            is HoverSafetyDecision.ManualHold ->
+                return MissionResumeOutcome.Failed(decision.reason.toWorkflowFailure())
+            HoverSafetyDecision.Waiting ->
+                return MissionResumeOutcome.Failed(MissionWorkflowFailure.SAFETY_EVIDENCE_INVALID)
+        }
         val evidence = ResumeSafetyEvidence(
             controlSession = control,
             mission = token.mission,
@@ -99,10 +117,10 @@ class Task7CoordinatorMissionPort internal constructor(
             terminalResultDurable = true,
             laserEnabled = false,
             targetAlignmentClosed = true,
-            anotherFireSessionActive = false,
+            anotherFireSessionActive = competingOwnerProbe(session),
             signals = observation.signals,
             telemetry = observation.telemetry,
-            stableHoverEvidence = stable,
+            stableHoverEvidence = freshStable,
             observedAtMonotonicMs = now,
         )
         if (!safetyEvidenceOwner.publish(evidence)) {
@@ -123,12 +141,56 @@ class Task7CoordinatorMissionPort internal constructor(
         }
     }
 
+    override suspend fun awaitHeldInvalidation(
+        session: CoordinatorSession,
+        holdProof: CoordinatorHoldProof,
+    ): MissionWorkflowFailure {
+        val token = holdProof.missionToken
+            ?: return MissionWorkflowFailure.MISSING_BREAKPOINT
+        while (true) {
+            val snapshot = missionControl.currentSnapshot()
+            if (snapshot.mission != token.mission ||
+                snapshot.state != ObservedMissionState.INTERRUPTED ||
+                snapshot.commandGeneration != token.pausedCommandGeneration
+            ) return MissionWorkflowFailure.UNKNOWN_MISSION_STATE
+            val now = monotonicNow()
+            val observation = observationSource.current()
+            observation.signals.toWorkflowFailureOrNull()?.let { return it }
+            val telemetry = observation.telemetry
+                ?: return MissionWorkflowFailure.UNKNOWN_MISSION_STATE
+            if (telemetry.observedAtMonotonicMs > now ||
+                now - telemetry.observedAtMonotonicMs > FlightSafetyPolicy.TELEMETRY_STALE_AFTER_MS ||
+                telemetry.horizontalSpeedMps > FlightSafetyPolicy.MAX_HORIZONTAL_SPEED_MPS ||
+                kotlin.math.abs(telemetry.verticalSpeedMps) >
+                FlightSafetyPolicy.MAX_ABSOLUTE_VERTICAL_SPEED_MPS
+            ) return MissionWorkflowFailure.FLIGHT_ERROR
+            delayMillis(OBSERVATION_INTERVAL_MS)
+        }
+    }
+
+    override suspend fun reconcileAfterResumeSubmission(
+        session: CoordinatorSession,
+        holdProof: CoordinatorHoldProof,
+    ): ResumeReconciliationOutcome {
+        val token = holdProof.missionToken ?: return ResumeReconciliationOutcome.Unknown
+        return missionControl.reconcileResume(
+            token,
+            FireControlSessionKey(session.sessionId, session.generation),
+        )
+    }
+
     override suspend fun reconcileForRecovery(
         session: CoordinatorRecoverySession,
-    ): RecoveryMissionOutcome = RecoveryMissionOutcome.ManualHold(
-        // Task 6 does not yet persist Task 7's exact opaque token. Never infer it.
-        MissionWorkflowFailure.UNKNOWN_MISSION_STATE,
-    )
+    ): RecoveryMissionOutcome {
+        val token = session.recoveryProof?.toMissionHoldToken()
+            ?: return RecoveryMissionOutcome.ManualHold(MissionWorkflowFailure.MISSING_BREAKPOINT)
+        return when (missionControl.reconcileRecovery(token)) {
+            ResumeReconciliationOutcome.Executing -> RecoveryMissionOutcome.Resumed
+            ResumeReconciliationOutcome.Held,
+            ResumeReconciliationOutcome.Unknown,
+            -> RecoveryMissionOutcome.ManualHold(MissionWorkflowFailure.UNKNOWN_MISSION_STATE)
+        }
+    }
 
     private fun CoordinatorHoldProof.matchesExact(session: CoordinatorSession): Boolean =
         sessionId == session.sessionId && eventId == session.eventId && generation == session.generation
@@ -137,6 +199,15 @@ class Task7CoordinatorMissionPort internal constructor(
         sessionId == session.sessionId && eventId == session.eventId && generation == session.generation
 
     companion object { const val OBSERVATION_INTERVAL_MS = 100L }
+}
+
+private fun FlightSafetySignals.toWorkflowFailureOrNull(): MissionWorkflowFailure? = when {
+    manualTakeover -> MissionWorkflowFailure.MANUAL_TAKEOVER
+    lowBattery -> MissionWorkflowFailure.LOW_BATTERY
+    rthActive -> MissionWorkflowFailure.RETURN_TO_HOME
+    obstacleAvoidanceActive -> MissionWorkflowFailure.OBSTACLE_AVOIDANCE
+    flightError -> MissionWorkflowFailure.FLIGHT_ERROR
+    else -> null
 }
 
 private fun FlightSafetyReason.toWorkflowFailure(): MissionWorkflowFailure = when (this) {

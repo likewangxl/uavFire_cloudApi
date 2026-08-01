@@ -22,22 +22,22 @@ import kotlin.math.max
 class SqliteCoordinatorStoreAdapter(
     private val store: SqliteFireSessionStore,
     private val records: CoordinatorStoreRecordFactory,
-    private val recoveryMetadata: CoordinatorRecoveryMetadataProvider =
-        CoordinatorRecoveryMetadataProvider { null },
 ) : CoordinatorStorePort {
     override suspend fun persistInitial(
+        session: CoordinatorSession,
         envelope: AgentFireConfirmationEnvelope,
         request: InitialPersistenceRequest,
     ): CoordinatorWrite = CoordinatorWrite(
-        store.persistInitialConfirmation(records.initial(envelope, request)),
+        store.persistInitialConfirmation(records.initial(session, envelope, request)),
         INITIAL_SEQUENCE,
     )
 
     override suspend fun persistStage(
         session: CoordinatorSession,
         state: FireSessionState,
+        recoveryProof: MissionRecoveryProofV1?,
     ): CoordinatorWrite = store.persistNextStage { sequence ->
-        records.stage(session, state, sequence, reason = null)
+        records.stage(session, state, sequence, reason = null, recoveryProof = recoveryProof)
     }.toCoordinatorWrite()
 
     override suspend fun persistTerminal(
@@ -59,14 +59,23 @@ class SqliteCoordinatorStoreAdapter(
         store.isOutboxAcknowledged(session.eventId, sequence)
 
     override suspend fun loadRecoverySessions(): List<CoordinatorRecoverySession> =
-        store.loadForStartup().activeSessions.mapNotNull { durable ->
-            recoveryMetadata.restore(durable)?.let { session ->
-                CoordinatorRecoverySession(
-                    session = session,
-                    persistedState = durable.state,
-                    terminalResultDurable = durable.state == FireSessionState.RESULT_DURABLE,
-                )
-            }
+        store.loadForCoordinatorRecovery().activeSessions.map { durable ->
+            CoordinatorRecoverySession(
+                session = CoordinatorSession(
+                    durable.sessionId,
+                    durable.eventId,
+                    durable.taskId,
+                    durable.detectionKind,
+                    durable.coordinatorGeneration,
+                    durable.initialRoi,
+                    durable.sourceGeneration,
+                    store.loadEvidence(durable.eventId).take(2),
+                ),
+                persistedState = durable.state,
+                terminalResultDurable = durable.state == FireSessionState.RESULT_DURABLE ||
+                    durable.state == FireSessionState.RESUME_REQUESTED,
+                recoveryProof = durable.recoveryProof,
+            )
         }
 
     private companion object { const val INITIAL_SEQUENCE = 1L }
@@ -74,6 +83,7 @@ class SqliteCoordinatorStoreAdapter(
 
 interface CoordinatorStoreRecordFactory {
     fun initial(
+        session: CoordinatorSession,
         envelope: AgentFireConfirmationEnvelope,
         request: InitialPersistenceRequest,
     ): InitialConfirmationRecord
@@ -83,6 +93,7 @@ interface CoordinatorStoreRecordFactory {
         state: FireSessionState,
         sequence: Long,
         reason: StagePersistenceReason?,
+        recoveryProof: MissionRecoveryProofV1? = null,
     ): StagePersistenceRecord
 
     fun terminal(
@@ -117,12 +128,14 @@ class CanonicalCoordinatorStoreRecordFactory(
     private val evidence: CoordinatorEvidenceProvider = CoordinatorEvidenceProvider { _, _ -> emptyList() },
 ) : CoordinatorStoreRecordFactory {
     override fun initial(
+        session: CoordinatorSession,
         envelope: AgentFireConfirmationEnvelope,
         request: InitialPersistenceRequest,
     ): InitialConfirmationRecord {
         require(envelope.sessionId == request.sessionId && envelope.eventId == request.eventId)
         val wall = monotonicToWall(envelope.confirmation.secondFrameTimestampMillis)
-        val root = identity(envelope.eventId, envelope.sessionId, 1, wall, FireSessionState.VISUAL_CONFIRMED)
+        require(session.sessionId == envelope.sessionId && session.eventId == envelope.eventId)
+        val root = identity(session, 1, wall, FireSessionState.VISUAL_CONFIRMED)
         root.addProperty("detectionKind", envelope.confirmation.kind.name)
         root.addProperty("confidence", envelope.confirmation.confidence)
         root.add("visibleRoi", roi(envelope.confirmation.roi))
@@ -139,8 +152,12 @@ class CanonicalCoordinatorStoreRecordFactory(
             model.modelSha256,
             model.inputSize,
             model.runtime,
+            taskId = session.taskId,
+            sourceGeneration = session.sourceGeneration,
+            coordinatorGeneration = session.generation,
+            initialRoi = session.initialRoi,
             payload = root.toString(),
-            evidence = evidence.evidence(envelope.eventId, 1),
+            evidence = (envelope.evidence + evidence.evidence(envelope.eventId, 1)).distinctBy { it.path }.take(2),
         )
     }
 
@@ -149,11 +166,12 @@ class CanonicalCoordinatorStoreRecordFactory(
         state: FireSessionState,
         sequence: Long,
         reason: StagePersistenceReason?,
+        recoveryProof: MissionRecoveryProofV1?,
     ): StagePersistenceRecord {
         val wall = clock.wallTimeMillis()
         val flightStatus = FLIGHT_STATUS[state]
         val locationStatus = if (state in PRE_TERMINAL) com.yinxin.uavfir.firedetection.LocationStatus.LASER_LOCATING else null
-        val root = identity(session.eventId, session.sessionId, sequence, wall, state)
+        val root = identity(session, sequence, wall, state)
         flightStatus?.let { root.addProperty("flightStatus", it) }
         locationStatus?.let { root.addProperty("locationStatus", it.name) }
         reason?.let { root.addProperty("reason", it.name) }
@@ -167,6 +185,7 @@ class CanonicalCoordinatorStoreRecordFactory(
             locationStatus,
             reason,
             root.toString(),
+            recoveryProof,
         )
     }
 
@@ -179,7 +198,7 @@ class CanonicalCoordinatorStoreRecordFactory(
         require(session.sessionId == request.sessionId && session.eventId == request.eventId)
         val timeAnchor = timeAnchor()
         val wall = timeAnchor.wallMillis
-        val root = identity(session.eventId, session.sessionId, sequence, wall, FireSessionState.RESULT_DURABLE)
+        val root = identity(session, sequence, wall, FireSessionState.RESULT_DURABLE)
         root.addProperty("locationStatus", request.locationStatus.name)
         root.addProperty("geoMethod", request.geoMethod.name)
         val report = when (result) {
@@ -226,7 +245,9 @@ class CanonicalCoordinatorStoreRecordFactory(
                     result.aircraftOsd.altitude,
                 )
                 root.add("aircraft", point(aircraft))
-                DegradedTerminalReport(aircraft)
+                val reason = FireLocalizationDegradedReason.from(result.reason)
+                root.addProperty("degradedReason", reason.name)
+                DegradedTerminalReport(aircraft, reason)
             }
             is FireLocalizationResult.ManualHold ->
                 throw IllegalArgumentException("Manual hold is not a terminal location report")
@@ -237,7 +258,7 @@ class CanonicalCoordinatorStoreRecordFactory(
             eventTimestampWallMillis = wall,
             report = report,
             payload = root.toString(),
-            evidence = evidence.evidence(session.eventId, sequence),
+            evidence = (session.evidence + evidence.evidence(session.eventId, sequence)).distinctBy { it.path }.take(2),
         )
     }
 
@@ -254,10 +275,14 @@ class CanonicalCoordinatorStoreRecordFactory(
         }
     }
 
-    private fun identity(eventId: String, sessionId: String, sequence: Long, wall: Long, state: FireSessionState) =
+    private fun identity(session: CoordinatorSession, sequence: Long, wall: Long, state: FireSessionState) =
         JsonObject().apply {
-            addProperty("eventId", eventId)
-            addProperty("sessionId", sessionId)
+            addProperty("eventId", session.eventId)
+            addProperty("sessionId", session.sessionId)
+            addProperty("taskId", session.taskId)
+            addProperty("sourceGeneration", session.sourceGeneration)
+            addProperty("coordinatorGeneration", session.generation)
+            add("initialVisibleRoi", roi(session.initialRoi))
             addProperty("sequence", sequence)
             addProperty("eventTimestamp", wall)
             addProperty("state", state.name)
@@ -296,11 +321,6 @@ class CanonicalCoordinatorStoreRecordFactory(
     }
 }
 
-fun interface CoordinatorRecoveryMetadataProvider {
-    /** Missing metadata deliberately leaves the durable session in MANUAL_HOLD. */
-    fun restore(session: DurableFireSession): CoordinatorSession?
-}
-
 private fun SequencedDurableWrite.toCoordinatorWrite() = CoordinatorWrite(result, sequence)
 
 private fun CoordinatorManualHoldReason.toStoreReason(): StagePersistenceReason = when (this) {
@@ -323,6 +343,8 @@ private fun CoordinatorManualHoldReason.toStoreReason(): StagePersistenceReason 
     CoordinatorManualHoldReason.RESUME_FAILURE -> StagePersistenceReason.RESUME_FAILURE
     CoordinatorManualHoldReason.CANCELLED_AFTER_FLIGHT_SUBMISSION ->
         StagePersistenceReason.CANCELLED_AFTER_FLIGHT_SUBMISSION
+    CoordinatorManualHoldReason.CANCELLED_AFTER_DURABLE_HOLD_INTENT ->
+        StagePersistenceReason.CANCELLED_AFTER_DURABLE_HOLD_INTENT
     CoordinatorManualHoldReason.STARTUP_RECOVERY_UNCERTAIN ->
         StagePersistenceReason.STARTUP_RECOVERY_UNCERTAIN
     CoordinatorManualHoldReason.STALE_SESSION_EVIDENCE -> StagePersistenceReason.STALE_SESSION_EVIDENCE

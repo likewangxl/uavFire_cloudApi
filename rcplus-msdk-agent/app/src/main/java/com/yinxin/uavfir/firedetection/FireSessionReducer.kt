@@ -47,7 +47,11 @@ class FireSessionReducer {
             state == FireSessionState.LASER_MEASURING &&
                 event is FireSessionEvent.TerminalResultReady ->
                 terminalResultReady(owned, event)
-            state == FireSessionState.LASER_MEASURING &&
+            state == FireSessionState.TARGET_ALIGNING &&
+                event is FireSessionEvent.TerminalResultReady &&
+                event.request.locationStatus == LocationStatus.DEGRADED_OSD ->
+                terminalResultReady(owned, event)
+            state in setOf(FireSessionState.LASER_MEASURING, FireSessionState.TARGET_ALIGNING) &&
                 event is FireSessionEvent.TerminalResultDurable ->
                 terminalResultDurable(owned, event)
             state == FireSessionState.RESULT_DURABLE &&
@@ -115,7 +119,7 @@ class FireSessionReducer {
         }
         return accepted(
             phase.moveTo(
-                state = FireSessionState.LASER_MEASURING,
+                state = phase.state,
                 pendingTerminal = request,
             ),
             FireSessionEffect.PersistTerminalResult(request),
@@ -159,7 +163,11 @@ private data class ReducerOwnedPhase(
     init {
         require((sessionId == null) == (eventId == null))
         require(pendingInitial == null || state == FireSessionState.VISUAL_CONFIRMED)
-        require(pendingTerminal == null || state == FireSessionState.LASER_MEASURING)
+        require(
+            pendingTerminal == null ||
+                state == FireSessionState.LASER_MEASURING ||
+                state == FireSessionState.TARGET_ALIGNING,
+        )
         require(durableTerminal == null || state == FireSessionState.RESULT_DURABLE)
         require(listOfNotNull(pendingInitial, pendingTerminal, durableTerminal).size <= 1)
     }

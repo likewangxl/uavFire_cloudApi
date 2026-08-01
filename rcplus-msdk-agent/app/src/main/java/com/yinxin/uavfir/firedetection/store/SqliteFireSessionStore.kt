@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.SQLException
 import android.database.sqlite.SQLiteDatabase
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.yinxin.uavfir.firedetection.DetectionKind
 import com.yinxin.uavfir.firedetection.FireSessionState
 import com.yinxin.uavfir.firedetection.GeoMethod
@@ -35,6 +37,16 @@ class SqliteFireSessionStore(
             val session = ContentValues().apply {
                 put("session_id", record.request.sessionId)
                 put("event_id", record.request.eventId)
+                put("task_id", record.taskId)
+                put("source_generation", record.sourceGeneration)
+                put("coordinator_generation", record.coordinatorGeneration)
+                put("roi_left", record.initialRoi.left.toDouble())
+                put("roi_top", record.initialRoi.top.toDouble())
+                put("roi_right", record.initialRoi.right.toDouble())
+                put("roi_bottom", record.initialRoi.bottom.toDouble())
+                putNull("recovery_proof_version")
+                putNull("recovery_proof_payload")
+                putNull("recovery_proof_sha256")
                 put("state", FireSessionState.VISUAL_CONFIRMED.name)
                 put("detection_kind", confirmation.kind.name)
                 put("confidence", confirmation.confidence.toDouble())
@@ -117,9 +129,11 @@ class SqliteFireSessionStore(
                     canonical,
                 )
             }
-            if (session.state != FireSessionState.LASER_MEASURING) {
+            val degradedBeforeLaser = session.state == FireSessionState.TARGET_ALIGNING &&
+                record.request.locationStatus == LocationStatus.DEGRADED_OSD
+            if (session.state != FireSessionState.LASER_MEASURING && !degradedBeforeLaser) {
                 return DurableWriteResult.Rejected(
-                    "Terminal result requires LASER_MEASURING",
+                    "Terminal result requires LASER_MEASURING or pre-laser degradation",
                 )
             }
             val hasPendingTerminal = session.pendingTerminalRequestId != null ||
@@ -159,7 +173,7 @@ class SqliteFireSessionStore(
                     arrayOf(
                         record.request.sessionId,
                         record.request.eventId,
-                        FireSessionState.LASER_MEASURING.name,
+                        session.state.name,
                     ),
                 ) == 1,
             )
@@ -263,6 +277,12 @@ class SqliteFireSessionStore(
             val values = ContentValues().apply {
                 put("state", record.state.name)
                 put("updated_at_wall_ms", record.eventTimestampWallMillis)
+                record.recoveryProof?.let { proof ->
+                    val payload = proofPayload(proof)
+                    put("recovery_proof_version", proof.version)
+                    put("recovery_proof_payload", payload)
+                    put("recovery_proof_sha256", sha256(payload))
+                }
             }
             check(
                 database.update(
@@ -367,6 +387,17 @@ class SqliteFireSessionStore(
             }
         }
 
+    fun loadDurableSession(eventId: String): DurableFireSession? = db.query(
+        FireStoreContract.Session.TABLE,
+        SESSION_COLUMNS,
+        "event_id=?",
+        arrayOf(eventId),
+        null,
+        null,
+        null,
+        "1",
+    ).use { cursor -> if (cursor.moveToFirst()) cursor.toSession() else null }
+
     fun hasActiveManualHold(): Boolean = loadActiveSessions().any {
         it.state == FireSessionState.MANUAL_HOLD
     }
@@ -422,6 +453,12 @@ class SqliteFireSessionStore(
     fun loadForStartup(): FireStoreStartup {
         recoverMonotonicEpoch()
         recoverUnsafeFlightSessions()
+        return FireStoreStartup(loadActiveSessions(), loadPendingOutbox())
+    }
+
+    /** Task 9 performs exact mission reconciliation before choosing MANUAL_HOLD. */
+    fun loadForCoordinatorRecovery(): FireStoreStartup {
+        recoverMonotonicEpoch()
         return FireStoreStartup(loadActiveSessions(), loadPendingOutbox())
     }
 
@@ -692,6 +729,10 @@ class SqliteFireSessionStore(
             session.modelHash == record.modelHash.lowercase() &&
             session.inputSize == record.inputSize &&
             session.runtime == record.runtime &&
+            session.taskId == record.taskId &&
+            session.sourceGeneration == record.sourceGeneration &&
+            session.coordinatorGeneration == record.coordinatorGeneration &&
+            session.initialRoi == record.initialRoi &&
             existing.eventId == record.request.eventId &&
             existing.sessionId == record.request.sessionId &&
             existing.sequence == 1L &&
@@ -876,6 +917,20 @@ class SqliteFireSessionStore(
         geoMethod = getStringOrNull(5)?.let(GeoMethod::valueOf),
         createdAtWallMillis = getLong(6),
         updatedAtWallMillis = getLong(7),
+        taskId = getString(8),
+        sourceGeneration = getLong(9),
+        coordinatorGeneration = getLong(10),
+        initialRoi = com.yinxin.uavfir.firedetection.NormalizedRoi(
+            getDouble(11).toFloat(),
+            getDouble(12).toFloat(),
+            getDouble(13).toFloat(),
+            getDouble(14).toFloat(),
+        ),
+        recoveryProof = if (isNull(15)) null else parseProof(
+            getInt(15),
+            getString(16),
+            getString(17),
+        ),
     )
 
     private fun Cursor.toSessionRow(): SessionRow = SessionRow(
@@ -896,6 +951,15 @@ class SqliteFireSessionStore(
         modelHash = getString(14),
         inputSize = getInt(15),
         runtime = getString(16),
+        taskId = getString(17),
+        sourceGeneration = getLong(18),
+        coordinatorGeneration = getLong(19),
+        initialRoi = com.yinxin.uavfir.firedetection.NormalizedRoi(
+            getDouble(20).toFloat(),
+            getDouble(21).toFloat(),
+            getDouble(22).toFloat(),
+            getDouble(23).toFloat(),
+        ),
     )
 
     private fun Cursor.toOutbox(): OutboxRow = OutboxRow(
@@ -919,6 +983,41 @@ class SqliteFireSessionStore(
     private fun Cursor.getLongOrNull(index: Int): Long? =
         if (isNull(index)) null else getLong(index)
 
+    private fun proofPayload(proof: MissionRecoveryProofV1): String = JsonObject().apply {
+        addProperty("missionId", proof.missionId)
+        addProperty("missionFileName", proof.missionFileName)
+        addProperty("missionGeneration", proof.missionGeneration)
+        addProperty("waylineId", proof.waylineId)
+        addProperty("waypointId", proof.waypointId)
+        addProperty("segmentProgress", proof.segmentProgress)
+        proof.latitude?.let { addProperty("latitude", it) }
+        proof.longitude?.let { addProperty("longitude", it) }
+        proof.altitude?.let { addProperty("altitude", it) }
+        proof.recoverAction?.let { addProperty("recoverAction", it) }
+        addProperty("pausedCommandGeneration", proof.pausedCommandGeneration)
+        addProperty("holdGeneration", proof.holdGeneration)
+    }.toString()
+
+    private fun parseProof(version: Int, payload: String, digest: String): MissionRecoveryProofV1 {
+        require(version == 1 && sha256(payload) == digest) { "Recovery proof is invalid" }
+        val value = JsonParser.parseString(payload).asJsonObject
+        fun optionalDouble(name: String): Double? = value.get(name)?.takeUnless { it.isJsonNull }?.asDouble
+        return MissionRecoveryProofV1(
+            missionId = value.get("missionId").asString,
+            missionFileName = value.get("missionFileName").asString,
+            missionGeneration = value.get("missionGeneration").asLong,
+            waylineId = value.get("waylineId").asInt,
+            waypointId = value.get("waypointId").asInt,
+            segmentProgress = value.get("segmentProgress").asDouble,
+            latitude = optionalDouble("latitude"),
+            longitude = optionalDouble("longitude"),
+            altitude = optionalDouble("altitude"),
+            recoverAction = value.get("recoverAction")?.takeUnless { it.isJsonNull }?.asString,
+            pausedCommandGeneration = value.get("pausedCommandGeneration").asLong,
+            holdGeneration = value.get("holdGeneration").asLong,
+        )
+    }
+
     private data class SessionRow(
         val sessionId: String,
         val eventId: String,
@@ -937,6 +1036,10 @@ class SqliteFireSessionStore(
         val modelHash: String,
         val inputSize: Int,
         val runtime: String,
+        val taskId: String,
+        val sourceGeneration: Long,
+        val coordinatorGeneration: Long,
+        val initialRoi: com.yinxin.uavfir.firedetection.NormalizedRoi,
     )
 
     companion object {
@@ -959,6 +1062,16 @@ class SqliteFireSessionStore(
             "geo_method",
             "created_at_wall_ms",
             "updated_at_wall_ms",
+            "task_id",
+            "source_generation",
+            "coordinator_generation",
+            "roi_left",
+            "roi_top",
+            "roi_right",
+            "roi_bottom",
+            "recovery_proof_version",
+            "recovery_proof_payload",
+            "recovery_proof_sha256",
         )
         private val INTERNAL_SESSION_COLUMNS = arrayOf(
             "session_id",
@@ -978,6 +1091,13 @@ class SqliteFireSessionStore(
             "model_hash",
             "input_size",
             "runtime",
+            "task_id",
+            "source_generation",
+            "coordinator_generation",
+            "roi_left",
+            "roi_top",
+            "roi_right",
+            "roi_bottom",
         )
         private val OUTBOX_COLUMNS = arrayOf(
             "event_id",

@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.firedetection
 
 import com.yinxin.uavfir.firedetection.store.DurableWriteResult
+import com.yinxin.uavfir.firedetection.store.MissionRecoveryProofV1
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -15,7 +16,7 @@ class AgentFireRecoveryCoordinatorTest {
             store, RecoveryDelivery(trace), RecoveryLocalization(trace), RecoveryMission(trace, RecoveryMissionOutcome.ManualHold(MissionWorkflowFailure.UNKNOWN_MISSION_STATE)),
         )
         val results = coordinator.recover()
-        assertEquals(listOf("outbox", "close", "manual"), trace)
+        assertEquals(listOf("close", "outbox", "manual"), trace)
         assertTrue(results.single() is RecoveryResult.ManualHold)
     }
 
@@ -60,13 +61,13 @@ class AgentFireRecoveryCoordinatorTest {
                 RecoveryMission(trace, RecoveryMissionOutcome.ManualHold(MissionWorkflowFailure.UNKNOWN_MISSION_STATE)),
             )
             assertTrue("$state", coordinator.recover().single() is RecoveryResult.ManualHold)
-            assertEquals("$state", listOf("outbox", "close", "manual"), trace)
+            assertEquals("$state", listOf("close", "outbox", "manual"), trace)
         }
     }
 
     private class RecoveryStore(private val trace: MutableList<String>, private val sessions: List<CoordinatorRecoverySession>) : CoordinatorStorePort {
-        override suspend fun persistInitial(envelope: AgentFireConfirmationEnvelope, request: InitialPersistenceRequest) = error("unused")
-        override suspend fun persistStage(session: CoordinatorSession, state: FireSessionState) = error("unused")
+        override suspend fun persistInitial(session: CoordinatorSession, envelope: AgentFireConfirmationEnvelope, request: InitialPersistenceRequest) = error("unused")
+        override suspend fun persistStage(session: CoordinatorSession, state: FireSessionState, recoveryProof: MissionRecoveryProofV1?) = error("unused")
         override suspend fun persistTerminal(session: CoordinatorSession, request: TerminalPersistenceRequest, result: FireLocalizationResult) = error("unused")
         override suspend fun persistManualHold(session: CoordinatorSession, reason: CoordinatorManualHoldReason): CoordinatorWrite { trace += "manual"; return CoordinatorWrite(DurableWriteResult.Written, 9) }
         override suspend fun recordTerminalAck(session: CoordinatorSession, sequence: Long) = false

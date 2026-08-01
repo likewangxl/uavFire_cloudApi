@@ -332,6 +332,40 @@ class AwaitableMissionControl(
         jobs.forEach { it.cancel(CancellationException("manual-control-takeover")) }
     }
 
+    fun currentSnapshot(): MissionSnapshot = port.snapshot()
+
+    fun reconcileResume(
+        token: MissionHoldToken,
+        controlSession: FireControlSessionKey,
+    ): ResumeReconciliationOutcome = synchronized(lock) {
+        val lifecycle = resumeLifecycle[ResumeOperationKey(token, controlSession)]
+        if (lifecycle !in setOf(
+                ResumeLifecycle.SUBMITTED,
+                ResumeLifecycle.SUCCEEDED,
+                ResumeLifecycle.OUTCOME_UNKNOWN,
+                ResumeLifecycle.FAILED,
+            )
+        ) return@synchronized ResumeReconciliationOutcome.Unknown
+        reconcileSnapshot(token, port.snapshot())
+    }
+
+    fun reconcileRecovery(token: MissionHoldToken): ResumeReconciliationOutcome =
+        reconcileSnapshot(token, port.snapshot())
+
+    private fun reconcileSnapshot(
+        token: MissionHoldToken,
+        snapshot: MissionSnapshot,
+    ): ResumeReconciliationOutcome = when {
+        snapshot.mission != token.mission -> ResumeReconciliationOutcome.Unknown
+        snapshot.state == ObservedMissionState.EXECUTING &&
+            snapshot.commandGeneration > token.pausedCommandGeneration ->
+            ResumeReconciliationOutcome.Executing
+        snapshot.state == ObservedMissionState.INTERRUPTED &&
+            snapshot.commandGeneration == token.pausedCommandGeneration ->
+            ResumeReconciliationOutcome.Held
+        else -> ResumeReconciliationOutcome.Unknown
+    }
+
     override fun close() {
         val jobs = synchronized(lock) {
             if (closed) return

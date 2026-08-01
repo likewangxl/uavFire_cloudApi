@@ -28,6 +28,8 @@ import com.yinxin.uavfir.firedetection.LatestVisibleFrameBuffer
 import com.yinxin.uavfir.firedetection.AwaitableMissionControl
 import com.yinxin.uavfir.firedetection.AgentFireClosedLoopCoordinator
 import com.yinxin.uavfir.firedetection.AgentFireConfirmationBridge
+import com.yinxin.uavfir.firedetection.BoundedCoordinatorOutcomeRecorder
+import com.yinxin.uavfir.firedetection.BoundedVisibleEvidenceCapture
 import com.yinxin.uavfir.firedetection.AgentFireMonitoringContext
 import com.yinxin.uavfir.firedetection.AgentFireRecoveryCoordinator
 import com.yinxin.uavfir.firedetection.ConfirmationHealth
@@ -91,6 +93,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 
 class AppServices(
     application: Application,
@@ -105,6 +108,13 @@ class AppServices(
     private val latestVisibleFrameBuffer = LatestVisibleFrameBuffer()
     private val visibleInferenceResults = VisibleInferenceResultJournal()
     private val fireCoordinatorReference = AtomicReference<AgentFireClosedLoopCoordinator?>()
+    private val cachedFireHealth = AtomicReference(ConfirmationHealth(false, false, false, false))
+    private val coordinatorOutcomeRecorder = BoundedCoordinatorOutcomeRecorder()
+    private val fireEvidenceCapture = BoundedVisibleEvidenceCapture(
+        File(application.filesDir, "fire-evidence"),
+        SystemClock::elapsedRealtime,
+        System::currentTimeMillis,
+    )
     private val visibleConfirmationTracker = VisibleConfirmationTracker(
         VisibleConfirmationPolicy(
             maxCenterDistance = 0.08,
@@ -151,20 +161,11 @@ class AppServices(
                 AgentFireMonitoringContext("fire-$droneSn", generation)
             } else null
         },
-        health = {
-            val detectorHealthy = visibleInferenceLoop?.snapshot()?.status == VisibleInferenceStatus.HEALTHY
-            ConfirmationHealth(
-                frameHealthy = latestVisibleFrameBuffer.currentVisibleSourceGeneration() != null,
-                modelHealthy = detectorHealthy,
-                runtimeHealthy = detectorHealthy,
-                storeHealthy = runCatching {
-                    fireSessionStore.loadActiveSessions()
-                    true
-                }.getOrDefault(false),
-            )
-        },
+        health = cachedFireHealth::get,
         coordinator = fireCoordinatorReference::get,
         scope = appScope,
+        evidenceCapture = fireEvidenceCapture,
+        outcomeSink = coordinatorOutcomeRecorder,
     )
     private val visibleFireDetectorArming = VisibleFireDetectorFactory.create(application)
     private val visibleInferenceLoop: VisibleInferenceLoop? =
@@ -254,6 +255,16 @@ class AppServices(
             )
         },
         monotonicNow = SystemClock::elapsedRealtime,
+        competingOwnerProbe = { session ->
+            visibleFireLaserLocator.hasCompetingOwnership(
+                com.yinxin.uavfir.firedetection.FireControlSessionKey(
+                    session.sessionId,
+                    session.generation,
+                ),
+                session.eventId,
+                session.generation,
+            )
+        },
     )
     private val visibleFireLaserRangefinder = DjiLaserRangefinderClient()
     private val aircraftOsdTracker = DjiAircraftOsdTracker()
@@ -283,17 +294,14 @@ class AppServices(
         localization = coordinatorLocalization,
         armingHealth = {
             val sourceGeneration = latestVisibleFrameBuffer.currentVisibleSourceGeneration()
-            val detectorHealthy = visibleInferenceLoop?.snapshot()?.status == VisibleInferenceStatus.HEALTHY
+            val health = cachedFireHealth.get()
             CoordinatorArmingHealth(
                 featureEnabled = BuildConfig.VISIBLE_FIRE_DETECTION_ENABLED,
                 backendMonitoringEnabled = sessionManager.thermalMonitoringEnabled,
                 visibleSourceActive = sourceGeneration != null,
                 sourceGenerationValid = sourceGeneration != null,
-                detectorHealthy = detectorHealthy,
-                storeHealthy = runCatching {
-                    fireSessionStore.loadActiveSessions()
-                    true
-                }.getOrDefault(false),
+                detectorHealthy = health.modelHealthy && health.runtimeHealthy,
+                storeHealthy = health.storeHealthy,
                 // Task 10 has not supplied the staged ACK transport yet.
                 outboxHealthy = false,
                 missionAdaptersHealthy = true,
@@ -304,6 +312,14 @@ class AppServices(
                     fireSessionStore.hasActiveManualHold()
                 }.getOrDefault(true),
                 competingOwnerActive = visibleFireLaserLocator.hasActiveOwnership(),
+            )
+        },
+        runtimeHealth = {
+            val health = cachedFireHealth.get()
+            com.yinxin.uavfir.firedetection.CoordinatorRuntimeHealth(
+                detectorHealthy = health.modelHealthy,
+                runtimeHealthy = health.runtimeHealthy,
+                storeHealthy = health.storeHealthy,
             )
         },
     )
@@ -386,6 +402,24 @@ class AppServices(
 
     init {
         fireCoordinatorReference.set(fireClosedLoopCoordinator)
+        appScope.launch {
+            while (isActive) {
+                val detectorHealthy = visibleInferenceLoop?.snapshot()?.status ==
+                    VisibleInferenceStatus.HEALTHY
+                cachedFireHealth.set(
+                    ConfirmationHealth(
+                        frameHealthy = latestVisibleFrameBuffer.currentVisibleSourceGeneration() != null,
+                        modelHealthy = detectorHealthy,
+                        runtimeHealthy = detectorHealthy,
+                        storeHealthy = runCatching {
+                            fireSessionStore.loadActiveSessions()
+                            true
+                        }.getOrDefault(false),
+                    ),
+                )
+                delay(FIRE_HEALTH_REFRESH_MS)
+            }
+        }
         appScope.launch {
             runCatching { fireRecoveryCoordinator.recover() }.fold(
                 onSuccess = {
@@ -515,6 +549,7 @@ class AppServices(
     companion object {
         private const val TAG = "AppServices"
         private const val AUTO_START_DELAY_MS: Long = 6_000
+        private const val FIRE_HEALTH_REFRESH_MS: Long = 250
         private const val VISIBLE_MODEL_VERSION = "visible-fire-wechat-best2-20260728"
         private const val VISIBLE_MODEL_SHA256 =
             "957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650"

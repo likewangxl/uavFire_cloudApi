@@ -12,9 +12,10 @@ class AgentFireRecoveryCoordinator(
     private val mission: CoordinatorMissionPort,
 ) {
     suspend fun recover(): List<RecoveryResult> {
-        delivery.restartPendingDelivery()
         localization.ensureLaserDisabledAndAlignmentClosed(null)
-        return store.loadRecoverySessions().map { recovery ->
+        val sessions = store.loadRecoverySessions()
+        delivery.restartPendingDelivery()
+        return sessions.map { recovery ->
             val session = recovery.session
             val stateMayOwnFlight = recovery.persistedState in UNSAFE_RESTART_STATES
             if (!stateMayOwnFlight) {

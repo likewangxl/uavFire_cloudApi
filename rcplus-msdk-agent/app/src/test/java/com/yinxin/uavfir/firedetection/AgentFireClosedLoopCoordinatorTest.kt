@@ -1,9 +1,11 @@
 package com.yinxin.uavfir.firedetection
 
 import com.yinxin.uavfir.firedetection.store.DurableWriteResult
+import com.yinxin.uavfir.firedetection.store.MissionRecoveryProofV1
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -151,8 +153,151 @@ class AgentFireClosedLoopCoordinatorTest {
         }
         val resume = fixture(DetectionKind.FIRE, precise())
         resume.mission.resumeFailure = MissionWorkflowFailure.RESUME_TIMEOUT
-        assertTrue(resume.coordinator.process(resume.envelope) is ClosedLoopResult.ManualHold)
+        assertTrue(resume.coordinator.process(resume.envelope) is ClosedLoopResult.ResumeOutcomeUnknown)
         assertEquals(1, resume.mission.resumeCalls)
+    }
+
+    @Test
+    fun `manual takeover during localization cancels work and enters manual hold`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, precise())
+        fixture.localization.block = CompletableDeferred()
+        fixture.mission.invalidation = CompletableDeferred()
+        val pending = async { fixture.coordinator.process(fixture.envelope) }
+        runCurrent()
+        fixture.mission.invalidation!!.complete(MissionWorkflowFailure.MANUAL_TAKEOVER)
+        runCurrent()
+        assertTrue(pending.await() is ClosedLoopResult.ManualHold)
+        assertEquals(CoordinatorManualHoldReason.MANUAL_TAKEOVER, fixture.store.manualHold)
+        assertEquals(0, fixture.mission.resumeCalls)
+    }
+
+    @Test
+    fun `detector failure during ACK cancels wait and holds`() = runTest {
+        var health = CoordinatorRuntimeHealth(true, true, true)
+        val fixture = fixture(DetectionKind.FIRE, precise(), runtimeHealth = { health })
+        fixture.delivery.ack = CompletableDeferred()
+        val pending = async { fixture.coordinator.process(fixture.envelope) }
+        runCurrent()
+        health = CoordinatorRuntimeHealth(false, true, true)
+        advanceTimeBy(101)
+        runCurrent()
+        assertTrue(pending.await() is ClosedLoopResult.ManualHold)
+        assertEquals(CoordinatorManualHoldReason.DETECTOR_FAILURE, fixture.store.manualHold)
+        assertEquals(0, fixture.mission.resumeCalls)
+    }
+
+    @Test
+    fun `runtime health probe exception during held work fails closed`() = runTest {
+        var healthy = true
+        val fixture = fixture(
+            DetectionKind.FIRE,
+            precise(),
+            runtimeHealth = {
+                if (healthy) CoordinatorRuntimeHealth(true, true, true) else error("probe")
+            },
+        )
+        fixture.delivery.ack = CompletableDeferred()
+        val pending = async { fixture.coordinator.process(fixture.envelope) }
+        runCurrent()
+        healthy = false
+        advanceTimeBy(101)
+        runCurrent()
+
+        assertTrue(pending.await() is ClosedLoopResult.ManualHold)
+        assertEquals(CoordinatorManualHoldReason.DETECTOR_FAILURE, fixture.store.manualHold)
+    }
+
+    @Test
+    fun `pre-laser degradation never fabricates laser measuring`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, degraded(FireLocalizationFailure.TARGET_NOT_ALIGNED))
+        fixture.localization.invokeLaserBoundary = false
+        assertEquals(ClosedLoopResult.MissionResumed, fixture.coordinator.process(fixture.envelope))
+        assertFalse(fixture.store.stages.contains(FireSessionState.LASER_MEASURING))
+    }
+
+    @Test
+    fun `cleanup failure persists final laser uncertain reason`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, FireLocalizationResult.ManualHold(DetectionKind.FIRE, FireLocalizationFailure.AIRCRAFT_OSD_UNAVAILABLE))
+        fixture.localization.cleanupFails = true
+        val result = fixture.coordinator.process(fixture.envelope) as ClosedLoopResult.ManualHold
+        assertEquals(CoordinatorManualHoldReason.LASER_DISABLE_UNCERTAIN, result.reason)
+        assertEquals(result.reason, fixture.store.manualHold)
+    }
+
+    @Test
+    fun `resume submitted then executing reconciliation never writes manual hold`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, precise())
+        fixture.mission.resumeFailure = MissionWorkflowFailure.RESUME_TIMEOUT
+        fixture.mission.reconciliation = ResumeReconciliationOutcome.Executing
+        assertEquals(ClosedLoopResult.MissionResumed, fixture.coordinator.process(fixture.envelope))
+        assertEquals(null, fixture.store.manualHold)
+    }
+
+    @Test
+    fun `confirmed executing with final persistence failure is durability uncertain not manual hold`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, precise())
+        fixture.store.stageFailures += FireSessionState.MISSION_RESUMED
+        assertTrue(
+            fixture.coordinator.process(fixture.envelope) is
+                ClosedLoopResult.MissionExecutingDurabilityUncertain,
+        )
+        assertEquals(null, fixture.store.manualHold)
+    }
+
+    @Test
+    fun `every pre-resume progress write failure fails closed`() = runTest {
+        listOf(
+            FireSessionState.HOLD_REQUESTED,
+            FireSessionState.HOVER_VERIFYING,
+            FireSessionState.TARGET_ALIGNING,
+            FireSessionState.LASER_MEASURING,
+            FireSessionState.RESUME_REQUESTED,
+        ).forEach { state ->
+            val fixture = fixture(DetectionKind.FIRE, precise())
+            fixture.store.stageFailures += state
+            val result = fixture.coordinator.process(fixture.envelope)
+            if (state == FireSessionState.HOLD_REQUESTED && fixture.mission.pauseSubmissions == 0) {
+                assertTrue("$state", result is ClosedLoopResult.Rejected)
+            } else {
+                assertTrue("$state", result is ClosedLoopResult.ManualHold)
+            }
+            assertEquals(0, fixture.mission.resumeCalls.takeIf { state != FireSessionState.RESUME_REQUESTED } ?: 0)
+        }
+    }
+
+    @Test
+    fun `pause starts while hold progress transaction is blocked after initial durability`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, precise())
+        fixture.store.holdStageBlock = CompletableDeferred()
+        val pending = async { fixture.coordinator.process(fixture.envelope) }
+        runCurrent()
+        assertEquals(1, fixture.mission.pauseCalls)
+        assertTrue(fixture.delivery.kicks.contains(fixture.envelope.eventId to 1L))
+        fixture.store.holdStageBlock!!.complete(Unit)
+        assertEquals(ClosedLoopResult.MissionResumed, pending.await())
+    }
+
+    @Test
+    fun `failed hold persistence cancels a pause that has not submitted`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, precise())
+        fixture.store.stageFailures += FireSessionState.HOLD_REQUESTED
+        fixture.mission.beforePauseSubmission = CompletableDeferred()
+
+        assertTrue(fixture.coordinator.process(fixture.envelope) is ClosedLoopResult.Rejected)
+        assertEquals(0, fixture.mission.pauseSubmissions)
+        assertEquals(null, fixture.store.manualHold)
+    }
+
+    @Test
+    fun `cancellation after durable hold intent before pause submission is durably closed`() = runTest {
+        val fixture = fixture(DetectionKind.FIRE, precise())
+        fixture.mission.beforePauseSubmission = CompletableDeferred()
+        val pending = async { fixture.coordinator.process(fixture.envelope) }
+        runCurrent()
+        pending.cancel()
+        runCurrent()
+        assertEquals(CoordinatorManualHoldReason.CANCELLED_AFTER_DURABLE_HOLD_INTENT, fixture.store.manualHold)
+        assertEquals(0, fixture.mission.pauseSubmissions)
     }
 
     @Test
@@ -225,6 +370,24 @@ class AgentFireClosedLoopCoordinatorTest {
     }
 
     @Test
+    fun `arming probe exception releases ownership for the next request`() = runTest {
+        var probeFails = true
+        val fixture = fixture(
+            DetectionKind.FIRE,
+            precise(),
+            armingHealth = {
+                if (probeFails) error("probe") else healthy()
+            },
+        )
+        assertEquals(
+            ClosedLoopResult.Rejected("arming-health-unavailable"),
+            fixture.coordinator.process(fixture.envelope),
+        )
+        probeFails = false
+        assertEquals(ClosedLoopResult.MissionResumed, fixture.coordinator.process(fixture.envelope))
+    }
+
+    @Test
     fun `cancellation after pause submission durably enters manual hold`() = runTest {
         val fixture = fixture(DetectionKind.FIRE, precise())
         fixture.mission.pauseBlock = CompletableDeferred()
@@ -252,6 +415,8 @@ class AgentFireClosedLoopCoordinatorTest {
         kind: DetectionKind,
         localizationResult: FireLocalizationResult,
         health: CoordinatorArmingHealth = healthy(),
+        runtimeHealth: () -> CoordinatorRuntimeHealth = { CoordinatorRuntimeHealth(true, true, true) },
+        armingHealth: (() -> CoordinatorArmingHealth)? = null,
     ): Fixture {
         val trace = mutableListOf<String>()
         val store = FakeStore(trace)
@@ -263,7 +428,8 @@ class AgentFireClosedLoopCoordinatorTest {
             delivery = delivery,
             mission = mission,
             localization = localization,
-            armingHealth = { health },
+            armingHealth = armingHealth ?: { health },
+            runtimeHealth = runtimeHealth,
             requestIds = object : CoordinatorRequestIdSource {
                 private var next = 1
                 override fun next(): String = "00000000-0000-4000-8000-${next++.toString().padStart(12, '0')}"
@@ -291,16 +457,25 @@ class AgentFireClosedLoopCoordinatorTest {
         var terminal: TerminalPersistenceRequest? = null
         var manualHold: CoordinatorManualHoldReason? = null
         var ackRecorded = false
+        val stages = mutableListOf<FireSessionState>()
+        val stageFailures = mutableSetOf<FireSessionState>()
+        var holdStageBlock: CompletableDeferred<Unit>? = null
         var initialBlock: CompletableDeferred<Unit>? = null
         private var nextSequence = 2L
-        override suspend fun persistInitial(envelope: AgentFireConfirmationEnvelope, request: InitialPersistenceRequest): CoordinatorWrite {
+        override suspend fun persistInitial(session: CoordinatorSession, envelope: AgentFireConfirmationEnvelope, request: InitialPersistenceRequest): CoordinatorWrite {
             initialBlock?.await()
             trace += "initial"; initialCalls++; initial = request
             return CoordinatorWrite(initialResult, 1)
         }
-        override suspend fun persistStage(session: CoordinatorSession, state: FireSessionState): CoordinatorWrite {
+        override suspend fun persistStage(session: CoordinatorSession, state: FireSessionState, recoveryProof: MissionRecoveryProofV1?): CoordinatorWrite {
+            stages += state
+            if (state == FireSessionState.HOLD_REQUESTED) holdStageBlock?.await()
             if (state == FireSessionState.TARGET_ALIGNING) trace += "align-stage"
-            return CoordinatorWrite(DurableWriteResult.Written, nextSequence++)
+            return CoordinatorWrite(
+                if (state in stageFailures) DurableWriteResult.Rejected("stage-failure")
+                else DurableWriteResult.Written,
+                nextSequence++,
+            )
         }
         override suspend fun persistTerminal(session: CoordinatorSession, request: TerminalPersistenceRequest, result: FireLocalizationResult): CoordinatorWrite {
             trace += "terminal"; terminal = request
@@ -336,12 +511,16 @@ class AgentFireClosedLoopCoordinatorTest {
 
     private class FakeMission(private val trace: MutableList<String>) : CoordinatorMissionPort {
         var pauseCalls = 0
+        var pauseSubmissions = 0
         var resumeCalls = 0
         var pauseFailure: MissionWorkflowFailure? = null
         var resumeFailure: MissionWorkflowFailure? = null
         var pauseBlock: CompletableDeferred<Unit>? = null
+        var beforePauseSubmission: CompletableDeferred<Unit>? = null
+        var invalidation: CompletableDeferred<MissionWorkflowFailure>? = null
+        var reconciliation: ResumeReconciliationOutcome = ResumeReconciliationOutcome.Unknown
         override suspend fun pauseAndAwait(session: CoordinatorSession, onSubmission: () -> Unit): MissionPauseOutcome {
-            trace += "pause"; pauseCalls++; onSubmission(); pauseBlock?.await()
+            trace += "pause"; pauseCalls++; beforePauseSubmission?.await(); onSubmission(); pauseSubmissions++; pauseBlock?.await()
             return pauseFailure?.let(MissionPauseOutcome::Failed) ?: MissionPauseOutcome.Paused(
                 CoordinatorHoldProof(session.sessionId, session.eventId, session.generation),
             )
@@ -357,6 +536,9 @@ class AgentFireClosedLoopCoordinatorTest {
             return resumeFailure?.let(MissionResumeOutcome::Failed) ?: MissionResumeOutcome.Resumed
         }
         override suspend fun reconcileForRecovery(session: CoordinatorRecoverySession): RecoveryMissionOutcome = RecoveryMissionOutcome.ManualHold(MissionWorkflowFailure.UNKNOWN_MISSION_STATE)
+        override suspend fun awaitHeldInvalidation(session: CoordinatorSession, holdProof: CoordinatorHoldProof): MissionWorkflowFailure =
+            invalidation?.await() ?: awaitCancellation()
+        override suspend fun reconcileAfterResumeSubmission(session: CoordinatorSession, holdProof: CoordinatorHoldProof) = reconciliation
     }
 
     private class FakeLocalization(
@@ -365,12 +547,21 @@ class AgentFireClosedLoopCoordinatorTest {
     ) : CoordinatorLocalizationPort {
         var lastRequest: FireLocalizationRequest? = null
         var overrideIdentity: Pair<String, String>? = null
+        var block: CompletableDeferred<Unit>? = null
+        var invokeLaserBoundary = true
+        var cleanupFails = false
         override suspend fun localize(session: CoordinatorSession, request: FireLocalizationRequest, holdProof: CoordinatorHoldProof, hoverProof: CoordinatorHoverProof, onLaserMeasurementBoundary: suspend () -> Boolean): BoundLocalizationResult {
-            lastRequest = request; onLaserMeasurementBoundary(); trace += "localize"
+            lastRequest = request
+            if (invokeLaserBoundary) onLaserMeasurementBoundary()
+            trace += "localize"
+            block?.await()
             val identity = overrideIdentity
             return BoundLocalizationResult(identity?.first ?: session.sessionId, identity?.second ?: session.eventId, session.generation, result)
         }
-        override suspend fun ensureLaserDisabledAndAlignmentClosed(session: CoordinatorSession?) { trace += "close" }
+        override suspend fun ensureLaserDisabledAndAlignmentClosed(session: CoordinatorSession?) {
+            trace += "close"
+            if (cleanupFails) error("cleanup")
+        }
     }
 
     companion object {
@@ -382,8 +573,8 @@ class AgentFireClosedLoopCoordinatorTest {
         private fun precise(kind: DetectionKind = DetectionKind.FIRE) = FireLocalizationResult.Precise(
             kind, 34.0, 108.0, 10.0, 100.0, 5.0, emptyList(), NormalizedRoi(.4f, .4f, .6f, .6f), 7,
         )
-        private fun degraded() = FireLocalizationResult.DegradedOsd(
-            DetectionKind.FIRE, FireLocalizationFailure.LASER_SAMPLES_INVALID,
+        private fun degraded(reason: FireLocalizationFailure = FireLocalizationFailure.LASER_SAMPLES_INVALID) = FireLocalizationResult.DegradedOsd(
+            DetectionKind.FIRE, reason,
             AircraftOsdSnapshot(34.0, 108.0, 10.0, 1, 100),
         )
     }

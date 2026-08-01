@@ -5,8 +5,14 @@ import com.yinxin.uavfir.firedetection.DetectionKind
 import com.yinxin.uavfir.firedetection.FireSessionState
 import com.yinxin.uavfir.firedetection.FireSessionEffect
 import com.yinxin.uavfir.firedetection.GeoMethod
+import com.yinxin.uavfir.firedetection.FireLocalizationFailure
 import com.yinxin.uavfir.firedetection.InitialPersistenceRequest
 import com.yinxin.uavfir.firedetection.LocationStatus
+import com.yinxin.uavfir.firedetection.MissionBreakpoint
+import com.yinxin.uavfir.firedetection.MissionExecutionKey
+import com.yinxin.uavfir.firedetection.MissionHoldToken
+import com.yinxin.uavfir.firedetection.MissionIdentity
+import com.yinxin.uavfir.firedetection.NormalizedRoi
 import com.yinxin.uavfir.firedetection.TerminalPersistenceRequest
 import java.io.File
 import java.security.MessageDigest
@@ -17,7 +23,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 object FireStoreContract {
-    const val SCHEMA_VERSION = 3
+    const val SCHEMA_VERSION = 4
     const val DEFAULT_DATABASE_NAME = "agent-fire-store.db"
 
     object Session {
@@ -107,6 +113,10 @@ data class InitialConfirmationRecord(
     val aircraft: ReportGeoPoint? = null,
     val payload: String,
     val evidence: List<FireEvidenceReference>,
+    val taskId: String = "legacy-task",
+    val sourceGeneration: Long = 1,
+    val coordinatorGeneration: Long = 1,
+    val initialRoi: NormalizedRoi = request.confirmation.roi,
 ) {
     init {
         require(eventTimestampWallMillis >= 0)
@@ -114,6 +124,7 @@ data class InitialConfirmationRecord(
         require(isSha256(modelHash))
         require(inputSize > 0)
         require(runtime.isNotBlank())
+        require(taskId.isNotBlank() && sourceGeneration > 0 && coordinatorGeneration > 0)
         validatePayloadSize(payload)
     }
 }
@@ -163,12 +174,71 @@ data class StagePersistenceRecord(
     val locationStatus: LocationStatus? = null,
     val reason: StagePersistenceReason? = null,
     val payload: String,
+    val recoveryProof: MissionRecoveryProofV1? = null,
 ) {
     init {
         require(sessionId.isNotBlank() && eventId.isNotBlank())
         require(sequence > 1)
         require(eventTimestampWallMillis >= 0)
         validatePayloadSize(payload)
+    }
+}
+
+data class MissionRecoveryProofV1(
+    val missionId: String,
+    val missionFileName: String,
+    val missionGeneration: Long,
+    val waylineId: Int,
+    val waypointId: Int,
+    val segmentProgress: Double,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val altitude: Double? = null,
+    val recoverAction: String? = null,
+    val pausedCommandGeneration: Long,
+    val holdGeneration: Long,
+) {
+    val version: Int = 1
+
+    init {
+        require(missionId.isNotBlank() && missionFileName.isNotBlank())
+        require(missionGeneration > 0 && pausedCommandGeneration >= 0 && holdGeneration > 0)
+        require(toMissionHoldToken().breakpoint.isValid)
+    }
+
+    fun toMissionHoldToken() = MissionHoldToken(
+        mission = MissionExecutionKey(MissionIdentity(missionId, missionFileName), missionGeneration),
+        breakpoint = MissionBreakpoint(
+            waylineId,
+            waypointId,
+            segmentProgress,
+            latitude,
+            longitude,
+            altitude,
+            recoverAction,
+        ),
+        pausedCommandGeneration = pausedCommandGeneration,
+        holdGeneration = holdGeneration,
+    )
+
+    companion object {
+        fun from(token: MissionHoldToken): MissionRecoveryProofV1 {
+            val breakpoint = token.breakpoint
+            return MissionRecoveryProofV1(
+                token.mission.identity.missionId,
+                token.mission.identity.missionFileName,
+                token.mission.missionGeneration,
+                breakpoint.waylineId,
+                breakpoint.waypointId,
+                breakpoint.segmentProgress,
+                breakpoint.latitude,
+                breakpoint.longitude,
+                breakpoint.altitude,
+                breakpoint.recoverAction,
+                token.pausedCommandGeneration,
+                token.holdGeneration,
+            )
+        }
     }
 }
 
@@ -192,6 +262,7 @@ enum class StagePersistenceReason {
     LASER_DISABLE_UNCERTAIN,
     RESUME_FAILURE,
     CANCELLED_AFTER_FLIGHT_SUBMISSION,
+    CANCELLED_AFTER_DURABLE_HOLD_INTENT,
     STARTUP_RECOVERY_UNCERTAIN,
     STALE_SESSION_EVIDENCE,
     STARTUP_FLIGHT_STATE_UNRECONCILED,
@@ -245,8 +316,25 @@ data class PreciseTerminalReport(
     }
 }
 
+enum class FireLocalizationDegradedReason(val failure: FireLocalizationFailure) {
+    TARGET_NOT_ALIGNED(FireLocalizationFailure.TARGET_NOT_ALIGNED),
+    TARGET_DETECTION_TIMEOUT(FireLocalizationFailure.TARGET_DETECTION_TIMEOUT),
+    LASER_ENABLE_FAILED(FireLocalizationFailure.LASER_ENABLE_FAILED),
+    LASER_CALLBACK_OVERFLOW(FireLocalizationFailure.LASER_CALLBACK_OVERFLOW),
+    LASER_SAMPLES_UNAVAILABLE(FireLocalizationFailure.LASER_SAMPLES_UNAVAILABLE),
+    LASER_SAMPLES_INVALID(FireLocalizationFailure.LASER_SAMPLES_INVALID),
+    ;
+
+    companion object {
+        fun from(failure: FireLocalizationFailure): FireLocalizationDegradedReason =
+            entries.firstOrNull { it.failure == failure }
+                ?: throw IllegalArgumentException("Failure cannot be a degraded terminal: $failure")
+    }
+}
+
 data class DegradedTerminalReport(
     val aircraft: ReportGeoPoint,
+    val reason: FireLocalizationDegradedReason = FireLocalizationDegradedReason.LASER_SAMPLES_INVALID,
 ) : TerminalLocationReport
 
 sealed interface DurableWriteResult {
@@ -272,6 +360,11 @@ data class DurableFireSession(
     val geoMethod: GeoMethod?,
     val createdAtWallMillis: Long,
     val updatedAtWallMillis: Long,
+    val taskId: String = "legacy-task",
+    val sourceGeneration: Long = 1,
+    val coordinatorGeneration: Long = 1,
+    val initialRoi: NormalizedRoi = NormalizedRoi(0f, 0f, 1f, 1f),
+    val recoveryProof: MissionRecoveryProofV1? = null,
 )
 
 enum class OutboxStatus {

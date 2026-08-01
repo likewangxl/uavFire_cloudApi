@@ -284,6 +284,20 @@ class VisibleFireLaserLocator(
     /** Read-only arming snapshot; exact ownership mutations remain mutex-bound. */
     fun hasActiveOwnership(): Boolean = ownership != null
 
+    fun hasCompetingOwnership(
+        controlSession: FireControlSessionKey,
+        eventId: String,
+        generation: Long,
+    ): Boolean {
+        val current = ownership ?: return false
+        return !current.matchesAdoptedOwner(
+            controlSession,
+            controlSession.sessionId,
+            eventId,
+            generation,
+        )
+    }
+
     suspend fun hold(eventId: String): DualStreamSessionManager.CommandExecutionResult =
         controlMutex.withLock { holdLocked(sessionId = null, eventId = eventId) }
 
