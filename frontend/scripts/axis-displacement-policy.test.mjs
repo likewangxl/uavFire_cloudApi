@@ -105,7 +105,7 @@ test('vertical command duration scales with meters and respects minimum/maximum 
   assert.equal(AXIS_DISTANCE_MAX_METERS, 200)
 })
 
-test('horizontal axis controls use DRC stick commands instead of fly_to_point', () => {
+test('horizontal axis controls use virtual-stick commands instead of fly_to_point', () => {
   const submitAxisDistanceControlBody = extractFunctionBody(tsaVue, 'submitAxisDistanceControl')
 
   assert.match(
@@ -135,23 +135,23 @@ test('horizontal axis controls use DRC stick commands instead of fly_to_point', 
   )
   assert.match(
     tsaVue,
-    /actionLoading\[device\.gateway\.sn\] === 'north'[\s\S]*:disabled="!hasActiveDrcControl\(device\)"/,
-    'north movement button should be gated on active DRC control'
+    /actionLoading\[device\.gateway\.sn\] === 'north'[\s\S]*:disabled="!canVirtualStick\(device\)"/,
+    'north movement button should be gated on a ready virtual-stick executor'
   )
   assert.match(
     tsaVue,
-    /actionLoading\[device\.gateway\.sn\] === 'west'[\s\S]*:disabled="!hasActiveDrcControl\(device\)"/,
-    'west movement button should be gated on active DRC control'
+    /actionLoading\[device\.gateway\.sn\] === 'west'[\s\S]*:disabled="!canVirtualStick\(device\)"/,
+    'west movement button should be gated on a ready virtual-stick executor'
   )
   assert.match(
     tsaVue,
-    /actionLoading\[device\.gateway\.sn\] === 'south'[\s\S]*:disabled="!hasActiveDrcControl\(device\)"/,
-    'south movement button should be gated on active DRC control'
+    /actionLoading\[device\.gateway\.sn\] === 'south'[\s\S]*:disabled="!canVirtualStick\(device\)"/,
+    'south movement button should be gated on a ready virtual-stick executor'
   )
   assert.match(
     tsaVue,
-    /actionLoading\[device\.gateway\.sn\] === 'east'[\s\S]*:disabled="!hasActiveDrcControl\(device\)"/,
-    'east movement button should be gated on active DRC control'
+    /actionLoading\[device\.gateway\.sn\] === 'east'[\s\S]*:disabled="!canVirtualStick\(device\)"/,
+    'east movement button should be gated on a ready virtual-stick executor'
   )
 })
 

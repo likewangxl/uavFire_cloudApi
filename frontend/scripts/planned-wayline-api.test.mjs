@@ -125,7 +125,7 @@ test('planning hook can build save payloads and hydrate saved planned-wayline re
 
   assert.match(source, /editingPlannedWaylineId/)
   assert.match(source, /aircraftModelKey/)
-  assert.match(source, /waypoints:\s*state\.waypoints\.map\(\(wp,\s*idx\)/)
+  assert.match(source, /waypoints:\s*bodyWaypoints\.map\(\(wp,\s*idx\)/)
   assert.match(source, /order:\s*idx\s*\+\s*1/)
 })
 
@@ -143,7 +143,7 @@ test('planning hook sanitizes saved payloads before calling planned-wayline APIs
   assert.match(source, /wgs84togcj02\(wgsLng,\s*wgsLat\)/)
   assert.match(source, /defaultHeight:\s*normalizePositiveNumber\(state\.defaultHeight,\s*DEFAULT_HEIGHT_M\)/)
   assert.match(source, /maxSpeed:\s*normalizePositiveNumber\(state\.maxSpeed,\s*DEFAULT_MAX_SPEED\)/)
-  assert.match(source, /waypoints:\s*state\.waypoints\.map\(\(wp,\s*idx\)\s*=>\s*buildPlannedWaypointBody\(normalizePlannedWaypoint\(wp\),\s*idx\)\)/)
+  assert.match(source, /waypoints:\s*bodyWaypoints\.map\(\(wp,\s*idx\)\s*=>\s*buildPlannedWaypointBody\(normalizePlannedWaypoint\(wp\),\s*idx\)\)/)
 })
 
 test('planned-wayline API rejects invalid save payloads before sending requests', () => {
@@ -213,7 +213,7 @@ test('wayline page renders saved planned-wayline management and calls planned AP
   assert.match(source, /tab="监测规划"[\s\S]*监测航线库/)
   const fc100View = readFileSync(fc100ViewPath, 'utf8')
   assert.match(source, /tab="投放任务"/)
-  assert.match(fc100View, /投放执行面板[\s\S]*FC100 投放航线库/)
+  assert.match(fc100View, /FC100 投放航线库/)
   assert.doesNotMatch(fc100View, /FC100 投放任务/)
   assert.doesNotMatch(source, /选择投放航线后，在执行面板创建任务、启动航线并完成到点后投放控制。/)
   assert.match(source, /class="wayline-mode-collapse generated-wayline-collapse"[\s\S]*header="已生成航线"[\s\S]*id="data"/)
@@ -228,25 +228,25 @@ test('wayline page renders saved planned-wayline management and calls planned AP
   assert.match(source, /white-space:\s*normal/)
   assert.match(source, /overflow-wrap:\s*anywhere/)
   assert.match(fc100View, /class="planned-wayline-actions planned-wayline-actions--minimal"/)
-  assert.match(fc100View, /class="planned-wayline-actions planned-wayline-actions--minimal"[\s\S]*selectFc100GeneratedWayline\(record\)[\s\S]*onDeletePlannedWayline\(record\)/)
+  assert.match(fc100View, /class="planned-wayline-actions planned-wayline-actions--minimal"[\s\S]*onOpenDeliveryTask\(record, \$event\)[\s\S]*onDeletePlannedWayline\(record\)/)
   assert.match(fc100View, /\.planned-wayline-actions--minimal\s*{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/)
   assert.match(source, /\.project-wayline-wrapper\s+:deep\(\.ant-btn\)\s*{[\s\S]*font-size:\s*14px/)
   assert.match(source, /\.project-wayline-wrapper\s+:deep\(\.ant-btn\)\s*{[\s\S]*font-family:\s*inherit/)
   assert.match(source, /\.project-wayline-wrapper\s+:deep\(\.ant-btn-sm\)\s*{[\s\S]*font-size:\s*14px/)
   assert.match(source, /label:\s*'下发准备'[\s\S]*wrap:\s*true/)
-  assert.match(fc100View, /class="fc100-selected-wayline"[\s\S]*class="planning-row planning-actions fc100-task-actions"[\s\S]*创建FC100任务[\s\S]*开始执行[\s\S]*刷新任务/)
+  assert.match(source, /class="delivery-terminal"[\s\S]*到点后投放控制[\s\S]*创建飞行任务[\s\S]*开始执行/)
   assert.doesNotMatch(fc100View, />\s*开始FC100执行\s*</)
   assert.doesNotMatch(fc100View, />\s*刷新FC100状态\s*</)
   assert.match(fc100View, /\.fc100-task-actions\s*{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/)
   assert.doesNotMatch(source, /font-size:\s*16px/)
   assert.match(fc100Hook, /function\s+selectFc100GeneratedWayline\b/)
-  assert.match(fc100View, /@click\.stop="selectFc100GeneratedWayline\(record\)"/)
+  assert.match(fc100View, /@click\.stop="onOpenDeliveryTask\(record, \$event\)"/)
   assert.match(source, /plannedWaylinesPagination/)
   assert.match(source, /plannedWaylinesCanRefresh/)
   assert.match(source, /onPlannedWaylinesScroll/)
   assert.match(source, /refreshWaylineFiles/)
-  assert.match(source, /KMZ同步/)
-  assert.match(source, /accept="\.kmz"/)
+  assert.match(source, /title="导入航线"/)
+  assert.match(source, /:accept="plannerTab === 'delivery' \? '\.kmz,\.kml' : '\.kmz'"/)
   assert.match(source, /:custom-request="uploadFile"/)
   assert.match(source, /const uploadFile = async \(options/)
   assert.match(source, /options\?\.file/)
@@ -259,15 +259,15 @@ test('wayline page renders saved planned-wayline management and calls planned AP
   assert.match(source, /canOverwritePlannedWayline/)
   assert.match(source, /onGeneratePlannedWaylineFile/)
   assert.match(source, /onPreparePlannedWaylineTask/)
-  assert.match(source, /function\s+resolvePrepareTargetDroneSn\b/)
+  assert.match(source, /function\s+openPrepareTargetModal\b/)
   assert.match(source, /listMsdkDevices/)
   assert.match(source, /function\s+upsertOnlineAircraft\b/)
   assert.match(source, /function\s+syncManagedTopoAircrafts\b/)
   assert.match(source, /function\s+syncMsdkOnlineAircrafts\b/)
   assert.match(source, /await\s+refreshOnlineAircrafts\(\)/)
-  assert.match(source, /onlineAircrafts\.value\.length\s*===\s*1/)
+  assert.match(source, /aircrafts\.length\s*===\s*1/)
   assert.match(source, /selectedAircraftSn\.value[\s\S]*record\.droneSn[\s\S]*record\.aircraftSn/)
-  assert.match(source, /检测到多台或未检测到在线飞行器/)
+  assert.match(source, /选择下发飞行器/)
   assert.match(source, /onExecutePlannedWaylineTask/)
   assert.match(source, /onCancelPlannedWaylineTask/)
   assert.match(source, /formatPlannedWaylineStatus\(record\)/)
@@ -321,23 +321,23 @@ test('wayline map renders live aircraft flight position and follow control', () 
   const source = readFileSync(waylinePagePath, 'utf8')
   const hook = readFileSync(planningHookPath, 'utf8')
   const map = readFileSync(join(frontendRoot, 'src/components/GMap.vue'), 'utf8')
+  const overlays = readFileSync(plannerOverlaysPath, 'utf8')
 
   assert.match(hook, /flightPosition:\s*null/)
   assert.match(hook, /export function setFlightPositionFromRecord\b/)
   assert.match(hook, /export function setFlightPositionFromWgs\b/)
-  assert.match(source, /setFlightPositionFromRecord\(updated\)/)
+  assert.match(source, /function applyPlannedWaylineFlightPosition\b[\s\S]*setFlightPositionFromRecord\(record\)/)
   assert.match(source, /function syncSelectedAircraftFlightPosition\b/)
   assert.match(source, /watch\(\s*\(\)\s*=>\s*selectedAircraftSn\.value/)
   assert.match(fc100Hook, /syncFc100DeviceFlightPosition\(fc100PlanningState\.selectedDeviceProps\)/)
-  assert.match(map, /flightPositionMarker/)
-  assert.match(map, /updateFlightPositionOverlay/)
-  assert.match(map, /<span>✈️<\/span>/)
-  assert.doesNotMatch(map, /:\s*'机'/)
+  assert.match(overlays, /let flightMarker:/)
+  assert.match(overlays, /function updateFlightPositionOverlay/)
+  assert.match(overlays, /flightPositionContent\(label\)/)
   assert.match(map, /class="aircraft-follow-control"/)
   assert.match(map, /title="切换到飞机位置"/)
   assert.match(map, /\.aircraft-follow-control\s*{[\s\S]*bottom:\s*82px/)
-  assert.match(map, /toggleAircraftFollow/)
-  assert.match(map, /setZoomAndCenter/)
+  assert.match(map, /@click="locateAircraftPosition"/)
+  assert.match(overlays, /map\.easeTo\(\{ center:/)
 })
 
 test('wayline page clears planned route overlays when leaving the page', () => {
@@ -389,17 +389,15 @@ test('planning draft restore keeps advanced waypoint speed and action fields', (
 })
 
 test('wayline page exposes FC100 planning from saved generated KMZ records', () => {
-  const source = readFileSync(fc100ViewPath, 'utf8')
+  const source = `${readFileSync(waylinePagePath, 'utf8')}\n${readFileSync(fc100ViewPath, 'utf8')}`
   const deliveryApi = readFileSync(join(frontendRoot, 'src/api/fire/delivery.ts'), 'utf8')
 
   for (const copy of [
-    '投放执行面板',
-    '刷新设备',
-    '导入FC100任务',
-    '创建FC100任务',
+    'FC100 投放航线库',
+    '导入航线',
+    '创建飞行任务',
     '开始执行',
-    '刷新任务',
-    'FC100任务ID',
+    '到点后投放控制',
   ]) {
     assert.match(source, new RegExp(copy))
   }
@@ -409,13 +407,12 @@ test('wayline page exposes FC100 planning from saved generated KMZ records', () 
   assert.doesNotMatch(fc100View, /FC100 投放执行面板/)
   assert.doesNotMatch(fc100View, /刷新FC100设备/)
   assert.match(source, /option-label-prop="label"/)
-  assert.match(fc100View, /v-for="device in fc100AircraftDevices"/)
-  assert.match(fc100View, /:label="formatFc100DeviceSelectLabel\(device\)"/)
+  assert.match(source, /v-for="device in fc100AircraftDevices"/)
+  assert.match(source, /:label="formatFc100DeliveryAircraftModel\(\) \+ ' · ' \+ device\.deviceSn"/)
   assert.match(fc100Hook, /function\s+isFc100AircraftDevice\s*\(device:\s*DeliveryDeviceDTO\)[\s\S]*bindStatus !== 'rc' && deviceType !== 'rc'/)
   assert.match(fc100Hook, /const\s+fc100AircraftDevices\s*=\s*computed\(\(\)\s*=>\s*fc100PlanningState\.devices\.filter\(isFc100AircraftDevice\)\)/)
   assert.match(fc100Hook, /function\s+formatFc100DeviceSelectLabel\s*\(device:\s*DeliveryDeviceDTO\)[\s\S]*formatFc100DeliveryAircraftModel\(\)[\s\S]*device\.deviceSn/)
-  assert.match(fc100View, /class="fc100-device-option"[\s\S]*fc100-device-option-model[\s\S]*fc100-device-option-sn[\s\S]*fc100-device-option-status/)
-  assert.match(fc100View, /\.fc100-device-option\s*{[\s\S]*flex-direction:\s*column/)
+  assert.match(source, /class="delivery-device-option"[\s\S]*prepare-target-option-name[\s\S]*delivery-device-option-sn/)
   assert.match(fc100Hook, /function\s+formatFc100DeliveryAircraftModel\s*\(\)\s*{[\s\S]*DJI FlyCart 100/)
   assert.match(fc100View, /FC100 投放航线库[\s\S]*机型 \{\{ formatFc100DeliveryAircraftModel\(\) \}\}/)
   assert.doesNotMatch(fc100View, /FC100 投放航线库[\s\S]*机型 \{\{ record\.aircraftModelKey/)
@@ -453,7 +450,7 @@ test('wayline page exposes FC100 planning from saved generated KMZ records', () 
   assert.match(fc100Hook, /function\s+onFc100PreviewGeneratedWayline\b/)
   assert.match(fc100Hook, /function\s+onFc100PreviewGeneratedWayline[\s\S]*previewPlannedWayline\(record\)/)
   assert.doesNotMatch(fc100Hook, /function\s+onFc100PreviewGeneratedWayline[\s\S]*handleFc100ImportGeneratedWaylineTask\(record\)/)
-  assert.match(fc100View, /selectFc100GeneratedWayline\(record\)/)
+  assert.match(fc100View, /onOpenDeliveryTask\(record, \$event\)/)
   assert.match(fc100Hook, /onFc100UseGeneratedWayline\(record\)/)
   assert.match(fc100Hook, /FC100 开始执行航线前检查未通过/)
 

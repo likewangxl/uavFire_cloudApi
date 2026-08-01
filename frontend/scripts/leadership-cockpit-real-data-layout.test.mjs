@@ -30,9 +30,9 @@ test('leadership cockpit does not ship invented operational copy', () => {
 })
 
 test('leadership cockpit shows unavailable backend-only data explicitly', () => {
-  assert.match(cockpitSource, /cockpitSummary\.dataGaps/)
-  assert.match(cockpitSource, /系统链路健康/)
-  assert.match(cockpitSource, /没有统一 health 汇总接口/)
+  assert.match(cockpitSource, /cockpitSummary\.emptyStateHints\.aiRisk/)
+  assert.match(cockpitSource, /cockpitSummary\.emptyStateHints\.fireEvents/)
+  assert.match(cockpitSource, /cockpitSummary\.emptyStateHints\.deliveryTasks/)
 })
 
 test('leadership cockpit uses a unified shell with top operational metrics', () => {
@@ -53,8 +53,8 @@ test('leadership cockpit uses a unified shell with top operational metrics', () 
 })
 
 test('leadership cockpit puts AI recognition above fire event queue', () => {
-  const aiIndex = cockpitSource.indexOf('<h3>AI 识别记录</h3>')
-  const fireEventIndex = cockpitSource.indexOf('<h3>火情事件队列</h3>')
+  const aiIndex = cockpitSource.indexOf('<h3>AI 风险识别雷达</h3>')
+  const fireEventIndex = cockpitSource.indexOf('<h3>火情事件优先队列</h3>')
 
   assert.notEqual(aiIndex, -1)
   assert.notEqual(fireEventIndex, -1)

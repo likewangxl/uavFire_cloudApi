@@ -23,25 +23,25 @@ test('manage api exposes dual stream task AI events', () => {
   assert.match(manageApiSource, /review_status/)
 })
 
-test('leadership cockpit renders polling AI risk records inside key alerts', () => {
+test('leadership cockpit renders polling AI risk records in the radar feed', () => {
   assert.match(cockpitSource, /getDualStreamTaskEvents/)
   assert.match(cockpitSource, /AI_EVENT_TASK_ID/)
   assert.match(cockpitSource, /aiRiskEventTimer/)
   assert.match(cockpitSource, /loadAiRiskEvents/)
-  assert.match(cockpitSource, /AI 风险识别记录/)
-  assert.match(cockpitSource, /可见光分数/)
-  assert.match(cockpitSource, /融合分数/)
+  assert.match(cockpitSource, /AI 风险识别雷达/)
+  assert.match(cockpitSource, /class="ai-radar-feed"/)
+  assert.match(cockpitSource, /formatAiScore\(event\.fusionScore\)/)
   assert.match(cockpitSource, /VISIBLE_SUSPECTED/)
   assert.match(cockpitSource, /THERMAL_CONFIRMED/)
   assert.match(cockpitSource, /THERMAL_REJECTED/)
   assert.doesNotMatch(cockpitSource, /<section class="ai-risk-panel">/)
-  assert.match(cockpitSource, /class="info-list ai-risk-alert-list"/)
+  assert.match(cockpitSource, /class="ai-radar-feed-row"/)
 })
 
 test('leadership cockpit limits visible AI event records and handles empty state', () => {
   assert.match(cockpitSource, /recentAiRiskEvents/)
   assert.match(cockpitSource, /\.slice\(-10\)\.reverse\(\)/)
-  assert.match(cockpitSource, /暂无 AI 识别记录/)
+  assert.match(cockpitSource, /cockpitSummary\.emptyStateHints\.aiRisk/)
   assert.match(cockpitSource, /formatAiScore/)
   assert.match(cockpitSource, /formatAiEventTime/)
 })
@@ -76,7 +76,7 @@ test('leadership cockpit suppresses duplicate fire event notifications by notifi
 
 test('right side column puts aircraft status above FC100 and link status', () => {
   const aircraftIndex = cockpitSource.indexOf('<h3>飞机与直播状态</h3>')
-  const fc100Index = cockpitSource.indexOf('<h3>FC100 投放与链路状态</h3>')
+  const fc100Index = cockpitSource.indexOf('<h3>投放与链路状态</h3>')
 
   assert.notEqual(aircraftIndex, -1)
   assert.notEqual(fc100Index, -1)

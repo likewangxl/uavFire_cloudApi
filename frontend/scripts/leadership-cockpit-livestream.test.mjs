@@ -25,16 +25,16 @@ test('leadership cockpit owns livestream tab state and mounts a local player she
 })
 
 test('leadership cockpit keeps separate map and livestream panel state', () => {
-  assert.match(cockpitSource, /mapKpis/)
+  assert.match(cockpitSource, /visualInstrumentBelt/)
   assert.match(cockpitSource, /livePaneState/)
   assert.match(cockpitSource, /flightHudData/)
   assert.doesNotMatch(cockpitSource, /liveHudItems/)
 })
 
 test('leadership cockpit switches map panel layout for livestream tabs', () => {
-  assert.match(cockpitSource, /'live-mode': activeVisualTab !== 'map'/)
-  assert.match(cockpitSource, /\.map-panel\.live-mode/)
-  assert.match(cockpitSource, /\.livestream-stage\s*\{[\s\S]*overflow:\s*visible/)
+  assert.match(cockpitSource, /v-if="activeVisualTab === 'map'"/)
+  assert.match(cockpitSource, /v-else-if="activeVisualTab === 'fire-monitor'" class="livestream-stage dual-stream-stage"/)
+  assert.match(cockpitSource, /\.visual-stage > \.livestream-stage/)
 })
 
 test('leadership cockpit uses ZLM WebRTC API instead of legacy rtc play endpoint', () => {
@@ -44,7 +44,7 @@ test('leadership cockpit uses ZLM WebRTC API instead of legacy rtc play endpoint
 })
 
 test('cockpit live video uses aspect-fit sizing instead of cropping', () => {
-  assert.match(cockpitSource, /\.dual-stream-player-stage\s*\{[\s\S]*aspect-ratio:\s*16\s*\/\s*9/)
+  assert.match(cockpitSource, /\.dual-stream-player-stage\s*\{[\s\S]*height:\s*100%/)
   assert.match(cockpitSource, /\.dual-stream-video\s*\{[\s\S]*object-fit:\s*contain/)
   assert.match(cockpitSource, /Object\.assign\(video\.style,[\s\S]*objectFit:\s*'contain'/)
   assert.doesNotMatch(cockpitSource, /objectFit:\s*'fill'/)
@@ -179,8 +179,7 @@ test('cockpit uses the preview window as the only visible thermal switch control
   assert.match(cockpitSource, /handlePreviewSwap/)
   assert.match(cockpitSource, /requestDualStreamFocus/)
   assert.doesNotMatch(cockpitSource, /class="dual-stream-controls"/)
-  assert.doesNotMatch(cockpitSource, />\s*可见光\s*</)
-  assert.doesNotMatch(cockpitSource, />\s*红外\s*</)
+  assert.match(cockpitSource, /class="dual-stream-preview"[\s\S]*@click="handlePreviewSwap"/)
   assert.doesNotMatch(cockpitSource, /会同步影响 Pilot2|Pilot2 预览/)
 })
 
@@ -222,14 +221,15 @@ test('cockpit mirrors backend-applied focus commands into the primary preference
   }), 'visible')
 })
 
-test('cockpit keeps visible playback as the default until fire detection is running', () => {
+test('cockpit keeps the pure-visible detector on visible focus after start', () => {
   assert.equal(resolveAppliedFocusPreference({
     currentPreference: 'visible',
     lastCommandAction: 'focus-thermal',
     lastCommandStatus: 'applied',
     fireDetectionRunning: false
   }), 'visible')
-  assert.match(cockpitSource, /requestFireDetectionStart\(fireDetectionState\.droneSn\)[\s\S]*await switchFireMonitorFocus\('focus-thermal'\)/)
+  assert.match(cockpitSource, /requestFireDetectionStart\(fireDetectionState\.droneSn\)[\s\S]*isThermalFocusActive\(\)[\s\S]*switchFireMonitorFocus\('focus-visible'/)
+  assert.doesNotMatch(cockpitSource, /requestFireDetectionStart\(fireDetectionState\.droneSn\)[\s\S]{0,800}switchFireMonitorFocus\('focus-thermal'/)
   assert.match(cockpitSource, /fireDetectionRunning:\s*fireDetectionState\.running/)
 })
 

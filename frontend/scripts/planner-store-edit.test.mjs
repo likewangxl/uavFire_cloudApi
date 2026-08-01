@@ -20,12 +20,12 @@ test('store exposes drag-update and midpoint-insert with wgs sync and exec guard
   assert.match(ins.slice(0, 1200), /MIN_WAYPOINT_SPACING_M/)
 })
 
-test('overlays wire draggable markers, midpoint ghosts, rightclick delete', () => {
+test('overlays wire draggable markers, midpoint ghosts, and context-menu delete', () => {
   assert.match(overlays, /draggable:/)
   assert.match(overlays, /dragend/)
   assert.match(overlays, /updateWaypointPositionGcj/)
   assert.match(overlays, /insertWaypointAfterGcj/)
-  assert.match(overlays, /rightclick/)
+  assert.match(overlays, /addEventListener\('contextmenu'/)
   assert.match(overlays, /removeWaypoint/)
   // 仅监测页签且非执行中才可编辑
   assert.match(overlays, /canEditWaypoints/)

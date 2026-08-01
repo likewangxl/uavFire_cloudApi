@@ -67,31 +67,26 @@ test('official takeoff confirmation uses a non-blocking modal instead of window.
   )
 })
 
-test('official takeoff keeps the original 30m command height contract', () => {
+test('official takeoff uses the native MSDK takeoff contract', () => {
   assert.match(
-    tsaVue,
-    /OFFICIAL_TAKEOFF_TARGET_HEIGHT/,
-    'takeoff should wire the restored 50m climb contract into TSA'
+    extractCallObject(tsaVue, 'handleTakeoff', 'confirmTsaModal'),
+    /MSDK KeyStartTakeoff/,
+    'takeoff confirmation should describe the native MSDK operation'
   )
   assert.match(
     extractCallObject(tsaVue, 'handleTakeoff', 'confirmTsaModal'),
-    /第二阶段：先自动向南约 200 米，再自动向北约 200 米返回/,
-    'takeoff confirmation should describe the south-then-north second stage'
+    /不执行航点位移/,
+    'takeoff confirmation should not promise the retired staged route'
   )
-  assert.match(
+  assert.doesNotMatch(
     extractFunctionBody(tsaVue, 'handleTakeoff'),
     /postTakeoffToPoint\(/,
-    'takeoff should send takeoff_to_point for stage 1'
+    'native takeoff should not send the retired takeoff_to_point command'
   )
   assert.match(
     extractFunctionBody(tsaVue, 'handleTakeoff'),
-    /target_height:\s*plan\.stage1\.targetHeight/,
-    'takeoff should send the absolute takeoff target height from the official plan'
-  )
-  assert.match(
-    tsaVue,
-    /EBizCode\.TakeoffToPointProgress/,
-    'tsa should advance the official takeoff flow from takeoff_to_point progress events'
+    /sendMsdkCommand\(device\.sn, 'takeoff'\)/,
+    'takeoff should use the Agent native takeoff command'
   )
   assert.doesNotMatch(
     extractFunctionBody(tsaVue, 'handleTakeoff'),
