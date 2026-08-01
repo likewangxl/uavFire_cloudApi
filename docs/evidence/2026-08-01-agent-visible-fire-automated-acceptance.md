@@ -78,5 +78,11 @@ frontend 产品逻辑，因此没有重跑全栈，也没有改写上面的原�
   `-PncnnAndroidNdkDir`；
 - 16 个正/负 fixture 与当前 checkout 静态策略均通过，`git diff --check` 通过。
 
-该 post-evidence guard fix 只增强未来回归拦截能力，不把任何设备门禁改为通过；发布结论
-仍为 `NOT_READY_DEFAULT_OFF`。
+首轮复审随后发现环境变量前缀和真实 systemd `.service` 单元名仍可绕过。策略进一步将
+命令行统一建模为“可选 `env`/`sudo`/`KEY=value` 前缀 + 可执行命令”，并允许
+`ai-service.service`、`uavfire-ai-service.service` 等单元名。四个原始绕过命令均加入失败
+fixture，相同文本放在禁止性行内文档中仍通过；fixture 总数从 16 增至 20，当前 checkout
+再次通过。
+
+这些 post-evidence guard fix 只增强未来回归拦截能力，不把任何设备门禁改为通过；发布
+结论仍为 `NOT_READY_DEFAULT_OFF`。

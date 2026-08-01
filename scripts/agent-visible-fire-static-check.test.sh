@@ -83,12 +83,35 @@ add_launcher_ai_startup() {
   printf '%s\n' './start-ai-service.sh' >"$1/scripts/start-production.sh"
 }
 
+add_assigned_compose_ai_startup() {
+  printf '%s\n' 'COMPOSE_PROFILES=ai docker compose up -d ai-service' \
+    >"$1/scripts/start-production.sh"
+}
+
+add_env_compose_ai_startup() {
+  printf '%s\n' 'env COMPOSE_PROJECT_NAME=uavfire docker compose up -d ai-service' \
+    >"$1/scripts/start-production.sh"
+}
+
+add_systemctl_unit_suffix_ai_startup() {
+  printf '%s\n' 'systemctl restart ai-service.service' >"$1/scripts/start-production.sh"
+}
+
+add_prefixed_systemctl_unit_ai_startup() {
+  printf '%s\n' 'sudo systemctl restart uavfire-ai-service.service' \
+    >"$1/scripts/start-production.sh"
+}
+
 add_allowed_prohibition_prose_and_tests() {
   local root="$1"
   printf '%s\n' \
     '禁止执行 `docker compose up -d ai-service`。' \
     '禁止执行 `systemctl start ai-service`、`service ai-service start`。' \
     '不要运行 `launchctl kickstart system/com.uavfire.ai-service` 或 `./start-ai-service.sh`。' \
+    '禁止执行 `COMPOSE_PROFILES=ai docker compose up -d ai-service`。' \
+    '不要运行 `env COMPOSE_PROJECT_NAME=uavfire docker compose up -d ai-service`。' \
+    '禁止执行 `systemctl restart ai-service.service`。' \
+    '禁止执行 `sudo systemctl restart uavfire-ai-service.service`。' \
     >>"$root/RUNBOOK.md"
   mkdir -p "$root/backend/uavfire/src/test/java" "$root/rcplus-msdk-agent/app/src/test/java"
   printf '%s\n' 'assertLegacyRouteRejected("latest-visible-roi")' \
@@ -133,6 +156,10 @@ expect_fail systemctl_ai_startup add_systemctl_ai_startup
 expect_fail service_ai_startup add_service_ai_startup
 expect_fail launchctl_ai_startup add_launchctl_ai_startup
 expect_fail launcher_ai_startup add_launcher_ai_startup
+expect_fail assigned_compose_ai_startup add_assigned_compose_ai_startup
+expect_fail env_compose_ai_startup add_env_compose_ai_startup
+expect_fail systemctl_unit_suffix_ai_startup add_systemctl_unit_suffix_ai_startup
+expect_fail prefixed_systemctl_unit_ai_startup add_prefixed_systemctl_unit_ai_startup
 expect_fail backend_roi_polling add_backend_roi_polling
 expect_fail agent_roi_polling add_agent_roi_polling
 expect_fail missing_reviewed_ndk_recipe remove_reviewed_ndk_recipe
