@@ -90,5 +90,12 @@ fixture，相同文本放在禁止性行内文档中仍通过；fixture 总数�
 四个不同实例样例被拒绝，同样的禁止性文档行允许通过；fixture 总数增至 24，当前 checkout
 再次通过。
 
+第三轮复审进一步要求同时消除漏检与误报。systemd unit 现允许以合法分隔符结束的任意
+前缀并包含 `ai-service` 或 `ai_service`，因此实例化的 `company-ai-service` 和
+`ai_service` 会被拒绝，而邻接但不同的 `xai-service`、`ai-service-helper` 不会误报。
+systemctl lifecycle verb 作为独立参数 token 解析，`start`、`restart`、`try-restart`、
+`enable` 被拦截，`is-enabled`、`show --property=CanStart`、
+`status --property=CanRestart` 允许通过。fixture 总数增至 27，当前 checkout 再次通过。
+
 这些 post-evidence guard fix 只增强未来回归拦截能力，不把任何设备门禁改为通过；发布
 结论仍为 `NOT_READY_DEFAULT_OFF`。

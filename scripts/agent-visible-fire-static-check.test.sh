@@ -121,6 +121,25 @@ add_assigned_systemctl_instance_ai_startup() {
     >"$1/scripts/start-production.sh"
 }
 
+add_underscore_systemctl_instance_ai_startup() {
+  printf '%s\n' 'systemctl start ai_service@prod.service' >"$1/scripts/start-production.sh"
+}
+
+add_company_systemctl_instance_ai_startup() {
+  printf '%s\n' 'systemctl --user restart company-ai-service@prod.service' \
+    >"$1/scripts/start-production.sh"
+}
+
+add_allowed_systemctl_queries_and_neighbors() {
+  printf '%s\n' \
+    'systemctl is-enabled ai-service.service' \
+    'systemctl show --property=CanStart ai-service.service' \
+    'systemctl status --property=CanRestart ai-service@prod.service' \
+    'systemctl start xai-service.service' \
+    'systemctl restart ai-service-helper.service' \
+    >"$1/scripts/diagnose-production.sh"
+}
+
 add_allowed_prohibition_prose_and_tests() {
   local root="$1"
   printf '%s\n' \
@@ -172,6 +191,7 @@ add_second_runtime() {
 expect_pass compliant true
 expect_pass excluded_offline_and_history add_offline_history
 expect_pass prohibited_examples_and_test_boundaries add_allowed_prohibition_prose_and_tests
+expect_pass systemctl_queries_and_token_neighbors add_allowed_systemctl_queries_and_neighbors
 expect_fail production_ai_startup add_production_ai_startup
 expect_fail compose_up_ai_startup add_compose_up_ai_startup
 expect_fail compose_run_ai_startup add_compose_run_ai_startup
@@ -187,6 +207,8 @@ expect_fail systemctl_instance_ai_startup add_systemctl_instance_ai_startup
 expect_fail prefixed_systemctl_instance_ai_startup add_prefixed_systemctl_instance_ai_startup
 expect_fail env_systemctl_instance_ai_startup add_env_systemctl_instance_ai_startup
 expect_fail assigned_systemctl_instance_ai_startup add_assigned_systemctl_instance_ai_startup
+expect_fail underscore_systemctl_instance_ai_startup add_underscore_systemctl_instance_ai_startup
+expect_fail company_systemctl_instance_ai_startup add_company_systemctl_instance_ai_startup
 expect_fail backend_roi_polling add_backend_roi_polling
 expect_fail agent_roi_polling add_agent_roi_polling
 expect_fail missing_reviewed_ndk_recipe remove_reviewed_ndk_recipe
