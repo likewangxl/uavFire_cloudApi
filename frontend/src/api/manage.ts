@@ -4,6 +4,42 @@ import { Device } from '/@/types/device'
 import { normalizeDualStreamGroup } from '/@/api/dual-stream-normalizer.mjs'
 
 const HTTP_PREFIX = '/manage/api/v1'
+export const FIRE_EVENT_UPDATE_BIZ_CODE = 'fire_event_update'
+
+export interface FireEventUpdatePayload {
+  notificationId?: string
+  eventId: string
+  notificationVersion: number
+  workspaceId?: string
+  taskId?: string
+  droneSn?: string
+  detectionKind?: string
+  state?: string
+  locationStatus?: string
+  flightStatus?: string
+  fireLat?: number | null
+  fireLng?: number | null
+  fireAlt?: number | null
+  aircraftLat?: number | null
+  aircraftLng?: number | null
+  aircraftAlt?: number | null
+  eventTimestamp?: number
+  message?: string
+}
+
+export function parseFireEventUpdateMessage (message: any): FireEventUpdatePayload | null {
+  const bizCode = String(message?.biz_code ?? message?.bizCode ?? message?.type ?? '').trim().toLowerCase()
+  if (bizCode !== FIRE_EVENT_UPDATE_BIZ_CODE) return null
+  const data = message?.data ?? message?.payload ?? message
+  const eventId = data?.eventId ?? data?.event_id
+  const notificationVersion = Number(data?.notificationVersion ?? data?.notification_version)
+  if (!eventId || !Number.isInteger(notificationVersion) || notificationVersion < 1) return null
+  return {
+    ...data,
+    eventId: String(eventId),
+    notificationVersion
+  }
+}
 
 // login
 export interface LoginBody {

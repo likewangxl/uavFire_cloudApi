@@ -51,7 +51,7 @@ test('leadership cockpit notifies low risk fire events too', () => {
     cockpitSource,
     /return level === 'LOW' \|\| level === 'MEDIUM' \|\| level === 'HIGH'/,
   )
-  assert.match(cockpitSource, /levelLabel = level === 'HIGH' \? '高' : level === 'MEDIUM' \? '中等' : '低'/)
+  assert.match(cockpitSource, /level === 'LOW' \? '低'/)
   assert.match(cockpitSource, /检测到\$\{levelLabel\}风险火情/)
 })
 

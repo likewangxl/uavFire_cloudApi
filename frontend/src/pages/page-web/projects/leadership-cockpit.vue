@@ -254,9 +254,9 @@
                   </div>
                   <div class="fire-event-detail-list">
                     <p><span>完整坐标</span><strong>{{ formatFireEventLocation(event) }}</strong></p>
-                    <p><span>位置质量</span><strong>{{ event.geoQuality || '定位质量未知' }}</strong></p>
+                    <p><span>位置质量</span><strong>{{ formatFireGeoQuality(event) }}</strong></p>
                     <p><span>任务编号</span><strong>{{ event.missionNo || '未关联任务' }}</strong></p>
-                    <p><span>事件来源</span><strong>{{ event.source || '未知来源' }}</strong></p>
+                    <p><span>事件来源</span><strong>{{ formatEventSource(event.source) }}</strong></p>
                     <p><span>更新时间</span><strong>{{ formatDateTime(event.updatedAt || event.createdAt) }}</strong></p>
                   </div>
                 </section>
@@ -272,7 +272,7 @@
                 <span class="fire-priority-confidence">{{ formatFireConfidence(event.confidence) }}</span>
                 <div class="fire-priority-location">
                   <strong>{{ formatFireLocationSummary(event) }}</strong>
-                  <small>{{ formatFireErrorRadius(event) }} · {{ event.geoQuality || '定位质量未知' }}</small>
+                  <small>{{ formatFireErrorRadius(event) }} · {{ formatFireGeoQuality(event) }}</small>
                 </div>
                 <span class="fire-priority-status-text" :class="fireEventLevelClass(event.fireLevel)">
                   {{ formatFireStatusLabel(event.status) }}
@@ -649,7 +649,7 @@
             >
               <div class="link-node-head">
                 <span>{{ task.taskName || '投放任务' }}</span>
-                <strong>{{ task.status || task.phase || '同步中' }}</strong>
+                <strong>{{ formatMissionStatus(task.status || task.phase) }}</strong>
               </div>
               <div
                 v-if="task.taskId || task.missionId"
@@ -661,7 +661,7 @@
               <div class="link-node-progress">
                 <span :style="{ width: formatTaskProgress(task.progressPercent) }"></span>
               </div>
-              <p>阶段 {{ task.phase || '--' }} · 进度 {{ formatTaskProgress(task.progressPercent) }}</p>
+              <p>阶段 {{ formatMissionStatus(task.phase) }} · 进度 {{ formatTaskProgress(task.progressPercent) }}</p>
               <p :title="task.message || task.displayMessage || task.reason">
                 {{ formatDeliveryTaskMessage(task) }}
               </p>
@@ -697,6 +697,7 @@ import {
   requestFireDetectionStart,
   requestFireDetectionStop,
   getFireDetectionStatus,
+  parseFireEventUpdateMessage,
   type DualStreamEvent,
   type DualStreamGroup
 } from '/@/api/manage'
@@ -707,6 +708,7 @@ import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
 import type { FireEventDTO } from '/@/types/fire/event'
 import type { WaypointDTO } from '/@/types/fire/waypoint'
 import { useMyStore } from '/@/store'
+import { useConnectWebSocket } from '/@/hooks/use-connect-websocket'
 import { EModeCode } from '/@/types/device'
 import CockpitAircraftStreamSelector, { type CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
 import CockpitDeliveryExecutionPanel from '/@/components/cockpit/CockpitDeliveryExecutionPanel.vue'
@@ -725,6 +727,17 @@ import {
 import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
 import { buildSituationLayers } from './leadership-cockpit-situation.mjs'
 import { formatFireLocation, isUsableFireLocation } from './fire/fire-event-location.mjs'
+import {
+  fireEventNotificationKey,
+  formatDetectionKind,
+  formatDetectionStatus,
+  formatEventSource,
+  formatEventStatus,
+  formatGeoQuality,
+  formatLocationExplanation,
+  formatMissionStatus,
+  reconcileFireEventUpdate
+} from './fire/fire-event-status.mjs'
 
 const store = useMyStore()
 const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
@@ -1869,7 +1882,17 @@ function handleSummaryMetricFocus (item: any) {
 let fireEventNotifyTimer: number | null = null
 const lastSeenFireEventId = ref(0)
 const fireEventsBootstrapped = ref(false)
-const lastNotifiedFireEventVersions = new Map<number, number>()
+const lastNotifiedFireEventVersions = new Map<string, number>()
+
+useConnectWebSocket((payload: any) => {
+  const update = parseFireEventUpdateMessage(payload)
+  if (!update) return
+  const reconciled = reconcileFireEventUpdate(fireEventState.events, update)
+  if (!reconciled.accepted || !reconciled.event) return
+  fireEventState.events = reconciled.events as FireEventDTO[]
+  showFireEventNotification(reconciled.event as FireEventDTO)
+  loadCockpitFireEvents()
+})
 
 async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
   fireEventState.loading = true
@@ -1902,7 +1925,7 @@ async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
     return events
   } catch (e) {
     console.warn('[cockpit] fire event poll failed', e)
-    fireEventState.error = (e as any)?.message || 'fire-events-unavailable'
+    fireEventState.error = '火情数据暂不可用'
     return []
   } finally {
     fireEventState.loading = false
@@ -1918,7 +1941,8 @@ async function loadNewFireEvents (): Promise<void> {
   if (!fireEventsBootstrapped.value) {
     lastSeenFireEventId.value = maxId
     for (const evt of events) {
-      lastNotifiedFireEventVersions.set(evt.id, evt.notificationVersion ?? 1)
+      const current = lastNotifiedFireEventVersions.get(evt.eventId) ?? 0
+      lastNotifiedFireEventVersions.set(evt.eventId, Math.max(current, evt.notificationVersion ?? 1))
     }
     fireEventsBootstrapped.value = true
     return
@@ -1931,56 +1955,63 @@ async function loadNewFireEvents (): Promise<void> {
     .filter(shouldNotifyFireEvent)
     .sort((a, b) => a.id - b.id)
   for (const evt of fresh) {
-    const level = (evt.fireLevel || '').toUpperCase()
-    const conf = Number(evt.confidence) || 0
-    const imageUrl = evt.thermalImageUrl || evt.visibleImageUrl
-    const imageKind = evt.thermalImageUrl ? '红外' : '可见光'
-    const levelLabel = level === 'HIGH' ? '高' : level === 'MEDIUM' ? '中等' : '低'
-    notification.warning({
-      message: `检测到${levelLabel}风险火情`,
-      description: h('div', { style: 'display:flex;gap:12px;align-items:flex-start' }, [
-        imageUrl
-          ? h('a', {
-            href: imageUrl,
-            target: '_blank',
-            rel: 'noopener',
-            style: 'flex:none; display:block; position:relative'
-          }, [
-            h('img', {
-              src: imageUrl,
-              alt: imageKind + '识别图',
-              style: 'width:120px;height:68px;object-fit:cover;border:1px solid #555;border-radius:4px;display:block;cursor:zoom-in'
-            }),
-            h('span', {
-              style: 'position:absolute; top:2px; left:2px; padding:1px 6px; font-size:10px; background:rgba(0,0,0,0.6); color:#fff; border-radius:3px'
-            }, imageKind)
-          ])
-          : null,
-        h('div', { style: 'font-size:12px;line-height:1.6' }, [
-          h('div', `事件: ${evt.eventId}`),
-          h('div', `置信度: ${conf.toFixed(2)}`),
-          h('div', `位置: ${formatFireLocation(evt, 4, '-')}`),
-          h('div', `状态: ${evt.status}`),
-          h('div', `通知版本: ${evt.notificationVersion ?? 1}`),
-          h('a', {
-            href: '/fire-events',
-            target: '_blank',
-            rel: 'noopener',
-            style: 'color:#69b1ff'
-          }, '查看完整列表 →')
-        ])
-      ]),
-      duration: 12,
-      placement: 'topRight'
-    })
-    lastNotifiedFireEventVersions.set(evt.id, evt.notificationVersion ?? 1)
+    showFireEventNotification(evt)
   }
   lastSeenFireEventId.value = maxId
 }
 
+function showFireEventNotification (evt: FireEventDTO) {
+  const level = (evt.fireLevel || '').toUpperCase()
+  const conf = Number(evt.confidence)
+  const imageUrl = evt.thermalImageUrl || evt.visibleImageUrl
+  const imageKind = evt.thermalImageUrl ? '红外' : '可见光'
+  const levelLabel = level === 'HIGH' ? '高' : level === 'MEDIUM' ? '中等' : level === 'LOW' ? '低' : ''
+  const agentState = evt.detectionStatus || evt.state
+  notification.warning({
+    key: fireEventNotificationKey(evt),
+    message: levelLabel ? `检测到${levelLabel}风险火情` : `${formatDetectionKind(evt.detectionKind)}即时提醒`,
+    description: h('div', { style: 'display:flex;gap:12px;align-items:flex-start' }, [
+      imageUrl
+        ? h('a', {
+          href: imageUrl,
+          target: '_blank',
+          rel: 'noopener',
+          style: 'flex:none; display:block; position:relative'
+        }, [
+          h('img', {
+            src: imageUrl,
+            alt: imageKind + '识别图',
+            style: 'width:120px;height:68px;object-fit:cover;border:1px solid #555;border-radius:4px;display:block;cursor:zoom-in'
+          }),
+          h('span', {
+            style: 'position:absolute; top:2px; left:2px; padding:1px 6px; font-size:10px; background:rgba(0,0,0,0.6); color:#fff; border-radius:3px'
+          }, imageKind)
+        ])
+        : null,
+      h('div', { style: 'font-size:12px;line-height:1.6' }, [
+        h('div', `事件: ${evt.eventId}`),
+        Number.isFinite(conf) ? h('div', `置信度: ${conf.toFixed(2)}`) : null,
+        h('div', `位置: ${formatFireLocation(evt, 4, '-')}`),
+        h('div', `状态: ${agentState ? formatDetectionStatus(agentState) : formatEventStatus(evt.status)}`),
+        h('div', `定位说明: ${formatLocationExplanation(evt)}`),
+        h('div', `通知版本: ${evt.notificationVersion ?? 1}`),
+        h('a', {
+          href: '/fire-events',
+          target: '_blank',
+          rel: 'noopener',
+          style: 'color:#69b1ff'
+        }, '查看完整列表 →')
+      ])
+    ]),
+    duration: 12,
+    placement: 'topRight'
+  })
+  lastNotifiedFireEventVersions.set(evt.eventId, evt.notificationVersion ?? 1)
+}
+
 function shouldNotifyFireEvent (evt: FireEventDTO) {
   const version = evt.notificationVersion ?? 1
-  const lastVersion = lastNotifiedFireEventVersions.get(evt.id)
+  const lastVersion = lastNotifiedFireEventVersions.get(evt.eventId)
   if (lastVersion == null) {
     return evt.id > lastSeenFireEventId.value
   }
@@ -2180,13 +2211,13 @@ const formatFireLevelShort = (level?: string | null) => {
   return '--'
 }
 
-const formatFireStatusLabel = (status?: string | null) => {
-  const normalized = String(status || '').toUpperCase()
-  if (normalized === 'NEW') return '待处置'
-  if (normalized === 'LOW_CONFIDENCE') return '待确认'
-  if (normalized === 'MISSION_CREATED') return '已建任务'
-  if (normalized === 'IGNORED') return '已忽略'
-  return status || '--'
+const formatFireStatusLabel = (status?: string | null) => formatEventStatus(status)
+
+const formatFireGeoQuality = (event: FireEventDTO) => {
+  const explanation = formatLocationExplanation(event)
+  return explanation !== '未知状态'
+    ? explanation
+    : formatGeoQuality(event.geoQuality || event.locationStatus)
 }
 
 const formatFireEventLocation = (event: FireEventDTO) => {
@@ -2280,10 +2311,10 @@ const formatAiChannel = (channel?: string) => {
 }
 
 const formatAiReviewStatus = (status?: string) => {
-  if (status === 'VISIBLE_SUSPECTED') return 'VISIBLE_SUSPECTED 可见光疑似'
-  if (status === 'THERMAL_CONFIRMED') return 'THERMAL_CONFIRMED 红外确认'
-  if (status === 'THERMAL_REJECTED') return 'THERMAL_REJECTED 红外驳回'
-  return status || '未进入复核流程'
+  if (status === 'VISIBLE_SUSPECTED') return '可见光疑似'
+  if (status === 'THERMAL_CONFIRMED') return '红外确认'
+  if (status === 'THERMAL_REJECTED') return '红外未确认'
+  return status ? '未知状态' : '未进入复核流程'
 }
 
 const aiRiskLevelClass = (riskLevel?: string) => {

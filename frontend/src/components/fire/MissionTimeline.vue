@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { MissionLogDTO } from '/@/types/fire/mission'
+import { formatMissionStatus } from '/@/pages/page-web/projects/fire/fire-event-status.mjs'
 
 const props = defineProps<{ logs: MissionLogDTO[] }>()
 
@@ -54,11 +55,11 @@ function fmt (ts: number): string {
 }
 
 function labelStatus (status: string): string {
-  return statusLabel[status] ?? status
+  return statusLabel[status] ?? formatMissionStatus(status)
 }
 
 function labelAction (action: string): string {
-  return actionLabel[action] ?? action
+  return actionLabel[action] ?? '未知操作'
 }
 </script>
 

@@ -1,18 +1,29 @@
-const UNUSABLE_LASER_QUALITY = new Set(['LASER_LOCATING', 'LASER_FAILED'])
-const ROUTE_READY_QUALITY = new Set(['AUTO_WAYPOINT_READY', 'READY', 'OK', 'PRECISE'])
+import {
+  formatGeoQuality,
+  formatLocationExplanation,
+  isRouteReadyFireEvent
+} from './fire-event-status.mjs'
 
 export function formatFireLocation (event, digits = 5, missing = '位置未返回') {
   const quality = normalizeGeoQuality(event)
-  if (quality === 'LASER_LOCATING') return '正在精确定位'
+  const location = String(event?.locationStatus || event?.location_status || quality).toUpperCase()
+  if (location === 'DEGRADED_OSD') return formatLocationExplanation(event)
+  if (location === 'LASER_LOCATING') return '正在精确定位'
   if (quality === 'LASER_FAILED') return '激光定位失败'
   const lat = Number(event?.lat ?? event?.latitude)
   const lng = Number(event?.lng ?? event?.longitude)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return missing
-  return `${lat.toFixed(digits)}, ${lng.toFixed(digits)}`
+  if (location !== 'PRECISE') return formatGeoQuality(quality || location)
+  const coordinate = `${lat.toFixed(digits)}, ${lng.toFixed(digits)}`
+  return String(event?.detectionKind || event?.detection_kind || '').toUpperCase() === 'SMOKE'
+    ? `${coordinate} · ${formatLocationExplanation(event)}`
+    : coordinate
 }
 
 export function isUsableFireLocation (event) {
-  if (UNUSABLE_LASER_QUALITY.has(normalizeGeoQuality(event))) return false
+  const location = String(event?.locationStatus || event?.location_status || normalizeGeoQuality(event)).toUpperCase()
+  const method = String(event?.geoMethod || event?.geo_method || '').toUpperCase()
+  if (location !== 'PRECISE' || method !== 'LASER_RANGEFINDER') return false
   const lat = Number(event?.lat ?? event?.latitude)
   const lng = Number(event?.lng ?? event?.longitude)
   return Number.isFinite(lat) && Number.isFinite(lng) &&
@@ -21,7 +32,7 @@ export function isUsableFireLocation (event) {
 }
 
 export function isRouteReadyFireLocation (event) {
-  return ROUTE_READY_QUALITY.has(normalizeGeoQuality(event))
+  return isRouteReadyFireEvent(event)
 }
 
 export function normalizeGeoQuality (event) {

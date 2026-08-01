@@ -1,0 +1,53 @@
+export interface FireEventLike {
+  eventId?: string;
+  event_id?: string;
+  notificationVersion?: number | null;
+  notification_version?: number | null;
+  detectionKind?: string | null;
+  detection_kind?: string | null;
+  detectionStatus?: string | null;
+  detection_status?: string | null;
+  state?: string | null;
+  locationStatus?: string | null;
+  location_status?: string | null;
+  flightStatus?: string | null;
+  flight_status?: string | null;
+  geoMethod?: string | null;
+  geo_method?: string | null;
+  geoQuality?: string | null;
+  geo_quality?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  fireLat?: number | null;
+  fireLng?: number | null;
+  fireAlt?: number | null;
+  aircraftLat?: number | null;
+  aircraftLng?: number | null;
+  aircraftAlt?: number | null;
+  [key: string]: unknown;
+}
+
+export function formatDetectionStatus(value?: unknown): string;
+export function formatLocationStatus(value?: unknown): string;
+export function formatFlightStatus(value?: unknown): string;
+export function formatGeoMethod(value?: unknown): string;
+export function formatDetectionKind(value?: unknown): string;
+export function formatEventStatus(value?: unknown): string;
+export function formatMissionStatus(value?: unknown): string;
+export function formatEventSource(value?: unknown): string;
+export function formatGeoQuality(value?: unknown): string;
+export function formatLocationExplanation(event?: FireEventLike): string;
+export function isPreciseLaserFireLocation(event?: FireEventLike): boolean;
+export function isRouteReadyFireEvent(event?: FireEventLike): boolean;
+export function isPreciseFireMarkerAllowed(event?: FireEventLike): boolean;
+export function isAutomaticRouteAllowed(event?: FireEventLike): boolean;
+export function normalizeFireEventUpdate<T extends FireEventLike>(update?: T): T & FireEventLike;
+export function reconcileFireEventUpdate<T extends FireEventLike>(events: T[], update: FireEventLike): {
+  events: T[];
+  event: T | FireEventLike | null;
+  accepted: boolean;
+  replaced: boolean;
+};
+export function fireEventNotificationKey(eventOrId?: FireEventLike | string): string;

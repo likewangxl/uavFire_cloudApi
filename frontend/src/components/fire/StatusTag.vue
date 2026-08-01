@@ -4,6 +4,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { formatMissionStatus } from '/@/pages/page-web/projects/fire/fire-event-status.mjs'
 
 const props = defineProps<{ status: string }>()
 
@@ -54,5 +55,5 @@ const labelMap: Record<string, string> = {
 }
 
 const color = computed(() => colorMap[props.status] ?? 'default')
-const label = computed(() => labelMap[props.status] ?? props.status)
+const label = computed(() => labelMap[props.status] ?? formatMissionStatus(props.status))
 </script>

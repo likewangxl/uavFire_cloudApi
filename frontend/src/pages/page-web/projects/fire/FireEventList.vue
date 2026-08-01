@@ -223,6 +223,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, h } from 'vue'
 import { message } from 'ant-design-vue'
+import { useConnectWebSocket } from '/@/hooks/use-connect-websocket'
+import { parseFireEventUpdateMessage } from '/@/api/manage'
 import { eventApi } from '/@/api/fire/event'
 import { missionApi, type MissionApproveBody } from '/@/api/fire/mission'
 import { deliveryApi, type DeliveryDeviceDTO } from '/@/api/fire/delivery'
@@ -232,11 +234,35 @@ import type { FireMissionDTO } from '/@/types/fire/mission'
 import { ELocalStorageKey } from '/@/types'
 import StatusTag from '/@/components/fire/StatusTag.vue'
 import { formatFireLocation } from './fire-event-location.mjs'
+import {
+  fireEventNotificationKey,
+  formatDetectionKind,
+  formatDetectionStatus,
+  formatEventSource,
+  formatEventStatus,
+  formatGeoQuality,
+  formatLocationExplanation,
+  reconcileFireEventUpdate
+} from './fire-event-status.mjs'
 
 const events = ref<FireEventDTO[]>([])
 // 火情事件 id -> 其关联的灭火任务（最新一次）。用于在事件列表展示审核状态并就地审批。
 const missionsByEventId = ref<Record<number, FireMissionDTO>>({})
 const loading = ref(false)
+
+useConnectWebSocket((payload: any) => {
+  const update = parseFireEventUpdateMessage(payload)
+  if (!update) return
+  const reconciled = reconcileFireEventUpdate(events.value, update)
+  if (!reconciled.accepted) return
+  events.value = reconciled.events as FireEventDTO[]
+  message.warning({
+    key: fireEventNotificationKey(update),
+    content: `${formatDetectionKind(update.detectionKind)}：${formatDetectionStatus(update.state)}`,
+    duration: 6
+  })
+  loadEvents()
+})
 
 function missionForEvent (record: FireEventDTO): FireMissionDTO | undefined {
   return missionsByEventId.value[record.id]
@@ -443,32 +469,18 @@ function displayFireLevel (level: string | null | undefined) {
     MEDIUM: '中',
     LOW: '低',
   }
-  return level ? labels[level] ?? level : '-'
+  return level ? labels[level] ?? '未知状态' : '未知状态'
 }
 
 function displayEventStatus (status: string | null | undefined) {
-  const labels: Record<string, string> = {
-    NEW: '新事件',
-    LOW_CONFIDENCE: '低置信度',
-    MISSION_CREATED: '已创建任务',
-    IGNORED: '已忽略',
-  }
-  return status ? labels[status] ?? status : '-'
+  return formatEventStatus(status)
 }
 
 function displayGeoQuality (record: FireEventDTO | FireEventHistoryDTO) {
-  const labels: Record<string, string> = {
-    AUTO_WAYPOINT_READY: '可自动航线',
-    PRECISE: '激光精确定位',
-    LASER_LOCATING: '正在精确定位',
-    LASER_FAILED: '激光定位失败',
-    DEM_MISSING: '缺DEM',
-    RTK_NOT_FIXED: 'RTK未固定',
-    GEO_SNAPSHOT_INCOMPLETE: '快照不完整',
-    LOW_ACCURACY: '精度不足',
-  }
-  const quality = record.geoQuality
-  const label = quality ? labels[quality] ?? quality : '人工确认'
+  const locationExplanation = formatLocationExplanation(record)
+  const label = locationExplanation !== '未知状态'
+    ? locationExplanation
+    : formatGeoQuality(record.geoQuality)
   const radius = Number(record.geoErrorRadiusM)
   return Number.isFinite(radius) ? `${label} / ${radius.toFixed(1)}m` : label
 }
@@ -501,7 +513,7 @@ function displayHistoryAction (action: string | null | undefined) {
     VISIBLE_CONFIRM_FAILED: '可见光确认失败',
     VISIBLE_VALIDATION_FAILED: '可见光图无效',
   }
-  return action ? labels[action] ?? action : '-'
+  return action ? labels[action] ?? '未知状态' : '未知状态'
 }
 
 function isVisibleHistoryAction (action: string | null | undefined) {
@@ -615,7 +627,12 @@ const tableScrollX = 2180
 
 const columns = [
   { title: '事件编号', key: 'eventId', width: 230, slots: { customRender: 'eventIdCell' } },
-  { title: '来源', dataIndex: 'source', key: 'source', width: 100 },
+  {
+    title: '来源',
+    key: 'source',
+    width: 150,
+    customRender: ({ record }: { record: FireEventDTO }) => formatEventSource(record.source),
+  },
   { title: '设备SN', key: 'deviceSn', width: 190, slots: { customRender: 'deviceSnCell' } },
   {
     title: '置信度',

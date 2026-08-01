@@ -20,7 +20,10 @@ function buildRichSummary () {
         fireLevel: 'HIGH',
         status: 'NEW',
         missionNo: '',
-        geoQuality: 'AUTO_WAYPOINT_READY',
+        detectionKind: 'FIRE',
+        locationStatus: 'PRECISE',
+        geoQuality: 'PRECISE',
+        geoMethod: 'LASER_RANGEFINDER',
         confidence: 0.95,
         latitude: 34.66791,
         longitude: 109.32667,
@@ -83,7 +86,7 @@ test('builds visual context metrics for every cockpit visual tab', () => {
     ['deliveryTarget', 'liveSource', 'taskPhase', 'taskProgress', 'deliveryBattery']
   )
   assert.equal(summary.visualContextMetrics['delivery-execution'].find(item => item.key === 'deliveryTarget').value, 'FC100')
-  assert.equal(summary.visualContextMetrics['delivery-execution'].find(item => item.key === 'taskPhase').value, 'DELIVERING')
+  assert.equal(summary.visualContextMetrics['delivery-execution'].find(item => item.key === 'taskPhase').value, '投放执行中')
   assert.equal(summary.visualContextMetrics['delivery-execution'].find(item => item.key === 'taskProgress').value, '35%')
 })
 
@@ -151,7 +154,7 @@ test('builds side health rows and explicit empty-state hints from real data avai
 test('builds fire queue stats and aircraft role groups for side panels', () => {
   const summary = buildCockpitSummary({
     fireEvents: [
-      { eventId: 'new-1', fireLevel: 'HIGH', status: 'NEW', missionNo: '', geoQuality: 'AUTO_WAYPOINT_READY' },
+      { eventId: 'new-1', detectionKind: 'FIRE', locationStatus: 'PRECISE', fireLevel: 'HIGH', status: 'NEW', missionNo: '', geoQuality: 'PRECISE', geoMethod: 'LASER_RANGEFINDER', lat: 34.66791, lng: 109.32667 },
       { eventId: 'linked-1', fireLevel: 'MEDIUM', status: 'MISSION_CREATED', missionNo: 'MISSION-001', geoQuality: 'DEM_MISSING' }
     ],
     msdkDevices: [

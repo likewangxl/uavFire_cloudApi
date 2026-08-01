@@ -24,7 +24,7 @@ test('pending laser events are excluded while precise laser events are placed', 
   const layers = buildSituationLayers({
     fireEvents: [
       { eventId: 'pending', lat: 34.9, lng: 109.3, geoQuality: 'LASER_LOCATING' },
-      { eventId: 'precise', lat: 34.8, lng: 109.2, geoQuality: 'PRECISE', geoMethod: 'LASER_RANGEFINDER' }
+      { eventId: 'precise', detectionKind: 'FIRE', locationStatus: 'PRECISE', lat: 34.8, lng: 109.2, geoQuality: 'PRECISE', geoMethod: 'LASER_RANGEFINDER' }
     ]
   })
 
@@ -37,9 +37,38 @@ test('route-ready metrics exclude pending laser coordinates and include precise 
   const summary = buildCockpitSummary({
     fireEvents: [
       { eventId: 'pending', lat: 34.9, lng: 109.3, geoQuality: 'LASER_LOCATING' },
-      { eventId: 'precise', lat: 34.8, lng: 109.2, geoQuality: 'PRECISE' }
+      { eventId: 'precise', detectionKind: 'FIRE', locationStatus: 'PRECISE', lat: 34.8, lng: 109.2, geoQuality: 'PRECISE', geoMethod: 'LASER_RANGEFINDER' }
     ]
   })
 
   assert.equal(summary.metrics.find(item => item.key === 'geoQuality').note, '1/2 可生成航线')
+})
+
+test('degraded aircraft observations and precise smoke observations never become fire routes', () => {
+  const layers = buildSituationLayers({
+    fireEvents: [
+      {
+        eventId: 'degraded-fire',
+        detectionKind: 'FIRE',
+        locationStatus: 'DEGRADED_OSD',
+        geoMethod: 'AIRCRAFT_OBSERVATION',
+        aircraftLat: 34.9,
+        aircraftLng: 109.3
+      },
+      {
+        eventId: 'precise-smoke',
+        detectionKind: 'SMOKE',
+        locationStatus: 'PRECISE',
+        geoMethod: 'LASER_RANGEFINDER',
+        lat: 34.8,
+        lng: 109.2
+      }
+    ]
+  })
+
+  assert.equal(layers.fireMarkers.length, 0)
+  assert.equal(layers.routeLines.length, 0)
+  assert.equal(layers.aircraftMarkers.length, 1)
+  assert.equal(layers.unlocatedEvents.find(item => item.eventId === 'degraded-fire').reason, '飞机观测位置，非火点精确位置')
+  assert.equal(layers.unlocatedEvents.find(item => item.eventId === 'precise-smoke').reason, '烟雾观测定位点，可能不是实际起火源')
 })

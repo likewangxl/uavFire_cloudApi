@@ -192,7 +192,7 @@ function displayFireLevel (level: string | null | undefined) {
     MEDIUM: '中危火情',
     LOW: '低危火情',
   }
-  return level ? labels[level] ?? level : '火情等级未知'
+  return level ? labels[level] ?? '火情等级未知' : '火情等级未知'
 }
 
 function formatConfidence (value: number | string | null | undefined) {

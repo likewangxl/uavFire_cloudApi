@@ -37,6 +37,14 @@ export interface FireEventDTO {
   reportCount: number | null;
   lastSourceEventId: string | null;
   notificationVersion: number | null;
+  detectionKind?: string | null;
+  detectionStatus?: string | null;
+  state?: string | null;
+  locationStatus?: string | null;
+  flightStatus?: string | null;
+  agentId?: string | null;
+  agentSessionId?: string | null;
+  agentTaskId?: string | null;
   status: FireEventStatus;
   confirmedStatus?: 'PENDING' | 'CONFIRMED' | 'REJECTED' | string;
   linkedIncidentId?: number | null;
@@ -77,5 +85,9 @@ export interface FireEventHistoryDTO {
   visibleImageUrl: string | null;
   eventTimestamp: number | null;
   action: 'CREATED' | 'MERGED' | 'VISIBLE_CONFIRM' | string;
+  detectionKind?: string | null;
+  detectionStatus?: string | null;
+  locationStatus?: string | null;
+  flightStatus?: string | null;
   createTime: number;
 }

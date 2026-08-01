@@ -1,3 +1,11 @@
+import {
+  formatEventStatus,
+  formatGeoQuality,
+  formatLocationExplanation,
+  formatMissionStatus,
+  isRouteReadyFireEvent
+} from './fire/fire-event-status.mjs'
+
 const LEVEL_ORDER = { HIGH: 3, MEDIUM: 2, LOW: 1 }
 const LEVEL_STYLE = {
   HIGH: { tone: 'danger', color: '#ff6172', priority: 30 },
@@ -24,12 +32,16 @@ export function buildSituationLayers ({
     const point = eventPoint(event)
     const qualityOk = isLocatedFireEvent(event)
     if (!point || !qualityOk) {
+      const explanation = formatLocationExplanation(event)
       unlocatedEvents.push({
         eventId: event?.eventId || event?.id || '--',
         fireLevel: normalizeLevel(event?.fireLevel),
-        reason: point ? `定位质量 ${event?.geoQuality || '未知'}` : '缺少经纬度',
+        reason: explanation !== '未知状态'
+          ? explanation
+          : (point ? `定位质量 ${formatGeoQuality(event?.geoQuality)}` : '缺少火点精确经纬度'),
         missionNo: event?.missionNo || null
       })
+      appendDegradedAircraftObservation(event, aircraftMarkers, boundsPoints)
       continue
     }
 
@@ -47,7 +59,7 @@ export function buildSituationLayers ({
         title: `${level} · ${event?.eventId || event?.id || '火情'}`,
         detail: [
           `置信度 ${formatConfidence(event?.confidence)}`,
-          `定位 ${event?.geoQuality || '未知'}`,
+          `定位 ${formatGeoQuality(event?.geoQuality || event?.locationStatus)}`,
           event?.missionNo ? `任务 ${event.missionNo}` : '未关联任务',
           `更新时间 ${formatTime(event?.lastSeenTime || event?.eventTimestamp || event?.createTime)}`
         ].join(' · ')
@@ -92,7 +104,7 @@ export function buildSituationLayers ({
       batteryPercent: device?.batteryPercent,
       height: device?.height,
       speed: device?.horizontalSpeed,
-      status: device?.mode || device?.connectionState || (device?.online ? '在线' : '离线')
+      status: formatMissionStatus(device?.mode || device?.connectionState || (device?.online ? 'ONLINE' : 'OFFLINE'))
     }))
     boundsPoints.push(point)
   }
@@ -110,7 +122,7 @@ export function buildSituationLayers ({
       batteryPercent: target?.batteryPercent,
       height: target?.altitude,
       speed: target?.horizontalSpeed,
-      status: target?.taskStatus || target?.streamStatus || (target?.online ? '在线' : '离线')
+      status: formatMissionStatus(target?.taskStatus || target?.streamStatus || (target?.online ? 'ONLINE' : 'OFFLINE'))
     }))
     boundsPoints.push(point)
   }
@@ -156,7 +168,9 @@ function buildRouteLine (missionNo, waypoints, event, style) {
     color: style.color,
     popup: {
       title: `任务航线 · ${missionNo}`,
-      detail: `${coordinates.length} 个航点 · 火情 ${event?.eventId || '--'} · ${event?.missionStatus || event?.status || '状态未知'}`
+      detail: `${coordinates.length} 个航点 · 火情 ${event?.eventId || '--'} · ${event?.missionStatus
+        ? formatMissionStatus(event.missionStatus)
+        : formatEventStatus(event?.status)}`
     }
   }
 }
@@ -196,9 +210,25 @@ function buildAircraftMarker ({
 }
 
 function isLocatedFireEvent (event) {
-  const quality = String(event?.geoQuality || '').toUpperCase()
-  if (!quality) return Boolean(eventPoint(event))
-  return isRouteReadyFireLocation(event)
+  return isRouteReadyFireEvent(event)
+}
+
+function appendDegradedAircraftObservation (event, aircraftMarkers, boundsPoints) {
+  const location = String(event?.locationStatus || event?.geoQuality || '').toUpperCase()
+  if (location !== 'DEGRADED_OSD') return
+  const point = numberPoint(event?.aircraftLng, event?.aircraftLat)
+  if (!point) return
+  aircraftMarkers.push(buildAircraftMarker({
+    id: `aircraft:fire-observation:${event?.eventId || event?.id || aircraftMarkers.length + 1}`,
+    role: '火情观测位置',
+    name: '观测飞机',
+    sn: event?.deviceSn,
+    online: true,
+    point,
+    height: event?.aircraftAlt,
+    status: formatLocationExplanation(event)
+  }))
+  boundsPoints.push(point)
 }
 
 function eventPoint (event) {
@@ -263,4 +293,3 @@ function formatTime (value) {
     hour12: false
   })
 }
-import { isRouteReadyFireLocation } from './fire/fire-event-location.mjs'

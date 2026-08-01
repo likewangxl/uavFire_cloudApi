@@ -24,7 +24,12 @@ test('builds cockpit metrics from connected backend data sources', () => {
         status: 'MISSION_CREATED',
         missionNo: 'FIRE-002',
         missionStatus: 'CREATED',
-        geoQuality: 'AUTO_WAYPOINT_READY',
+        detectionKind: 'FIRE',
+        locationStatus: 'PRECISE',
+        geoQuality: 'PRECISE',
+        geoMethod: 'LASER_RANGEFINDER',
+        lat: 34.66791,
+        lng: 109.32667,
         lastSeenTime: 900
       }
     ],
@@ -91,7 +96,7 @@ test('exposes full aircraft model details for summary card hover text', () => {
   assert.match(summary.metrics.find(item => item.key === 'liveOnline').note, /DJI Matrice 4T/)
   assert.match(summary.metrics.find(item => item.key === 'liveOnline').note, /DJI Flycart100/)
   assert.match(summary.metrics.find(item => item.key === 'aircraftOnline').title, /DJI Matrice 4T/)
-  assert.match(summary.metrics.find(item => item.key === 'aircraftOnline').title, /READY/)
+  assert.match(summary.metrics.find(item => item.key === 'aircraftOnline').title, /待执行/)
   assert.match(summary.metrics.find(item => item.key === 'minBattery').title, /62%/)
   assert.match(summary.metrics.find(item => item.key === 'minBattery').note, /DJI Matrice 4T/)
   assert.match(summary.metrics.find(item => item.key === 'minBattery').note, /DJI Flycart100/)
@@ -131,7 +136,10 @@ test('builds rich hover details for highlighted cockpit summary cards', () => {
         fireLevel: 'HIGH',
         status: 'NEW',
         missionNo: '',
-        geoQuality: 'AUTO_WAYPOINT_READY',
+        detectionKind: 'FIRE',
+        locationStatus: 'PRECISE',
+        geoQuality: 'PRECISE',
+        geoMethod: 'LASER_RANGEFINDER',
         confidence: 0.95,
         latitude: 34.66791,
         longitude: 109.32667,

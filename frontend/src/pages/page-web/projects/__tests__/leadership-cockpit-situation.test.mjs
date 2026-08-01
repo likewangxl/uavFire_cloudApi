@@ -16,7 +16,10 @@ test('builds fire markers from located fire events', () => {
         lat: 34.66791,
         lng: 109.32667,
         confidence: 0.95,
-        geoQuality: 'AUTO_WAYPOINT_READY',
+        detectionKind: 'FIRE',
+        locationStatus: 'PRECISE',
+        geoQuality: 'PRECISE',
+        geoMethod: 'LASER_RANGEFINDER',
         geoErrorRadiusM: 42,
         missionNo: 'MISSION-001',
         lastSeenTime: 1760000000000
@@ -53,7 +56,10 @@ test('builds error circles from geo error radius without calling them real fire 
         status: 'NEW',
         lat: 34.66791,
         lng: 109.32667,
-        geoQuality: 'READY',
+        detectionKind: 'FIRE',
+        locationStatus: 'PRECISE',
+        geoQuality: 'PRECISE',
+        geoMethod: 'LASER_RANGEFINDER',
         geoErrorRadiusM: 80
       }
     ]
@@ -74,7 +80,10 @@ test('builds route lines from mission waypoints', () => {
         status: 'MISSION_CREATED',
         lat: 34.66791,
         lng: 109.32667,
-        geoQuality: 'READY',
+        detectionKind: 'FIRE',
+        locationStatus: 'PRECISE',
+        geoQuality: 'PRECISE',
+        geoMethod: 'LASER_RANGEFINDER',
         missionNo: 'MISSION-001'
       }
     ],
@@ -127,7 +136,7 @@ test('builds aircraft markers from monitor and delivery aircraft coordinates', (
 
 test('computes map bounds from visible situation coordinates', () => {
   const layers = buildSituationLayers({
-    fireEvents: [{ eventId: 'fire-1', fireLevel: 'HIGH', lat: 34.66, lng: 109.32, geoQuality: 'READY' }],
+    fireEvents: [{ eventId: 'fire-1', detectionKind: 'FIRE', locationStatus: 'PRECISE', fireLevel: 'HIGH', lat: 34.66, lng: 109.32, geoQuality: 'PRECISE', geoMethod: 'LASER_RANGEFINDER' }],
     msdkDevices: [{ aircraftSn: 'M4T-001', model: 'DJI Matrice 4T', online: true, latitude: 34.68, longitude: 109.35 }]
   })
 

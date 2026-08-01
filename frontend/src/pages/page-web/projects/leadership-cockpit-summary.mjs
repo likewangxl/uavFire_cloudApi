@@ -306,7 +306,7 @@ function buildVisualInstrumentBelt ({
     const videoSignals = isDelivery
       ? [
           { key: 'visible', label: 'FC100', status: deliveryLiveOnline ? 'online' : 'offline', detail: deliveryTarget?.primaryPlayUrl ? '直播地址已返回' : '等待平台地址' },
-          { key: 'thermal', label: '平台', status: deliveryTarget?.online ? 'online' : 'offline', detail: deliveryTargetsLoading ? '同步中' : (deliveryTarget?.taskStatus || '等待任务') },
+          { key: 'thermal', label: '平台', status: deliveryTarget?.online ? 'online' : 'offline', detail: deliveryTargetsLoading ? '同步中' : formatMissionStatus(deliveryTarget?.taskStatus) },
           { key: 'zlm', label: 'ZLM', status: deliveryLiveOnline ? 'online' : 'warning', detail: deliveryLiveOnline ? '播放链路可用' : '未验证播放' }
         ]
       : [
@@ -342,7 +342,7 @@ function buildVisualInstrumentBelt ({
           key: 'aiObservation',
           title: isDelivery ? '任务观察' : 'AI 观察',
           summary: isDelivery
-            ? (deliveryTask ? `${deliveryTask.phase || deliveryTask.status || '执行中'} ${deliveryTask.progressPercent == null ? '' : formatPercent(deliveryTask.progressPercent)}`.trim() : '未启动投放任务')
+            ? (deliveryTask ? `${formatMissionStatus(deliveryTask.phase || deliveryTask.status)} ${deliveryTask.progressPercent == null ? '' : formatPercent(deliveryTask.progressPercent)}`.trim() : '未启动投放任务')
             : (aiEvents.length > 0 ? `最近 ${aiEvents.length} 条识别` : '暂无识别事件'),
           status: aiEventsError ? 'warning' : (aiEvents.length > 0 || deliveryTask ? 'online' : 'idle'),
           ticks: buildAiTicks(aiEvents),
@@ -368,7 +368,7 @@ function buildVisualInstrumentBelt ({
           key: 'aiTask',
           time: formatTimeLabel(latestAiEvent?.eventTimestamp || latestAiEvent?.createTime),
           label: isDelivery
-            ? (deliveryTask ? `${deliveryTask.phase || deliveryTask.status || '执行中'} ${deliveryTask.progressPercent == null ? '' : formatPercent(deliveryTask.progressPercent)}`.trim() : '投放任务待启动')
+            ? (deliveryTask ? `${formatMissionStatus(deliveryTask.phase || deliveryTask.status)} ${deliveryTask.progressPercent == null ? '' : formatPercent(deliveryTask.progressPercent)}`.trim() : '投放任务待启动')
             : (aiEvents.length > 0 ? `AI 识别 ${aiEvents.length} 条` : (fireEventsError || aiEventsError || '识别任务待启动')),
           status: (aiEvents.length > 0 || deliveryTask) ? 'online' : 'idle'
         }
@@ -453,7 +453,7 @@ function buildVisualContextMetrics ({
       {
         key: 'taskPhase',
         label: '任务阶段',
-        value: deliveryTask?.phase || deliveryTask?.status || deliveryTarget?.taskStatus || '待命',
+        value: formatMissionStatus(deliveryTask?.phase || deliveryTask?.status || deliveryTarget?.taskStatus || 'IDLE'),
         note: deliveryTask?.taskId || deliveryTarget?.message || '等待投放任务'
       },
       {
@@ -611,7 +611,7 @@ function buildHighestFireLevelPopover ({
       .filter(event => normalizeLevel(event?.fireLevel) === highestFireLevel)
       .slice(0, 5)
       .map(buildFirePopoverRow)
-  const routeReady = highestRows.filter(row => row.metrics.some(item => item.key === 'geoQuality' && /READY|OK|AUTO/.test(item.value))).length
+  const routeReady = highestRows.filter(row => row.routeReady).length
   return {
     title: '最高等级火情',
     subtitle: '火情等级研判',
@@ -711,7 +711,9 @@ function buildFirePopoverRow (event, index = 0) {
   const id = event?.eventId || event?.id || event?.fireId || `fire-${index + 1}`
   const confidence = event?.confidence ?? event?.fusionScore ?? event?.score
   const confidenceText = Number.isFinite(Number(confidence)) ? Number(confidence).toFixed(2) : '--'
-  const status = event?.status || event?.missionStatus || 'UNKNOWN'
+  const status = event?.detectionStatus
+    ? formatDetectionStatus(event.detectionStatus)
+    : (event?.missionStatus ? formatMissionStatus(event.missionStatus) : formatEventStatus(event?.status))
   return {
     key: `fire:${id}`,
     title: `${level === 'UNKNOWN' ? 'UNKNOWN' : level} · ${id}`,
@@ -721,10 +723,11 @@ function buildFirePopoverRow (event, index = 0) {
     detail: `置信度 ${confidenceText} · ${formatCoordinate(event)} · ${event?.missionNo ? `任务 ${event.missionNo}` : '未关联任务'}`,
     metrics: [
       { key: 'confidence', label: '置信度', value: confidenceText },
-      { key: 'geoQuality', label: '定位', value: event?.geoQuality || '--' },
+      { key: 'geoQuality', label: '定位', value: formatGeoQuality(event?.geoQuality || event?.locationStatus) },
       { key: 'mission', label: '任务', value: event?.missionNo || '未关联' },
       { key: 'action', label: '建议', value: formatFireActionNote(event) }
-    ]
+    ],
+    routeReady: isRouteReadyFireLocation(event)
   }
 }
 
@@ -820,7 +823,7 @@ function buildBatteryHoverTitle (msdkDevices, deliveryTargets) {
 function formatHoverRow (model, sn, status, batteryPercent) {
   const snText = sn || 'SN --'
   const batteryText = Number.isFinite(Number(batteryPercent)) ? `battery ${formatPercent(batteryPercent)}` : 'battery --'
-  return `${model} | ${snText} | ${status || 'unknown'} | ${batteryText}`
+  return `${model} | ${snText} | ${formatMissionStatus(status)} | ${batteryText}`
 }
 
 function formatScorePercent (value) {
@@ -836,7 +839,7 @@ function formatAiReviewText (value) {
   if (status === 'CONFIRMED' || status === 'APPROVED') return '已确认'
   if (status === 'REJECTED' || status === 'IGNORED') return '已排除'
   if (status === 'PENDING' || status === 'WAITING') return '待复核'
-  return value
+  return '未知状态'
 }
 
 function resolveMonitorModel (device) {
@@ -866,7 +869,7 @@ function buildAircraftRows (msdkDevices, deliveryTargets) {
       sn: device.aircraftSn || '--',
       name: resolveMonitorModel(device),
       online: Boolean(device.online),
-      status: device.online ? (device.mode || device.connectionState || '在线') : '离线',
+      status: device.online ? formatMissionStatus(device.mode || device.connectionState || 'ONLINE') : '离线',
       battery: device.batteryPercent,
       detail: `GPS ${device.gpsCount ?? '--'} / RTK ${device.rtkCount ?? '--'} / H ${formatNumber(device.height, 1)}m`
     })),
@@ -876,7 +879,7 @@ function buildAircraftRows (msdkDevices, deliveryTargets) {
       sn: target.deviceSn || '--',
       name: resolveDeliveryModel(target),
       online: Boolean(target.online),
-      status: target.streamStatus === 'running' ? '直播在线' : (target.taskStatus || target.streamStatus || '待命'),
+      status: target.streamStatus === 'running' ? '直播在线' : formatMissionStatus(target.taskStatus || target.streamStatus || 'IDLE'),
       battery: target.batteryPercent,
       detail: target.message || target.primaryPlayUrl || '等待投放平台状态'
     }))
@@ -911,7 +914,7 @@ function formatFireActionNote (event) {
   if (!event) return ''
   if (event.missionNo) return `已关联任务 ${event.missionNo}`
   if (isRouteReadyFireLocation(event)) return '定位满足航线生成条件'
-  return `定位质量 ${event.geoQuality || '未知'}，建议先人工复核`
+  return `${formatLocationExplanation(event)}，建议先人工复核`
 }
 
 function formatCoordinate (event) {
@@ -1009,7 +1012,7 @@ function formatFireLevelCounts (counts) {
 
 function summarizeDeliveryTask (task) {
   if (!task) return ''
-  const phase = task.phase || task.status || '任务同步中'
+  const phase = formatMissionStatus(task.phase || task.status)
   const progress = task.progressPercent == null ? '' : ` · ${formatPercent(task.progressPercent)}`
   return `${phase}${progress}`
 }
@@ -1017,3 +1020,10 @@ import {
   formatFireLocation,
   isRouteReadyFireLocation
 } from './fire/fire-event-location.mjs'
+import {
+  formatDetectionStatus,
+  formatEventStatus,
+  formatGeoQuality,
+  formatLocationExplanation,
+  formatMissionStatus
+} from './fire/fire-event-status.mjs'
