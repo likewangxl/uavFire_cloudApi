@@ -95,6 +95,9 @@ done < <(rg --files --no-ignore "$ACCEPTANCE_DIR/automated" \
 当前生产控制，不作为“既有失败”忽略。设备门禁仍全部阻塞，因此总体发布结论不变，仍为
 `NOT_READY_DEFAULT_OFF`。
 
+最终 clean-HEAD 自动化复跑的精确计数、时间和 SHA-256 固化在
+[`docs/evidence/2026-08-01-agent-visible-fire-automated-acceptance.md`](../evidence/2026-08-01-agent-visible-fire-automated-acceptance.md)。
+
 ## 5. 设备门禁（严格顺序）
 
 后一个阶段只有在前一个阶段通过后才允许开始。
