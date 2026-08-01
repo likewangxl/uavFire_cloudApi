@@ -28,6 +28,12 @@ internal object CanonicalFireReport {
             state = FireSessionState.VISUAL_CONFIRMED,
         )
         validateInitialSchema(root)
+        if (record.droneSn != "legacy-drone" || root.has("droneSn")) {
+            requireString(root, "droneSn", record.droneSn)
+        }
+        if (record.taskId != "legacy-task" || root.has("taskId")) {
+            requireString(root, "taskId", record.taskId)
+        }
         val confirmation = record.request.confirmation
         requireString(root, "detectionKind", confirmation.kind.name)
         requireNumber(root, "confidence", confirmation.confidence.toString())

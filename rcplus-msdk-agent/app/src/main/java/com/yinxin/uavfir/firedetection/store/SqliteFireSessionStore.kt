@@ -37,6 +37,7 @@ class SqliteFireSessionStore(
             val session = ContentValues().apply {
                 put("session_id", record.request.sessionId)
                 put("event_id", record.request.eventId)
+                put("drone_sn", record.droneSn)
                 put("task_id", record.taskId)
                 put("source_generation", record.sourceGeneration)
                 put("coordinator_generation", record.coordinatorGeneration)
@@ -729,6 +730,7 @@ class SqliteFireSessionStore(
             session.modelHash == record.modelHash.lowercase() &&
             session.inputSize == record.inputSize &&
             session.runtime == record.runtime &&
+            session.droneSn == record.droneSn &&
             session.taskId == record.taskId &&
             session.sourceGeneration == record.sourceGeneration &&
             session.coordinatorGeneration == record.coordinatorGeneration &&
@@ -917,19 +919,20 @@ class SqliteFireSessionStore(
         geoMethod = getStringOrNull(5)?.let(GeoMethod::valueOf),
         createdAtWallMillis = getLong(6),
         updatedAtWallMillis = getLong(7),
-        taskId = getString(8),
-        sourceGeneration = getLong(9),
-        coordinatorGeneration = getLong(10),
+        droneSn = getString(8),
+        taskId = getString(9),
+        sourceGeneration = getLong(10),
+        coordinatorGeneration = getLong(11),
         initialRoi = com.yinxin.uavfir.firedetection.NormalizedRoi(
-            getDouble(11).toFloat(),
             getDouble(12).toFloat(),
             getDouble(13).toFloat(),
             getDouble(14).toFloat(),
+            getDouble(15).toFloat(),
         ),
-        recoveryProof = if (isNull(15)) null else parseProof(
-            getInt(15),
-            getString(16),
+        recoveryProof = if (isNull(16)) null else parseProof(
+            getInt(16),
             getString(17),
+            getString(18),
         ),
     )
 
@@ -951,14 +954,15 @@ class SqliteFireSessionStore(
         modelHash = getString(14),
         inputSize = getInt(15),
         runtime = getString(16),
-        taskId = getString(17),
-        sourceGeneration = getLong(18),
-        coordinatorGeneration = getLong(19),
+        droneSn = getString(17),
+        taskId = getString(18),
+        sourceGeneration = getLong(19),
+        coordinatorGeneration = getLong(20),
         initialRoi = com.yinxin.uavfir.firedetection.NormalizedRoi(
-            getDouble(20).toFloat(),
             getDouble(21).toFloat(),
             getDouble(22).toFloat(),
             getDouble(23).toFloat(),
+            getDouble(24).toFloat(),
         ),
     )
 
@@ -1036,6 +1040,7 @@ class SqliteFireSessionStore(
         val modelHash: String,
         val inputSize: Int,
         val runtime: String,
+        val droneSn: String,
         val taskId: String,
         val sourceGeneration: Long,
         val coordinatorGeneration: Long,
@@ -1062,6 +1067,7 @@ class SqliteFireSessionStore(
             "geo_method",
             "created_at_wall_ms",
             "updated_at_wall_ms",
+            "drone_sn",
             "task_id",
             "source_generation",
             "coordinator_generation",
@@ -1091,6 +1097,7 @@ class SqliteFireSessionStore(
             "model_hash",
             "input_size",
             "runtime",
+            "drone_sn",
             "task_id",
             "source_generation",
             "coordinator_generation",

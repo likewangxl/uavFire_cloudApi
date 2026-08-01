@@ -13,7 +13,10 @@ import java.util.Set;
 
 @Component
 public class AgentFireReportValidator {
-    static final long MAX_CLOCK_SKEW_MILLIS = 5 * 60 * 1000L;
+    /** Authenticated durable observations may replay after an outage for 30 days. */
+    public static final long MAX_REPLAY_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000;
+    public static final long MAX_FUTURE_CLOCK_SKEW_MILLIS = 5 * 60 * 1000L;
+    static final long MAX_LASER_SAMPLE_SKEW_MILLIS = 5 * 60 * 1000L;
     static final String MODEL_VERSION = "visible-fire-wechat-best2-20260728";
     static final String MODEL_HASH = "957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650";
     private static final Set<String> STATES = set("VISUAL_CONFIRMED", "HOLD_REQUESTED", "HOVER_VERIFYING",
@@ -41,9 +44,10 @@ public class AgentFireReportValidator {
         text(p.getEventId(), "eventId"); text(p.getSessionId(), "sessionId");
         if (p.getSequence() == null || p.getSequence() <= 0) fail("sequence must be positive");
         long now = clock.millis();
-        if (p.getEventTimestamp() == null || p.getEventTimestamp() < now - MAX_CLOCK_SKEW_MILLIS ||
-            p.getEventTimestamp() > now + MAX_CLOCK_SKEW_MILLIS)
-            fail("eventTimestamp exceeds clock skew policy");
+        if (p.getEventTimestamp() == null || p.getEventTimestamp() < now - MAX_REPLAY_AGE_MILLIS)
+            fail("eventTimestamp exceeds authenticated replay retention");
+        if (p.getEventTimestamp() > now + MAX_FUTURE_CLOCK_SKEW_MILLIS)
+            fail("eventTimestamp exceeds future clock skew policy");
         if (!STATES.contains(p.getState())) fail("unknown state");
         if (!set("FIRE", "SMOKE").contains(p.getDetectionKind())) fail("unknown detectionKind");
         if (!MODEL_VERSION.equals(p.getModelVersion()) || !MODEL_HASH.equals(p.getModelHash()) ||
@@ -97,8 +101,8 @@ public class AgentFireReportValidator {
                 if (horizontalDistanceMeters(p.getFireLat(), p.getFireLng(), s.getLat(), s.getLng()) >
                     p.getErrorRadiusMeters()) fail("laser sample scatter exceeds error radius");
                 if (s.getEventTimestamp() == null ||
-                    s.getEventTimestamp() < p.getEventTimestamp() - MAX_CLOCK_SKEW_MILLIS ||
-                    s.getEventTimestamp() > p.getEventTimestamp() + MAX_CLOCK_SKEW_MILLIS)
+                    s.getEventTimestamp() < p.getEventTimestamp() - MAX_LASER_SAMPLE_SKEW_MILLIS ||
+                    s.getEventTimestamp() > p.getEventTimestamp() + MAX_LASER_SAMPLE_SKEW_MILLIS)
                     fail("invalid laser timestamp");
             }
         } else if ("DEGRADED_OSD".equals(p.getLocationStatus())) {

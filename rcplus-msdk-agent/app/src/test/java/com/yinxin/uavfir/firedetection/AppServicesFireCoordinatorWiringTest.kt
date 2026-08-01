@@ -23,6 +23,9 @@ class AppServicesFireCoordinatorWiringTest {
         assertFalse(source.contains("task10-transport-unavailable"))
         assertFalse(source.contains("SendOutcome.Acknowledged"))
         assertFalse(source.contains("holdLocal("))
+        assertTrue(source.contains("activeTaskId = waypointExecutor.activeMissionId()"))
+        assertTrue(source.contains("activeStreamDroneSn = sessionManager.activeStreamDroneSn"))
+        assertFalse(source.contains("AgentFireMonitoringContext(\"fire-"))
     }
 
     @Test

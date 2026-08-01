@@ -25,7 +25,10 @@ class Task7CoordinatorMissionPort internal constructor(
     override suspend fun pauseAndAwait(
         session: CoordinatorSession,
         onSubmission: () -> Unit,
-    ): MissionPauseOutcome = when (val outcome = missionControl.pause(onSubmission)) {
+    ): MissionPauseOutcome = when (val outcome = missionControl.pause(
+        onSubmissionBoundary = onSubmission,
+        expectedMissionId = session.taskId,
+    )) {
         is MissionHoldResult.WaylinePaused -> MissionPauseOutcome.Paused(
             CoordinatorHoldProof(
                 session.sessionId,

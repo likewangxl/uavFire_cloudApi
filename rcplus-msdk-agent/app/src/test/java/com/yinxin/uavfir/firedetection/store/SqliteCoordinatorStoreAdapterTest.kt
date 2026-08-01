@@ -22,7 +22,7 @@ class SqliteCoordinatorStoreAdapterTest {
         CoordinatorModelIdentity("visible-v1", "a".repeat(64), 960, "ncnn"),
     )
     private val roi = NormalizedRoi(.2f, .2f, .4f, .4f)
-    private val session = CoordinatorSession("session-1", "event-1", "task-1", DetectionKind.FIRE, 1, roi)
+    private val session = CoordinatorSession("session-1", "event-1", "drone-1", "task-1", DetectionKind.FIRE, 1, roi)
     private val request = TerminalPersistenceRequest(
         "session-1",
         "event-1",
@@ -55,7 +55,7 @@ class SqliteCoordinatorStoreAdapterTest {
         val record = records.terminal(session, request, precise(listOf(800, 900, 1_000)), 6)
         listOf(
             "\"agentId\":\"uavfire-agent\"",
-            "\"droneSn\":\"task-1\"",
+            "\"droneSn\":\"drone-1\"",
             "\"taskId\":\"task-1\"",
             "\"detectionKind\":\"FIRE\"",
             "\"modelVersion\":\"visible-v1\"",

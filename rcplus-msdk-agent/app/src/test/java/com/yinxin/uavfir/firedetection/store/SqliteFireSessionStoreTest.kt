@@ -13,6 +13,7 @@ import com.yinxin.uavfir.firedetection.NormalizedRoi
 import com.yinxin.uavfir.firedetection.TerminalPersistenceRequest
 import com.yinxin.uavfir.firedetection.VisibleConfirmation
 import java.util.UUID
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -181,6 +182,27 @@ class SqliteFireSessionStoreTest {
         assertNull(store.leaseNext(1_000))
         assertTrue(store.markAcknowledged(first))
         assertEquals(2L, store.leaseNext(1_000)!!.row.sequence)
+    }
+
+    @Test
+    fun historicalReplayAckAfterLongOutageUnblocksNextOrderedSequence() = runTest {
+        store.persistInitialConfirmation(initialRecord())
+        store.persistStage(stageRecord(2, FireSessionState.HOLD_REQUESTED))
+        clock.wallMillis += 6 * 60 * 60 * 1_000L
+        clock.elapsedMillis += 6 * 60 * 60 * 1_000L
+        val sent = mutableListOf<Long>()
+        val dispatcher = FireOutboxDispatcher(
+            store,
+            FireReportTransport { row ->
+                sent += row.sequence
+                SendOutcome.Acknowledged
+            },
+        )
+
+        assertEquals(DispatchResult.Acknowledged, dispatcher.dispatchOnce())
+        assertEquals(DispatchResult.Acknowledged, dispatcher.dispatchOnce())
+        assertEquals(listOf(1L, 2L), sent)
+        assertEquals(listOf(OutboxStatus.ACKED, OutboxStatus.ACKED), store.loadOutbox(EVENT_ID).map { it.status })
     }
 
     @Test

@@ -56,6 +56,19 @@ class AwaitableMissionControlTest {
         unknownControl.close()
     }
 
+    @Test
+    fun capturedMissionMustMatchConfirmationTaskBindingBeforePauseSubmission() = runTest {
+        val port = Port(MissionSnapshot(mission, ObservedMissionState.EXECUTING, 0), breakpoint)
+        val control = control(port)
+
+        assertEquals(
+            MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH),
+            control.pause(expectedMissionId = "different-active-task"),
+        )
+        assertEquals(0, port.pauseCalls)
+        control.close()
+    }
+
     private fun kotlinx.coroutines.test.TestScope.control(
         port: Port,
         hover: suspend () -> Unit = {},

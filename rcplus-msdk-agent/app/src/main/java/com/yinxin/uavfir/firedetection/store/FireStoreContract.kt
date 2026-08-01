@@ -23,7 +23,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 object FireStoreContract {
-    const val SCHEMA_VERSION = 4
+    const val SCHEMA_VERSION = 5
     const val DEFAULT_DATABASE_NAME = "agent-fire-store.db"
 
     object Session {
@@ -113,6 +113,7 @@ data class InitialConfirmationRecord(
     val aircraft: ReportGeoPoint? = null,
     val payload: String,
     val evidence: List<FireEvidenceReference>,
+    val droneSn: String = "legacy-drone",
     val taskId: String = "legacy-task",
     val sourceGeneration: Long = 1,
     val coordinatorGeneration: Long = 1,
@@ -124,7 +125,7 @@ data class InitialConfirmationRecord(
         require(isSha256(modelHash))
         require(inputSize > 0)
         require(runtime.isNotBlank())
-        require(taskId.isNotBlank() && sourceGeneration > 0 && coordinatorGeneration > 0)
+        require(droneSn.isNotBlank() && taskId.isNotBlank() && sourceGeneration > 0 && coordinatorGeneration > 0)
         validatePayloadSize(payload)
     }
 }
@@ -360,6 +361,7 @@ data class DurableFireSession(
     val geoMethod: GeoMethod?,
     val createdAtWallMillis: Long,
     val updatedAtWallMillis: Long,
+    val droneSn: String = "legacy-unbound",
     val taskId: String = "legacy-task",
     val sourceGeneration: Long = 1,
     val coordinatorGeneration: Long = 1,

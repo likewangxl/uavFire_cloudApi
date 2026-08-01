@@ -256,8 +256,14 @@ class AwaitableMissionControl(
     private var manualTakeover = false
     private var closed = false
 
-    suspend fun pause(onSubmissionBoundary: () -> Unit = {}): MissionHoldResult {
+    suspend fun pause(
+        onSubmissionBoundary: () -> Unit = {},
+        expectedMissionId: String? = null,
+    ): MissionHoldResult {
         val captured = port.snapshot()
+        if (expectedMissionId != null && captured.mission?.identity?.missionId != expectedMissionId) {
+            return MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
+        }
         val operation = synchronized(lock) {
             if (closed) return MissionHoldResult.ManualHold(FlightSafetyReason.CONTROL_CLOSED)
             if (manualTakeover) return MissionHoldResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER)

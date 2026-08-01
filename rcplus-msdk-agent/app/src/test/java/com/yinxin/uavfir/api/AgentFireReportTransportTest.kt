@@ -69,6 +69,17 @@ class AgentFireReportTransportTest {
         assertTrue(transport.send(row()) is SendOutcome.PayloadConflict)
     }
 
+    @Test fun `duplicate must be a present JSON boolean`() = runTest {
+        listOf(
+            """{"eventId":"event-1","acceptedSequence":1,"eventPersisted":true,"notificationQueued":false}""",
+            """{"eventId":"event-1","acceptedSequence":1,"eventPersisted":true,"notificationQueued":false,"duplicate":null}""",
+            """{"eventId":"event-1","acceptedSequence":1,"eventPersisted":true,"notificationQueued":false,"duplicate":"false"}""",
+        ).forEach { body ->
+            server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody(body))
+            assertTrue(transport.send(row()) is SendOutcome.PayloadConflict)
+        }
+    }
+
     @Test fun `malformed success is fail closed`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json")
             .setBody("{"))

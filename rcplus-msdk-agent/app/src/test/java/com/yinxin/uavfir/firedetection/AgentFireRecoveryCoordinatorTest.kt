@@ -144,7 +144,7 @@ class AgentFireRecoveryCoordinatorTest {
 
     companion object {
         private fun recovery(state: FireSessionState, terminal: Boolean) = CoordinatorRecoverySession(
-            CoordinatorSession("session-r", "event-r", "task-r", DetectionKind.FIRE, 1, NormalizedRoi(.1f, .1f, .2f, .2f)), state, terminal,
+            CoordinatorSession("session-r", "event-r", "drone-r", "task-r", DetectionKind.FIRE, 1, NormalizedRoi(.1f, .1f, .2f, .2f)), state, terminal,
         )
     }
 }

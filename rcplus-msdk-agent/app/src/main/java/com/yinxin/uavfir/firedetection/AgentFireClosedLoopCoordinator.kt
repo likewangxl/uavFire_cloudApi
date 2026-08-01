@@ -19,13 +19,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 data class AgentFireConfirmationEnvelope(
     val sessionId: String,
     val eventId: String,
+    val droneSn: String,
     val taskId: String,
     val sourceGeneration: Long,
     val confirmation: VisibleConfirmation,
     val evidence: List<FireEvidenceReference> = emptyList(),
 ) {
     init {
-        require(sessionId.isNotBlank() && eventId.isNotBlank() && taskId.isNotBlank())
+        require(sessionId.isNotBlank() && eventId.isNotBlank() && droneSn.isNotBlank() && taskId.isNotBlank())
         require(sourceGeneration > 0)
         require(evidence.size <= MAX_EVIDENCE_REFERENCES)
     }
@@ -36,6 +37,7 @@ data class AgentFireConfirmationEnvelope(
 data class CoordinatorSession(
     val sessionId: String,
     val eventId: String,
+    val droneSn: String,
     val taskId: String,
     val kind: DetectionKind,
     val generation: Long,
@@ -44,7 +46,7 @@ data class CoordinatorSession(
     val evidence: List<FireEvidenceReference> = emptyList(),
 ) {
     init {
-        require(sessionId.isNotBlank() && eventId.isNotBlank() && taskId.isNotBlank())
+        require(sessionId.isNotBlank() && eventId.isNotBlank() && droneSn.isNotBlank() && taskId.isNotBlank())
         require(generation > 0 && sourceGeneration > 0)
         require(evidence.size <= 2)
     }
@@ -352,6 +354,7 @@ class AgentFireClosedLoopCoordinator(
         val session = CoordinatorSession(
             envelope.sessionId,
             envelope.eventId,
+            envelope.droneSn,
             envelope.taskId,
             envelope.confirmation.kind,
             generation.incrementAndGet(),

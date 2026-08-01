@@ -64,6 +64,9 @@ class SqliteCoordinatorStoreAdapter(
                 session = CoordinatorSession(
                     durable.sessionId,
                     durable.eventId,
+                    durable.droneSn.also {
+                        require(it != LEGACY_UNBOUND_DRONE_SN) { "recovery-drone-identity-unbound" }
+                    },
                     durable.taskId,
                     durable.detectionKind,
                     durable.coordinatorGeneration,
@@ -78,7 +81,10 @@ class SqliteCoordinatorStoreAdapter(
             )
         }
 
-    private companion object { const val INITIAL_SEQUENCE = 1L }
+    private companion object {
+        const val INITIAL_SEQUENCE = 1L
+        const val LEGACY_UNBOUND_DRONE_SN = "legacy-unbound"
+    }
 }
 
 interface CoordinatorStoreRecordFactory {
@@ -137,7 +143,10 @@ class CanonicalCoordinatorStoreRecordFactory(
     ): InitialConfirmationRecord {
         require(envelope.sessionId == request.sessionId && envelope.eventId == request.eventId)
         val wall = monotonicToWall(envelope.confirmation.secondFrameTimestampMillis)
-        require(session.sessionId == envelope.sessionId && session.eventId == envelope.eventId)
+        require(
+            session.sessionId == envelope.sessionId && session.eventId == envelope.eventId &&
+                session.droneSn == envelope.droneSn && session.taskId == envelope.taskId,
+        ) { "confirmation identity changed before initial persistence" }
         val root = identity(session, 1, wall, FireSessionState.VISUAL_CONFIRMED)
         root.addProperty("detectionKind", envelope.confirmation.kind.name)
         root.addProperty("confidence", envelope.confirmation.confidence)
@@ -155,6 +164,7 @@ class CanonicalCoordinatorStoreRecordFactory(
             model.modelSha256,
             model.inputSize,
             model.runtime,
+            droneSn = session.droneSn,
             taskId = session.taskId,
             sourceGeneration = session.sourceGeneration,
             coordinatorGeneration = session.generation,
@@ -281,7 +291,7 @@ class CanonicalCoordinatorStoreRecordFactory(
     private fun identity(session: CoordinatorSession, sequence: Long, wall: Long, state: FireSessionState) =
         JsonObject().apply {
             addProperty("agentId", agentId)
-            addProperty("droneSn", session.taskId.removePrefix("fire-").ifBlank { session.taskId })
+            addProperty("droneSn", session.droneSn)
             addProperty("eventId", session.eventId)
             addProperty("sessionId", session.sessionId)
             addProperty("taskId", session.taskId)

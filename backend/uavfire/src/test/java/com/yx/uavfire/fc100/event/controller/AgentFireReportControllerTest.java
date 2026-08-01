@@ -133,6 +133,24 @@ class AgentFireReportControllerTest {
         verify(ingress, never()).accept(any());
     }
 
+    @Test void acceptsAuthenticatedHistoricalReplayButRejectsTooOldAndFutureObservations() throws Exception {
+        when(ingress.accept(any())).thenReturn(AgentFireReportIngress.Result.committed(false));
+        long outageReplay = System.currentTimeMillis() - 6 * 60 * 60 * 1000L;
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
+            .content(withEventTimestamp(initial(), outageReplay)))
+            .andExpect(status().isOk());
+        verify(ingress).accept(any());
+
+        long tooOld = System.currentTimeMillis() - AgentFireReportValidator.MAX_REPLAY_AGE_MILLIS - 1;
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
+            .content(withEventTimestamp(initial(), tooOld)))
+            .andExpect(status().isBadRequest());
+        long future = System.currentTimeMillis() + AgentFireReportValidator.MAX_FUTURE_CLOCK_SKEW_MILLIS + 10_000;
+        mvc.perform(reportRequest().contentType(MediaType.APPLICATION_JSON)
+            .content(withEventTimestamp(initial(), future)))
+            .andExpect(status().isBadRequest());
+    }
+
     private String path() { return "/manage/api/v1/fire-events/agent-report"; }
     private MockHttpServletRequestBuilder reportRequest() {
         return reportRequest(token("drone-1", 60_000));
@@ -145,6 +163,9 @@ class AgentFireReportControllerTest {
             .withExpiresAt(new Date(System.currentTimeMillis() + expiresInMillis)).sign(JwtUtil.algorithm);
     }
     private long now() { return System.currentTimeMillis(); }
+    private String withEventTimestamp(String report, long timestamp) {
+        return report.replaceFirst("\\\"eventTimestamp\\\":\\d+", "\\\"eventTimestamp\\\":" + timestamp);
+    }
     private String common(String state, long seq) {
         return "\"agentId\":\"agent-1\",\"droneSn\":\"drone-1\",\"taskId\":\"task-1\"," +
             "\"eventId\":\"event-1\",\"sessionId\":\"session-1\",\"sequence\":" + seq + "," +

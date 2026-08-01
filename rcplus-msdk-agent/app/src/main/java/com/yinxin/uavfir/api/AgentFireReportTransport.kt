@@ -64,7 +64,10 @@ class AgentFireReportTransport(
         if (body.eventPersisted != true || body.notificationQueued == null) {
             return SendOutcome.PayloadConflict("response-not-durably-committed")
         }
-        return if (body.duplicate) SendOutcome.ExactDuplicate else SendOutcome.Acknowledged
+        val duplicate = body.duplicate?.takeIf {
+            it.isJsonPrimitive && it.asJsonPrimitive.isBoolean
+        }?.asBoolean ?: return SendOutcome.PayloadConflict("response-duplicate-invalid")
+        return if (duplicate) SendOutcome.ExactDuplicate else SendOutcome.Acknowledged
     }
 
     private companion object {

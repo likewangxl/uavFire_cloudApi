@@ -5,6 +5,7 @@ import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
 import java.util.UUID
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -55,6 +56,28 @@ class FireStoreOpenHelperMigrationTest {
         )
         assertTrue(db.rawQuery("SELECT COUNT(*) FROM fire_session", null).use {
             it.moveToFirst() && it.getInt(0) == 1
+        })
+        db.close()
+        helper.close()
+    }
+
+    @Test
+    fun schema4To5AddsIndependentUnboundDroneWithoutDerivingItFromTask() {
+        val db = SQLiteDatabase.create(null)
+        db.execSQL(
+            "CREATE TABLE fire_session (session_id TEXT PRIMARY KEY, event_id TEXT NOT NULL, task_id TEXT NOT NULL)",
+        )
+        db.execSQL("INSERT INTO fire_session(session_id,event_id,task_id) VALUES('s1','e1','fire-fake-drone')")
+        val helper = FireStoreOpenHelper(context, "migration-${UUID.randomUUID()}.db")
+        helper.onUpgrade(db, 4, 5)
+
+        assertEquals("legacy-unbound", db.rawQuery("SELECT drone_sn FROM fire_session", null).use {
+            it.moveToFirst()
+            it.getString(0)
+        })
+        assertEquals("fire-fake-drone", db.rawQuery("SELECT task_id FROM fire_session", null).use {
+            it.moveToFirst()
+            it.getString(0)
         })
         db.close()
         helper.close()

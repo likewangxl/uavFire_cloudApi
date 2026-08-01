@@ -35,6 +35,48 @@ import org.robolectric.annotation.SQLiteMode
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentFireProductionAdaptersIntegrationTest {
     @Test
+    fun `legacy v4 session without independent drone identity fails closed on recovery`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = "task10-legacy-recovery-${System.nanoTime()}.db"
+        val clock = MutableStoreClock(2_000, 100_000, "boot-legacy")
+        val sqlite = SqliteFireSessionStore(FireStoreOpenHelper(context, database), clock)
+        try {
+            val adapter = SqliteCoordinatorStoreAdapter(
+                sqlite,
+                CanonicalCoordinatorStoreRecordFactory(
+                    clock,
+                    CoordinatorModelIdentity("visible-v1", "a".repeat(64), 960, "ncnn"),
+                ),
+            )
+            val confirmation = VisibleConfirmation(
+                DetectionKind.FIRE, .9f, NormalizedRoi(.2f, .2f, .5f, .5f),
+                1_800, 1_900, "policy-v1",
+            )
+            val session = CoordinatorSession(
+                "session-legacy", "event-legacy", "legacy-unbound", "inspection-task-1",
+                DetectionKind.FIRE, 1, confirmation.roi, 7,
+            )
+            val envelope = AgentFireConfirmationEnvelope(
+                session.sessionId, session.eventId, session.droneSn, session.taskId,
+                session.sourceGeneration, confirmation,
+            )
+            assertTrue(adapter.persistInitial(
+                session,
+                envelope,
+                InitialPersistenceRequest(
+                    session.sessionId, session.eventId,
+                    "00000000-0000-4000-8000-000000000099", confirmation,
+                ),
+            ).durable)
+
+            assertTrue(runCatching { adapter.loadRecoverySessions() }.exceptionOrNull() is IllegalArgumentException)
+        } finally {
+            sqlite.close()
+            context.deleteDatabase(database)
+        }
+    }
+
+    @Test
     fun `real store outbox task7 and task8 adapters preserve identity and degraded audit`() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = "task9-integration-${System.nanoTime()}.db"
@@ -112,6 +154,7 @@ class AgentFireProductionAdaptersIntegrationTest {
                 AgentFireConfirmationEnvelope(
                     "session-integration",
                     "event-integration",
+                    "drone-integration",
                     "task-integration",
                     7,
                     VisibleConfirmation(
@@ -129,12 +172,14 @@ class AgentFireProductionAdaptersIntegrationTest {
             assertEquals(ClosedLoopResult.MissionResumed, result)
             val payloads = store.loadOutbox("event-integration")
             assertTrue(payloads.all { it.payload.contains("\"taskId\":\"task-integration\"") })
+            assertTrue(payloads.all { it.payload.contains("\"droneSn\":\"drone-integration\"") })
             assertTrue(payloads.all { it.payload.contains("\"sourceGeneration\":7") })
             assertTrue(payloads.last { it.state == FireSessionState.RESULT_DURABLE }.payload
                 .contains("\"degradedReason\":\"TARGET_NOT_ALIGNED\""))
             assertFalse(payloads.any { it.state == FireSessionState.LASER_MEASURING })
             val durable = checkNotNull(store.loadDurableSession("event-integration"))
             assertEquals("task-integration", durable.taskId)
+            assertEquals("drone-integration", durable.droneSn)
             assertEquals(7, durable.sourceGeneration)
             assertTrue(durable.recoveryProof != null)
             assertTrue(store.loadEvidence("event-integration").size >= 2)
@@ -149,9 +194,9 @@ class AgentFireProductionAdaptersIntegrationTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val database = "task9-recovery-${System.nanoTime()}.db"
         val clock = MutableStoreClock(2_000, 100_000, "boot-recovery")
-        val sqlite = SqliteFireSessionStore(FireStoreOpenHelper(context, database), clock)
+        var sqlite = SqliteFireSessionStore(FireStoreOpenHelper(context, database), clock)
         try {
-            val adapter = SqliteCoordinatorStoreAdapter(
+            var adapter = SqliteCoordinatorStoreAdapter(
                 sqlite,
                 CanonicalCoordinatorStoreRecordFactory(
                     clock,
@@ -169,6 +214,7 @@ class AgentFireProductionAdaptersIntegrationTest {
             val session = CoordinatorSession(
                 "session-recovery",
                 "event-recovery",
+                "drone-recovery",
                 "task-recovery",
                 DetectionKind.FIRE,
                 1,
@@ -178,6 +224,7 @@ class AgentFireProductionAdaptersIntegrationTest {
             val envelope = AgentFireConfirmationEnvelope(
                 session.sessionId,
                 session.eventId,
+                session.droneSn,
                 session.taskId,
                 session.sourceGeneration,
                 confirmation,
@@ -224,6 +271,22 @@ class AgentFireProductionAdaptersIntegrationTest {
                     ),
                 ).durable,
             )
+            sqlite.close()
+            sqlite = SqliteFireSessionStore(FireStoreOpenHelper(context, database), clock)
+            adapter = SqliteCoordinatorStoreAdapter(
+                sqlite,
+                CanonicalCoordinatorStoreRecordFactory(
+                    clock,
+                    CoordinatorModelIdentity("visible-v1", "a".repeat(64), 960, "ncnn"),
+                ),
+            )
+            val recoveredSession = adapter.loadRecoverySessions().single().session
+            assertEquals("drone-recovery", recoveredSession.droneSn)
+            assertEquals("task-recovery", recoveredSession.taskId)
+            assertTrue(sqlite.loadOutbox(session.eventId).all {
+                it.payload.contains("\"droneSn\":\"drone-recovery\"") &&
+                    it.payload.contains("\"taskId\":\"task-recovery\"")
+            })
             val mission = CountingRecoveryMission()
             val delivery = NoopRecoveryDelivery()
             val localization = NoopRecoveryLocalization()
@@ -249,7 +312,7 @@ class AgentFireProductionAdaptersIntegrationTest {
     }
 
     private class IntegrationMissionPort : MissionControlPort {
-        private val mission = MissionExecutionKey(MissionIdentity("mission-1", "route.kmz"), 1)
+        private val mission = MissionExecutionKey(MissionIdentity("task-integration", "route.kmz"), 1)
         private var snapshot = MissionSnapshot(mission, ObservedMissionState.EXECUTING, 1)
         private val listeners = mutableListOf<(MissionSnapshot) -> Unit>()
         override fun snapshot() = snapshot

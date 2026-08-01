@@ -31,7 +31,7 @@ import com.yinxin.uavfir.firedetection.AgentFireClosedLoopCoordinator
 import com.yinxin.uavfir.firedetection.AgentFireConfirmationBridge
 import com.yinxin.uavfir.firedetection.BoundedCoordinatorOutcomeRecorder
 import com.yinxin.uavfir.firedetection.BoundedVisibleEvidenceCapture
-import com.yinxin.uavfir.firedetection.AgentFireMonitoringContext
+import com.yinxin.uavfir.firedetection.authoritativeFireMonitoringContext
 import com.yinxin.uavfir.firedetection.AgentFireRecoveryCoordinator
 import com.yinxin.uavfir.firedetection.ConfirmationHealth
 import com.yinxin.uavfir.firedetection.CoordinatorArmingHealth
@@ -158,9 +158,13 @@ class AppServices(
         monitoringContext = {
             val generation = latestVisibleFrameBuffer.currentVisibleSourceGeneration()
             val droneSn = activeThermalDroneSn()
-            if (sessionManager.thermalMonitoringEnabled && generation != null && droneSn != null) {
-                AgentFireMonitoringContext("fire-$droneSn", generation)
-            } else null
+            authoritativeFireMonitoringContext(
+                monitoringEnabled = sessionManager.thermalMonitoringEnabled,
+                activeDroneSn = droneSn,
+                activeStreamDroneSn = sessionManager.activeStreamDroneSn,
+                activeTaskId = waypointExecutor.activeMissionId(),
+                sourceGeneration = generation,
+            )
         },
         health = cachedFireHealth::get,
         coordinator = fireCoordinatorReference::get,

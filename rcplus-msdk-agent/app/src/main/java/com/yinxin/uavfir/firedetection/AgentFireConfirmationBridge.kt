@@ -5,10 +5,24 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 data class AgentFireMonitoringContext(
+    val droneSn: String,
     val taskId: String,
     val sourceGeneration: Long,
 ) {
-    init { require(taskId.isNotBlank() && sourceGeneration > 0) }
+    init { require(droneSn.isNotBlank() && taskId.isNotBlank() && sourceGeneration > 0) }
+}
+
+internal fun authoritativeFireMonitoringContext(
+    monitoringEnabled: Boolean,
+    activeDroneSn: String?,
+    activeStreamDroneSn: String?,
+    activeTaskId: String?,
+    sourceGeneration: Long?,
+): AgentFireMonitoringContext? {
+    if (!monitoringEnabled || activeDroneSn.isNullOrBlank() || activeTaskId.isNullOrBlank() ||
+        sourceGeneration == null || sourceGeneration <= 0 || activeStreamDroneSn != activeDroneSn
+    ) return null
+    return AgentFireMonitoringContext(activeDroneSn, activeTaskId, sourceGeneration)
 }
 
 data class CoordinatorOutcomeRecord(val eventId: String, val result: ClosedLoopResult)
@@ -75,6 +89,7 @@ class AgentFireConfirmationBridge(
         val envelope = AgentFireConfirmationEnvelope(
             sessionId = randomId(),
             eventId = eventId,
+            droneSn = context.droneSn,
             taskId = context.taskId,
             sourceGeneration = context.sourceGeneration,
             confirmation = confirmation,

@@ -417,7 +417,7 @@ class AgentBackendClientTest {
         var lastAgentFireToken: String? = null
         override suspend fun reportAgentFire(agentToken: String, body: RequestBody): Response<okhttp3.ResponseBody> =
             Response.success(okhttp3.ResponseBody.create(null,
-                """{"eventId":"event-1","acceptedSequence":1,"eventPersisted":true,"notificationQueued":false}"""))
+                """{"eventId":"event-1","acceptedSequence":1,"eventPersisted":true,"notificationQueued":false,"duplicate":false}"""))
                 .also {
                     lastAgentFireToken = agentToken
                     lastAgentFireBody = Buffer().also { buffer -> body.writeTo(buffer) }.readUtf8()

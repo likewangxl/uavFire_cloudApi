@@ -23,6 +23,7 @@ class FireStoreOpenHelper(
             CREATE TABLE fire_session (
                 session_id TEXT NOT NULL PRIMARY KEY,
                 event_id TEXT NOT NULL UNIQUE,
+                drone_sn TEXT NOT NULL,
                 task_id TEXT NOT NULL,
                 source_generation INTEGER NOT NULL,
                 coordinator_generation INTEGER NOT NULL,
@@ -106,7 +107,8 @@ class FireStoreOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion == 3 && newVersion == 4) {
+        var current = oldVersion
+        if (current == 3 && newVersion >= 4) {
             db.execSQL("ALTER TABLE fire_session ADD COLUMN task_id TEXT NOT NULL DEFAULT 'legacy-unbound'")
             db.execSQL("ALTER TABLE fire_session ADD COLUMN source_generation INTEGER NOT NULL DEFAULT 1")
             db.execSQL("ALTER TABLE fire_session ADD COLUMN coordinator_generation INTEGER NOT NULL DEFAULT 1")
@@ -117,6 +119,15 @@ class FireStoreOpenHelper(
             db.execSQL("ALTER TABLE fire_session ADD COLUMN recovery_proof_version INTEGER")
             db.execSQL("ALTER TABLE fire_session ADD COLUMN recovery_proof_payload TEXT")
             db.execSQL("ALTER TABLE fire_session ADD COLUMN recovery_proof_sha256 TEXT")
+            current = 4
+        }
+        if (current == 4 && newVersion >= 5) {
+            // v4 had no independent aircraft identity. Preserve rows without
+            // inventing a droneSn from task_id; recovery fails closed on this sentinel.
+            db.execSQL("ALTER TABLE fire_session ADD COLUMN drone_sn TEXT NOT NULL DEFAULT 'legacy-unbound'")
+            current = 5
+        }
+        if (current == newVersion) {
             return
         }
         throw IllegalStateException(

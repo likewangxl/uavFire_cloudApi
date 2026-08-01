@@ -704,7 +704,8 @@ class AgentFireClosedLoopCoordinatorTest {
     companion object {
         private fun healthy() = CoordinatorArmingHealth(true, true, true, true, true, true, true, true, true, false, false)
         private fun envelope(kind: DetectionKind) = AgentFireConfirmationEnvelope(
-            sessionId = "session-1", eventId = "event-1", taskId = "task-1", sourceGeneration = 7,
+            sessionId = "session-1", eventId = "event-1", droneSn = "drone-1",
+            taskId = "task-1", sourceGeneration = 7,
             confirmation = VisibleConfirmation(kind, .9f, NormalizedRoi(.4f, .4f, .6f, .6f), 100, 200, "agent-visible-v1"),
         )
         private fun precise(kind: DetectionKind = DetectionKind.FIRE) = FireLocalizationResult.Precise(
