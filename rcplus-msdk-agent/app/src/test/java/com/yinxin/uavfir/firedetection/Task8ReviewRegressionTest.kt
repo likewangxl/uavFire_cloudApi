@@ -89,6 +89,45 @@ class Task8ReviewRegressionTest {
         assertFalse(exact.copy(capturedAtMonotonicMs = 10_001).isFreshAt(10_000, 2_000))
     }
 
+    @Test
+    fun preciseRawSamplesAreDefensivelyUnmodifiable() {
+        val binding = binding(operation = 2)
+        val valid = LaserSampleValidator().validate(
+            binding,
+            listOf(
+                hardwareSample(binding, 2, 1, 900),
+                hardwareSample(binding, 2, 2, 1_200),
+                hardwareSample(binding, 2, 3, 1_500),
+            ),
+        ) as LaserValidationResult.Valid
+
+        assertTrue(
+            runCatching { (valid.rawSamples as MutableList<BoundLaserSample>).clear() }
+                .exceptionOrNull() is UnsupportedOperationException,
+        )
+        assertEquals(3, valid.rawSamples.size)
+    }
+
+    @Test
+    fun localDetectionAwaitRequestRejectsMalformedTrustBoundaryValues() {
+        val valid = { session: String, event: String, generation: Long, captured: Long, cursor: Long ->
+            LocalDetectionAwaitRequest(
+                session,
+                event,
+                DetectionKind.FIRE,
+                generation,
+                captured,
+                cursor,
+            )
+        }
+
+        assertTrue(runCatching { valid("", "event", 1, 0, 0) }.isFailure)
+        assertTrue(runCatching { valid("session", "", 1, 0, 0) }.isFailure)
+        assertTrue(runCatching { valid("session", "event", 0, 0, 0) }.isFailure)
+        assertTrue(runCatching { valid("session", "event", 1, -1, 0) }.isFailure)
+        assertTrue(runCatching { valid("session", "event", 1, 0, -1) }.isFailure)
+    }
+
     private fun aimRequest() = LocalTargetAimRequest(
         "session", "event", DetectionKind.FIRE, NormalizedRoi(.4f, .4f, .6f, .6f),
     )

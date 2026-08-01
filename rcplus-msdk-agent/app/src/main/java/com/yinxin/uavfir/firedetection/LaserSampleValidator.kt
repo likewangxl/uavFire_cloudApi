@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.firedetection
 
 import com.yinxin.uavfir.api.LaserRangefinderResult
+import java.util.Collections
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
@@ -138,7 +139,7 @@ class LaserSampleValidator {
             altitude = ordered.map { it.measurement.altitude!! }.median(),
             rangeM = ordered.map { it.measurement.distanceM!! }.median(),
             errorRadiusM = DEFAULT_ERROR_RADIUS_M,
-            rawSamples = ordered.toList(),
+            rawSamples = Collections.unmodifiableList(ArrayList(ordered)),
         )
     }
 

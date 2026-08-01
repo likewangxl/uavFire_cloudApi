@@ -22,6 +22,8 @@ import org.junit.Test
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -349,6 +351,93 @@ class VisibleFireLaserLocatorTest {
         }
     }
 
+    @Test
+    fun highFrequencyCallbacksSkipEarlyCandidatesAndUseExactIntervalBoundary() = runTest {
+        val laser = SequenceLaser(
+            results = MutableList(5) {
+                LaserRangefinderResult(
+                    34.0 + it * 0.000001,
+                    109.0 + it * 0.000001,
+                    10.0 + it,
+                    60.0 + it,
+                    "NORMAL",
+                    .5,
+                    .5,
+                )
+            },
+            sampleOffsetsMs = mutableListOf(0, 100, 300, 400, 600),
+        )
+        val locator = localLocator(laser)
+        locator.holdLocal("session-1", "event-1")
+
+        val result = locator.localize(localRequest(DetectionKind.FIRE))
+
+        assertTrue(result is FireLocalizationResult.Precise)
+        result as FireLocalizationResult.Precise
+        val firstAt = result.rawSamples.first().sampledAtMonotonicMs
+        assertEquals(
+            listOf(0L, 300L, 600L),
+            result.rawSamples.map { it.sampledAtMonotonicMs - firstAt },
+        )
+        assertEquals(5, laser.measureCalls)
+    }
+
+    @Test
+    fun cancellationDuringMissionHoldClearsOwnerAndDoesNotIssueHover() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val mission = CancellableMissionHold(gate, firstResult = true)
+        val flight = RecordingFlightControl()
+        val locator = VisibleFireLaserLocator(
+            missionHold = mission,
+            flightControl = flight,
+            velocityProvider = SequenceVelocityProvider(MutableList(12) { VelocitySample(.1, .1) }),
+            time = AdvancingTime(),
+        )
+        val first = launch { locator.holdLocal("session-1", "event-1") }
+        runCurrent()
+
+        first.cancelAndJoin()
+
+        assertTrue("cancellation must not continue into hover", flight.actions.isEmpty())
+        assertEquals("applied", locator.holdLocal("session-1", "event-2").status)
+    }
+
+    @Test
+    fun cancellationDuringHoverClearsOwnerAndAllowsRetry() = runTest {
+        val hoverGate = CompletableDeferred<Unit>()
+        val flight = CancellableHoverFlightControl(hoverGate)
+        val locator = VisibleFireLaserLocator(
+            missionHold = RecordingMissionHold(false),
+            flightControl = flight,
+            velocityProvider = SequenceVelocityProvider(MutableList(12) { VelocitySample(.1, .1) }),
+            time = AdvancingTime(),
+        )
+        val first = launch { locator.holdLocal("session-1", "event-1") }
+        runCurrent()
+
+        first.cancelAndJoin()
+
+        assertEquals("applied", locator.holdLocal("session-1", "event-2").status)
+    }
+
+    @Test
+    fun cancellationDuringVelocityDelayClearsOwnerAndAllowsRetry() = runTest {
+        val delayGate = CompletableDeferred<Unit>()
+        val time = CancellableFirstDelayTime(delayGate)
+        val locator = VisibleFireLaserLocator(
+            missionHold = RecordingMissionHold(true),
+            flightControl = RecordingFlightControl(),
+            velocityProvider = SequenceVelocityProvider(MutableList(12) { VelocitySample(.1, .1) }),
+            time = time,
+        )
+        val first = launch { locator.holdLocal("session-1", "event-1") }
+        runCurrent()
+
+        first.cancelAndJoin()
+
+        assertEquals("applied", locator.holdLocal("session-1", "event-2").status)
+    }
+
     private fun normalSamples() = mutableListOf(
         LaserRangefinderResult(34.0, 109.0, 10.0, 60.0, "NORMAL", .5, .5),
         LaserRangefinderResult(34.00001, 109.00001, 11.0, 61.0, "NORMAL", .5, .5),
@@ -430,6 +519,7 @@ class VisibleFireLaserLocatorTest {
         private val awaitBarrier: CompletableDeferred<Unit>? = null,
         private val fixedObservationSequence: Long? = null,
         private val hardwareGenerationOffset: Long = 0,
+        private val sampleOffsetsMs: MutableList<Long>? = null,
     ) : LaserRangefinderClient, BoundLaserObservationClient {
         var disableCalls = 0
         var enableCalls = 0
@@ -470,14 +560,14 @@ class VisibleFireLaserLocatorTest {
             if (results.isEmpty()) return LaserHardwareAwaitResult.Timeout
             val result = results.removeAt(0)
             observationSequence = fixedObservationSequence ?: observationSequence + 1
+            val sampledAt = sampleOffsetsMs?.removeAt(0) ?: (observationSequence - 1) * 300
             return LaserHardwareAwaitResult.Observed(
                 BoundLaserSample(
                     binding = token.binding,
                     hardwareOperationGeneration =
                         token.hardwareOperationGeneration + hardwareGenerationOffset,
                     observationSequence = observationSequence,
-                    sampledAtMonotonicMs = token.binding.windowStartedAtMonotonicMs +
-                        (observationSequence - 1) * 300,
+                    sampledAtMonotonicMs = token.binding.windowStartedAtMonotonicMs + sampledAt,
                     measurement = result,
                 ),
             )
@@ -505,6 +595,21 @@ class VisibleFireLaserLocatorTest {
         }
     }
 
+    private class CancellableMissionHold(
+        private val firstGate: CompletableDeferred<Unit>,
+        private val firstResult: Boolean,
+    ) : MissionHoldControl {
+        private var calls = 0
+
+        override suspend fun holdForConfirmation(): Boolean {
+            calls += 1
+            if (calls == 1) firstGate.await()
+            return firstResult
+        }
+
+        override suspend fun resumeAfterConfirmation() = Unit
+    }
+
     private class SequenceVelocityProvider(
         private val values: MutableList<VelocitySample>,
         private val fallback: VelocitySample? = values.lastOrNull(),
@@ -520,6 +625,23 @@ class VisibleFireLaserLocatorTest {
 
         override suspend fun delayMs(durationMs: Long) {
             nowMs += durationMs
+        }
+    }
+
+    private class CancellableFirstDelayTime(
+        private val firstGate: CompletableDeferred<Unit>,
+    ) : VisibleFireTime {
+        private var first = true
+        private var current = 0L
+
+        override fun nowMs(): Long = current
+
+        override suspend fun delayMs(durationMs: Long) {
+            if (first) {
+                first = false
+                firstGate.await()
+            }
+            current += durationMs
         }
     }
 
@@ -544,6 +666,28 @@ class VisibleFireLaserLocatorTest {
             height: Double,
             speed: Double,
         ) = Unit
+        override suspend fun setNavigationLight(enabled: Boolean) = Unit
+    }
+
+    private class CancellableHoverFlightControl(
+        private val firstGate: CompletableDeferred<Unit>,
+    ) : FlightControlActionClient {
+        private var hoverCalls = 0
+
+        override suspend fun hover() {
+            hoverCalls += 1
+            if (hoverCalls == 1) firstGate.await()
+        }
+
+        override suspend fun startTakeoff() = Unit
+        override suspend fun startGoHome() = Unit
+        override suspend fun stopGoHome() = Unit
+        override suspend fun startAutoLanding() = Unit
+        override suspend fun stopAutoLanding() = Unit
+        override suspend fun emergencyStop() = Unit
+        override suspend fun stopFlyToPoint() = Unit
+        override suspend fun sendVirtualStick(key: String, durationMs: Long) = Unit
+        override suspend fun flyToPoint(latitude: Double, longitude: Double, height: Double, speed: Double) = Unit
         override suspend fun setNavigationLight(enabled: Boolean) = Unit
     }
 

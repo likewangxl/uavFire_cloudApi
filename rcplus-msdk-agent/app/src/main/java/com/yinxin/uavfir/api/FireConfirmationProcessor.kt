@@ -933,10 +933,97 @@ class DjiBatteryProvider : BatteryProvider {
     }
 }
 
-class DjiLaserRangefinderClient(
-    private val keyManager: KeyManager = KeyManager.getInstance(),
+internal interface DjiLaserHardwareAccess {
+    fun listen(owner: Any, observer: (LaserRangefinderResult) -> Unit)
+    fun cancelListen(owner: Any)
+    suspend fun enable()
+    suspend fun disable()
+    suspend fun current(): LaserRangefinderResult?
+}
+
+private class KeyManagerDjiLaserHardwareAccess(
+    private val keyManager: KeyManager,
+) : DjiLaserHardwareAccess {
+    private val informationKey = laserKey(DJICameraKey.KeyLaserMeasureInformation)
+
+    override fun listen(owner: Any, observer: (LaserRangefinderResult) -> Unit) {
+        keyManager.listen(
+            informationKey,
+            owner,
+            false,
+            object : CommonCallbacks.KeyListener<LaserMeasureInformation> {
+                override fun onValueChange(
+                    oldValue: LaserMeasureInformation?,
+                    newValue: LaserMeasureInformation?,
+                ) {
+                    newValue?.let { observer(it.toResult()) }
+                }
+            },
+        )
+    }
+
+    override fun cancelListen(owner: Any) {
+        keyManager.cancelListen(informationKey, owner)
+    }
+
+    override suspend fun enable() {
+        setValue(laserKey(DJICameraKey.KeyLaserWorkMode), LaserWorkMode.OPEN_ON_DEMAND)
+        setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), true)
+    }
+
+    override suspend fun disable() {
+        setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
+    }
+
+    override suspend fun current(): LaserRangefinderResult? = getValue(informationKey)?.toResult()
+
+    private fun <T> laserKey(keyInfo: dji.sdk.keyvalue.key.DJIKeyInfo<T>): DJIKey<T> =
+        KeyTools.createCameraKey(
+            keyInfo,
+            ComponentIndexType.LEFT_OR_MAIN,
+            CameraLensType.CAMERA_LENS_ZOOM,
+        )
+
+    private suspend fun <T> setValue(key: DJIKey<T>, value: T) {
+        suspendCancellableCoroutine<Unit> { continuation ->
+            keyManager.setValue(key, value, object : CommonCallbacks.CompletionCallback {
+                override fun onSuccess() {
+                    continuation.takeIf { it.isActive }?.resume(Unit)
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    continuation.takeIf { it.isActive }
+                        ?.resumeWithException(IllegalStateException(error.description()))
+                }
+            })
+        }
+    }
+
+    private suspend fun <T> getValue(key: DJIKey<T>): T? =
+        suspendCancellableCoroutine { continuation ->
+            keyManager.getValue(key, object : CommonCallbacks.CompletionCallbackWithParam<T> {
+                override fun onSuccess(result: T?) {
+                    continuation.takeIf { it.isActive }?.resume(result)
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    continuation.takeIf { it.isActive }
+                        ?.resumeWithException(IllegalStateException(error.description()))
+                }
+            })
+        }
+}
+
+class DjiLaserRangefinderClient internal constructor(
+    private val hardwareAccess: DjiLaserHardwareAccess,
     private val settleMs: Long = 500L,
+    private val nowMonotonicMs: () -> Long = SystemClock::elapsedRealtime,
 ) : LaserRangefinderClient, BoundLaserObservationClient {
+    constructor(
+        keyManager: KeyManager = KeyManager.getInstance(),
+        settleMs: Long = 500L,
+    ) : this(KeyManagerDjiLaserHardwareAccess(keyManager), settleMs, SystemClock::elapsedRealtime)
+
     private val operationMutex = Mutex()
     private var enabled = false
     private var activeObservationOperation: ActiveLaserObservationOperation? = null
@@ -973,10 +1060,7 @@ class DjiLaserRangefinderClient(
 
     override suspend fun enable() = operationMutex.withLock {
         if (!enabled) {
-            val workModeKey = laserKey(DJICameraKey.KeyLaserWorkMode)
-            val enabledKey = laserKey(DJICameraKey.KeyLaserMeasureEnabled)
-            setValue(workModeKey, LaserWorkMode.OPEN_ON_DEMAND)
-            setValue(enabledKey, true)
+            hardwareAccess.enable()
             enabled = true
             delay(settleMs)
         }
@@ -986,14 +1070,12 @@ class DjiLaserRangefinderClient(
         // Keep legacy callers self-contained while the local locator explicitly
         // brackets one bounded operation with enable/disable.
         enable()
-        val informationKey = laserKey(DJICameraKey.KeyLaserMeasureInformation)
-        val information = getValue(informationKey) ?: return null
-        return information.toResult()
+        return hardwareAccess.current()
     }
 
     override suspend fun disable() = operationMutex.withLock {
         try {
-            setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
+            hardwareAccess.disable()
         } finally {
             enabled = false
         }
@@ -1004,25 +1086,18 @@ class DjiLaserRangefinderClient(
     ): LaserHardwareOperationToken = operationMutex.withLock {
         check(activeObservationOperation == null) { "laser-operation-already-active" }
         val operation = ActiveLaserObservationOperation(binding)
-        activeObservationOperation = operation
-        val informationKey = laserKey(DJICameraKey.KeyLaserMeasureInformation)
-        keyManager.listen(
-            informationKey,
-            operation.listenerOwner,
-            false,
-            object : CommonCallbacks.KeyListener<LaserMeasureInformation> {
-                override fun onValueChange(
-                    oldValue: LaserMeasureInformation?,
-                    newValue: LaserMeasureInformation?,
-                ) {
-                    newValue?.let { operation.publish(it.toResult(), SystemClock.elapsedRealtime()) }
-                }
-            },
-        )
+        var listenAttempted = false
+        var enableAttempted = false
         try {
+            activeObservationOperation = operation
+            listenAttempted = true
+            hardwareAccess.listen(operation.listenerOwner) { result ->
+                operation.publish(result, nowMonotonicMs())
+            }
+            enableAttempted = true
             enableHardware()
             delay(settleMs)
-            val enabledAt = SystemClock.elapsedRealtime()
+            val enabledAt = nowMonotonicMs()
             val cursor = operation.observations.value.lastSequence
             LaserHardwareOperationToken(
                 binding = binding,
@@ -1031,9 +1106,11 @@ class DjiLaserRangefinderClient(
                 enabledAtMonotonicMs = enabledAt,
             ).also { operation.token = it }
         } catch (error: Throwable) {
-            keyManager.cancelListen(informationKey, operation.listenerOwner)
-            runCatching { disableHardware() }
-            activeObservationOperation = null
+            withContext(NonCancellable) {
+                if (enableAttempted) runCatching { disableHardware() }
+                if (listenAttempted) runCatching { hardwareAccess.cancelListen(operation.listenerOwner) }
+                if (activeObservationOperation === operation) activeObservationOperation = null
+            }
             throw error
         }
     }
@@ -1069,61 +1146,30 @@ class DjiLaserRangefinderClient(
     override suspend fun endOperation(token: LaserHardwareOperationToken) =
         operationMutex.withLock {
             val operation = activeObservationOperation?.takeIf { it.token == token } ?: return@withLock
-            try {
-                disableHardware()
-            } finally {
-                keyManager.cancelListen(
-                    laserKey(DJICameraKey.KeyLaserMeasureInformation),
-                    operation.listenerOwner,
-                )
-                activeObservationOperation = null
+            var cleanupFailure: Throwable? = null
+            withContext(NonCancellable) {
+                runCatching { disableHardware() }
+                    .onFailure { cleanupFailure = it }
+                runCatching { hardwareAccess.cancelListen(operation.listenerOwner) }
+                    .onFailure { failure ->
+                        cleanupFailure?.addSuppressed(failure) ?: run { cleanupFailure = failure }
+                    }
+                if (activeObservationOperation === operation) activeObservationOperation = null
             }
+            cleanupFailure?.let { throw IllegalStateException("laser-operation-cleanup-failed", it) }
+            Unit
         }
 
     private suspend fun enableHardware() {
-        setValue(laserKey(DJICameraKey.KeyLaserWorkMode), LaserWorkMode.OPEN_ON_DEMAND)
-        setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), true)
+        hardwareAccess.enable()
         enabled = true
     }
 
     private suspend fun disableHardware() {
         try {
-            setValue(laserKey(DJICameraKey.KeyLaserMeasureEnabled), false)
+            hardwareAccess.disable()
         } finally {
             enabled = false
-        }
-    }
-
-    private fun <T> laserKey(keyInfo: dji.sdk.keyvalue.key.DJIKeyInfo<T>): DJIKey<T> =
-        KeyTools.createCameraKey(keyInfo, ComponentIndexType.LEFT_OR_MAIN, CameraLensType.CAMERA_LENS_ZOOM)
-
-    private suspend fun <T> setValue(key: DJIKey<T>, value: T) {
-        suspendCancellableCoroutine<Unit> { continuation ->
-            keyManager.setValue(key, value, object : CommonCallbacks.CompletionCallback {
-                override fun onSuccess() {
-                    continuation.takeIf { it.isActive }?.resume(Unit)
-                }
-
-                override fun onFailure(error: IDJIError) {
-                    continuation.takeIf { it.isActive }
-                        ?.resumeWithException(IllegalStateException(error.description()))
-                }
-            })
-        }
-    }
-
-    private suspend fun <T> getValue(key: DJIKey<T>): T? {
-        return suspendCancellableCoroutine { continuation ->
-            keyManager.getValue(key, object : CommonCallbacks.CompletionCallbackWithParam<T> {
-                override fun onSuccess(result: T?) {
-                    continuation.takeIf { it.isActive }?.resume(result)
-                }
-
-                override fun onFailure(error: IDJIError) {
-                    continuation.takeIf { it.isActive }
-                        ?.resumeWithException(IllegalStateException(error.description()))
-                }
-            })
         }
     }
 

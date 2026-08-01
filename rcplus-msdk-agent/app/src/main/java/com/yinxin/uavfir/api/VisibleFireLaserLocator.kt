@@ -276,45 +276,59 @@ class VisibleFireLaserLocator(
             Ownership.LocalHolding(sessionId, eventId, generation)
         }
         ownership = holding
-        val routePaused = runCatching { missionHold.holdForConfirmation() }.getOrDefault(false)
-        if (!routePaused) {
-            val hoverFailure = runCatching { flightControl.hover() }.exceptionOrNull()
-            if (hoverFailure != null) {
-                compareAndClear(holding)
-                return failureFor(eventId, "hover-command-failed")
+        try {
+            val routePaused = try {
+                missionHold.holdForConfirmation()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
             }
-        }
-        val startedAt = time.nowMs()
-        var stableSince: Long? = null
-        while (time.nowMs() - startedAt <= HOVER_TIMEOUT_MS) {
-            val sample = velocityProvider.current()
-            val stable = sample != null &&
-                sample.horizontalMps <= MAX_HORIZONTAL_SPEED_MPS &&
-                abs(sample.verticalMps) <= MAX_VERTICAL_SPEED_MPS
-            val now = time.nowMs()
-            if (stable) {
-                if (stableSince == null) {
-                    stableSince = now
+            if (!routePaused) {
+                try {
+                    flightControl.hover()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    return failureFor(eventId, "hover-command-failed")
                 }
-                if (now - stableSince >= REQUIRED_STABLE_MS) {
-                    ownership = if (holding is Ownership.LocalHolding) {
-                        Ownership.LocalHeld(holding.sessionId, eventId, generation)
-                    } else {
-                        Ownership.LegacyHeld(eventId, generation)
+            }
+            val startedAt = time.nowMs()
+            var stableSince: Long? = null
+            while (time.nowMs() - startedAt <= HOVER_TIMEOUT_MS) {
+                val sample = velocityProvider.current()
+                val stable = sample != null &&
+                    sample.horizontalMps <= MAX_HORIZONTAL_SPEED_MPS &&
+                    abs(sample.verticalMps) <= MAX_VERTICAL_SPEED_MPS
+                val now = time.nowMs()
+                if (stable) {
+                    if (stableSince == null) {
+                        stableSince = now
                     }
-                    return DualStreamSessionManager.CommandExecutionResult(
-                        status = "applied",
-                        message = "HOVER_STABLE",
-                        eventId = eventId,
-                    )
+                    if (now - stableSince >= REQUIRED_STABLE_MS) {
+                        ownership = if (holding is Ownership.LocalHolding) {
+                            Ownership.LocalHeld(holding.sessionId, eventId, generation)
+                        } else {
+                            Ownership.LegacyHeld(eventId, generation)
+                        }
+                        return DualStreamSessionManager.CommandExecutionResult(
+                            status = "applied",
+                            message = "HOVER_STABLE",
+                            eventId = eventId,
+                        )
+                    }
+                } else {
+                    stableSince = null
                 }
-            } else {
-                stableSince = null
+                time.delayMs(VELOCITY_POLL_MS)
             }
-            time.delayMs(VELOCITY_POLL_MS)
+            return failureFor(eventId, "hover-stability-timeout")
+        } finally {
+            // A successful hold has already transitioned to *Held. Every
+            // exception/cancellation/timeout clears only this exact transient
+            // token so a later hold can recover without stealing another owner.
+            compareAndClear(holding)
         }
-        compareAndClear(holding)
-        return failureFor(eventId, "hover-stability-timeout")
     }
 
     suspend fun measure(
@@ -480,7 +494,11 @@ class VisibleFireLaserLocator(
                             FireLocalizationFailure.SOURCE_GENERATION_CHANGED,
                         )
                     }
-                    if (isNewObservation &&
+                    val intervalEligible = accepted.lastOrNull()?.let { previous ->
+                        sample.sampledAtMonotonicMs - previous.sampledAtMonotonicMs >=
+                            LASER_SAMPLE_INTERVAL_MS
+                    } ?: true
+                    if (isNewObservation && intervalEligible &&
                         laserSampleValidator.isAcceptableCandidate(binding, sample)
                     ) accepted += sample
                 }

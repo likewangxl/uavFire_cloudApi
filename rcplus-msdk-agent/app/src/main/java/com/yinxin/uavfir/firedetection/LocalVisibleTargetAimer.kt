@@ -53,7 +53,15 @@ data class LocalDetectionAwaitRequest(
     val sourceGeneration: Long,
     val capturedStrictlyAfterMonotonicMs: Long,
     val afterPublicationSequence: Long,
-)
+) {
+    init {
+        require(sessionId.isNotBlank())
+        require(eventId.isNotBlank())
+        require(sourceGeneration > 0)
+        require(capturedStrictlyAfterMonotonicMs >= 0)
+        require(afterPublicationSequence >= 0)
+    }
+}
 
 data class LocalVisibleDetectionObservation(
     val sessionId: String,
