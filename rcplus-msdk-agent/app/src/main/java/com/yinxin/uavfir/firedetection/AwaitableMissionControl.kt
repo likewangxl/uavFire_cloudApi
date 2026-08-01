@@ -15,6 +15,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -254,7 +256,7 @@ class AwaitableMissionControl(
     private var manualTakeover = false
     private var closed = false
 
-    suspend fun pause(): MissionHoldResult {
+    suspend fun pause(onSubmissionBoundary: () -> Unit = {}): MissionHoldResult {
         val captured = port.snapshot()
         val operation = synchronized(lock) {
             if (closed) return MissionHoldResult.ManualHold(FlightSafetyReason.CONTROL_CLOSED)
@@ -270,7 +272,7 @@ class AwaitableMissionControl(
                 if (it.key != key) return MissionHoldResult.ManualHold(FlightSafetyReason.MISSION_IDENTITY_MISMATCH)
                 it.waiters++
                 it
-            } ?: newPauseOperation(captured)
+            } ?: newPauseOperation(captured, onSubmissionBoundary)
         }
         return awaitShared(operation, MissionHoldResult.ManualHold(FlightSafetyReason.MANUAL_CONTROL_TAKEOVER))
     }
@@ -278,6 +280,7 @@ class AwaitableMissionControl(
     suspend fun resume(
         token: MissionHoldToken,
         controlSession: FireControlSessionKey,
+        onSubmissionBoundary: () -> Unit = {},
     ): MissionResumeResult {
         val operationKey = ResumeOperationKey(token, controlSession)
         val operation = synchronized(lock) {
@@ -316,7 +319,7 @@ class AwaitableMissionControl(
                 }
                 it.waiters++
                 it
-            } ?: newResumeOperation(token, controlSession)
+            } ?: newResumeOperation(token, controlSession, onSubmissionBoundary)
         }
         return awaitShared(operation, MissionResumeResult.ManualHold(FlightSafetyReason.RESUME_OUTCOME_UNKNOWN))
     }
@@ -338,8 +341,13 @@ class AwaitableMissionControl(
         jobs.forEach { it.cancel(CancellationException("mission-control-closed")) }
     }
 
-    private fun newPauseOperation(captured: MissionSnapshot): SharedOperation<MissionHoldResult> {
-        val deferred = scope.async(start = CoroutineStart.LAZY) { performPause(captured) }
+    private fun newPauseOperation(
+        captured: MissionSnapshot,
+        onSubmissionBoundary: () -> Unit,
+    ): SharedOperation<MissionHoldResult> {
+        val deferred = scope.async(start = CoroutineStart.LAZY) {
+            performPause(captured, onSubmissionBoundary)
+        }
         val op = SharedOperation(deferred, 1, captured.mission)
         pauseOperation = op
         deferred.invokeOnCompletion {
@@ -357,8 +365,11 @@ class AwaitableMissionControl(
     private fun newResumeOperation(
         token: MissionHoldToken,
         controlSession: FireControlSessionKey,
+        onSubmissionBoundary: () -> Unit,
     ): SharedOperation<MissionResumeResult> {
-        val deferred = scope.async(start = CoroutineStart.LAZY) { performResume(token, controlSession) }
+        val deferred = scope.async(start = CoroutineStart.LAZY) {
+            performResume(token, controlSession, onSubmissionBoundary)
+        }
         val key = ResumeOperationKey(token, controlSession)
         val op = SharedOperation(deferred, 1, key)
         resumeOperation = op
@@ -393,7 +404,10 @@ class AwaitableMissionControl(
         return op
     }
 
-    private suspend fun performPause(captured: MissionSnapshot): MissionHoldResult {
+    private suspend fun performPause(
+        captured: MissionSnapshot,
+        onSubmissionBoundary: () -> Unit,
+    ): MissionHoldResult {
         val mission = captured.mission
         if (mission == null) {
             return if (captured.state in NO_ACTIVE_STATES) {
@@ -425,6 +439,7 @@ class AwaitableMissionControl(
             mission,
             ObservedMissionState.INTERRUPTED,
             setOf(ObservedMissionState.EXECUTING, ObservedMissionState.INTERRUPTED),
+            onSubmitted = { onSubmissionBoundary() },
         ) { callback, boundary -> port.pause(mission, boundary, callback) }
         return when {
             outcome.error == null &&
@@ -441,6 +456,7 @@ class AwaitableMissionControl(
     private suspend fun performResume(
         token: MissionHoldToken,
         controlSession: FireControlSessionKey,
+        onSubmissionBoundary: () -> Unit,
     ): MissionResumeResult {
         val initial = port.snapshot()
         if (initial.mission != token.mission) {
@@ -494,6 +510,7 @@ class AwaitableMissionControl(
                     }
                     claimCommitted = true
                     synchronized(lock) { resumeLifecycle[key] = ResumeLifecycle.SUBMITTED }
+                    onSubmissionBoundary()
                 },
             ) { callback, boundary -> port.resume(token.mission, token.breakpoint, boundary, callback) }
         } finally {
@@ -647,7 +664,8 @@ class AwaitableMissionControl(
     private suspend fun <T> awaitShared(op: SharedOperation<T>, cancellationResult: T): T {
         try {
             return op.deferred.await()
-        } catch (_: CancellationException) {
+        } catch (cancelled: CancellationException) {
+            if (!currentCoroutineContext().isActive) throw cancelled
             return cancellationResult
         } finally {
             synchronized(lock) {

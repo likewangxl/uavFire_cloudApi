@@ -26,6 +26,16 @@ import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.firedetection.LatestVisibleFrameBuffer
 import com.yinxin.uavfir.firedetection.AwaitableMissionControl
+import com.yinxin.uavfir.firedetection.AgentFireClosedLoopCoordinator
+import com.yinxin.uavfir.firedetection.AgentFireConfirmationBridge
+import com.yinxin.uavfir.firedetection.AgentFireMonitoringContext
+import com.yinxin.uavfir.firedetection.AgentFireRecoveryCoordinator
+import com.yinxin.uavfir.firedetection.ConfirmationHealth
+import com.yinxin.uavfir.firedetection.CoordinatorArmingHealth
+import com.yinxin.uavfir.firedetection.CoordinatorFlightObservation
+import com.yinxin.uavfir.firedetection.CoordinatorFlightObservationSource
+import com.yinxin.uavfir.firedetection.FlightSafetySignals
+import com.yinxin.uavfir.firedetection.FlightTelemetrySample
 import com.yinxin.uavfir.firedetection.FlightSafetyGate
 import com.yinxin.uavfir.firedetection.OwnedResumeSafetyEvidenceProvider
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
@@ -34,7 +44,22 @@ import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import com.yinxin.uavfir.firedetection.VisibleInferenceLoop
 import com.yinxin.uavfir.firedetection.VisibleInferenceResultJournal
 import com.yinxin.uavfir.firedetection.LocalVisibleTargetAimer
+import com.yinxin.uavfir.firedetection.StoreBackedCoordinatorOutboxPort
+import com.yinxin.uavfir.firedetection.Task7CoordinatorMissionPort
+import com.yinxin.uavfir.firedetection.Task8CoordinatorLocalizationPort
+import com.yinxin.uavfir.firedetection.VisibleConfirmationPolicy
+import com.yinxin.uavfir.firedetection.VisibleConfirmationTracker
+import com.yinxin.uavfir.firedetection.VisibleInferenceStatus
 import com.yinxin.uavfir.firedetection.WaypointMissionControlPort
+import com.yinxin.uavfir.firedetection.store.AndroidStoreClock
+import com.yinxin.uavfir.firedetection.store.CanonicalCoordinatorStoreRecordFactory
+import com.yinxin.uavfir.firedetection.store.CoordinatorModelIdentity
+import com.yinxin.uavfir.firedetection.store.FireOutboxDispatcher
+import com.yinxin.uavfir.firedetection.store.FireReportTransport
+import com.yinxin.uavfir.firedetection.store.FireStoreOpenHelper
+import com.yinxin.uavfir.firedetection.store.SendOutcome
+import com.yinxin.uavfir.firedetection.store.SqliteCoordinatorStoreAdapter
+import com.yinxin.uavfir.firedetection.store.SqliteFireSessionStore
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
@@ -59,6 +84,7 @@ import com.yinxin.uavfir.wayline.WaypointLocalKmzExecutor
 import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -78,13 +104,77 @@ class AppServices(
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val latestVisibleFrameBuffer = LatestVisibleFrameBuffer()
     private val visibleInferenceResults = VisibleInferenceResultJournal()
+    private val fireCoordinatorReference = AtomicReference<AgentFireClosedLoopCoordinator?>()
+    private val visibleConfirmationTracker = VisibleConfirmationTracker(
+        VisibleConfirmationPolicy(
+            maxCenterDistance = 0.08,
+            fireConfidence = 0.70f,
+            smokeConfidence = 0.65f,
+            nmsIou = com.yinxin.uavfir.firedetection.VisibleDetectorContract.NMS_IOU_THRESHOLD,
+        ),
+    )
+    private val fireStoreClock = AndroidStoreClock()
+    private val fireSessionStore = SqliteFireSessionStore(
+        FireStoreOpenHelper(application),
+        fireStoreClock,
+    )
+    private val coordinatorStore = SqliteCoordinatorStoreAdapter(
+        fireSessionStore,
+        CanonicalCoordinatorStoreRecordFactory(
+            fireStoreClock,
+            CoordinatorModelIdentity(
+                modelVersion = VISIBLE_MODEL_VERSION,
+                modelSha256 = VISIBLE_MODEL_SHA256,
+                inputSize = 960,
+                runtime = "NCNN",
+            ),
+        ),
+    )
+    private val coordinatorOutbox = StoreBackedCoordinatorOutboxPort(
+        fireSessionStore,
+        FireOutboxDispatcher(
+            fireSessionStore,
+            FireReportTransport {
+                // Task 10 owns the staged backend transport. Never synthesize
+                // a successful ACK through a legacy endpoint.
+                SendOutcome.TransientFailure("task10-transport-unavailable")
+            },
+        ),
+        appScope,
+    )
+    private val fireConfirmationBridge = AgentFireConfirmationBridge(
+        tracker = visibleConfirmationTracker,
+        monitoringContext = {
+            val generation = latestVisibleFrameBuffer.currentVisibleSourceGeneration()
+            val droneSn = activeThermalDroneSn()
+            if (sessionManager.thermalMonitoringEnabled && generation != null && droneSn != null) {
+                AgentFireMonitoringContext("fire-$droneSn", generation)
+            } else null
+        },
+        health = {
+            val detectorHealthy = visibleInferenceLoop?.snapshot()?.status == VisibleInferenceStatus.HEALTHY
+            ConfirmationHealth(
+                frameHealthy = latestVisibleFrameBuffer.currentVisibleSourceGeneration() != null,
+                modelHealthy = detectorHealthy,
+                runtimeHealthy = detectorHealthy,
+                storeHealthy = runCatching {
+                    fireSessionStore.loadActiveSessions()
+                    true
+                }.getOrDefault(false),
+            )
+        },
+        coordinator = fireCoordinatorReference::get,
+        scope = appScope,
+    )
     private val visibleFireDetectorArming = VisibleFireDetectorFactory.create(application)
-    private val visibleInferenceLoop = (visibleFireDetectorArming as? VisibleFireDetectorArmingResult.Armed)
+    private val visibleInferenceLoop: VisibleInferenceLoop? =
+        (visibleFireDetectorArming as? VisibleFireDetectorArmingResult.Armed)
         ?.let {
             VisibleInferenceLoop(
                 latestVisibleFrameBuffer,
                 it.detector,
                 resultPublisher = visibleInferenceResults,
+                confirmationObserver = fireConfirmationBridge,
             )
         }
     private val visibleFrameIngress: VisibleFrameIngress =
@@ -147,6 +237,24 @@ class AppServices(
         safetyProvider = resumeSafetyEvidenceOwner,
         monotonicNow = SystemClock::elapsedRealtime,
     )
+    private val coordinatorMission = Task7CoordinatorMissionPort(
+        missionControl = awaitableMissionControl,
+        safetyGate = flightSafetyGate,
+        safetyEvidenceOwner = resumeSafetyEvidenceOwner,
+        observationSource = CoordinatorFlightObservationSource {
+            val now = SystemClock.elapsedRealtime()
+            val velocity = com.yinxin.uavfir.api.DjiAircraftVelocityProvider().current()
+            CoordinatorFlightObservation(
+                telemetry = velocity?.let {
+                    FlightTelemetrySample(now, now, it.horizontalMps, it.verticalMps)
+                },
+                // Full manual/RTH/battery/avoidance signal adapter is not yet
+                // device-proven, so the arming snapshot below stays fail-closed.
+                signals = FlightSafetySignals(),
+            )
+        },
+        monotonicNow = SystemClock::elapsedRealtime,
+    )
     private val visibleFireLaserRangefinder = DjiLaserRangefinderClient()
     private val aircraftOsdTracker = DjiAircraftOsdTracker()
     private val localVisibleTargetAimer = LocalVisibleTargetAimer(
@@ -167,6 +275,44 @@ class AppServices(
         sourceGenerationGuard =
             latestVisibleFrameBuffer::currentVisibleSourceGeneration,
     ).also(sessionManager::attachVisibleFireLaserLocator)
+    private val coordinatorLocalization = Task8CoordinatorLocalizationPort(visibleFireLaserLocator)
+    private val fireClosedLoopCoordinator = AgentFireClosedLoopCoordinator(
+        store = coordinatorStore,
+        delivery = coordinatorOutbox,
+        mission = coordinatorMission,
+        localization = coordinatorLocalization,
+        armingHealth = {
+            val sourceGeneration = latestVisibleFrameBuffer.currentVisibleSourceGeneration()
+            val detectorHealthy = visibleInferenceLoop?.snapshot()?.status == VisibleInferenceStatus.HEALTHY
+            CoordinatorArmingHealth(
+                featureEnabled = BuildConfig.VISIBLE_FIRE_DETECTION_ENABLED,
+                backendMonitoringEnabled = sessionManager.thermalMonitoringEnabled,
+                visibleSourceActive = sourceGeneration != null,
+                sourceGenerationValid = sourceGeneration != null,
+                detectorHealthy = detectorHealthy,
+                storeHealthy = runCatching {
+                    fireSessionStore.loadActiveSessions()
+                    true
+                }.getOrDefault(false),
+                // Task 10 has not supplied the staged ACK transport yet.
+                outboxHealthy = false,
+                missionAdaptersHealthy = true,
+                // RC Plus is unavailable; full DJI safety-signal evidence is
+                // deliberately not represented as healthy.
+                safetyAdaptersHealthy = false,
+                manualHoldActive = runCatching {
+                    fireSessionStore.hasActiveManualHold()
+                }.getOrDefault(true),
+                competingOwnerActive = visibleFireLaserLocator.hasActiveOwnership(),
+            )
+        },
+    )
+    private val fireRecoveryCoordinator = AgentFireRecoveryCoordinator(
+        coordinatorStore,
+        coordinatorOutbox,
+        coordinatorLocalization,
+        coordinatorMission,
+    )
     private val fireConfirmationProcessor = FireConfirmationProcessor(
         sessionManager = sessionManager,
         flightControl = flightControlClient,
@@ -239,7 +385,17 @@ class AppServices(
     )
 
     init {
-        visibleInferenceLoop?.start(appScope)
+        fireCoordinatorReference.set(fireClosedLoopCoordinator)
+        appScope.launch {
+            runCatching { fireRecoveryCoordinator.recover() }.fold(
+                onSuccess = {
+                    // Startup force-safe/reconciliation always precedes new
+                    // inference and therefore new flight-control ownership.
+                    visibleInferenceLoop?.start(appScope)
+                },
+                onFailure = { Log.e(TAG, "fire recovery failed closed", it) },
+            )
+        }
         fireConfirmationRunnerBridge.runner = fireConfirmationProcessor::run
         thermalHotspotTriggerBridge.trigger = {
             activeThermalDroneSn()?.let { droneSn ->
@@ -343,6 +499,7 @@ class AppServices(
     }
 
     fun shutdown() {
+        fireCoordinatorReference.set(null)
         awaitableMissionControl.close()
         aircraftOsdTracker.close()
         visibleInferenceLoop?.close() ?: latestVisibleFrameBuffer.close()
@@ -352,11 +509,15 @@ class AppServices(
         runtimeLoop.stop()
         mqttPublisher.disconnect()
         appScope.cancel()
+        fireSessionStore.close()
     }
 
     companion object {
         private const val TAG = "AppServices"
         private const val AUTO_START_DELAY_MS: Long = 6_000
+        private const val VISIBLE_MODEL_VERSION = "visible-fire-wechat-best2-20260728"
+        private const val VISIBLE_MODEL_SHA256 =
+            "957bec7a567ce1f57f9a57187a6b085c7c95149b889773479d018e3ed5e9f650"
     }
 }
 

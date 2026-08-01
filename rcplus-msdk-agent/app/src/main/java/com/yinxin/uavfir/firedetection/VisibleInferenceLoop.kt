@@ -39,6 +39,15 @@ internal data class VisibleInferenceLoopHooks(
     val beforeJobPublication: () -> Unit = {},
 )
 
+fun interface VisibleInferenceConfirmationObserver {
+    /** Called on the inference worker while [frame] is still valid. Must not retain it. */
+    fun onInference(frame: VisibleRgbaFrame, result: VisibleDetectionResult, completedAtMillis: Long)
+
+    companion object {
+        val NO_OP = VisibleInferenceConfirmationObserver { _, _, _ -> }
+    }
+}
+
 /**
  * Single sequential consumer capped at 5 FPS. Lifecycle publication is
  * linearized under [lifecycleMonitor]; detector/metric work stays outside it.
@@ -50,6 +59,8 @@ class VisibleInferenceLoop internal constructor(
     private val hooks: VisibleInferenceLoopHooks = VisibleInferenceLoopHooks(),
     private val resultPublisher: VisibleInferenceResultPublisher =
         VisibleInferenceResultPublisher.NO_OP,
+    private val confirmationObserver: VisibleInferenceConfirmationObserver =
+        VisibleInferenceConfirmationObserver.NO_OP,
 ) : AutoCloseable {
     private val processing = AtomicBoolean(false)
     private val lifecycleMonitor = Any()
@@ -117,6 +128,7 @@ class VisibleInferenceLoop internal constructor(
                     error("detector-result-frame-timestamp-mismatch")
                 }
                 val completedAt = nowMillis()
+                confirmationObserver.onInference(frame, result, completedAt)
                 resultPublisher.publish(
                     VisibleInferencePublication(
                         sourceGeneration = frame.sourceGeneration,

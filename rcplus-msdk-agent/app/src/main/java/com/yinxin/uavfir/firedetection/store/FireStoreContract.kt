@@ -173,12 +173,27 @@ data class StagePersistenceRecord(
 }
 
 enum class StagePersistenceReason {
+    PAUSE_TIMEOUT,
+    PAUSE_FAILED,
+    HOVER_TIMEOUT,
+    MANUAL_TAKEOVER,
+    LOW_BATTERY,
+    RETURN_TO_HOME,
+    OBSTACLE_AVOIDANCE,
+    FLIGHT_ERROR,
     UNKNOWN_MISSION_STATE,
     MISSING_BREAKPOINT,
+    BREAKPOINT_MISMATCH,
+    ROI_OR_LASER_FAILURE,
+    AIRCRAFT_OSD_UNAVAILABLE,
     MANUAL_INTERVENTION,
     STORAGE_FAILURE,
     DETECTOR_FAILURE,
+    LASER_DISABLE_UNCERTAIN,
     RESUME_FAILURE,
+    CANCELLED_AFTER_FLIGHT_SUBMISSION,
+    STARTUP_RECOVERY_UNCERTAIN,
+    STALE_SESSION_EVIDENCE,
     STARTUP_FLIGHT_STATE_UNRECONCILED,
 }
 
@@ -239,6 +254,13 @@ sealed interface DurableWriteResult {
     data object ExactDuplicate : DurableWriteResult
     data class Conflict(val reason: String) : DurableWriteResult
     data class Rejected(val reason: String) : DurableWriteResult
+}
+
+data class SequencedDurableWrite(
+    val result: DurableWriteResult,
+    val sequence: Long,
+) {
+    init { require(sequence > 0) }
 }
 
 data class DurableFireSession(

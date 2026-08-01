@@ -281,6 +281,7 @@ class SqliteFireSessionStoreTest {
             ),
         )
         assertEquals(FireSessionState.MANUAL_HOLD, store.loadActiveSessions().single().state)
+        assertTrue(store.hasActiveManualHold())
     }
 
     @Test
@@ -514,6 +515,55 @@ class SqliteFireSessionStoreTest {
         assertTrue(store.persistTerminalResult(forged) is DurableWriteResult.Conflict)
         assertEquals(DurableWriteResult.Written, store.persistTerminalResult(terminalRecord()))
         assertEquals(DurableWriteResult.ExactDuplicate, store.persistTerminalResult(terminalRecord()))
+    }
+
+    @Test
+    fun unboundLaserMeasurementIsDurableBeforeTerminalTypeIsKnown() {
+        store.persistInitialConfirmation(initialRecord())
+        listOf(
+            FireSessionState.HOLD_REQUESTED,
+            FireSessionState.HOVER_VERIFYING,
+            FireSessionState.TARGET_ALIGNING,
+        ).forEachIndexed { index, state -> store.persistStage(stageRecord(index + 2L, state)) }
+
+        val measuring = store.persistUnboundLaserMeasurement(
+            stageRecord(5, FireSessionState.LASER_MEASURING),
+        )
+        assertEquals(DurableWriteResult.Written, measuring)
+        assertEquals(FireSessionState.LASER_MEASURING, store.loadActiveSessions().single().state)
+        assertEquals(LocationStatus.LASER_LOCATING, store.loadActiveSessions().single().locationStatus)
+
+        val degradedRequest = terminalRequest(
+            locationStatus = LocationStatus.DEGRADED_OSD,
+            geoMethod = GeoMethod.AIRCRAFT_OBSERVATION,
+        )
+        val degraded = degradedTerminalRecord(degradedRequest)
+        assertEquals(
+            SequencedDurableWrite(DurableWriteResult.Written, 6),
+            store.persistNextTerminal { degraded.copy(sequence = it) },
+        )
+        assertEquals(
+            SequencedDurableWrite(DurableWriteResult.ExactDuplicate, 6),
+            store.persistNextTerminal { degraded.copy(sequence = it) },
+        )
+        assertEquals((1L..6L).toList(), store.loadPendingOutbox().map { it.sequence })
+        assertEquals(LocationStatus.DEGRADED_OSD, store.loadActiveSessions().single().locationStatus)
+        assertEquals(GeoMethod.AIRCRAFT_OBSERVATION, store.loadActiveSessions().single().geoMethod)
+    }
+
+    @Test
+    fun allocatedWritesChooseContiguousSequenceInsideStoreTransaction() {
+        store.persistInitialConfirmation(initialRecord())
+        val hold = store.persistNextStage { sequence ->
+            stageRecord(sequence, FireSessionState.HOLD_REQUESTED)
+        }
+        val hover = store.persistNextStage { sequence ->
+            stageRecord(sequence, FireSessionState.HOVER_VERIFYING)
+        }
+
+        assertEquals(SequencedDurableWrite(DurableWriteResult.Written, 2), hold)
+        assertEquals(SequencedDurableWrite(DurableWriteResult.Written, 3), hover)
+        assertEquals(listOf(1L, 2L, 3L), store.loadPendingOutbox().map { it.sequence })
     }
 
     @Test

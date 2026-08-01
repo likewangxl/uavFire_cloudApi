@@ -18,6 +18,9 @@ import com.yinxin.uavfir.firedetection.LocalTargetAimFailure
 import com.yinxin.uavfir.firedetection.LocalTargetAimResult
 import com.yinxin.uavfir.firedetection.LocalVisibleTargetAimerPort
 import com.yinxin.uavfir.firedetection.LocalTargetAlignmentAction
+import com.yinxin.uavfir.firedetection.FireControlSessionKey
+import com.yinxin.uavfir.firedetection.MissionHoldToken
+import com.yinxin.uavfir.firedetection.StableHoverEvidence
 import com.yinxin.uavfir.firedetection.TargetActionReceipt
 import com.yinxin.uavfir.firedetection.VisibleSourceGenerationGuard
 import dji.sdk.keyvalue.key.FlightControllerKey
@@ -50,6 +53,20 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+
+enum class VerifiedHoldAdoptionFailure {
+    INVALID_IDENTITY,
+    CONTROL_SESSION_MISMATCH,
+    MISSION_MISMATCH,
+    PAUSE_GENERATION_MISMATCH,
+    INVALID_HOVER_EVIDENCE,
+    OWNER_BUSY,
+}
+
+sealed interface VerifiedHoldAdoptionResult {
+    data object Adopted : VerifiedHoldAdoptionResult
+    data class Rejected(val reason: VerifiedHoldAdoptionFailure) : VerifiedHoldAdoptionResult
+}
 
 data class VelocitySample(
     val horizontalMps: Double,
@@ -225,6 +242,15 @@ class VisibleFireLaserLocator(
     private val sourceGenerationGuard: VisibleSourceGenerationGuard =
         VisibleSourceGenerationGuard { null },
 ) {
+    private data class VerifiedHoldBinding(
+        val controlSession: FireControlSessionKey,
+        val sessionId: String,
+        val eventId: String,
+        val coordinatorGeneration: Long,
+        val missionToken: MissionHoldToken,
+        val stableHoverEvidence: StableHoverEvidence,
+    )
+
     private sealed interface Ownership {
         val generation: Long
         val eventId: String
@@ -237,11 +263,13 @@ class VisibleFireLaserLocator(
             val sessionId: String,
             override val eventId: String,
             override val generation: Long,
+            val verifiedBinding: VerifiedHoldBinding? = null,
         ) : Ownership
         data class LocalOperating(
             val sessionId: String,
             override val eventId: String,
             override val generation: Long,
+            val verifiedBinding: VerifiedHoldBinding? = null,
         ) : Ownership
         data class LegacyHolding(override val eventId: String, override val generation: Long) : Ownership
         data class LegacyHeld(override val eventId: String, override val generation: Long) : Ownership
@@ -250,7 +278,11 @@ class VisibleFireLaserLocator(
 
     private val ownershipGeneration = AtomicLong()
     private val controlMutex = Mutex()
+    @Volatile
     private var ownership: Ownership? = null
+
+    /** Read-only arming snapshot; exact ownership mutations remain mutex-bound. */
+    fun hasActiveOwnership(): Boolean = ownership != null
 
     suspend fun hold(eventId: String): DualStreamSessionManager.CommandExecutionResult =
         controlMutex.withLock { holdLocked(sessionId = null, eventId = eventId) }
@@ -261,6 +293,151 @@ class VisibleFireLaserLocator(
     ): DualStreamSessionManager.CommandExecutionResult = controlMutex.withLock {
         if (sessionId.isBlank()) return@withLock failureFor(eventId, "session-id-required")
         holdLocked(sessionId, eventId)
+    }
+
+    /**
+     * Adopts Task 7's already-observed pause and stable-hover proofs. This is
+     * the coordinator-only path: it never submits another pause or hover.
+     */
+    suspend fun adoptVerifiedHold(
+        missionToken: MissionHoldToken,
+        stableHoverEvidence: StableHoverEvidence,
+        controlSession: FireControlSessionKey,
+        sessionId: String,
+        eventId: String,
+        generation: Long,
+    ): VerifiedHoldAdoptionResult = controlMutex.withLock {
+        if (sessionId.isBlank() || eventId.isBlank() || generation <= 0 ||
+            !missionToken.breakpoint.isValid
+        ) {
+            return@withLock VerifiedHoldAdoptionResult.Rejected(
+                VerifiedHoldAdoptionFailure.INVALID_IDENTITY,
+            )
+        }
+        if (controlSession.sessionId != sessionId || controlSession.generation != generation) {
+            return@withLock VerifiedHoldAdoptionResult.Rejected(
+                VerifiedHoldAdoptionFailure.CONTROL_SESSION_MISMATCH,
+            )
+        }
+        val hoverBinding = stableHoverEvidence.binding
+        if (hoverBinding.controlSession != controlSession) {
+            return@withLock VerifiedHoldAdoptionResult.Rejected(
+                VerifiedHoldAdoptionFailure.CONTROL_SESSION_MISMATCH,
+            )
+        }
+        if (hoverBinding.mission != missionToken.mission) {
+            return@withLock VerifiedHoldAdoptionResult.Rejected(
+                VerifiedHoldAdoptionFailure.MISSION_MISMATCH,
+            )
+        }
+        if (hoverBinding.pausedCommandGeneration != missionToken.pausedCommandGeneration) {
+            return@withLock VerifiedHoldAdoptionResult.Rejected(
+                VerifiedHoldAdoptionFailure.PAUSE_GENERATION_MISMATCH,
+            )
+        }
+        if (stableHoverEvidence.hoverEpoch < 0 ||
+            stableHoverEvidence.issuedAtMonotonicMs < 0 || stableHoverEvidence.nonce <= 0
+        ) {
+            return@withLock VerifiedHoldAdoptionResult.Rejected(
+                VerifiedHoldAdoptionFailure.INVALID_HOVER_EVIDENCE,
+            )
+        }
+        val binding = VerifiedHoldBinding(
+            controlSession,
+            sessionId,
+            eventId,
+            generation,
+            missionToken,
+            stableHoverEvidence,
+        )
+        val current = ownership
+        if (current is Ownership.LocalHeld && current.verifiedBinding == binding) {
+            return@withLock VerifiedHoldAdoptionResult.Adopted
+        }
+        if (current != null) {
+            return@withLock VerifiedHoldAdoptionResult.Rejected(
+                VerifiedHoldAdoptionFailure.OWNER_BUSY,
+            )
+        }
+        ownership = Ownership.LocalHeld(
+            sessionId = sessionId,
+            eventId = eventId,
+            generation = ownershipGeneration.incrementAndGet(),
+            verifiedBinding = binding,
+        )
+        VerifiedHoldAdoptionResult.Adopted
+    }
+
+    /**
+     * Disables laser hardware and clears only the exact adopted coordinator
+     * owner. A stale cleanup request cannot disturb another fire session.
+     * Returns false for an identity mismatch; hardware cleanup failures throw
+     * after exact ownership has still been cleared.
+     */
+    suspend fun forceSafeCleanup(
+        controlSession: FireControlSessionKey,
+        sessionId: String,
+        eventId: String,
+        generation: Long,
+    ): Boolean = controlMutex.withLock {
+        val current = ownership
+        if (current != null && !current.matchesAdoptedOwner(
+                controlSession,
+                sessionId,
+                eventId,
+                generation,
+            )
+        ) return@withLock false
+
+        var cleanupFailure: Throwable? = null
+        try {
+            withContext(NonCancellable) {
+                try {
+                    laserRangefinder.disable()
+                } catch (failure: Throwable) {
+                    cleanupFailure = failure
+                }
+            }
+        } finally {
+            if (current != null) compareAndClear(current)
+        }
+        cleanupFailure?.let { failure ->
+            when (failure) {
+                is CancellationException -> throw failure
+                is Error -> throw failure
+                else -> throw IllegalStateException("laser-force-safe-cleanup-failed", failure)
+            }
+        }
+        true
+    }
+
+    /**
+     * Startup-recovery escape hatch for a fresh process that has no durable
+     * in-memory ownership token to present. It always attempts to disable the
+     * laser and clears local (never legacy command-route) ownership. Recovery
+     * must stop when this method surfaces a hardware cleanup failure.
+     */
+    suspend fun forceSafeStartupCleanup() = controlMutex.withLock {
+        val localOwner = ownership?.takeIf { it.isLocalOwner() }
+        var cleanupFailure: Throwable? = null
+        try {
+            withContext(NonCancellable) {
+                try {
+                    laserRangefinder.disable()
+                } catch (failure: Throwable) {
+                    cleanupFailure = failure
+                }
+            }
+        } finally {
+            localOwner?.let(::compareAndClear)
+        }
+        cleanupFailure?.let { failure ->
+            when (failure) {
+                is CancellationException -> throw failure
+                is Error -> throw failure
+                else -> throw IllegalStateException("laser-startup-cleanup-failed", failure)
+            }
+        }
     }
 
     private suspend fun holdLocked(
@@ -384,7 +561,10 @@ class VisibleFireLaserLocator(
         }
     }
 
-    suspend fun localize(request: FireLocalizationRequest): FireLocalizationResult = controlMutex.withLock {
+    suspend fun localize(
+        request: FireLocalizationRequest,
+        onLaserMeasurementBoundary: suspend () -> Boolean = { true },
+    ): FireLocalizationResult = controlMutex.withLock {
         val held = ownership as? Ownership.LocalHeld
         if (held == null || held.sessionId != request.sessionId || held.eventId != request.eventId) {
             return@withLock degradedOrManualHold(
@@ -392,11 +572,18 @@ class VisibleFireLaserLocator(
                 FireLocalizationFailure.EVENT_SESSION_MISMATCH,
             )
         }
-        val operating = Ownership.LocalOperating(held.sessionId, held.eventId, held.generation)
+        val operating = Ownership.LocalOperating(
+            held.sessionId,
+            held.eventId,
+            held.generation,
+            held.verifiedBinding,
+        )
         ownership = operating
         var hardwareToken: LaserHardwareOperationToken? = null
         try {
-            localizeOwned(request, operating) { hardwareToken = it }
+            localizeOwned(request, operating, onLaserMeasurementBoundary) {
+                hardwareToken = it
+            }
         } finally {
             hardwareToken?.let { token ->
                 withContext(NonCancellable) {
@@ -412,6 +599,7 @@ class VisibleFireLaserLocator(
     private suspend fun localizeOwned(
         request: FireLocalizationRequest,
         operating: Ownership.LocalOperating,
+        onLaserMeasurementBoundary: suspend () -> Boolean,
         onHardwareToken: (LaserHardwareOperationToken) -> Unit,
     ): FireLocalizationResult {
         val aimer = localTargetAimer ?: return degradedOrManualHold(
@@ -438,6 +626,22 @@ class VisibleFireLaserLocator(
             ) FireLocalizationFailure.TARGET_DETECTION_TIMEOUT
             else FireLocalizationFailure.TARGET_NOT_ALIGNED
             return degradedOrManualHold(request, failure)
+        }
+        if (!sameVisibleGeneration(aimed.sourceGeneration)) {
+            return degradedOrManualHold(request, FireLocalizationFailure.SOURCE_GENERATION_CHANGED)
+        }
+        val boundaryAccepted = try {
+            onLaserMeasurementBoundary()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        if (!boundaryAccepted) {
+            return FireLocalizationResult.ManualHold(
+                request.kind,
+                FireLocalizationFailure.LASER_ENABLE_FAILED,
+            )
         }
         if (!sameVisibleGeneration(aimed.sourceGeneration)) {
             return degradedOrManualHold(request, FireLocalizationFailure.SOURCE_GENERATION_CHANGED)
@@ -558,6 +762,29 @@ class VisibleFireLaserLocator(
 
     private fun compareAndClear(expected: Ownership) {
         if (ownership == expected) ownership = null
+    }
+
+    private fun Ownership.matchesAdoptedOwner(
+        controlSession: FireControlSessionKey,
+        sessionId: String,
+        eventId: String,
+        generation: Long,
+    ): Boolean {
+        val binding = when (this) {
+            is Ownership.LocalHeld -> verifiedBinding
+            is Ownership.LocalOperating -> verifiedBinding
+            else -> null
+        } ?: return false
+        return binding.controlSession == controlSession &&
+            binding.sessionId == sessionId && binding.eventId == eventId &&
+            binding.coordinatorGeneration == generation
+    }
+
+    private fun Ownership.isLocalOwner(): Boolean = when (this) {
+        is Ownership.LocalHolding,
+        is Ownership.LocalHeld,
+        is Ownership.LocalOperating -> true
+        else -> false
     }
 
     private fun failureFor(eventId: String, reason: String) =

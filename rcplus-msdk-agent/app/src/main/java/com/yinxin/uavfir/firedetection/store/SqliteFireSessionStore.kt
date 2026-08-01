@@ -68,16 +68,48 @@ class SqliteFireSessionStore(
         }
 
     fun persistTerminalResult(record: TerminalResultRecord): DurableWriteResult =
-        durableTransaction { database ->
+        durableTransaction { database -> persistTerminalResult(database, record) }
+
+    /** Allocates and commits the terminal sequence and result atomically. */
+    fun persistNextTerminal(
+        recordFactory: (sequence: Long) -> TerminalResultRecord,
+    ): SequencedDurableWrite {
+        var allocated = 1L
+        val result = durableTransaction { database ->
+            val probe = recordFactory(2)
+            val session = sessionById(database, probe.request.sessionId)
+            val existing = if (session?.terminalRequestId == probe.request.requestId) {
+                terminalOutbox(database, probe.request.eventId)
+            } else {
+                null
+            }
+            allocated = existing?.sequence ?: nextSequence(database, probe.request.eventId)
+            val record = recordFactory(allocated)
+            require(
+                record.request.sessionId == probe.request.sessionId &&
+                    record.request.eventId == probe.request.eventId &&
+                    record.request.requestId == probe.request.requestId,
+            ) {
+                "Terminal factory changed event identity"
+            }
+            persistTerminalResult(database, record)
+        }
+        return SequencedDurableWrite(result, allocated)
+    }
+
+    private fun persistTerminalResult(
+        database: SQLiteDatabase,
+        record: TerminalResultRecord,
+    ): DurableWriteResult {
             val canonical = CanonicalFireReport.terminal(record)
             val session = sessionById(database, record.request.sessionId)
-                ?: return@durableTransaction DurableWriteResult.Rejected("Initial session is not durable")
+                ?: return DurableWriteResult.Rejected("Initial session is not durable")
             if (session.eventId != record.request.eventId) {
-                return@durableTransaction DurableWriteResult.Conflict("Session/event identity mismatch")
+                return DurableWriteResult.Conflict("Session/event identity mismatch")
             }
             val existing = outboxByKey(database, record.request.eventId, record.sequence)
             if (session.terminalRequestId != null || existing != null) {
-                return@durableTransaction terminalDuplicateResult(
+                return terminalDuplicateResult(
                     database,
                     session,
                     existing,
@@ -86,24 +118,27 @@ class SqliteFireSessionStore(
                 )
             }
             if (session.state != FireSessionState.LASER_MEASURING) {
-                return@durableTransaction DurableWriteResult.Rejected(
+                return DurableWriteResult.Rejected(
                     "Terminal result requires LASER_MEASURING",
                 )
             }
-            if (
-                session.pendingTerminalRequestId != record.request.requestId ||
-                session.pendingLocationStatus != record.request.locationStatus ||
-                session.pendingGeoMethod != record.request.geoMethod
+            val hasPendingTerminal = session.pendingTerminalRequestId != null ||
+                session.pendingLocationStatus != null || session.pendingGeoMethod != null
+            if (hasPendingTerminal && (
+                    session.pendingTerminalRequestId != record.request.requestId ||
+                        session.pendingLocationStatus != record.request.locationStatus ||
+                        session.pendingGeoMethod != record.request.geoMethod
+                    )
             ) {
-                return@durableTransaction DurableWriteResult.Conflict(
+                return DurableWriteResult.Conflict(
                     "Terminal result does not match the durable pending request",
                 )
             }
             if (!hasOutboxSequence(database, record.request.eventId, 1)) {
-                return@durableTransaction DurableWriteResult.Rejected("Initial report is not durable")
+                return DurableWriteResult.Rejected("Initial report is not durable")
             }
             if (record.sequence != nextSequence(database, record.request.eventId)) {
-                return@durableTransaction DurableWriteResult.Rejected("Terminal sequence must be contiguous")
+                return DurableWriteResult.Rejected("Terminal sequence must be contiguous")
             }
 
             val values = ContentValues().apply {
@@ -144,25 +179,66 @@ class SqliteFireSessionStore(
                 FireSessionState.RESULT_DURABLE,
                 canonical,
             )
-            DurableWriteResult.Written
+            return DurableWriteResult.Written
         }
 
     fun persistStage(record: StagePersistenceRecord): DurableWriteResult =
+        durableTransaction { database -> persistStage(database, record, allowUnboundLaser = false) }
+
+    /**
+     * Persists the safety-critical measurement boundary without guessing the
+     * eventual PRECISE/DEGRADED terminal mapping. The exact mapping is bound by
+     * [persistTerminalResult] only after localization has produced a result.
+     */
+    fun persistUnboundLaserMeasurement(record: StagePersistenceRecord): DurableWriteResult =
         durableTransaction { database ->
-            if (record.state == FireSessionState.LASER_MEASURING) {
-                return@durableTransaction DurableWriteResult.Rejected(
+            require(record.state == FireSessionState.LASER_MEASURING) {
+                "Unbound measurement must enter LASER_MEASURING"
+            }
+            persistStage(database, record, allowUnboundLaser = true)
+        }
+
+    /** Allocates and commits the next event sequence in the same transaction. */
+    fun persistNextStage(
+        recordFactory: (sequence: Long) -> StagePersistenceRecord,
+    ): SequencedDurableWrite {
+        var allocated = 1L
+        val result = durableTransaction { database ->
+            val probe = recordFactory(2)
+            allocated = nextSequence(database, probe.eventId)
+            val record = recordFactory(allocated)
+            require(
+                record.sessionId == probe.sessionId && record.eventId == probe.eventId &&
+                    record.state == probe.state,
+            ) { "Stage factory changed identity or state" }
+            persistStage(
+                database,
+                record,
+                allowUnboundLaser = record.state == FireSessionState.LASER_MEASURING,
+            )
+        }
+        return SequencedDurableWrite(result, allocated)
+    }
+
+    private fun persistStage(
+        database: SQLiteDatabase,
+        record: StagePersistenceRecord,
+        allowUnboundLaser: Boolean,
+    ): DurableWriteResult {
+            if (record.state == FireSessionState.LASER_MEASURING && !allowUnboundLaser) {
+                return DurableWriteResult.Rejected(
                     "LASER_MEASURING requires a registered terminal request",
                 )
             }
             val canonical = CanonicalFireReport.stage(record)
             val session = sessionById(database, record.sessionId)
-                ?: return@durableTransaction DurableWriteResult.Rejected("Session is not durable")
+                ?: return DurableWriteResult.Rejected("Session is not durable")
             if (session.eventId != record.eventId) {
-                return@durableTransaction DurableWriteResult.Conflict("Session/event identity mismatch")
+                return DurableWriteResult.Conflict("Session/event identity mismatch")
             }
             val existing = outboxByKey(database, record.eventId, record.sequence)
             if (existing != null) {
-                return@durableTransaction if (
+                return if (
                     existing.eventId == record.eventId &&
                     existing.sessionId == record.sessionId &&
                     existing.sequence == record.sequence &&
@@ -177,10 +253,10 @@ class SqliteFireSessionStore(
                 }
             }
             if (record.sequence != nextSequence(database, record.eventId)) {
-                return@durableTransaction DurableWriteResult.Rejected("Outbox sequence must be contiguous")
+                return DurableWriteResult.Rejected("Outbox sequence must be contiguous")
             }
             if (!isAllowedStoredTransition(session.state, record.state)) {
-                return@durableTransaction DurableWriteResult.Rejected(
+                return DurableWriteResult.Rejected(
                     "Illegal durable state transition ${session.state}->${record.state}",
                 )
             }
@@ -205,7 +281,7 @@ class SqliteFireSessionStore(
                 record.state,
                 canonical,
             )
-            DurableWriteResult.Written
+            return DurableWriteResult.Written
         }
 
     fun registerPendingTerminal(
@@ -291,6 +367,10 @@ class SqliteFireSessionStore(
             }
         }
 
+    fun hasActiveManualHold(): Boolean = loadActiveSessions().any {
+        it.state == FireSessionState.MANUAL_HOLD
+    }
+
     fun loadEvidence(eventId: String): List<FireEvidenceReference> =
         db.query(
             FireStoreContract.Evidence.TABLE,
@@ -335,6 +415,9 @@ class SqliteFireSessionStore(
 
     fun loadOutbox(eventId: String): List<OutboxRow> =
         queryOutbox(selection = "event_id=?", args = arrayOf(eventId))
+
+    fun isOutboxAcknowledged(eventId: String, sequence: Long): Boolean =
+        loadOutbox(eventId).any { it.sequence == sequence && it.status == OutboxStatus.ACKED }
 
     fun loadForStartup(): FireStoreStartup {
         recoverMonotonicEpoch()
@@ -733,6 +816,18 @@ class SqliteFireSessionStore(
             null,
             null,
             null,
+            "1",
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.toOutbox() else null }
+
+    private fun terminalOutbox(database: SQLiteDatabase, eventId: String): OutboxRow? =
+        database.query(
+            FireStoreContract.Outbox.TABLE,
+            OUTBOX_COLUMNS,
+            "event_id=? AND state=?",
+            arrayOf(eventId, FireSessionState.RESULT_DURABLE.name),
+            null,
+            null,
+            "sequence DESC",
             "1",
         ).use { cursor -> if (cursor.moveToFirst()) cursor.toOutbox() else null }
 

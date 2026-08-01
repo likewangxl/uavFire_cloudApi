@@ -184,6 +184,52 @@ class VisibleFireLaserLocatorTest {
     }
 
     @Test
+    fun laserMeasurementBoundaryRunsAfterAlignmentAndImmediatelyBeforeEnable() = runTest {
+        val order = mutableListOf<String>()
+        val laser = SequenceLaser(normalSamples(), onBegin = { order += "enable" })
+        val locator = localLocator(
+            laser = laser,
+            aimer = LocalVisibleTargetAimerPort {
+                order += "aligned"
+                LocalTargetAimResult.Aligned(
+                    kind = it.kind,
+                    roi = it.priorRoi,
+                    sourceGeneration = 7,
+                    detectionCapturedAtMonotonicMs = 100,
+                    cycles = 1,
+                )
+            },
+        )
+        locator.holdLocal("session-1", "event-1")
+
+        val result = locator.localize(localRequest(DetectionKind.FIRE)) {
+            order += "boundary"
+            true
+        }
+
+        assertTrue(result is FireLocalizationResult.Precise)
+        assertEquals(listOf("aligned", "boundary", "enable"), order)
+    }
+
+    @Test
+    fun rejectedOrThrowingLaserMeasurementBoundaryManualHoldsWithoutEnablingLaser() = runTest {
+        for (boundary in listOf<suspend () -> Boolean>(
+            { false },
+            { throw IllegalStateException("store-failed") },
+        )) {
+            val laser = SequenceLaser(normalSamples())
+            val locator = localLocator(laser)
+            locator.holdLocal("session-1", "event-1")
+
+            val result = locator.localize(localRequest(DetectionKind.SMOKE), boundary)
+
+            assertTrue(result is FireLocalizationResult.ManualHold)
+            assertEquals(FireLocalizationFailure.LASER_ENABLE_FAILED, result.reason)
+            assertEquals(0, laser.enableCalls)
+        }
+    }
+
+    @Test
     fun boundedInvalidLaserSamplesDegradeToAircraftObservationWithoutFireCoordinates() = runTest {
         val laser = SequenceLaser(
             MutableList(20) {
@@ -520,6 +566,7 @@ class VisibleFireLaserLocatorTest {
         private val fixedObservationSequence: Long? = null,
         private val hardwareGenerationOffset: Long = 0,
         private val sampleOffsetsMs: MutableList<Long>? = null,
+        private val onBegin: () -> Unit = {},
     ) : LaserRangefinderClient, BoundLaserObservationClient {
         var disableCalls = 0
         var enableCalls = 0
@@ -543,6 +590,7 @@ class VisibleFireLaserLocatorTest {
         }
 
         override suspend fun beginOperation(binding: LaserOperationBinding): LaserHardwareOperationToken {
+            onBegin()
             enableCalls += 1
             enableError?.let { throw it }
             activeBinding = binding
