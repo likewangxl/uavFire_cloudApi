@@ -227,9 +227,7 @@ internal object CanonicalFireReport {
         requireString(root, "locationStatus", "DEGRADED_OSD")
         requireString(root, "geoMethod", "AIRCRAFT_OBSERVATION")
         bindOptionalPoint(root, "aircraft", report.aircraft)
-        if (root.has("degradedReason")) {
-            requireString(root, "degradedReason", report.reason.name)
-        }
+        requireString(root, "degradedReason", report.reason.name)
     }
 
     private fun validateRoiShape(roi: JsonObject) {

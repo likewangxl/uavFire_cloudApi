@@ -29,6 +29,52 @@ class AgentFireRecoveryCoordinatorTest {
         )
         assertEquals(listOf(RecoveryResult.Resumed("event-r")), coordinator.recover())
         assertEquals(1, trace.count { it == "reconcile" })
+        assertTrue(trace.contains("stage-MISSION_RESUMED"))
+    }
+
+    @Test
+    fun `executing recovery with failed durable completion remains uncertain`() = runTest {
+        val trace = mutableListOf<String>()
+        val store = RecoveryStore(
+            trace,
+            listOf(recovery(FireSessionState.RESUME_REQUESTED, true)),
+            stageResult = DurableWriteResult.Rejected("disk"),
+        )
+        val coordinator = AgentFireRecoveryCoordinator(
+            store,
+            RecoveryDelivery(trace),
+            RecoveryLocalization(trace),
+            RecoveryMission(trace, RecoveryMissionOutcome.Resumed),
+        )
+
+        assertEquals(
+            listOf(RecoveryResult.DurabilityUncertain("event-r")),
+            coordinator.recover(),
+        )
+        assertEquals(1, trace.count { it == "reconcile" })
+    }
+
+    @Test
+    fun `executing recovery cannot skip an undurable resume requested audit`() = runTest {
+        val trace = mutableListOf<String>()
+        val store = RecoveryStore(
+            trace,
+            listOf(recovery(FireSessionState.RESULT_DURABLE, true)),
+            stageResult = DurableWriteResult.Rejected("disk"),
+        )
+        val coordinator = AgentFireRecoveryCoordinator(
+            store,
+            RecoveryDelivery(trace),
+            RecoveryLocalization(trace),
+            RecoveryMission(trace, RecoveryMissionOutcome.Resumed),
+        )
+
+        assertEquals(
+            listOf(RecoveryResult.DurabilityUncertain("event-r")),
+            coordinator.recover(),
+        )
+        assertTrue(trace.contains("stage-RESUME_REQUESTED"))
+        assertTrue(!trace.contains("stage-MISSION_RESUMED"))
     }
 
     @Test
@@ -65,9 +111,16 @@ class AgentFireRecoveryCoordinatorTest {
         }
     }
 
-    private class RecoveryStore(private val trace: MutableList<String>, private val sessions: List<CoordinatorRecoverySession>) : CoordinatorStorePort {
+    private class RecoveryStore(
+        private val trace: MutableList<String>,
+        private val sessions: List<CoordinatorRecoverySession>,
+        private val stageResult: DurableWriteResult = DurableWriteResult.Written,
+    ) : CoordinatorStorePort {
         override suspend fun persistInitial(session: CoordinatorSession, envelope: AgentFireConfirmationEnvelope, request: InitialPersistenceRequest) = error("unused")
-        override suspend fun persistStage(session: CoordinatorSession, state: FireSessionState, recoveryProof: MissionRecoveryProofV1?) = error("unused")
+        override suspend fun persistStage(session: CoordinatorSession, state: FireSessionState, recoveryProof: MissionRecoveryProofV1?): CoordinatorWrite {
+            trace += "stage-$state"
+            return CoordinatorWrite(stageResult, 10)
+        }
         override suspend fun persistTerminal(session: CoordinatorSession, request: TerminalPersistenceRequest, result: FireLocalizationResult) = error("unused")
         override suspend fun persistManualHold(session: CoordinatorSession, reason: CoordinatorManualHoldReason): CoordinatorWrite { trace += "manual"; return CoordinatorWrite(DurableWriteResult.Written, 9) }
         override suspend fun recordTerminalAck(session: CoordinatorSession, sequence: Long) = false

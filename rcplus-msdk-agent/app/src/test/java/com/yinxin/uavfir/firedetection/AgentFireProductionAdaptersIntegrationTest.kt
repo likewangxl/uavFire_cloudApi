@@ -13,6 +13,7 @@ import com.yinxin.uavfir.firedetection.store.FireOutboxDispatcher
 import com.yinxin.uavfir.firedetection.store.FireReportTransport
 import com.yinxin.uavfir.firedetection.store.FireStoreOpenHelper
 import com.yinxin.uavfir.firedetection.store.MutableStoreClock
+import com.yinxin.uavfir.firedetection.store.MissionRecoveryProofV1
 import com.yinxin.uavfir.firedetection.store.SendOutcome
 import com.yinxin.uavfir.firedetection.store.SqliteCoordinatorStoreAdapter
 import com.yinxin.uavfir.firedetection.store.SqliteFireSessionStore
@@ -143,6 +144,110 @@ class AgentFireProductionAdaptersIntegrationTest {
         }
     }
 
+    @Test
+    fun `exact executing startup reconciliation is durable and is not repeated on second start`() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = "task9-recovery-${System.nanoTime()}.db"
+        val clock = MutableStoreClock(2_000, 100_000, "boot-recovery")
+        val sqlite = SqliteFireSessionStore(FireStoreOpenHelper(context, database), clock)
+        try {
+            val adapter = SqliteCoordinatorStoreAdapter(
+                sqlite,
+                CanonicalCoordinatorStoreRecordFactory(
+                    clock,
+                    CoordinatorModelIdentity("visible-v1", "a".repeat(64), 960, "ncnn"),
+                ),
+            )
+            val confirmation = VisibleConfirmation(
+                DetectionKind.FIRE,
+                .9f,
+                NormalizedRoi(.2f, .2f, .5f, .5f),
+                1_800,
+                1_900,
+                "policy-v1",
+            )
+            val session = CoordinatorSession(
+                "session-recovery",
+                "event-recovery",
+                "task-recovery",
+                DetectionKind.FIRE,
+                1,
+                confirmation.roi,
+                7,
+            )
+            val envelope = AgentFireConfirmationEnvelope(
+                session.sessionId,
+                session.eventId,
+                session.taskId,
+                session.sourceGeneration,
+                confirmation,
+            )
+            val initial = InitialPersistenceRequest(
+                session.sessionId,
+                session.eventId,
+                "00000000-0000-4000-8000-000000000001",
+                confirmation,
+            )
+            assertTrue(adapter.persistInitial(session, envelope, initial).durable)
+            assertTrue(adapter.persistStage(session, FireSessionState.HOLD_REQUESTED).durable)
+            val proof = MissionRecoveryProofV1(
+                "mission-recovery",
+                "route.kmz",
+                1,
+                0,
+                2,
+                .4,
+                null,
+                null,
+                null,
+                null,
+                2,
+                1,
+            )
+            assertTrue(adapter.persistStage(session, FireSessionState.HOVER_VERIFYING, proof).durable)
+            assertTrue(adapter.persistStage(session, FireSessionState.TARGET_ALIGNING).durable)
+            val terminal = TerminalPersistenceRequest(
+                session.sessionId,
+                session.eventId,
+                "00000000-0000-4000-8000-000000000002",
+                LocationStatus.DEGRADED_OSD,
+                GeoMethod.AIRCRAFT_OBSERVATION,
+            )
+            assertTrue(
+                adapter.persistTerminal(
+                    session,
+                    terminal,
+                    FireLocalizationResult.DegradedOsd(
+                        DetectionKind.FIRE,
+                        FireLocalizationFailure.LASER_SAMPLES_INVALID,
+                        AircraftOsdSnapshot(34.0, 108.0, 50.0, 1_900, 1_900),
+                    ),
+                ).durable,
+            )
+            val mission = CountingRecoveryMission()
+            val delivery = NoopRecoveryDelivery()
+            val localization = NoopRecoveryLocalization()
+
+            assertEquals(
+                listOf(RecoveryResult.Resumed(session.eventId)),
+                AgentFireRecoveryCoordinator(adapter, delivery, localization, mission).recover(),
+            )
+            assertTrue(
+                AgentFireRecoveryCoordinator(adapter, delivery, localization, mission)
+                    .recover()
+                    .isEmpty(),
+            )
+            assertEquals(1, mission.reconcileCalls)
+            assertEquals(
+                FireSessionState.MISSION_RESUMED,
+                sqlite.loadDurableSession(session.eventId)?.state,
+            )
+        } finally {
+            sqlite.close()
+            context.deleteDatabase(database)
+        }
+    }
+
     private class IntegrationMissionPort : MissionControlPort {
         private val mission = MissionExecutionKey(MissionIdentity("mission-1", "route.kmz"), 1)
         private var snapshot = MissionSnapshot(mission, ObservedMissionState.EXECUTING, 1)
@@ -187,6 +292,28 @@ class AgentFireProductionAdaptersIntegrationTest {
         override suspend fun sendVirtualStick(key: String, durationMs: Long) = Unit
         override suspend fun flyToPoint(latitude: Double, longitude: Double, height: Double, speed: Double) = Unit
         override suspend fun setNavigationLight(enabled: Boolean) = Unit
+    }
+
+    private class CountingRecoveryMission : CoordinatorMissionPort {
+        var reconcileCalls = 0
+        override suspend fun pauseAndAwait(session: CoordinatorSession, onSubmission: () -> Unit) = error("unused")
+        override suspend fun awaitStableHover(session: CoordinatorSession, holdProof: CoordinatorHoldProof) = error("unused")
+        override suspend fun resumeAfterSafetyReread(session: CoordinatorSession, holdProof: CoordinatorHoldProof, hoverProof: CoordinatorHoverProof, onSubmission: () -> Unit) = error("unused")
+        override suspend fun reconcileForRecovery(session: CoordinatorRecoverySession): RecoveryMissionOutcome {
+            reconcileCalls++
+            return RecoveryMissionOutcome.Resumed
+        }
+    }
+
+    private class NoopRecoveryDelivery : CoordinatorOutboxPort {
+        override fun trigger(eventId: String, sequence: Long) = Unit
+        override suspend fun awaitTerminalAck(eventId: String, sequence: Long) = TerminalAckResult.Offline
+        override fun restartPendingDelivery() = Unit
+    }
+
+    private class NoopRecoveryLocalization : CoordinatorLocalizationPort {
+        override suspend fun localize(session: CoordinatorSession, request: FireLocalizationRequest, holdProof: CoordinatorHoldProof, hoverProof: CoordinatorHoverProof, onLaserMeasurementBoundary: suspend () -> Boolean) = error("unused")
+        override suspend fun ensureLaserDisabledAndAlignmentClosed(session: CoordinatorSession?) = Unit
     }
 
     private fun healthy() = CoordinatorArmingHealth(

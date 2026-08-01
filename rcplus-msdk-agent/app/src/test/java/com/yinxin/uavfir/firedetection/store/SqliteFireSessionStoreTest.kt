@@ -611,6 +611,10 @@ class SqliteFireSessionStoreTest {
         val record = degradedTerminalRecord(request)
         listOf(
             degradedTerminalPayload().replace(
+                Regex(""",\s*"degradedReason":"LASER_SAMPLES_INVALID"""),
+                "",
+            ),
+            degradedTerminalPayload().replace(
                 Regex(""",\s*"aircraft":\{"lat":34\.95,"lng":108\.12,"alt":120\.0\}"""),
                 "",
             ),
@@ -841,6 +845,7 @@ class SqliteFireSessionStoreTest {
           "state":"RESULT_DURABLE",
           "locationStatus":"DEGRADED_OSD",
           "geoMethod":"AIRCRAFT_OBSERVATION",
+          "degradedReason":"LASER_SAMPLES_INVALID",
           "aircraft":{"lat":34.95,"lng":108.12,"alt":120.0}
         }
     """.trimIndent()

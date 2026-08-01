@@ -68,4 +68,12 @@ class Task9ReviewRegressionTest {
         sink.record("event-3", ClosedLoopResult.Busy("owner"))
         assertEquals(listOf("event-2", "event-3"), sink.snapshot().map { it.eventId })
     }
+
+    @Test
+    fun `startup durability uncertainty cannot authorize new confirmations`() {
+        assertTrue(RecoveryResult.Resumed("event-1").safeToAcceptNewConfirmations)
+        assertTrue(RecoveryResult.ManualHold("event-1", true).safeToAcceptNewConfirmations)
+        assertFalse(RecoveryResult.ManualHold("event-1", false).safeToAcceptNewConfirmations)
+        assertFalse(RecoveryResult.DurabilityUncertain("event-1").safeToAcceptNewConfirmations)
+    }
 }

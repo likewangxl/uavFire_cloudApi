@@ -422,10 +422,14 @@ class AppServices(
         }
         appScope.launch {
             runCatching { fireRecoveryCoordinator.recover() }.fold(
-                onSuccess = {
-                    // Startup force-safe/reconciliation always precedes new
-                    // inference and therefore new flight-control ownership.
-                    visibleInferenceLoop?.start(appScope)
+                onSuccess = { results ->
+                    if (results.all { it.safeToAcceptNewConfirmations }) {
+                        // Startup force-safe/reconciliation always precedes new
+                        // inference and therefore new flight-control ownership.
+                        visibleInferenceLoop?.start(appScope)
+                    } else {
+                        Log.e(TAG, "fire recovery failed closed: durability remains uncertain")
+                    }
                 },
                 onFailure = { Log.e(TAG, "fire recovery failed closed", it) },
             )

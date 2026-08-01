@@ -318,11 +318,24 @@ class AgentFireClosedLoopCoordinator(
     private val ownerMutex = Mutex()
     private val generation = AtomicLong()
     @Volatile private var active: CoordinatorSession? = null
+    @Volatile private var unresolvedResumeOwner: UnresolvedResumeOwner? = null
     @Volatile private var manualHoldLatched = false
 
     suspend fun process(envelope: AgentFireConfirmationEnvelope): ClosedLoopResult {
         if (!ownerMutex.tryLock()) {
             return ClosedLoopResult.Busy(active?.eventId ?: "owner-acquiring")
+        }
+        unresolvedResumeOwner?.let { unresolved ->
+            try {
+                reconcileSubmittedResume(
+                    unresolved.session,
+                    unresolved.holdProof,
+                    CoordinatorManualHoldReason.RESUME_FAILURE,
+                )
+            } finally {
+                ownerMutex.unlock()
+            }
+            return ClosedLoopResult.Busy(unresolved.session.eventId)
         }
         val health = try {
             armingHealth()
@@ -448,18 +461,31 @@ class AgentFireClosedLoopCoordinator(
             if (!safeStage(session, FireSessionState.RESUME_REQUESTED).durable) {
                 return manualHold(session, CoordinatorManualHoldReason.STORAGE_FAILURE)
             }
+            val finalHealthFailure = try {
+                runtimeHealth().failureReason
+            } catch (_: Exception) {
+                CoordinatorManualHoldReason.DETECTOR_FAILURE
+            }
+            if (finalHealthFailure != null) {
+                return manualHold(session, finalHealthFailure)
+            }
             val resumed = mission.resumeAfterSafetyReread(session, holdProof, hoverProof) {
                 commandStage = CommandStage.RESUME_SUBMITTED
             }
             if (resumed is MissionResumeOutcome.Failed) {
                 if (commandStage == CommandStage.RESUME_SUBMITTED) {
-                    return reconcileSubmittedResume(session, holdProof)
+                    return reconcileSubmittedResume(
+                        session,
+                        holdProof,
+                        CoordinatorManualHoldReason.RESUME_FAILURE,
+                    )
                 }
                 return manualHold(session, CoordinatorManualHoldReason.RESUME_FAILURE)
             }
             commandStage = CommandStage.RESUME_CONFIRMED
             phase = acceptedPhase(phase, FireSessionEvent.MissionResumeConfirmed)
             if (!safeStage(session, FireSessionState.MISSION_RESUMED).durable) {
+                retainUnresolvedResumeOwner(session, holdProof)
                 return ClosedLoopResult.MissionExecutingDurabilityUncertain(session.eventId)
             }
             check(phase.state == FireSessionState.MISSION_RESUMED)
@@ -467,7 +493,11 @@ class AgentFireClosedLoopCoordinator(
         } catch (cancelled: CancellationException) {
             if (commandStage >= CommandStage.RESUME_SUBMITTED) {
                 withContext(NonCancellable) {
-                    reconcileSubmittedResume(session, verifiedHoldProof)
+                    reconcileSubmittedResume(
+                        session,
+                        verifiedHoldProof,
+                        CoordinatorManualHoldReason.CANCELLED_AFTER_FLIGHT_SUBMISSION,
+                    )
                 }
             } else if (commandStage >= CommandStage.PAUSE_SUBMITTED || durableHoldIntent) {
                 withContext(NonCancellable) {
@@ -621,27 +651,53 @@ class AgentFireClosedLoopCoordinator(
     private suspend fun reconcileSubmittedResume(
         session: CoordinatorSession,
         holdProof: CoordinatorHoldProof?,
-    ): ClosedLoopResult = when (
+        heldReason: CoordinatorManualHoldReason,
+    ): ClosedLoopResult = when (val reconciliation = try {
         holdProof?.let { mission.reconcileAfterResumeSubmission(session, it) }
             ?: ResumeReconciliationOutcome.Unknown
-    ) {
+    } catch (_: Exception) {
+        ResumeReconciliationOutcome.Unknown
+    }) {
         ResumeReconciliationOutcome.Executing -> {
             val write = safeStage(session, FireSessionState.MISSION_RESUMED)
-            if (write.durable) ClosedLoopResult.MissionResumed
-            else ClosedLoopResult.MissionExecutingDurabilityUncertain(session.eventId)
+            if (write.durable) {
+                clearUnresolvedResumeOwner(session)
+                ClosedLoopResult.MissionResumed
+            } else {
+                retainUnresolvedResumeOwner(session, holdProof)
+                ClosedLoopResult.MissionExecutingDurabilityUncertain(session.eventId)
+            }
         }
-        ResumeReconciliationOutcome.Held ->
-            manualHold(session, CoordinatorManualHoldReason.CANCELLED_AFTER_FLIGHT_SUBMISSION)
-        ResumeReconciliationOutcome.Unknown -> ClosedLoopResult.ResumeOutcomeUnknown(session.eventId)
+        ResumeReconciliationOutcome.Held -> {
+            val result = manualHold(session, heldReason)
+            if (result.durable) clearUnresolvedResumeOwner(session)
+            else retainUnresolvedResumeOwner(session, holdProof)
+            result
+        }
+        ResumeReconciliationOutcome.Unknown -> {
+            retainUnresolvedResumeOwner(session, holdProof)
+            ClosedLoopResult.ResumeOutcomeUnknown(session.eventId)
+        }
     }
 
-    fun activeSession(): CoordinatorSession? = active
+    fun activeSession(): CoordinatorSession? = active ?: unresolvedResumeOwner?.session
 
     /** May only be called after explicit Task 7 recovery reconciliation. */
     fun clearManualHoldAfterRecovery(reconciled: Boolean): Boolean {
-        if (!reconciled || active != null) return false
+        if (!reconciled || active != null || unresolvedResumeOwner != null) return false
         manualHoldLatched = false
         return true
+    }
+
+    private fun retainUnresolvedResumeOwner(
+        session: CoordinatorSession,
+        holdProof: CoordinatorHoldProof?,
+    ) {
+        unresolvedResumeOwner = UnresolvedResumeOwner(session, holdProof)
+    }
+
+    private fun clearUnresolvedResumeOwner(session: CoordinatorSession) {
+        if (unresolvedResumeOwner?.session == session) unresolvedResumeOwner = null
     }
 
     private fun acceptedPhase(phase: FireSessionPhase, event: FireSessionEvent): FireSessionPhase =
@@ -693,6 +749,11 @@ private enum class CommandStage {
     RESUME_SUBMITTED,
     RESUME_CONFIRMED,
 }
+
+private data class UnresolvedResumeOwner(
+    val session: CoordinatorSession,
+    val holdProof: CoordinatorHoldProof?,
+)
 
 private sealed interface HeldWorkflowResult {
     data class Completed(val phase: FireSessionPhase) : HeldWorkflowResult
