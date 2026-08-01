@@ -20,6 +20,7 @@ import {
   isRouteReadyFireEvent,
   reconcileFireEventUpdate,
   mergeFireEventSnapshot,
+  captureFireEventSnapshotWatermark,
   fireEventNotificationKey
 } from '../fire/fire-event-status.mjs'
 
@@ -208,6 +209,34 @@ test('same sequence only fills fields and legacy v0 uses updateTime without roll
   assert.equal(legacy[0].status, 'ARCHIVED')
 })
 
+test('authoritative snapshot prunes the event that falls outside the backend limit', () => {
+  const current = Array.from({ length: 51 }, (_, index) => ({
+    eventId: `event-${51 - index}`,
+    notificationVersion: 1,
+    lastAgentSequence: 1
+  }))
+  const merged = mergeFireEventSnapshot(current, current.slice(0, 50))
+
+  assert.equal(merged.length, 50)
+  assert.equal(merged.some(event => event.eventId === 'event-1'), false)
+})
+
+test('snapshot prunes deleted rows but retains websocket rows that arrived during the request for one cycle', () => {
+  let events = [{ eventId: 'deleted-event', notificationVersion: 1, lastAgentSequence: 1 }]
+  const requestWatermark = captureFireEventSnapshotWatermark()
+  events = reconcileFireEventUpdate(events, {
+    eventId: 'inflight-ws', notificationVersion: 1, agentSequence: 1, state: 'VISUAL_CONFIRMED'
+  }).events
+  events = events.map(event => new Proxy(event, {}))
+
+  events = mergeFireEventSnapshot(events, [], { realtimeWatermark: requestWatermark })
+  assert.deepEqual(events.map(event => event.eventId), ['inflight-ws'])
+
+  const nextRequestWatermark = captureFireEventSnapshotWatermark()
+  events = mergeFireEventSnapshot(events, [], { realtimeWatermark: nextRequestWatermark })
+  assert.deepEqual(events, [])
+})
+
 test('fire event pages consume websocket updates with the shared monotonic reconciliation contract', () => {
   const listSource = readFileSync(resolve(frontendRoot, 'src/pages/page-web/projects/fire/FireEventList.vue'), 'utf8')
   const cockpitSource = readFileSync(resolve(frontendRoot, 'src/pages/page-web/projects/leadership-cockpit.vue'), 'utf8')
@@ -218,6 +247,7 @@ test('fire event pages consume websocket updates with the shared monotonic recon
     assert.match(source, /parseFireEventUpdateMessage/)
     assert.match(source, /reconcileFireEventUpdate/)
     assert.match(source, /mergeFireEventSnapshot/)
+    assert.match(source, /captureFireEventSnapshotWatermark/)
     assert.match(source, /fireEventNotificationKey/)
   }
   assert.match(manageSource, /FIRE_EVENT_UPDATE_BIZ_CODE\s*=\s*'fire_event_update'/)

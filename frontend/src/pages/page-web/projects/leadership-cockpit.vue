@@ -728,6 +728,7 @@ import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
 import { buildSituationLayers } from './leadership-cockpit-situation.mjs'
 import { formatFireLocation, isUsableFireLocation } from './fire/fire-event-location.mjs'
 import {
+  captureFireEventSnapshotWatermark,
   fireEventNotificationKey,
   formatDetectionKind,
   formatDetectionStatus,
@@ -1882,6 +1883,7 @@ function handleSummaryMetricFocus (item: any) {
 // 火情弹 antd notification 带带框的标注图缩略图。lastSeenFireEventId 防止首次进
 // 页面把历史事件全弹出来。
 let fireEventNotifyTimer: number | null = null
+let fireEventSnapshotGeneration = 0
 const lastSeenFireEventId = ref(0)
 const fireEventsBootstrapped = ref(false)
 const lastNotifiedFireEventVersions = new Map<string, number>()
@@ -1897,11 +1899,14 @@ useConnectWebSocket((payload: any) => {
 })
 
 async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
+  const requestGeneration = ++fireEventSnapshotGeneration
+  const realtimeWatermark = captureFireEventSnapshotWatermark()
   fireEventState.loading = true
   try {
     const res = await fireEventApi.list()
+    if (requestGeneration !== fireEventSnapshotGeneration) return fireEventState.events
     const events = res.data.data ?? []
-    fireEventState.events = mergeFireEventSnapshot(fireEventState.events, events) as FireEventDTO[]
+    fireEventState.events = mergeFireEventSnapshot(fireEventState.events, events, { realtimeWatermark }) as FireEventDTO[]
     fireEventState.error = ''
     cockpitLastRefreshAt.value = Date.now()
     const missionNos = Array.from(new Set(events.map(event => event.missionNo).filter(Boolean))) as string[]
@@ -1930,7 +1935,7 @@ async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
     fireEventState.error = '火情数据暂不可用'
     return []
   } finally {
-    fireEventState.loading = false
+    if (requestGeneration === fireEventSnapshotGeneration) fireEventState.loading = false
   }
 }
 

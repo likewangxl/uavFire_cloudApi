@@ -156,6 +156,25 @@ export const isRouteReadyFireEvent = isPreciseLaserFireLocation
 export const isPreciseFireMarkerAllowed = isPreciseLaserFireLocation
 export const isAutomaticRouteAllowed = isPreciseLaserFireLocation
 
+let realtimeRevision = 0
+const REALTIME_REVISION = Symbol('fire-event-realtime-revision')
+
+export function captureFireEventSnapshotWatermark () {
+  return realtimeRevision
+}
+
+function markRealtimeRevision (event, revision) {
+  Object.defineProperty(event, REALTIME_REVISION, {
+    value: revision,
+    configurable: true,
+    enumerable: false
+  })
+}
+
+function realtimeRevisionOf (event) {
+  return Number(event?.[REALTIME_REVISION]) || 0
+}
+
 export function normalizeFireEventUpdate (update = {}) {
   const sequence = toSequence(update.agentSequence ?? update.agent_sequence ?? update.lastAgentSequence ?? update.last_agent_sequence) || undefined
   const updateTime = toTimestamp(update.updateTime ?? update.update_time ?? update.updatedAt) || undefined
@@ -196,10 +215,12 @@ export function reconcileFireEventUpdate (events = [], update = {}) {
     if (!accepted) return { events: currentEvents, event: current, accepted: false, replaced: true, notificationAdvanced: false }
     const next = currentEvents.slice()
     next[index] = merged
+    markRealtimeRevision(merged, ++realtimeRevision)
     return { events: next, event: merged, accepted: true, replaced: true, notificationAdvanced }
   }
 
   const inserted = compactDefined({ ...normalized, eventId })
+  markRealtimeRevision(inserted, ++realtimeRevision)
   return {
     events: [inserted, ...currentEvents],
     event: inserted,
@@ -209,21 +230,42 @@ export function reconcileFireEventUpdate (events = [], update = {}) {
   }
 }
 
-export function mergeFireEventSnapshot (events = [], snapshot = []) {
-  const next = Array.isArray(events) ? events.slice() : []
+export function mergeFireEventSnapshot (events = [], snapshot = [], options = {}) {
+  const currentEvents = Array.isArray(events) ? events : []
+  const currentById = new Map()
+  for (const event of currentEvents) {
+    const eventId = String(event?.eventId ?? event?.event_id ?? '').trim()
+    if (eventId) currentById.set(eventId, event)
+  }
+  const snapshotWatermark = Number.isSafeInteger(options?.realtimeWatermark)
+    ? options.realtimeWatermark
+    : realtimeRevision
+  const snapshotEvents = []
+  const snapshotIds = new Set()
   for (const raw of Array.isArray(snapshot) ? snapshot : []) {
     const incoming = normalizeFireEventUpdate(raw)
     const eventId = incoming.eventId == null ? '' : String(incoming.eventId).trim()
     if (!eventId) continue
-    const index = next.findIndex(event => String(event?.eventId ?? event?.event_id ?? '') === eventId)
-    if (index < 0) {
-      next.push(compactDefined({ ...incoming, eventId }))
-      continue
+    snapshotIds.add(eventId)
+    const current = currentById.get(eventId)
+    if (!current) {
+      snapshotEvents.push(compactDefined({ ...incoming, eventId }))
+    } else {
+      const merged = mergeProjection(current, incoming)
+      const revision = realtimeRevisionOf(current)
+      if (revision > 0) markRealtimeRevision(merged, revision)
+      snapshotEvents.push(merged)
     }
-    const current = next[index]
-    next[index] = mergeProjection(current, incoming)
   }
-  return next
+
+  // REST is authoritative for membership. The only absent rows retained are
+  // WebSocket changes that arrived after this request started. The next
+  // successful snapshot either includes or prunes that short-lived overlay.
+  const realtimeOverlay = currentEvents.filter(event => {
+    const eventId = String(event?.eventId ?? event?.event_id ?? '').trim()
+    return eventId && !snapshotIds.has(eventId) && realtimeRevisionOf(event) > snapshotWatermark
+  })
+  return [...realtimeOverlay, ...snapshotEvents]
 }
 
 export function fireEventNotificationKey (eventOrId) {

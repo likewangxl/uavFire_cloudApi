@@ -235,6 +235,7 @@ import { ELocalStorageKey } from '/@/types'
 import StatusTag from '/@/components/fire/StatusTag.vue'
 import { formatFireLocation } from './fire-event-location.mjs'
 import {
+  captureFireEventSnapshotWatermark,
   fireEventNotificationKey,
   formatDetectionKind,
   formatDetectionStatus,
@@ -250,6 +251,7 @@ const events = ref<FireEventDTO[]>([])
 // 火情事件 id -> 其关联的灭火任务（最新一次）。用于在事件列表展示审核状态并就地审批。
 const missionsByEventId = ref<Record<number, FireMissionDTO>>({})
 const loading = ref(false)
+let eventSnapshotGeneration = 0
 
 useConnectWebSocket((payload: any) => {
   const update = parseFireEventUpdateMessage(payload)
@@ -429,13 +431,16 @@ function resetForm () {
 }
 
 async function loadEvents () {
+  const requestGeneration = ++eventSnapshotGeneration
+  const realtimeWatermark = captureFireEventSnapshotWatermark()
   loading.value = true
   try {
     const [eventRes, missionRes] = await Promise.all([
       eventApi.list(),
       missionApi.list({ size: 500 }),
     ])
-    events.value = mergeFireEventSnapshot(events.value, eventRes.data.data ?? []) as FireEventDTO[]
+    if (requestGeneration !== eventSnapshotGeneration) return
+    events.value = mergeFireEventSnapshot(events.value, eventRes.data.data ?? [], { realtimeWatermark }) as FireEventDTO[]
     // 后端任务列表按 create_time 倒序，同一事件多次尝试时保留首个(=最新)
     const map: Record<number, FireMissionDTO> = {}
     for (const m of missionRes.data.data ?? []) {
@@ -447,7 +452,7 @@ async function loadEvents () {
   } catch (e) {
     message.error('加载火情列表失败')
   } finally {
-    loading.value = false
+    if (requestGeneration === eventSnapshotGeneration) loading.value = false
   }
 }
 

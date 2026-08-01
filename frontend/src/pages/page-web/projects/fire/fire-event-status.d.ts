@@ -58,5 +58,10 @@ export function reconcileFireEventUpdate<T extends FireEventLike>(events: T[], u
   replaced: boolean;
   notificationAdvanced: boolean;
 };
-export function mergeFireEventSnapshot<T extends FireEventLike>(events: T[], snapshot: FireEventLike[]): Array<T | FireEventLike>;
+export function captureFireEventSnapshotWatermark(): number;
+export function mergeFireEventSnapshot<T extends FireEventLike>(
+  events: T[],
+  snapshot: FireEventLike[],
+  options?: { realtimeWatermark?: number }
+): Array<T | FireEventLike>;
 export function fireEventNotificationKey(eventOrId?: FireEventLike | string): string;
