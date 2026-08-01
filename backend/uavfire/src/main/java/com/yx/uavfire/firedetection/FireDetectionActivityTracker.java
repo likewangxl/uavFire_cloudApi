@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 记录哪些飞机当前处于火情监测中。
  * 仅监测中的飞机允许后端自动下发 focus-thermal / 测温指令，
- * 避免遗留的 ai-service 任务在监测停止后持续翻转直播画面。
+ * 记录兼容监测状态；新的生产识别状态以 Agent 心跳为准。
  */
 @Component
 public class FireDetectionActivityTracker {

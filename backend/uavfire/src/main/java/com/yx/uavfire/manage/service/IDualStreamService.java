@@ -7,7 +7,6 @@ import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
-import com.yx.uavfire.manage.model.dto.VisibleRoiSnapshotDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -21,17 +20,6 @@ public interface IDualStreamService {
     void acceptCapability(String droneSn, DualStreamAgentCapabilityDTO capability);
 
     void acceptEvent(String taskId, DualStreamEventDTO event);
-
-    void startVisibleLaserLocalization(
-            String eventId,
-            String taskId,
-            String droneSn,
-            long sourceTs,
-            Map<String, Double> visibleRoi);
-
-    VisibleRoiSnapshotDTO latestVisibleRoi(String taskId, long afterSourceTs);
-
-    void expireLocalizationSessions();
 
     List<DualStreamEventDTO> listEvents(String taskId);
 

@@ -4,6 +4,8 @@ import com.yinxin.uavfir.stream.MockStreamProvider
 import com.yinxin.uavfir.stream.BoundStreamState
 import com.yinxin.uavfir.stream.StreamProvider
 import com.yinxin.uavfir.stream.StreamStartResult
+import com.yinxin.uavfir.firedetection.CoordinatorArmingHealth
+import com.yinxin.uavfir.firedetection.VisibleDetectorControl
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -11,6 +13,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DualStreamSessionManagerTest {
+    @Test
+    fun detectorArmAndDisarmCommandsExposeFailClosedLocalState() = runTest {
+        val control = VisibleDetectorControl {
+            CoordinatorArmingHealth(
+                featureEnabled = false,
+                detectorArmRequested = true,
+                visibleSourceActive = true,
+                sourceGenerationValid = true,
+                detectorHealthy = true,
+                storeHealthy = true,
+                outboxHealthy = true,
+                missionAdaptersHealthy = true,
+                safetyAdaptersHealthy = true,
+                manualHoldActive = false,
+                competingOwnerActive = false,
+            )
+        }
+        val manager = DualStreamSessionManager(MockStreamProvider(), visibleDetectorControl = control)
+
+        assertEquals("applied", manager.executeCommand("DRONE-001", "visible-detector-arm").status)
+        assertEquals("BLOCKED", manager.detectorStatus().state)
+        assertEquals("UNHEALTHY", manager.detectorStatus().health)
+        assertEquals("applied", manager.executeCommand("DRONE-001", "visible-detector-disarm").status)
+        assertEquals("DISARMED", manager.detectorStatus().state)
+    }
+
     @Test
     fun startSession_movesFromInitToRunning() = runTest {
         val manager = DualStreamSessionManager(MockStreamProvider())

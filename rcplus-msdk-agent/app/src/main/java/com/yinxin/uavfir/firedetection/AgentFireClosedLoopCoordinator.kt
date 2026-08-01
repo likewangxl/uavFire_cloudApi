@@ -179,7 +179,7 @@ sealed interface TerminalAckResult {
 
 data class CoordinatorArmingHealth(
     val featureEnabled: Boolean,
-    val backendMonitoringEnabled: Boolean,
+    val detectorArmRequested: Boolean,
     val visibleSourceActive: Boolean,
     val sourceGenerationValid: Boolean,
     val detectorHealthy: Boolean,
@@ -191,7 +191,7 @@ data class CoordinatorArmingHealth(
     val competingOwnerActive: Boolean,
 ) {
     val armed: Boolean
-        get() = featureEnabled && backendMonitoringEnabled && visibleSourceActive &&
+        get() = featureEnabled && detectorArmRequested && visibleSourceActive &&
             sourceGenerationValid && detectorHealthy && storeHealthy && outboxHealthy &&
             missionAdaptersHealthy && safetyAdaptersHealthy && !manualHoldActive &&
             !competingOwnerActive

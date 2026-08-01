@@ -85,10 +85,8 @@ class CommandPollingCoordinatorTest {
 
         coordinator.pollOnce("DRONE-001")
 
-        assertEquals("applied", api.lastAck?.status)
-        assertEquals(34.9604606, received?.fireLat)
-        assertEquals(109.3163910, received?.fireLng)
-        assertEquals("fire-DRONE-001", received?.taskId)
+        assertEquals("ignored", api.lastAck?.status)
+        assertNull(received)
     }
 
     @Test
@@ -133,10 +131,8 @@ class CommandPollingCoordinatorTest {
 
         coordinator.pollOnce("DRONE-001")
 
-        assertEquals("applied", api.lastAck?.status)
-        assertEquals("HOVER_STABLE", api.lastAck?.message)
-        assertEquals("fire-visible-1", api.lastAck?.eventId)
-        assertEquals(listOf("hover"), flight.actions)
+        assertEquals("ignored", api.lastAck?.status)
+        assertTrue(flight.actions.isEmpty())
     }
 
     @Test
@@ -198,13 +194,8 @@ class CommandPollingCoordinatorTest {
 
         coordinator.pollOnce("DRONE-001")
 
-        assertEquals("applied", api.lastAck?.status)
-        assertEquals("fire-visible-1", api.lastAck?.eventId)
-        assertEquals(34.960123, api.lastAck?.fireLat)
-        assertEquals(109.316456, api.lastAck?.fireLng)
-        assertEquals("LASER_RANGEFINDER", api.lastAck?.geoMethod)
-        assertEquals("PRECISE", api.lastAck?.geoQuality)
-        assertEquals(5.0, api.lastAck?.geoErrorRadiusM)
+        assertEquals("ignored", api.lastAck?.status)
+        assertNull(api.lastAck?.fireLat)
     }
 
     @Test

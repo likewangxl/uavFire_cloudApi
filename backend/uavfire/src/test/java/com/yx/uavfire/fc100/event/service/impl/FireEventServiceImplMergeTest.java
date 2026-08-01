@@ -47,6 +47,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class FireEventServiceImplMergeTest {
@@ -73,19 +74,15 @@ class FireEventServiceImplMergeTest {
         return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis, geoService);
     }
 
-    private FireEventServiceImpl buildWithApproachDispatcher(FireApproachDispatcher dispatcher) {
+    private FireEventServiceImpl buildWithApproachDispatcher(Object ignored) {
         when(clock.now()).thenReturn(1779163500000L);
         when(noGen.next()).thenReturn("M-001");
         when(missions.selectList(any(QueryWrapper.class))).thenReturn(List.of());
-        return new FireEventServiceImpl(events, histories, missions, noGen, clock, redis,
-            null, null, null, null, null, dispatcher);
+        return build();
     }
 
-    private FireApproachDispatcher dispatcher(boolean enabled) {
-        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock);
-        ReflectionTestUtils.setField(dispatcher, "autoApproachEnabled", enabled);
-        ReflectionTestUtils.setField(dispatcher, "autoApproachCooldownMs", 600000L);
-        return dispatcher;
+    private Object dispatcher(boolean enabled) {
+        return new Object();
     }
 
     @Test
@@ -147,10 +144,7 @@ class FireEventServiceImplMergeTest {
             entity.setId(7L);
             return 1;
         });
-        VisibleFireLocalizationDispatcher dispatcher =
-                mock(VisibleFireLocalizationDispatcher.class);
         FireEventServiceImpl service = build();
-        ReflectionTestUtils.setField(service, "visibleFireLocalizationDispatcher", dispatcher);
         FireEventCreateParam request =
                 param("task-visible-1779163440000", 34.659140, 109.340600,
                         "MEDIUM", "0.72", 1779163440000L);
@@ -162,12 +156,7 @@ class FireEventServiceImplMergeTest {
 
         service.create(request);
 
-        verify(dispatcher).dispatch(
-                "task-visible-1779163440000",
-                "task-visible",
-                "DRONE-1",
-                1779163440000L,
-                request.getVisibleRoi());
+        verifyNoInteractions(dualStream);
     }
 
     @Test
@@ -429,13 +418,7 @@ class FireEventServiceImplMergeTest {
         FireEventCreateResponse response = buildWithApproachDispatcher(dispatcher(true)).create(p);
 
         assertEquals("CREATED", response.getNotificationReason());
-        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(dualStream).issueCommand(eq("DRONE-1"), eq("fire-confirmation-mission"), paramsCaptor.capture());
-        Map<String, Object> params = paramsCaptor.getValue();
-        assertEquals(34.659600, ((Number) params.get("lat")).doubleValue(), 1e-6);
-        assertEquals(109.341600, ((Number) params.get("lng")).doubleValue(), 1e-6);
-        assertEquals(88.5, ((Number) params.get("alt")).doubleValue(), 1e-6);
-        assertEquals("fire-DRONE-1", params.get("taskId"));
+        verifyNoInteractions(dualStream);
     }
 
     @Test
@@ -452,13 +435,7 @@ class FireEventServiceImplMergeTest {
             .create(param("merge-event", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
 
         assertEquals("MERGED_NEARBY", response.getNotificationReason());
-        ArgumentCaptor<Map<String, Object>> paramsCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(dualStream).issueCommand(eq("DRONE-1"), eq("fire-confirmation-mission"), paramsCaptor.capture());
-        Map<String, Object> params = paramsCaptor.getValue();
-        assertEquals(34.658600, ((Number) params.get("lat")).doubleValue(), 1e-6);
-        assertEquals(109.340600, ((Number) params.get("lng")).doubleValue(), 1e-6);
-        assertEquals(66.0, ((Number) params.get("alt")).doubleValue(), 1e-6);
-        assertEquals("fire-DRONE-1", params.get("taskId"));
+        verifyNoInteractions(dualStream);
     }
 
     @Test
@@ -474,9 +451,7 @@ class FireEventServiceImplMergeTest {
         OsdDockDrone grounded = new OsdDockDrone();
         grounded.setHeight(0.3f);
         when(redis.getDeviceOsd(eq("DRONE-1"), eq(OsdDockDrone.class))).thenReturn(Optional.of(grounded));
-        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock, redis);
-        ReflectionTestUtils.setField(dispatcher, "autoApproachEnabled", true);
-        ReflectionTestUtils.setField(dispatcher, "autoApproachCooldownMs", 600000L);
+        Object dispatcher = dispatcher(true);
 
         buildWithApproachDispatcher(dispatcher)
             .create(param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
@@ -497,14 +472,12 @@ class FireEventServiceImplMergeTest {
         airborne.setHeight(35.0f);
         when(redis.getDeviceOsd(eq("DRONE-1"), eq(OsdDockDrone.class))).thenReturn(Optional.of(airborne));
         when(dualStream.issueCommand(any(), any(), any())).thenReturn(new DualStreamCommandDTO());
-        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock, redis);
-        ReflectionTestUtils.setField(dispatcher, "autoApproachEnabled", true);
-        ReflectionTestUtils.setField(dispatcher, "autoApproachCooldownMs", 600000L);
+        Object dispatcher = dispatcher(true);
 
         buildWithApproachDispatcher(dispatcher)
             .create(param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
 
-        verify(dualStream).issueCommand(eq("DRONE-1"), eq("fire-confirmation-mission"), any());
+        verifyNoInteractions(dualStream);
     }
 
     @Test
@@ -516,9 +489,8 @@ class FireEventServiceImplMergeTest {
             e.setId(2L);
             return 1;
         });
-        FireApproachDispatcher dispatcher = new FireApproachDispatcher(dualStream, clock);
+        Object dispatcher = dispatcher(false);
 
-        assertFalse((Boolean) ReflectionTestUtils.getField(dispatcher, "autoApproachEnabled"));
         FireEventCreateResponse response = buildWithApproachDispatcher(dispatcher)
             .create(param("fire-DRONE-1-1779163440000", 34.659600, 109.341600, "MEDIUM", "0.72", 1779163440000L));
 
@@ -538,7 +510,7 @@ class FireEventServiceImplMergeTest {
         service.create(param("merge-event-1", 34.658650, 109.340650, "MEDIUM", "0.72", 1779163440000L));
         service.create(param("merge-event-2", 34.658660, 109.340660, "MEDIUM", "0.73", 1779163450000L));
 
-        verify(dualStream).issueCommand(any(), eq("fire-confirmation-mission"), any());
+        verifyNoInteractions(dualStream);
     }
 
     @Test
@@ -548,7 +520,7 @@ class FireEventServiceImplMergeTest {
         event.setLat(null);
         event.setLng(null);
 
-        dispatcher(true).dispatchIfEligible(event);
+        // Automatic approach dispatcher was removed from production.
 
         verify(dualStream, never()).issueCommand(any(), any(), any());
     }
@@ -582,7 +554,7 @@ class FireEventServiceImplMergeTest {
 
         assertEquals(2L, response.getFireEventId());
         assertEquals("CREATED", response.getNotificationReason());
-        verify(dualStream).issueCommand(any(), eq("fire-confirmation-mission"), any());
+        verifyNoInteractions(dualStream);
     }
 
     @Test
@@ -831,7 +803,6 @@ class FireEventServiceImplMergeTest {
 
     @Test
     void laser_locating_event_does_not_dispatch_legacy_auto_approach() {
-        FireApproachDispatcher approach = mock(FireApproachDispatcher.class);
         FireEventCreateParam locating = param(
             "visible-locating", 34.9607, 109.3163, "HIGH", "0.81", 1779163440000L);
         locating.setGeoMethod("LASER_RANGEFINDER");
@@ -843,9 +814,9 @@ class FireEventServiceImplMergeTest {
             return 1;
         });
 
-        buildWithApproachDispatcher(approach).create(locating);
+        build().create(locating);
 
-        verify(approach, never()).dispatchIfEligible(any(FireEventEntity.class));
+        verifyNoInteractions(dualStream);
     }
 
     @Test

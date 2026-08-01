@@ -1,61 +1,72 @@
 package com.yx.uavfire.firedetection;
 
+import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
+import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class FireDetectionServiceTest {
 
-    private FireDetectionService newService(AiServiceClient client, FireDetectionActivityTracker tracker) {
-        FireDetectionService service = new FireDetectionService(client, tracker);
-        ReflectionTestUtils.setField(service, "zlmRtspHost", "127.0.0.1");
-        ReflectionTestUtils.setField(service, "zlmRtspPort", 8554);
-        return service;
-    }
-
     @Test
-    void startForDrone_marksFireDetectionActiveOnSuccess() {
-        AiServiceClient client = mock(AiServiceClient.class);
-        IDualStreamService dualStreamService = mock(IDualStreamService.class);
-        when(client.fireTaskIdForDrone("DRONE-001")).thenReturn("fire-DRONE-001");
-        when(client.startDetection(eq("fire-DRONE-001"), eq("DRONE-001"), anyString(), anyString())).thenReturn(true);
-        FireDetectionActivityTracker tracker = new FireDetectionActivityTracker();
-        FireDetectionService service = newService(client, tracker);
-        ReflectionTestUtils.setField(service, "dualStreamService", dualStreamService);
+    void startForDrone_queuesAgentArmWithoutClaimingDetectorIsRunning() {
+        IDualStreamService commands = mock(IDualStreamService.class);
+        when(commands.issueCommand("DRONE-001", "visible-detector-arm"))
+                .thenReturn(new DualStreamCommandDTO());
+        FireDetectionService service = new FireDetectionService(commands);
 
         assertTrue(service.startForDrone("DRONE-001"));
-        assertTrue(tracker.isActive("DRONE-001"));
-        verify(dualStreamService).issueCommand("DRONE-001", "thermal-monitor-off");
+        verify(commands).issueCommand("DRONE-001", "visible-detector-arm");
+        assertFalse((Boolean) service.statusForDrone("DRONE-001").get("running"));
+        assertEquals("AGENT", service.statusForDrone("DRONE-001").get("executor"));
     }
 
     @Test
-    void startForDrone_keepsInactiveWhenStartFails() {
-        AiServiceClient client = mock(AiServiceClient.class);
-        when(client.fireTaskIdForDrone("DRONE-001")).thenReturn("fire-DRONE-001");
-        when(client.startDetection(eq("fire-DRONE-001"), eq("DRONE-001"), anyString(), anyString())).thenReturn(false);
-        FireDetectionActivityTracker tracker = new FireDetectionActivityTracker();
+    void statusForDrone_usesObservedAgentHeartbeatNotQueuedCommand() {
+        IDualStreamService commands = mock(IDualStreamService.class);
+        when(commands.getGroup("DRONE-001")).thenReturn(new DualStreamLiveGroupDTO()
+                .setDetectorIntent("ARMED")
+                .setDetectorState("ARMED")
+                .setDetectorHealth("HEALTHY")
+                .setDetectorObservedAt(System.currentTimeMillis()));
+        FireDetectionService service = new FireDetectionService(commands);
 
-        assertFalse(newService(client, tracker).startForDrone("DRONE-001"));
-        assertFalse(tracker.isActive("DRONE-001"));
+        Map<String, Object> status = service.statusForDrone("DRONE-001");
+
+        assertTrue((Boolean) status.get("running"));
+        assertEquals(false, status.get("heartbeat_stale"));
     }
 
     @Test
-    void stopForDrone_marksFireDetectionInactiveEvenIfAiServiceStopFails() {
-        AiServiceClient client = mock(AiServiceClient.class);
-        when(client.fireTaskIdForDrone("DRONE-001")).thenReturn("fire-DRONE-001");
-        when(client.stopDetection("fire-DRONE-001")).thenReturn(false);
-        FireDetectionActivityTracker tracker = new FireDetectionActivityTracker();
-        tracker.markActive("DRONE-001");
+    void statusForDrone_failsClosedWhenAgentHeartbeatIsStale() {
+        IDualStreamService commands = mock(IDualStreamService.class);
+        when(commands.getGroup("DRONE-001")).thenReturn(new DualStreamLiveGroupDTO()
+                .setDetectorState("ARMED")
+                .setDetectorHealth("HEALTHY")
+                .setDetectorObservedAt(System.currentTimeMillis() - 60_000));
 
-        assertFalse(newService(client, tracker).stopForDrone("DRONE-001"));
-        assertFalse(tracker.isActive("DRONE-001"));
+        Map<String, Object> status = new FireDetectionService(commands).statusForDrone("DRONE-001");
+
+        assertFalse((Boolean) status.get("running"));
+        assertEquals(true, status.get("heartbeat_stale"));
+        assertEquals("agent-heartbeat-stale", status.get("status_reason"));
+    }
+
+    @Test
+    void stopForDrone_queuesAgentDisarm() {
+        IDualStreamService commands = mock(IDualStreamService.class);
+        when(commands.issueCommand("DRONE-001", "visible-detector-disarm"))
+                .thenReturn(new DualStreamCommandDTO());
+
+        assertTrue(new FireDetectionService(commands).stopForDrone("DRONE-001"));
+        verify(commands).issueCommand("DRONE-001", "visible-detector-disarm");
     }
 }

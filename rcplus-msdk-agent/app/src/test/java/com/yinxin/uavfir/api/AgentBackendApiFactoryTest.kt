@@ -12,6 +12,10 @@ class AgentBackendApiFactoryTest {
             droneSn = "RC_PLUS_LOCAL",
             connectionState = "CAPABILITY_READY",
             sessionState = "INIT",
+            detectorIntent = "ARMED",
+            detectorState = "BLOCKED",
+            detectorHealth = "UNHEALTHY",
+            detectorReason = "feature-disabled",
         )
 
         val json = backendGson().toJson(payload)
@@ -20,6 +24,10 @@ class AgentBackendApiFactoryTest {
         assertTrue(node.has("drone_sn"))
         assertTrue(node.has("connection_state"))
         assertTrue(node.has("session_state"))
+        assertTrue(node.has("detector_intent"))
+        assertTrue(node.has("detector_state"))
+        assertTrue(node.has("detector_health"))
+        assertTrue(node.has("detector_reason"))
         assertFalse(node.has("droneSn"))
         assertFalse(node.has("connectionState"))
         assertFalse(node.has("sessionState"))

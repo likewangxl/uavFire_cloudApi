@@ -9,7 +9,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.util.StringUtils;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -28,14 +27,8 @@ public class FireDetectionController {
         if (!StringUtils.hasText(droneSn)) {
             return HttpResultResponse.error("drone_sn required");
         }
-        // MSDK Migration Phase 1 (docs/MSDK_MIGRATION_PLAN.md):
-        // Default URL points at the MSDK Agent's RTMP push (ZLM stream-id
-        // "{drone_sn}-0", matching DjiLiveStreamController). When caller
-        // explicitly supplies a Cloud SDK video_id we honour it — this is
-        // the rollback rail for phase 1, removed in phase 2.
-        String videoId = body.get("video_id");
-        boolean ok = fireDetectionService.startForDrone(droneSn, videoId);
-        return ok ? HttpResultResponse.success() : HttpResultResponse.error("ai-service start failed");
+        boolean ok = fireDetectionService.startForDrone(droneSn);
+        return ok ? HttpResultResponse.success() : HttpResultResponse.error("agent arm command queue failed");
     }
 
     @GetMapping("/status")
@@ -43,10 +36,7 @@ public class FireDetectionController {
         if (!StringUtils.hasText(droneSn)) {
             return HttpResultResponse.error("drone_sn required");
         }
-        Map<String, Object> data = new HashMap<>();
-        data.put("drone_sn", droneSn);
-        data.put("running", fireDetectionService.isActiveForDrone(droneSn));
-        return HttpResultResponse.success(data);
+        return HttpResultResponse.success(fireDetectionService.statusForDrone(droneSn));
     }
 
     @PostMapping("/stop")
@@ -56,6 +46,6 @@ public class FireDetectionController {
             return HttpResultResponse.error("drone_sn required");
         }
         boolean ok = fireDetectionService.stopForDrone(droneSn);
-        return ok ? HttpResultResponse.success() : HttpResultResponse.error("ai-service stop failed");
+        return ok ? HttpResultResponse.success() : HttpResultResponse.error("agent disarm command queue failed");
     }
 }

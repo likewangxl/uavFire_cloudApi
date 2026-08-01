@@ -68,13 +68,6 @@ public class DualStreamController {
         return HttpResultResponse.success(dualStreamService.listEvents(taskId));
     }
 
-    @GetMapping("/tasks/{task_id}/latest-visible-roi")
-    public HttpResultResponse<VisibleRoiSnapshotDTO> latestVisibleRoi(
-            @PathVariable("task_id") String taskId,
-            @RequestParam(name = "after_source_ts", defaultValue = "0") long afterSourceTs) {
-        return HttpResultResponse.success(dualStreamService.latestVisibleRoi(taskId, afterSourceTs));
-    }
-
     @GetMapping("/groups/{drone_sn}")
     public HttpResultResponse<DualStreamLiveGroupDTO> getGroup(@PathVariable("drone_sn") String droneSn) {
         return HttpResultResponse.success(dualStreamService.getGroup(droneSn));

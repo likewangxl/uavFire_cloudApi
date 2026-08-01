@@ -111,10 +111,6 @@ public class FireEventServiceImpl implements FireEventService {
     private final OperationIncidentMapper operationIncidentMapper;
     private final IncidentStateMachine incidentStateMachine;
     private final Fc100ThermalProperties thermalProperties;
-    private final FireApproachDispatcher fireApproachDispatcher;
-
-    @Autowired(required = false)
-    private VisibleFireLocalizationDispatcher visibleFireLocalizationDispatcher;
 
     @Value("${fc100.fire-event.dedup-enabled:true}")
     private boolean fireEventDedupEnabled = true;
@@ -137,7 +133,7 @@ public class FireEventServiceImpl implements FireEventService {
     public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
                                 MissionNoGenerator g, Clock c,
                                 IDeviceRedisService deviceRedisService) {
-        this(em, hm, mm, g, c, deviceRedisService, null, null, null, null, null, null);
+        this(em, hm, mm, g, c, deviceRedisService, null, null, null, null, null);
     }
 
     @Override
@@ -294,19 +290,7 @@ public class FireEventServiceImpl implements FireEventService {
                                 MissionNoGenerator g, Clock c,
                                 IDeviceRedisService deviceRedisService,
                                 FireGeoLocationService fireGeoLocationService) {
-        this(em, hm, mm, g, c, deviceRedisService, fireGeoLocationService, null, null, null, null, null);
-    }
-
-    public FireEventServiceImpl(FireEventMapper em, FireEventHistoryMapper hm, FireMissionMapper mm,
-                                MissionNoGenerator g, Clock c,
-                                IDeviceRedisService deviceRedisService,
-                                FireGeoLocationService fireGeoLocationService,
-                                OperationIncidentService operationIncidentService,
-                                OperationIncidentMapper operationIncidentMapper,
-                                IncidentStateMachine incidentStateMachine,
-                                Fc100ThermalProperties thermalProperties) {
-        this(em, hm, mm, g, c, deviceRedisService, fireGeoLocationService, operationIncidentService,
-            operationIncidentMapper, incidentStateMachine, thermalProperties, null);
+        this(em, hm, mm, g, c, deviceRedisService, fireGeoLocationService, null, null, null, null);
     }
 
     @Autowired
@@ -317,8 +301,7 @@ public class FireEventServiceImpl implements FireEventService {
                                 OperationIncidentService operationIncidentService,
                                 OperationIncidentMapper operationIncidentMapper,
                                 IncidentStateMachine incidentStateMachine,
-                                Fc100ThermalProperties thermalProperties,
-                                FireApproachDispatcher fireApproachDispatcher) {
+                                Fc100ThermalProperties thermalProperties) {
         this.eventMapper = em;
         this.historyMapper = hm;
         this.missionMapper = mm;
@@ -330,7 +313,6 @@ public class FireEventServiceImpl implements FireEventService {
         this.operationIncidentMapper = operationIncidentMapper;
         this.incidentStateMachine = incidentStateMachine;
         this.thermalProperties = thermalProperties != null ? thermalProperties : new Fc100ThermalProperties();
-        this.fireApproachDispatcher = fireApproachDispatcher;
     }
 
     @Override
@@ -491,30 +473,8 @@ public class FireEventServiceImpl implements FireEventService {
         }
         eventMapper.insert(e);
         insertHistory(e, param, eventTs, now, "CREATED");
-        dispatchVisibleLaserLocalization(e, param, eventTs);
-
         return createdResponse(e, new FireEventCreateResponse(e.getId(), e.getEventId(),
             false, null, e.getStatus(), true, false, true, "CREATED"));
-    }
-
-    private void dispatchVisibleLaserLocalization(
-            FireEventEntity event,
-            FireEventCreateParam param,
-            long eventTs) {
-        if (visibleFireLocalizationDispatcher == null
-                || !GEO_QUALITY_LASER_LOCATING.equalsIgnoreCase(event.getGeoQuality())
-                || param.getVisibleRoi() == null
-                || param.getVisibleRoi().isEmpty()
-                || event.getDeviceSn() == null
-                || event.getDeviceSn().isBlank()) {
-            return;
-        }
-        visibleFireLocalizationDispatcher.dispatch(
-                event.getEventId(),
-                taskIdForLaserEvent(event.getEventId(), event.getDeviceSn()),
-                event.getDeviceSn(),
-                eventTs,
-                param.getVisibleRoi());
     }
 
     private String taskIdForLaserEvent(String eventId, String deviceSn) {
@@ -565,9 +525,6 @@ public class FireEventServiceImpl implements FireEventService {
     }
 
     private FireEventCreateResponse createdResponse(FireEventEntity event, FireEventCreateResponse response) {
-        if (fireApproachDispatcher != null && !isUnresolvedLaserQuality(event.getGeoQuality())) {
-            fireApproachDispatcher.dispatchIfEligible(event);
-        }
         return response;
     }
 
@@ -1063,7 +1020,7 @@ public class FireEventServiceImpl implements FireEventService {
     }
 
     /**
-     * 当 caller (ai-service) 没带 lat/lng 时,从 Redis 里取该 deviceSn 最新 OSD 自动填入。
+     * 当 Agent 上报未带 lat/lng 时,从 Redis 里取该 deviceSn 最新 OSD 自动填入。
      * OSD 也查不到则抛 MISSING_DEVICE_POSITION (HTTP 400),不持久化半残事件。
      */
     private void fillPositionFromOsdIfMissing(FireEventCreateParam param) {

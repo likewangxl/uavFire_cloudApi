@@ -53,19 +53,11 @@ class CommandPollingCoordinator(
         try {
             val result = runCatching {
                 withTimeout(commandTimeoutMs) {
-                    if (command.action.equals("fire-confirmation-mission", ignoreCase = true) ||
-                        command.action.equals("visible-fire-hold", ignoreCase = true) ||
-                        command.action.equals("visible-fire-laser-measure", ignoreCase = true)
-                    ) {
-                        // Fire workflows carry their target/session data in command.params.
-                        sessionManager.executeCommand(droneSn, command.action, command.params.orEmpty())
-                    } else {
-                        sessionManager.executeCommand(
-                            droneSn,
-                            command.action,
-                            command.thermalMeasureRoi?.toThermalMeasureRegion(),
-                        )
-                    }
+                    sessionManager.executeCommand(
+                        droneSn,
+                        command.action,
+                        command.thermalMeasureRoi?.toThermalMeasureRegion(),
+                    )
                 }
             }.getOrElse { throwable ->
                 if (throwable is TimeoutCancellationException) {

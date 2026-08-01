@@ -4,6 +4,7 @@ import com.yinxin.uavfir.sdk.CameraCapability
 import com.yinxin.uavfir.session.AgentConnectionState
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
 import com.yinxin.uavfir.session.DualStreamSessionState
+import com.yinxin.uavfir.firedetection.VisibleDetectorStatus
 
 class AgentReporter(
     private val client: AgentBackendClient,
@@ -12,8 +13,9 @@ class AgentReporter(
         droneSn: String,
         connectionState: AgentConnectionState,
         sessionState: DualStreamSessionState,
+        detectorStatus: VisibleDetectorStatus = VisibleDetectorStatus.disarmed(),
     ) {
-        client.sendHeartbeat(droneSn, connectionState, sessionState)
+        client.sendHeartbeat(droneSn, connectionState, sessionState, detectorStatus)
     }
 
     suspend fun reportStatus(

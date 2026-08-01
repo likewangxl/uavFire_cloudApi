@@ -43,6 +43,7 @@ import com.yinxin.uavfir.firedetection.FlightSafetyGate
 import com.yinxin.uavfir.firedetection.OwnedResumeSafetyEvidenceProvider
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorFactory
+import com.yinxin.uavfir.firedetection.VisibleDetectorControl
 import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import com.yinxin.uavfir.firedetection.VisibleInferenceLoop
 import com.yinxin.uavfir.firedetection.VisibleInferenceResultJournal
@@ -187,12 +188,14 @@ class AppServices(
         if (visibleInferenceLoop != null) latestVisibleFrameBuffer else VisibleFrameIngress.NO_OP
     private val thermalHotspotTriggerBridge = ThermalHotspotTriggerBridge()
     private val fireConfirmationRunnerBridge = FireConfirmationRunnerBridge()
+    private val visibleDetectorControl = VisibleDetectorControl(::currentDetectorArmingHealth)
     private val sessionManager = DualStreamSessionManager(
         RealMsdkStreamProvider(
             hotspotCandidateListener = thermalHotspotTriggerBridge,
             visibleFrameIngress = visibleFrameIngress,
         ),
         fireConfirmationRunner = fireConfirmationRunnerBridge::run,
+        visibleDetectorControl = visibleDetectorControl,
     )
     private val flightControlClient = DjiFlightControlActionClient()
     private val msdkCommandExecutor = DualStreamMsdkCommandExecutor(
@@ -292,28 +295,7 @@ class AppServices(
         delivery = coordinatorOutbox,
         mission = coordinatorMission,
         localization = coordinatorLocalization,
-        armingHealth = {
-            val sourceGeneration = latestVisibleFrameBuffer.currentVisibleSourceGeneration()
-            val health = cachedFireHealth.get()
-            CoordinatorArmingHealth(
-                featureEnabled = BuildConfig.VISIBLE_FIRE_DETECTION_ENABLED,
-                backendMonitoringEnabled = sessionManager.thermalMonitoringEnabled,
-                visibleSourceActive = sourceGeneration != null,
-                sourceGenerationValid = sourceGeneration != null,
-                detectorHealthy = health.modelHealthy && health.runtimeHealthy,
-                storeHealthy = health.storeHealthy,
-                // Task 11 durable backend ingress and RC safety proof are not complete.
-                outboxHealthy = false,
-                missionAdaptersHealthy = true,
-                // RC Plus is unavailable; full DJI safety-signal evidence is
-                // deliberately not represented as healthy.
-                safetyAdaptersHealthy = false,
-                manualHoldActive = runCatching {
-                    fireSessionStore.hasActiveManualHold()
-                }.getOrDefault(true),
-                competingOwnerActive = visibleFireLaserLocator.hasActiveOwnership(),
-            )
-        },
+        armingHealth = ::currentDetectorArmingHealth,
         runtimeHealth = {
             val health = cachedFireHealth.get()
             com.yinxin.uavfir.firedetection.CoordinatorRuntimeHealth(
@@ -534,6 +516,26 @@ class AppServices(
                 Log.w(TAG, "auto-start dual-stream failed droneSn=$droneSn: ${throwable.message}", throwable)
             }
         }
+    }
+
+    private fun currentDetectorArmingHealth(): CoordinatorArmingHealth {
+        val sourceGeneration = latestVisibleFrameBuffer.currentVisibleSourceGeneration()
+        val health = cachedFireHealth.get()
+        return CoordinatorArmingHealth(
+            featureEnabled = BuildConfig.VISIBLE_FIRE_DETECTION_ENABLED,
+            detectorArmRequested = visibleDetectorControl.isArmRequested(),
+            visibleSourceActive = sourceGeneration != null,
+            sourceGenerationValid = sourceGeneration != null,
+            detectorHealthy = health.modelHealthy && health.runtimeHealthy,
+            storeHealthy = health.storeHealthy,
+            outboxHealthy = false,
+            missionAdaptersHealthy = true,
+            safetyAdaptersHealthy = false,
+            manualHoldActive = runCatching {
+                fireSessionStore.hasActiveManualHold()
+            }.getOrDefault(true),
+            competingOwnerActive = visibleFireLaserLocator.hasActiveOwnership(),
+        )
     }
 
     fun shutdown() {

@@ -217,6 +217,7 @@ class AgentRuntimeLoop(
                 droneSn = droneSn,
                 connectionState = connectionState,
                 sessionState = sessionManager.sessionState,
+                detectorStatus = sessionManager.detectorStatus(),
             )
         }.onFailure { onError("heartbeat", it) }
     }

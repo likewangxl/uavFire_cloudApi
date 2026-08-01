@@ -906,13 +906,8 @@ class FireConfirmationProcessorTest {
             ),
         )
 
-        assertEquals("applied", result.status)
-        assertEquals(88.0, result.thermalCenterTemperatureC ?: -1.0, 1e-6)
-        assertEquals("task-manual-001", receivedRequest?.taskId)
-        assertEquals("DRONE-001", receivedRequest?.droneSn)
-        assertEquals(34.12, receivedRequest?.fireLat ?: -1.0, 1e-6)
-        assertEquals(108.23, receivedRequest?.fireLng ?: -1.0, 1e-6)
-        assertEquals(121.5, receivedRequest?.fireAlt ?: -1.0, 1e-6)
+        assertEquals("ignored", result.status)
+        assertNull(receivedRequest)
     }
 
     @Test

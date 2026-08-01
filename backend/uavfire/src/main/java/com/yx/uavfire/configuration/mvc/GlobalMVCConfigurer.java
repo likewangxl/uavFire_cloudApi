@@ -48,7 +48,6 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/demo-login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/events");
-        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/latest-visible-roi");
         // Excluded only from browser-user auth; the dedicated Agent JWT
         // interceptor below authenticates this exact machine endpoint.
         EXCLUDE_PATHS.add(agentFireReportPath);

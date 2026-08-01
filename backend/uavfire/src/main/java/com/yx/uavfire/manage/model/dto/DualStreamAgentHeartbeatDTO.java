@@ -16,4 +16,12 @@ public class DualStreamAgentHeartbeatDTO {
     private String connectionState;
 
     private String sessionState;
+
+    private String detectorIntent;
+
+    private String detectorState;
+
+    private String detectorHealth;
+
+    private String detectorReason;
 }

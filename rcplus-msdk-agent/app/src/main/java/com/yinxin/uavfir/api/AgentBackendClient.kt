@@ -7,6 +7,7 @@ import com.yinxin.uavfir.session.DualStreamSessionState
 import java.util.Locale
 import com.yinxin.uavfir.firedetection.store.OutboxRow
 import com.yinxin.uavfir.firedetection.store.SendOutcome
+import com.yinxin.uavfir.firedetection.VisibleDetectorStatus
 
 class AgentBackendClient(
     private val api: DualStreamApi,
@@ -19,9 +20,10 @@ class AgentBackendClient(
         droneSn: String,
         connectionState: AgentConnectionState,
         sessionState: DualStreamSessionState,
+        detectorStatus: VisibleDetectorStatus = VisibleDetectorStatus.disarmed(),
     ) {
         debug("heartbeat request drone=$droneSn state=$connectionState session=$sessionState")
-        api.heartbeat(droneSn, buildHeartbeatRequest(droneSn, connectionState, sessionState))
+        api.heartbeat(droneSn, buildHeartbeatRequest(droneSn, connectionState, sessionState, detectorStatus))
         debug("heartbeat response drone=$droneSn")
     }
 
@@ -29,10 +31,15 @@ class AgentBackendClient(
         droneSn: String,
         connectionState: AgentConnectionState,
         sessionState: DualStreamSessionState,
+        detectorStatus: VisibleDetectorStatus = VisibleDetectorStatus.disarmed(),
     ): AgentHeartbeatRequest = AgentHeartbeatRequest(
         droneSn = droneSn,
         connectionState = connectionState.name,
         sessionState = sessionState.name,
+        detectorIntent = detectorStatus.intent,
+        detectorState = detectorStatus.state,
+        detectorHealth = detectorStatus.health,
+        detectorReason = detectorStatus.reason,
     )
 
     suspend fun sendStatus(

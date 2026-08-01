@@ -1785,8 +1785,6 @@ class PlannedWaylineServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
         IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
-        com.yx.uavfire.firedetection.AiServiceClient aiServiceClient =
-                mock(com.yx.uavfire.firedetection.AiServiceClient.class);
         com.yx.uavfire.wayline.agent.service.IWaylineAgentService waylineAgentService =
                 mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
         Path kmzPath = Files.createTempFile("pw-agent-ai", ".kmz");
@@ -1818,7 +1816,6 @@ class PlannedWaylineServiceTest {
 
         service.executeTask("workspace-001", "pw-agent-ai");
 
-        verify(aiServiceClient, never()).startDetection(any(), any(), any(), any());
     }
 
     @Test

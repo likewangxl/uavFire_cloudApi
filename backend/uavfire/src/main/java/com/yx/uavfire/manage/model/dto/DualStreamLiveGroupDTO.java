@@ -44,4 +44,14 @@ public class DualStreamLiveGroupDTO {
     private Boolean thermalSupported;
 
     private Double thermalCenterTemperatureC;
+
+    private String detectorIntent;
+
+    private String detectorState;
+
+    private String detectorHealth;
+
+    private String detectorReason;
+
+    private Long detectorObservedAt;
 }

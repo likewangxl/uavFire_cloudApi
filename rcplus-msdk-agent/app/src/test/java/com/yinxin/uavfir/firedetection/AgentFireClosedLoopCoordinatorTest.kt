@@ -485,7 +485,7 @@ class AgentFireClosedLoopCoordinatorTest {
         val base = healthy()
         val unhealthy = listOf(
             base.copy(featureEnabled = false),
-            base.copy(backendMonitoringEnabled = false),
+            base.copy(detectorArmRequested = false),
             base.copy(visibleSourceActive = false),
             base.copy(sourceGenerationValid = false),
             base.copy(detectorHealthy = false),

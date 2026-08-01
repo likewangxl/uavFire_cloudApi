@@ -4,6 +4,8 @@ import com.yinxin.uavfir.api.AgentReporter
 import com.yinxin.uavfir.api.FireConfirmationRequest
 import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.api.VisibleFireLaserLocator
+import com.yinxin.uavfir.firedetection.VisibleDetectorControl
+import com.yinxin.uavfir.firedetection.VisibleDetectorStatus
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiDeviceState
 import com.yinxin.uavfir.stream.BoundStreamState
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 class DualStreamSessionManager(
     private val streamProvider: StreamProvider,
     visibleFireLaserLocator: VisibleFireLaserLocator? = null,
+    private val visibleDetectorControl: VisibleDetectorControl? = null,
     private val fireConfirmationRunner: (suspend (FireConfirmationRequest) -> FireConfirmationResult)? = null,
 ) : DualStreamCommandExecutor {
     @Volatile
@@ -199,6 +202,9 @@ class DualStreamSessionManager(
         thermalCenterTemperatureC = lastThermalCenterTemperatureC,
     )
 
+    override fun detectorStatus(): VisibleDetectorStatus =
+        visibleDetectorControl?.snapshot() ?: VisibleDetectorStatus.disarmed()
+
     override suspend fun executeCommand(
         droneSn: String,
         action: String,
@@ -219,60 +225,7 @@ class DualStreamSessionManager(
         droneSn: String,
         action: String,
         params: Map<String, Any?>,
-    ): CommandExecutionResult {
-        if (action.equals("visible-fire-hold", ignoreCase = true)) {
-            val eventId = params["eventId"]?.toString()
-                ?: return CommandExecutionResult(
-                    status = "failed",
-                    message = "LASER_FAILED:event-id-required",
-                )
-            val locator = visibleFireLaserLocator
-                ?: return CommandExecutionResult(
-                    status = "failed",
-                    message = "LASER_FAILED:locator-not-wired",
-                    eventId = eventId,
-                )
-            return locator.hold(eventId)
-        }
-        if (action.equals("visible-fire-laser-measure", ignoreCase = true)) {
-            val eventId = params["eventId"]?.toString()
-                ?: return CommandExecutionResult(
-                    status = "failed",
-                    message = "LASER_FAILED:event-id-required",
-                )
-            val taskId = params["taskId"]?.toString()
-                ?: return CommandExecutionResult(
-                    status = "failed",
-                    message = "LASER_FAILED:task-id-required",
-                    eventId = eventId,
-                )
-            val roi = params["visibleRoi"].asVisibleRoi()
-                ?: params["visible_roi"].asVisibleRoi()
-                ?: return CommandExecutionResult(
-                    status = "failed",
-                    message = "LASER_FAILED:visible-roi-required",
-                    eventId = eventId,
-                )
-            val locator = visibleFireLaserLocator
-                ?: return CommandExecutionResult(
-                    status = "failed",
-                    message = "LASER_FAILED:locator-not-wired",
-                    eventId = eventId,
-                )
-            return locator.measure(eventId, taskId, roi)
-        }
-        if (!action.equals("fire-confirmation-mission", ignoreCase = true)) {
-            return executeCommand(droneSn, action)
-        }
-        val request = params.toFireConfirmationRequest(droneSn)
-            ?: return CommandExecutionResult(status = "failed", message = "fire-confirmation-params-required")
-        return executeCommand(
-            droneSn = droneSn,
-            action = action,
-            thermalMeasureRegion = null,
-            fireConfirmationRequest = request,
-        )
-    }
+    ): CommandExecutionResult = executeCommand(droneSn, action)
 
     suspend fun executeCommand(
         droneSn: String,
@@ -280,6 +233,18 @@ class DualStreamSessionManager(
         thermalMeasureRegion: ThermalMeasureRegion?,
         fireConfirmationRequest: FireConfirmationRequest?,
     ): CommandExecutionResult = when (action.lowercase()) {
+        "visible-detector-arm" -> {
+            val status = visibleDetectorControl?.arm()
+                ?: return CommandExecutionResult(status = "failed", message = "visible-detector-control-not-wired")
+            CommandExecutionResult(status = "applied", message = "detector-state=${status.state}:${status.reason.orEmpty()}")
+        }
+
+        "visible-detector-disarm" -> {
+            val status = visibleDetectorControl?.disarm()
+                ?: return CommandExecutionResult(status = "failed", message = "visible-detector-control-not-wired")
+            CommandExecutionResult(status = "applied", message = "detector-state=${status.state}")
+        }
+
         "start" -> {
             start(droneSn)
             if (state.value == DualStreamSessionState.RUNNING) {
@@ -423,26 +388,6 @@ class DualStreamSessionManager(
             },
         )
 
-        "fire-confirmation-mission" -> runCatching {
-            val runner = fireConfirmationRunner ?: error("fire-confirmation-runner-not-wired")
-            val request = fireConfirmationRequest ?: error("fire-confirmation-params-required")
-            runner(request)
-        }.fold(
-            onSuccess = { result ->
-                CommandExecutionResult(
-                    status = if (result.success) "applied" else "failed",
-                    message = result.failureReason ?: "fire-confirmation-${result.phaseReached.name.lowercase()}",
-                    thermalCenterTemperatureC = result.closeMeasureTemperatureC,
-                )
-            },
-            onFailure = {
-                CommandExecutionResult(
-                    status = "failed",
-                    message = it.message ?: "fire-confirmation-mission-failed",
-                )
-            },
-        )
-
         else -> CommandExecutionResult(
             status = "ignored",
             message = "unsupported-action:$action",
@@ -498,6 +443,8 @@ interface DualStreamCommandExecutor {
     val sessionState: DualStreamSessionState
 
     fun runtimeStatus(): RuntimeStatus = RuntimeStatus(sessionState = sessionState)
+
+    fun detectorStatus(): VisibleDetectorStatus = VisibleDetectorStatus.disarmed()
 
     suspend fun executeCommand(
         droneSn: String,
