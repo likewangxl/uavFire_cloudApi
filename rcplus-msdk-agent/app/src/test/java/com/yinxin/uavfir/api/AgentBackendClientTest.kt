@@ -10,8 +10,30 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import okhttp3.RequestBody
+import retrofit2.Response
+import com.yinxin.uavfir.firedetection.FireSessionState
+import com.yinxin.uavfir.firedetection.store.OutboxRow
+import com.yinxin.uavfir.firedetection.store.OutboxStatus
+import com.yinxin.uavfir.firedetection.store.SendOutcome
+import com.yinxin.uavfir.firedetection.store.sha256
+import okio.Buffer
 
 class AgentBackendClientTest {
+    @Test
+    fun sendAgentFireReport_preservesDurablePayload() = runTest {
+        val api = RecordingDualStreamApi()
+        val client = AgentBackendClient(api)
+        val payload = """{"eventId":"event-1","sequence":1}"""
+        val row = OutboxRow(
+            "event-1", "session-1", 1, 100_000, FireSessionState.VISUAL_CONFIRMED,
+            payload, sha256(payload), OutboxStatus.PENDING, 0, 0, null, null,
+        )
+
+        assertEquals(SendOutcome.Acknowledged, client.sendAgentFireReport(row))
+        assertEquals(payload, api.lastAgentFireBody)
+    }
+
     @Test
     fun heartbeatPayload_containsDroneSnAndSessionState() {
         val payload = AgentHeartbeatRequest(
@@ -390,6 +412,11 @@ class AgentBackendClientTest {
     }
 
     private class RecordingDualStreamApi : DualStreamApi {
+        var lastAgentFireBody: String? = null
+        override suspend fun reportAgentFire(body: RequestBody): Response<okhttp3.ResponseBody> =
+            Response.success(okhttp3.ResponseBody.create(null,
+                """{"eventId":"event-1","acceptedSequence":1,"eventPersisted":true,"notificationQueued":false}"""))
+                .also { lastAgentFireBody = Buffer().also { buffer -> body.writeTo(buffer) }.readUtf8() }
         var lastHeartbeatDroneSn: String? = null
         var lastHeartbeatBody: AgentHeartbeatRequest? = null
         var lastStatusDroneSn: String? = null

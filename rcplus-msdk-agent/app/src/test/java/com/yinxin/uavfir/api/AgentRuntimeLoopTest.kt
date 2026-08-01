@@ -364,6 +364,8 @@ class AgentRuntimeLoopTest {
     }
 
     private class RecordingDualStreamApi : DualStreamApi {
+        override suspend fun reportAgentFire(body: okhttp3.RequestBody) =
+            retrofit2.Response.success(okhttp3.ResponseBody.create(null, "{}"))
         var heartbeatCount: Int = 0
         var lastHeartbeatDroneSn: String? = null
         var lastHeartbeatBody: AgentHeartbeatRequest? = null

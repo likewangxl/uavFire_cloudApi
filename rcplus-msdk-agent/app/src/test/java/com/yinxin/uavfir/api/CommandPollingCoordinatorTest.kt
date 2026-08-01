@@ -857,6 +857,8 @@ class CommandPollingCoordinatorTest {
         private val nextCommand: AgentApiEnvelope<AgentCommandResponse>?,
         private val nextMsdkCommand: AgentApiEnvelope<MsdkCommandResponse>? = null,
     ) : DualStreamApi {
+        override suspend fun reportAgentFire(body: okhttp3.RequestBody) =
+            retrofit2.Response.success(okhttp3.ResponseBody.create(null, "{}"))
         var lastAck: AgentCommandAckRequest? = null
         var lastMsdkAck: MsdkCommandAckRequest? = null
         var lastStatusBody: AgentStatusRequest? = null

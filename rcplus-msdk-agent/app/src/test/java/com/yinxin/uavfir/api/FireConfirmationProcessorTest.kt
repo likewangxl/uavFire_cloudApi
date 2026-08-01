@@ -1408,6 +1408,8 @@ class FireConfirmationProcessorTest {
     private class RecordingDualStreamApi(
         private val onRecord: (() -> Int)? = null,
     ) : DualStreamApi {
+        override suspend fun reportAgentFire(body: okhttp3.RequestBody) =
+            retrofit2.Response.success(okhttp3.ResponseBody.create(null, "{}"))
         var lastTaskEventTaskId: String? = null
         var lastTaskEventBody: DualStreamEventRequest? = null
         val taskEvents = mutableListOf<DualStreamEventRequest>()

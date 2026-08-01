@@ -6,6 +6,7 @@ import android.util.Log
 import com.yinxin.uavfir.api.AgentBackendConfig
 import com.yinxin.uavfir.api.AgentBackendApiFactory
 import com.yinxin.uavfir.api.AgentBackendClient
+import com.yinxin.uavfir.api.AgentFireReportTransport
 import com.yinxin.uavfir.api.AgentReporter
 import com.yinxin.uavfir.api.AgentRuntimeLoop
 import com.yinxin.uavfir.api.CommandPollingCoordinator
@@ -57,9 +58,7 @@ import com.yinxin.uavfir.firedetection.store.AndroidStoreClock
 import com.yinxin.uavfir.firedetection.store.CanonicalCoordinatorStoreRecordFactory
 import com.yinxin.uavfir.firedetection.store.CoordinatorModelIdentity
 import com.yinxin.uavfir.firedetection.store.FireOutboxDispatcher
-import com.yinxin.uavfir.firedetection.store.FireReportTransport
 import com.yinxin.uavfir.firedetection.store.FireStoreOpenHelper
-import com.yinxin.uavfir.firedetection.store.SendOutcome
 import com.yinxin.uavfir.firedetection.store.SqliteCoordinatorStoreAdapter
 import com.yinxin.uavfir.firedetection.store.SqliteFireSessionStore
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
@@ -138,17 +137,14 @@ class AppServices(
                 inputSize = 960,
                 runtime = "NCNN",
             ),
+            agentId = BuildConfig.AGENT_BUILD_ID,
         ),
     )
     private val coordinatorOutbox = StoreBackedCoordinatorOutboxPort(
         fireSessionStore,
         FireOutboxDispatcher(
             fireSessionStore,
-            FireReportTransport {
-                // Task 10 owns the staged backend transport. Never synthesize
-                // a successful ACK through a legacy endpoint.
-                SendOutcome.TransientFailure("task10-transport-unavailable")
-            },
+            AgentFireReportTransport(api),
         ),
         appScope,
     )
@@ -302,7 +298,7 @@ class AppServices(
                 sourceGenerationValid = sourceGeneration != null,
                 detectorHealthy = health.modelHealthy && health.runtimeHealthy,
                 storeHealthy = health.storeHealthy,
-                // Task 10 has not supplied the staged ACK transport yet.
+                // Task 11 durable backend ingress and RC safety proof are not complete.
                 outboxHealthy = false,
                 missionAdaptersHealthy = true,
                 // RC Plus is unavailable; full DJI safety-signal evidence is

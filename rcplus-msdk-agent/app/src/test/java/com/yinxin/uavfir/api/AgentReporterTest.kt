@@ -58,6 +58,8 @@ class AgentReporterTest {
     }
 
     private class RecordingDualStreamApi : DualStreamApi {
+        override suspend fun reportAgentFire(body: okhttp3.RequestBody) =
+            retrofit2.Response.success(okhttp3.ResponseBody.create(null, "{}"))
         var lastHeartbeatDroneSn: String? = null
         var lastHeartbeatBody: AgentHeartbeatRequest? = null
         var lastStatusDroneSn: String? = null

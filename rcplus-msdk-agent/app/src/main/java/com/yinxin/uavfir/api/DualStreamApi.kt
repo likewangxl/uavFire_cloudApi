@@ -1,11 +1,19 @@
 package com.yinxin.uavfir.api
 
+import okhttp3.RequestBody
+import okhttp3.ResponseBody
+import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface DualStreamApi {
+    @POST("/manage/api/v1/fire-events/agent-report")
+    suspend fun reportAgentFire(
+        @Body body: RequestBody,
+    ): Response<ResponseBody>
+
     @POST("/manage/api/v1/dual-stream/agents/{droneSn}/heartbeat")
     suspend fun heartbeat(
         @Path("droneSn") droneSn: String,

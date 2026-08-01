@@ -126,7 +126,7 @@ internal object CanonicalFireReport {
             root.requiredString("taskId")
             root.requiredLong("sourceGeneration")
             root.requiredLong("coordinatorGeneration")
-            validateRoiShape(root.requiredObject("initialVisibleRoi"))
+            root.optionalObject("initialVisibleRoi")?.let(::validateRoiShape)
         }
         return root
     }
@@ -468,6 +468,15 @@ internal object CanonicalFireReport {
         "sourceGeneration",
         "coordinatorGeneration",
         "initialVisibleRoi",
+        "agentId",
+        "droneSn",
+        "detectionKind",
+        "visibleRoi",
+        "modelVersion",
+        "modelHash",
+        "policyVersion",
+        "inputSize",
+        "runtime",
     )
     private val INITIAL_FIELDS = BASE_FIELDS + setOf(
         "detectionKind",

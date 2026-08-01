@@ -5,10 +5,16 @@ import com.yinxin.uavfir.session.AgentConnectionState
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
 import com.yinxin.uavfir.session.DualStreamSessionState
 import java.util.Locale
+import com.yinxin.uavfir.firedetection.store.OutboxRow
+import com.yinxin.uavfir.firedetection.store.SendOutcome
 
 class AgentBackendClient(
     private val api: DualStreamApi,
 ) {
+    /** Task 10 staged report path; the transport sends the durable payload unchanged. */
+    suspend fun sendAgentFireReport(row: OutboxRow): SendOutcome =
+        AgentFireReportTransport(api).send(row)
+
     suspend fun sendHeartbeat(
         droneSn: String,
         connectionState: AgentConnectionState,

@@ -12,6 +12,7 @@ import com.yinxin.uavfir.firedetection.NormalizedRoi
 import com.yinxin.uavfir.firedetection.TerminalPersistenceRequest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SqliteCoordinatorStoreAdapterTest {
@@ -47,6 +48,25 @@ class SqliteCoordinatorStoreAdapterTest {
         assertThrows(IllegalArgumentException::class.java) {
             records.terminal(session, request, precise(listOf(800, 900, 1_101)), 6)
         }
+    }
+
+    @Test
+    fun stagedPayloadCarriesDurableReporterAndReleaseIdentityWithoutImageData() {
+        val record = records.terminal(session, request, precise(listOf(800, 900, 1_000)), 6)
+        listOf(
+            "\"agentId\":\"uavfire-agent\"",
+            "\"droneSn\":\"task-1\"",
+            "\"taskId\":\"task-1\"",
+            "\"detectionKind\":\"FIRE\"",
+            "\"modelVersion\":\"visible-v1\"",
+            "\"modelHash\":\"${"a".repeat(64)}\"",
+            "\"policyVersion\":\"agent-visible-v1\"",
+            "\"inputSize\":960",
+            "\"runtime\":\"ncnn\"",
+            "\"visibleRoi\"",
+        ).forEach { assertTrue("missing $it", record.payload.contains(it)) }
+        assertTrue(!record.payload.contains("initialVisibleRoi"))
+        assertTrue(!record.payload.contains("image"))
     }
 
     private fun precise(times: List<Long>): FireLocalizationResult.Precise {

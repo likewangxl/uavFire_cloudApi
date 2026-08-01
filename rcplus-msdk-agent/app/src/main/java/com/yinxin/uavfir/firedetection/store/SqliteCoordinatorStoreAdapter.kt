@@ -126,7 +126,10 @@ class CanonicalCoordinatorStoreRecordFactory(
     private val clock: StoreClock,
     private val model: CoordinatorModelIdentity,
     private val evidence: CoordinatorEvidenceProvider = CoordinatorEvidenceProvider { _, _ -> emptyList() },
+    private val agentId: String = "uavfire-agent",
+    private val policyVersion: String = "agent-visible-v1",
 ) : CoordinatorStoreRecordFactory {
+    init { require(agentId.isNotBlank() && policyVersion.isNotBlank()) }
     override fun initial(
         session: CoordinatorSession,
         envelope: AgentFireConfirmationEnvelope,
@@ -277,15 +280,23 @@ class CanonicalCoordinatorStoreRecordFactory(
 
     private fun identity(session: CoordinatorSession, sequence: Long, wall: Long, state: FireSessionState) =
         JsonObject().apply {
+            addProperty("agentId", agentId)
+            addProperty("droneSn", session.taskId.removePrefix("fire-").ifBlank { session.taskId })
             addProperty("eventId", session.eventId)
             addProperty("sessionId", session.sessionId)
             addProperty("taskId", session.taskId)
             addProperty("sourceGeneration", session.sourceGeneration)
             addProperty("coordinatorGeneration", session.generation)
-            add("initialVisibleRoi", roi(session.initialRoi))
             addProperty("sequence", sequence)
             addProperty("eventTimestamp", wall)
             addProperty("state", state.name)
+            addProperty("detectionKind", session.kind.name)
+            add("visibleRoi", roi(session.initialRoi))
+            addProperty("modelVersion", model.modelVersion)
+            addProperty("modelHash", model.modelSha256.lowercase())
+            addProperty("policyVersion", policyVersion)
+            addProperty("inputSize", model.inputSize)
+            addProperty("runtime", model.runtime)
         }
 
     private fun roi(value: com.yinxin.uavfir.firedetection.NormalizedRoi) = JsonObject().apply {
