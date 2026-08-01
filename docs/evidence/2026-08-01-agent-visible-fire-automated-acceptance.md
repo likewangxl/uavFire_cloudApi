@@ -63,3 +63,20 @@ RC Plus 当前不可用。visible-960 三引擎实机对比、正式 APK 30 分�
 实激光定位、OSD 降级、断网恢复、无桨台架和受控飞行均为
 `BLOCKED_PENDING_DEVICE`。现有 NCNN 自动化结果只是 provisional 开发证据，不能替代这些
 设备门禁；detector 必须保持默认关闭和 fail-closed。
+
+## Post-evidence guard fix
+
+2026-08-01 18:34（Asia/Shanghai），Task 15 终审在上述全栈证据之后指出三项静态门禁
+覆盖缺口。后续修复只修改策略、fixture 和生产 RUNBOOK，没有修改 backend、Agent 或
+frontend 产品逻辑，因此没有重跑全栈，也没有改写上面的原始日志与哈希。
+
+- `ai-service` 启动禁令新增 compose `up/run`、systemd/service、launchctl 和 shell launcher
+  命令形态，同时允许文档用行内代码明确列出“禁止执行”的示例；
+- legacy `latest-visible-roi` 禁令扩展到 backend 与 Agent 的全部 `src/main`，`src/test`
+  仍作为负向契约测试边界；
+- 生产 RUNBOOK 增加 reviewed `NCNN_ANDROID_NDK_DIR` fail-fast，并把它显式传给
+  `-PncnnAndroidNdkDir`；
+- 16 个正/负 fixture 与当前 checkout 静态策略均通过，`git diff --check` 通过。
+
+该 post-evidence guard fix 只增强未来回归拦截能力，不把任何设备门禁改为通过；发布结论
+仍为 `NOT_READY_DEFAULT_OFF`。

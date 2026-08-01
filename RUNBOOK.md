@@ -103,12 +103,18 @@ ZLMediaKit/RTMP/WebRTC 不提供推理帧、不参与暂停、ROI、激光或恢
 
 ## 7. 构建与安装 Agent
 
+`NCNN_ANDROID_NDK_DIR` 必须指向经过评审并与验收环境一致的 Android NDK。未设置时构建
+立即失败，不允许依赖 Gradle 缓存绕过 NCNN 原生库打包。
+
 ```bash
 cd rcplus-msdk-agent
+: "${NCNN_ANDROID_NDK_DIR:?set NCNN_ANDROID_NDK_DIR to the reviewed Android NDK}"
 JAVA_HOME=/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home \
 ANDROID_HOME=/usr/local/share/android-commandlinetools \
 ANDROID_SDK_ROOT=/usr/local/share/android-commandlinetools \
-./gradlew --console=plain :app:testDebugUnitTest :app:assembleDebug
+./gradlew --console=plain --rerun-tasks \
+  -PncnnAndroidNdkDir="$NCNN_ANDROID_NDK_DIR" \
+  :app:testDebugUnitTest :app:assembleDebug
 sha256sum app/build/outputs/apk/debug/app-debug.apk
 ```
 
