@@ -89,6 +89,29 @@ public class DualStreamServiceImpl implements IDualStreamService {
                     + "redis.call('SET', KEYS[2], cjson.encode({intent=ARGV[1], version=version})); "
                     + "return version;",
             Long.class);
+    private static final DefaultRedisScript<String> MERGE_GROUP_SNAPSHOT_SCRIPT = new DefaultRedisScript<>(
+            "local incoming = cjson.decode(ARGV[1]); "
+                    + "local raw = redis.call('GET', KEYS[1]); "
+                    + "if raw then "
+                    + "  local current = cjson.decode(raw); "
+                    + "  local cv = tonumber(current.detectorIntentVersion); "
+                    + "  local iv = tonumber(incoming.detectorIntentVersion); "
+                    + "  local co = tonumber(current.detectorObservedAt) or 0; "
+                    + "  local io = tonumber(incoming.detectorObservedAt) or 0; "
+                    + "  local keepCurrent = cv and ((not iv) or cv > iv or (cv == iv and co > io)); "
+                    + "  if keepCurrent then "
+                    + "    incoming.detectorIntent = current.detectorIntent; "
+                    + "    incoming.detectorState = current.detectorState; "
+                    + "    incoming.detectorHealth = current.detectorHealth; "
+                    + "    incoming.detectorReason = current.detectorReason; "
+                    + "    incoming.detectorObservedAt = current.detectorObservedAt; "
+                    + "    incoming.detectorIntentVersion = current.detectorIntentVersion; "
+                    + "  end; "
+                    + "end; "
+                    + "local merged = cjson.encode(incoming); "
+                    + "redis.call('SET', KEYS[1], merged); "
+                    + "return merged;",
+            String.class);
     private static final long DETECTOR_OBSERVATION_TTL_MS = 15_000L;
     private static final String DEFAULT_VISIBLE_STREAM_SUFFIX = "-0";
     private static final List<String> URGENT_ACTIONS = List.of(
@@ -326,8 +349,12 @@ public class DualStreamServiceImpl implements IDualStreamService {
             return null;
         }
         String intent = armed ? "ARMED" : "DISARMED";
-        DetectorIntentRecordDTO record = persistNextDetectorIntent(
-                droneSn, intent, latestObservedDetectorIntentVersion(droneSn));
+        Long observedVersion = latestObservedDetectorIntentVersion(droneSn);
+        if (observedVersion == null) {
+            log.error("refusing detector intent while observation authority is unavailable drone={} intent={}", droneSn, intent);
+            return null;
+        }
+        DetectorIntentRecordDTO record = persistNextDetectorIntent(droneSn, intent, observedVersion);
         if (record == null) {
             return null;
         }
@@ -345,7 +372,12 @@ public class DualStreamServiceImpl implements IDualStreamService {
         if (!StringUtils.hasText(droneSn)) {
             return null;
         }
-        reconcileDetectorIntent(droneSn, latestFreshDetectorObservation(droneSn));
+        DetectorObservationRead observation = latestFreshDetectorObservation(droneSn);
+        if (observation.successful) {
+            reconcileDetectorIntent(droneSn, observation.heartbeat);
+        } else {
+            removeDetectorIntentCommands(droneSn);
+        }
         expireTimedOutCommands(droneSn);
         DualStreamCommandDTO active = commandByDrone.get(droneSn);
         if (active == null || !COMMAND_STATUS_PENDING.equals(normalize(active.getStatus()))) {
@@ -404,18 +436,20 @@ public class DualStreamServiceImpl implements IDualStreamService {
             return null;
         }
 
+        if (hasRedisGroupStore()) {
+            GroupSnapshotRead read = readGroupFromRedis(droneSn);
+            if (!read.successful || read.group == null) {
+                if (read.successful) {
+                    groups.remove(droneSn);
+                }
+                return null;
+            }
+            DualStreamLiveGroupDTO normalized = normalizeGroup(read.group);
+            groups.put(droneSn, copyGroup(normalized));
+            return copyGroup(normalized);
+        }
         DualStreamLiveGroupDTO cached = groups.get(droneSn);
-        if (cached != null) {
-            return normalizeGroup(copyGroup(cached));
-        }
-
-        DualStreamLiveGroupDTO restored = restoreGroupFromRedis(droneSn);
-        if (restored == null) {
-            return null;
-        }
-        DualStreamLiveGroupDTO normalized = normalizeGroup(restored);
-        groups.put(droneSn, normalized);
-        return copyGroup(normalized);
+        return cached == null ? null : normalizeGroup(copyGroup(cached));
     }
 
     @Override
@@ -553,23 +587,41 @@ public class DualStreamServiceImpl implements IDualStreamService {
         }
     }
 
-    private DualStreamAgentHeartbeatDTO latestFreshDetectorObservation(String droneSn) {
-        DualStreamLiveGroupDTO group = getGroup(droneSn);
+    private DetectorObservationRead latestFreshDetectorObservation(String droneSn) {
+        DualStreamLiveGroupDTO group;
+        if (hasRedisGroupStore()) {
+            GroupSnapshotRead read = readGroupFromRedis(droneSn);
+            if (!read.successful) {
+                return DetectorObservationRead.failed();
+            }
+            group = read.group;
+        } else {
+            group = groups.get(droneSn);
+        }
         if (group == null || group.getDetectorObservedAt() == null
                 || System.currentTimeMillis() - group.getDetectorObservedAt() > DETECTOR_OBSERVATION_TTL_MS) {
-            return null;
+            return DetectorObservationRead.success(null);
         }
-        return new DualStreamAgentHeartbeatDTO()
+        return DetectorObservationRead.success(new DualStreamAgentHeartbeatDTO()
                 .setDroneSn(droneSn)
                 .setDetectorIntent(group.getDetectorIntent())
                 .setDetectorState(group.getDetectorState())
                 .setDetectorHealth(group.getDetectorHealth())
                 .setDetectorReason(group.getDetectorReason())
-                .setDetectorIntentVersion(group.getDetectorIntentVersion());
+                .setDetectorIntentVersion(group.getDetectorIntentVersion()));
     }
 
-    private long latestObservedDetectorIntentVersion(String droneSn) {
-        DualStreamLiveGroupDTO group = getGroup(droneSn);
+    private Long latestObservedDetectorIntentVersion(String droneSn) {
+        DualStreamLiveGroupDTO group;
+        if (hasRedisGroupStore()) {
+            GroupSnapshotRead read = readGroupFromRedis(droneSn);
+            if (!read.successful) {
+                return null;
+            }
+            group = read.group;
+        } else {
+            group = groups.get(droneSn);
+        }
         return group == null || group.getDetectorIntentVersion() == null
                 ? 0L : Math.max(0L, group.getDetectorIntentVersion());
     }
@@ -637,14 +689,25 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     private void mergeGroup(String droneSn, Consumer<DualStreamLiveGroupDTO> updater) {
         groups.compute(droneSn, (sn, existing) -> {
-            DualStreamLiveGroupDTO group = existing != null ? copyGroup(existing) : restoreGroupFromRedis(sn);
+            DualStreamLiveGroupDTO group = null;
+            boolean authoritativeReadCompleted = false;
+            if (hasRedisGroupStore()) {
+                GroupSnapshotRead read = readGroupFromRedis(sn);
+                if (read.successful) {
+                    group = read.group;
+                    authoritativeReadCompleted = true;
+                }
+            }
+            if (group == null && existing != null && !authoritativeReadCompleted) {
+                group = copyGroup(existing);
+            }
             if (group == null) {
                 group = new DualStreamLiveGroupDTO().setDroneSn(sn);
             }
             updater.accept(group);
             group = normalizeGroup(group);
-            persistSnapshot(sn, group);
-            return group;
+            DualStreamLiveGroupDTO persisted = persistSnapshot(sn, group);
+            return persisted == null ? group : normalizeGroup(persisted);
         });
     }
 
@@ -851,29 +914,82 @@ public class DualStreamServiceImpl implements IDualStreamService {
     }
 
     private DualStreamLiveGroupDTO restoreGroupFromRedis(String droneSn) {
-        if (stringRedisTemplate == null || objectMapper == null) {
-            return null;
-        }
+        GroupSnapshotRead read = readGroupFromRedis(droneSn);
+        return read.successful ? read.group : null;
+    }
 
+    private boolean hasRedisGroupStore() {
+        return stringRedisTemplate != null && objectMapper != null;
+    }
+
+    private GroupSnapshotRead readGroupFromRedis(String droneSn) {
+        if (!hasRedisGroupStore()) {
+            return GroupSnapshotRead.failed();
+        }
         try {
             String raw = stringRedisTemplate.opsForValue().get(GROUP_KEY_PREFIX + droneSn);
             if (!StringUtils.hasText(raw)) {
-                return null;
+                return GroupSnapshotRead.success(null);
             }
-            return objectMapper.readValue(raw, DualStreamLiveGroupDTO.class);
-        } catch (RuntimeException | JsonProcessingException ignored) {
+            return GroupSnapshotRead.success(objectMapper.readValue(raw, DualStreamLiveGroupDTO.class));
+        } catch (RuntimeException | JsonProcessingException error) {
+            log.error("failed to restore dual-stream group drone={}", droneSn, error);
+            return GroupSnapshotRead.failed();
+        }
+    }
+
+    private DualStreamLiveGroupDTO persistSnapshot(String droneSn, DualStreamLiveGroupDTO group) {
+        if (!hasRedisGroupStore()) {
+            return group;
+        }
+        try {
+            String merged = stringRedisTemplate.execute(
+                    MERGE_GROUP_SNAPSHOT_SCRIPT,
+                    List.of(GROUP_KEY_PREFIX + droneSn),
+                    objectMapper.writeValueAsString(group));
+            return StringUtils.hasText(merged)
+                    ? objectMapper.readValue(merged, DualStreamLiveGroupDTO.class)
+                    : null;
+        } catch (RuntimeException | JsonProcessingException error) {
+            log.error("failed to persist dual-stream group drone={}", droneSn, error);
+            // Keep the in-memory snapshot as fallback when Redis serialization is unavailable.
             return null;
         }
     }
 
-    private void persistSnapshot(String droneSn, DualStreamLiveGroupDTO group) {
-        if (stringRedisTemplate == null || objectMapper == null) {
-            return;
+    private static final class GroupSnapshotRead {
+        private final boolean successful;
+        private final DualStreamLiveGroupDTO group;
+
+        private GroupSnapshotRead(boolean successful, DualStreamLiveGroupDTO group) {
+            this.successful = successful;
+            this.group = group;
         }
-        try {
-            stringRedisTemplate.opsForValue().set(GROUP_KEY_PREFIX + droneSn, objectMapper.writeValueAsString(group));
-        } catch (RuntimeException | JsonProcessingException ignored) {
-            // Keep the in-memory snapshot as fallback when Redis serialization is unavailable.
+
+        private static GroupSnapshotRead success(DualStreamLiveGroupDTO group) {
+            return new GroupSnapshotRead(true, group);
+        }
+
+        private static GroupSnapshotRead failed() {
+            return new GroupSnapshotRead(false, null);
+        }
+    }
+
+    private static final class DetectorObservationRead {
+        private final boolean successful;
+        private final DualStreamAgentHeartbeatDTO heartbeat;
+
+        private DetectorObservationRead(boolean successful, DualStreamAgentHeartbeatDTO heartbeat) {
+            this.successful = successful;
+            this.heartbeat = heartbeat;
+        }
+
+        private static DetectorObservationRead success(DualStreamAgentHeartbeatDTO heartbeat) {
+            return new DetectorObservationRead(true, heartbeat);
+        }
+
+        private static DetectorObservationRead failed() {
+            return new DetectorObservationRead(false, null);
         }
     }
 

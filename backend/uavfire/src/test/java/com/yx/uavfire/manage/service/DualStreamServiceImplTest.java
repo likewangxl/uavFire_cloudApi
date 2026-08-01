@@ -125,6 +125,62 @@ class DualStreamServiceImplTest {
     }
 
     @Test
+    void operatorIntentUsesLatestCrossNodeObservationAsVersionFloorForArmAndDisarm() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl staleNode = serviceWithRedis(redis, version);
+        DualStreamServiceImpl freshNode = serviceWithRedis(redis, version);
+
+        staleNode.acceptHeartbeat("DRONE-MULTI-DISARM", detectorHeartbeat("DRONE-MULTI-DISARM", "ARMED", 1L));
+        freshNode.acceptHeartbeat("DRONE-MULTI-DISARM", detectorHeartbeat("DRONE-MULTI-DISARM", "ARMED", 10L));
+        DualStreamCommandDTO disarm = staleNode.setDetectorIntent("DRONE-MULTI-DISARM", false);
+
+        staleNode.acceptHeartbeat("DRONE-MULTI-ARM", detectorHeartbeat("DRONE-MULTI-ARM", "DISARMED", 3L));
+        freshNode.acceptHeartbeat("DRONE-MULTI-ARM", detectorHeartbeat("DRONE-MULTI-ARM", "DISARMED", 20L));
+        DualStreamCommandDTO arm = staleNode.setDetectorIntent("DRONE-MULTI-ARM", true);
+
+        assertEquals(11L, ((Number) disarm.getParams().get("intentVersion")).longValue());
+        assertEquals(21L, ((Number) arm.getParams().get("intentVersion")).longValue());
+    }
+
+    @Test
+    void staleNodeStatusUpdateCannotRollBackNewerDetectorObservation() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl staleNode = serviceWithRedis(redis, version);
+        DualStreamServiceImpl freshNode = serviceWithRedis(redis, version);
+
+        staleNode.acceptHeartbeat("DRONE-MONOTONIC", detectorHeartbeat("DRONE-MONOTONIC", "DISARMED", 1L));
+        freshNode.acceptHeartbeat("DRONE-MONOTONIC", detectorHeartbeat("DRONE-MONOTONIC", "ARMED", 10L));
+        staleNode.acceptStatus("DRONE-MONOTONIC", new DualStreamAgentStatusDTO()
+                .setDroneSn("DRONE-MONOTONIC")
+                .setMessage("stale-node-status"));
+
+        DualStreamLiveGroupDTO stored = serviceWithRedis(redis, version).getGroup("DRONE-MONOTONIC");
+        assertEquals("stale-node-status", stored.getStatusMessage());
+        assertEquals("ARMED", stored.getDetectorIntent());
+        assertEquals(10L, stored.getDetectorIntentVersion());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void detectorIntentFailsClosedWhenObservationRedisReadFails() {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(template.opsForValue()).thenReturn(values);
+        when(values.get("dual-stream:group:DRONE-OBS-DOWN"))
+                .thenThrow(new IllegalStateException("redis-unavailable"));
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", template);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+
+        assertNull(service.setDetectorIntent("DRONE-OBS-DOWN", false));
+        assertNull(service.pollCommand("DRONE-OBS-DOWN"));
+        verify(template, never()).execute(
+                any(RedisScript.class), anyList(), any(String.class), any(String.class));
+    }
+
+    @Test
     void observedAheadRaisesAuthorityFloorBeforeReissuingArm() {
         Map<String, String> redis = new ConcurrentHashMap<>();
         AtomicLong version = new AtomicLong();
@@ -222,6 +278,24 @@ class DualStreamServiceImplTest {
         ValueOperations<String, String> values = mock(ValueOperations.class);
         when(template.opsForValue()).thenReturn(values);
         when(values.get(any(String.class))).thenAnswer(invocation -> redis.get(invocation.getArgument(0)));
+        when(template.execute(any(RedisScript.class), anyList(), any(String.class))).thenAnswer(invocation -> {
+            List<String> keys = invocation.getArgument(1);
+            String incomingRaw = invocation.getArgument(2);
+            ObjectMapper mapper = new ObjectMapper();
+            synchronized (redis) {
+                DualStreamLiveGroupDTO incoming = mapper.readValue(incomingRaw, DualStreamLiveGroupDTO.class);
+                String currentRaw = redis.get(keys.get(0));
+                if (currentRaw != null) {
+                    DualStreamLiveGroupDTO current = mapper.readValue(currentRaw, DualStreamLiveGroupDTO.class);
+                    if (isNewerDetectorObservation(current, incoming)) {
+                        copyDetectorObservation(current, incoming);
+                    }
+                }
+                String merged = mapper.writeValueAsString(incoming);
+                redis.put(keys.get(0), merged);
+                return merged;
+            }
+        });
         when(template.execute(any(RedisScript.class), anyList(), any(String.class), any(String.class))).thenAnswer(invocation -> {
             List<String> keys = invocation.getArgument(1);
             String intent = invocation.getArgument(2);
@@ -255,6 +329,40 @@ class DualStreamServiceImplTest {
         ReflectionTestUtils.setField(service, "stringRedisTemplate", template);
         ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
         return service;
+    }
+
+    private DualStreamAgentHeartbeatDTO detectorHeartbeat(String droneSn, String intent, long version) {
+        return new DualStreamAgentHeartbeatDTO()
+                .setDroneSn(droneSn)
+                .setDetectorIntent(intent)
+                .setDetectorState(intent)
+                .setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(version);
+    }
+
+    private boolean isNewerDetectorObservation(
+            DualStreamLiveGroupDTO current,
+            DualStreamLiveGroupDTO incoming) {
+        if (current.getDetectorIntentVersion() == null) {
+            return false;
+        }
+        if (incoming.getDetectorIntentVersion() == null
+                || current.getDetectorIntentVersion() > incoming.getDetectorIntentVersion()) {
+            return true;
+        }
+        long currentObservedAt = current.getDetectorObservedAt() == null ? 0L : current.getDetectorObservedAt();
+        long incomingObservedAt = incoming.getDetectorObservedAt() == null ? 0L : incoming.getDetectorObservedAt();
+        return current.getDetectorIntentVersion().equals(incoming.getDetectorIntentVersion())
+                && currentObservedAt > incomingObservedAt;
+    }
+
+    private void copyDetectorObservation(DualStreamLiveGroupDTO source, DualStreamLiveGroupDTO target) {
+        target.setDetectorIntent(source.getDetectorIntent())
+                .setDetectorState(source.getDetectorState())
+                .setDetectorHealth(source.getDetectorHealth())
+                .setDetectorReason(source.getDetectorReason())
+                .setDetectorObservedAt(source.getDetectorObservedAt())
+                .setDetectorIntentVersion(source.getDetectorIntentVersion());
     }
 
     @Test

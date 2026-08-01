@@ -10,8 +10,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,6 +25,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 
 class FireDetectionServiceTest {
 
@@ -100,6 +103,12 @@ class FireDetectionServiceTest {
         ValueOperations<String, String> values = mock(ValueOperations.class);
         when(template.opsForValue()).thenReturn(values);
         when(values.get(any(String.class))).thenAnswer(invocation -> redis.get(invocation.getArgument(0)));
+        when(template.execute(any(RedisScript.class), anyList(), any(String.class))).thenAnswer(invocation -> {
+            List<String> keys = invocation.getArgument(1);
+            String snapshot = invocation.getArgument(2);
+            redis.put(keys.get(0), snapshot);
+            return snapshot;
+        });
         doAnswer(invocation -> {
             redis.put(invocation.getArgument(0), invocation.getArgument(1));
             return null;
