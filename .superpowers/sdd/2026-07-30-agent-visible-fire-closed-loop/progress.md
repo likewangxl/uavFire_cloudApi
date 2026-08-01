@@ -76,3 +76,11 @@ Task 12: implementation fix round 1 complete (commits 5d25743..07bf806; focused 
 Task 12: complete (commits eda57f8..07bf806, final rereview APPROVE; Critical 0 / Important 0 / Minor 0; focused backend 44/44, full backend 493/493, Agent transport 29/29, migration double-run green). Transactional notification Outbox, exact Chinese alert stages, WebSocket updates, monotonic after-commit wakeup, and scheduled retry fallback are closed; RC Plus/real-flight validation remains pending.
 Task 13: started from 07bf806. Production backend must stop invoking ai-service and stop orchestrating automatic hold/ROI/laser/confirmation missions; detector arming and observed status move to the Agent command/heartbeat contract while manual operator safety commands remain available.
 Task 13: implementation complete (backend 494/494, Agent 479/479, debug APK and production-source audit green). Backend start/stop now controls Agent detector intent; status is heartbeat-observed with a 15-second fail-closed freshness gate; ai-service, livestream auto-trigger, backend ROI/laser/confirmation orchestration, and Agent legacy remote fire actions are removed. RC Plus/real-flight validation remains pending and no device acceptance is claimed.
+# Task 13 review remediation (2026-08-01)
+
+- Fixed Agent JWT coverage and drone-SN binding for authoritative detector control endpoints.
+- Added atomic, durable, versioned detector desired state and backend/Agent restart reconciliation.
+- Tightened truthful running status to real Agent enum/legal heartbeat combinations.
+- Preserved detector heartbeat fields through cache and Redis restore.
+- Removed obsolete commented/vacuous tests.
+- Verification: backend 500/500, Agent 484/484, debug APK assembled; RC Plus acceptance remains pending.

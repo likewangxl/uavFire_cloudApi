@@ -225,7 +225,26 @@ class DualStreamSessionManager(
         droneSn: String,
         action: String,
         params: Map<String, Any?>,
-    ): CommandExecutionResult = executeCommand(droneSn, action)
+    ): CommandExecutionResult {
+        if (action.equals("visible-detector-arm", ignoreCase = true)
+            || action.equals("visible-detector-disarm", ignoreCase = true)
+        ) {
+            val version = params["intentVersion"].asPositiveIntentVersion()
+                ?: return CommandExecutionResult(status = "failed", message = "detector-intent-version-required")
+            val intent = if (action.equals("visible-detector-arm", ignoreCase = true)) "ARMED" else "DISARMED"
+            val result = visibleDetectorControl?.applyIntent(intent, version)
+                ?: return CommandExecutionResult(status = "failed", message = "visible-detector-control-not-wired")
+            return CommandExecutionResult(
+                status = when {
+                    result.applied -> "applied"
+                    result.reason == "stale-intent-version" -> "ignored"
+                    else -> "failed"
+                },
+                message = result.reason ?: "detector-state=${result.status.state}:${result.status.reason.orEmpty()}",
+            )
+        }
+        return executeCommand(droneSn, action)
+    }
 
     suspend fun executeCommand(
         droneSn: String,
@@ -417,6 +436,15 @@ private fun Map<String, Any?>.toFireConfirmationRequest(droneSn: String): FireCo
 private fun Any?.asDoubleOrNull(): Double? = when (this) {
     is Number -> toDouble()
     is String -> toDoubleOrNull()
+    else -> null
+}
+
+private fun Any?.asPositiveIntentVersion(): Long? = when (this) {
+    is Byte, is Short, is Int, is Long -> (this as Number).toLong().takeIf { it > 0L }
+    is Float, is Double -> (this as Number).toDouble()
+        .takeIf { it.isFinite() && it > 0.0 && it % 1.0 == 0.0 && it <= Long.MAX_VALUE.toDouble() }
+        ?.toLong()
+    is String -> toLongOrNull()?.takeIf { it > 0L }
     else -> null
 }
 

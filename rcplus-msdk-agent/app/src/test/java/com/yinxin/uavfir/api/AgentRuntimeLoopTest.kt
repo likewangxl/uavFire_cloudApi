@@ -377,6 +377,7 @@ class AgentRuntimeLoopTest {
         val msdkDeviceStates: MutableList<MsdkDeviceStateRequest> = mutableListOf()
 
         override suspend fun heartbeat(
+            agentToken: String,
             droneSn: String,
             body: AgentHeartbeatRequest,
         ) {
@@ -386,6 +387,7 @@ class AgentRuntimeLoopTest {
         }
 
         override suspend fun status(
+            agentToken: String,
             droneSn: String,
             body: AgentStatusRequest,
         ) {
@@ -394,6 +396,7 @@ class AgentRuntimeLoopTest {
         }
 
         override suspend fun capability(
+            agentToken: String,
             droneSn: String,
             body: CapabilityReportRequest,
         ) {
@@ -401,9 +404,10 @@ class AgentRuntimeLoopTest {
             lastCapabilityBody = body
         }
 
-        override suspend fun pollCommand(droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = null
+        override suspend fun pollCommand(agentToken: String, droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = null
 
         override suspend fun ackCommand(
+            agentToken: String,
             droneSn: String,
             body: AgentCommandAckRequest,
         ) = Unit

@@ -11,6 +11,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -109,5 +110,40 @@ class WaylineAgentAuthInterceptorTest {
         assertNotNull(claim);
         assertEquals("SN-A", claim.getDroneSn());
         assertEquals(WaylineAgentClaim.ROLE, claim.getRole());
+    }
+
+    @Test
+    void preHandle_bindsDualStreamAgentPathToTokenDrone() throws Exception {
+        String token = JwtUtil.createToken(Map.of("role", WaylineAgentClaim.ROLE, "droneSn", "SN-A"));
+        MockHttpServletRequest req = new MockHttpServletRequest(
+                "POST", "/manage/api/v1/dual-stream/agents/SN-B/heartbeat");
+        req.addHeader(WaylineAgentAuthInterceptor.HEADER_AGENT_TOKEN, token);
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(req, resp, new Object()));
+        assertEquals(403, resp.getStatus());
+    }
+
+    @Test
+    void preHandle_protectsEveryDualStreamAgentControlEndpoint() throws Exception {
+        String token = JwtUtil.createToken(Map.of("role", WaylineAgentClaim.ROLE, "droneSn", "SN-A"));
+        List<String> paths = List.of(
+                "/manage/api/v1/dual-stream/agents/SN-A/heartbeat",
+                "/manage/api/v1/dual-stream/agents/SN-A/status",
+                "/manage/api/v1/dual-stream/agents/SN-A/capability",
+                "/manage/api/v1/dual-stream/agents/SN-A/command",
+                "/manage/api/v1/dual-stream/agents/SN-A/command/ack");
+
+        for (String path : paths) {
+            MockHttpServletRequest missingRequest = new MockHttpServletRequest("POST", path);
+            MockHttpServletResponse missingResponse = new MockHttpServletResponse();
+            assertFalse(interceptor.preHandle(missingRequest, missingResponse, new Object()));
+            assertEquals(401, missingResponse.getStatus());
+
+            MockHttpServletRequest validRequest = new MockHttpServletRequest("POST", path);
+            validRequest.addHeader(WaylineAgentAuthInterceptor.HEADER_AGENT_TOKEN, token);
+            MockHttpServletResponse validResponse = new MockHttpServletResponse();
+            assertTrue(interceptor.preHandle(validRequest, validResponse, new Object()));
+        }
     }
 }

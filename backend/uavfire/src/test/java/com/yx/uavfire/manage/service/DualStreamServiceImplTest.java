@@ -11,22 +11,21 @@ import com.yx.uavfire.manage.service.impl.DualStreamServiceImpl;
 import com.yx.uavfire.fc100.event.model.dto.FireEventCreateResponse;
 import com.yx.uavfire.firedetection.FireDetectionActivityTracker;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
-import com.yx.uavfire.fc100.event.model.param.FireLaserLocationParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import com.sun.net.httpserver.HttpServer;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Deque;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -34,14 +33,108 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 
 class DualStreamServiceImplTest {
+    @Test
+    void latestDetectorIntentCoalescesArmThenDisarmBeforePoll() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        ReflectionTestUtils.setField(service, "allowInMemoryDetectorIntent", true);
+
+        service.setDetectorIntent("DRONE-INTENT", true);
+        service.setDetectorIntent("DRONE-INTENT", false);
+        DualStreamCommandDTO command = service.pollCommand("DRONE-INTENT");
+
+        assertEquals("visible-detector-disarm", command.getAction());
+        assertEquals(2L, ((Number) command.getParams().get("intentVersion")).longValue());
+        assertEquals(command.getCommandId(), service.pollCommand("DRONE-INTENT").getCommandId());
+    }
+
+    @Test
+    void durableDetectorIntentRestoresAfterBackendRestartBeforePoll() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl first = serviceWithRedis(redis, version);
+        first.setDetectorIntent("DRONE-RESTART", true);
+
+        DualStreamServiceImpl restarted = serviceWithRedis(redis, version);
+        DualStreamCommandDTO restored = restarted.pollCommand("DRONE-RESTART");
+
+        assertNotNull(restored);
+        assertEquals("visible-detector-arm", restored.getAction());
+        assertEquals(1L, ((Number) restored.getParams().get("intentVersion")).longValue());
+    }
+
+    @Test
+    void staleArmedHeartbeatReplaysOnlyNewerDisarm() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        ReflectionTestUtils.setField(service, "allowInMemoryDetectorIntent", true);
+        service.setDetectorIntent("DRONE-RACE", true);
+        service.setDetectorIntent("DRONE-RACE", false);
+
+        service.acceptHeartbeat("DRONE-RACE", new DualStreamAgentHeartbeatDTO()
+                .setDroneSn("DRONE-RACE")
+                .setDetectorIntent("ARMED")
+                .setDetectorIntentVersion(1L));
+        DualStreamCommandDTO replay = service.pollCommand("DRONE-RACE");
+
+        assertEquals("visible-detector-disarm", replay.getAction());
+        assertEquals(2L, ((Number) replay.getParams().get("intentVersion")).longValue());
+    }
+
+    @SuppressWarnings("unchecked")
+    private DualStreamServiceImpl serviceWithRedis(Map<String, String> redis, AtomicLong version) {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(template.opsForValue()).thenReturn(values);
+        when(values.get(any(String.class))).thenAnswer(invocation -> redis.get(invocation.getArgument(0)));
+        when(template.execute(any(RedisScript.class), anyList(), any(String.class))).thenAnswer(invocation -> {
+            List<String> keys = invocation.getArgument(1);
+            String intent = invocation.getArgument(2);
+            long next = version.incrementAndGet();
+            redis.put(keys.get(0), Long.toString(next));
+            redis.put(keys.get(1), "{\"intent\":\"" + intent + "\",\"version\":" + next + "}");
+            return next;
+        });
+        doAnswer(invocation -> {
+            redis.put(invocation.getArgument(0), invocation.getArgument(1));
+            return null;
+        }).when(values).set(any(String.class), any(String.class));
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", template);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+        return service;
+    }
+
+    @Test
+    void heartbeatDetectorFieldsSurviveRealGroupCopy() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        service.acceptHeartbeat("DRONE-COPY", new DualStreamAgentHeartbeatDTO()
+                .setDroneSn("DRONE-COPY")
+                .setConnectionState("CONNECTED")
+                .setSessionState("RUNNING")
+                .setDetectorIntent("ARMED")
+                .setDetectorState("ARMED")
+                .setDetectorHealth("HEALTHY")
+                .setDetectorReason("ready")
+                .setDetectorIntentVersion(7L));
+
+        DualStreamLiveGroupDTO group = service.getGroup("DRONE-COPY");
+
+        assertEquals("ARMED", group.getDetectorIntent());
+        assertEquals("ARMED", group.getDetectorState());
+        assertEquals("HEALTHY", group.getDetectorHealth());
+        assertEquals("ready", group.getDetectorReason());
+        assertEquals(7L, group.getDetectorIntentVersion());
+        assertNotNull(group.getDetectorObservedAt());
+    }
 
     @Test
     void issueCommand_enqueuesPendingCommandForDrone() {
@@ -91,150 +184,24 @@ class DualStreamServiceImplTest {
 
     @Test
     void startVisibleLaserLocalization_dispatchesOneUrgentHold() {
-        /* Retired backend localization orchestration contract.
-        DualStreamServiceImpl service = new DualStreamServiceImpl();
-        Map<String, Double> roi = Map.of("x", 0.4, "y", 0.3, "width", 0.2, "height", 0.2);
-
-        service.startVisibleLaserLocalization(
-                "fire-event-1", "task-1", "DRONE-001", 1_000L, roi);
-        service.startVisibleLaserLocalization(
-                "fire-event-1", "task-1", "DRONE-001", 1_000L, roi);
-
-        DualStreamCommandDTO hold = service.pollCommand("DRONE-001");
-        assertNotNull(hold);
-        assertEquals("visible-fire-hold", hold.getAction());
-        assertTrue(hold.getUrgent());
-        assertEquals("fire-event-1", hold.getParams().get("eventId"));
-        assertEquals("task-1", hold.getParams().get("taskId"));
-        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
-                .setCommandId(hold.getCommandId())
-                .setStatus("failed")
-                .setMessage("test-cleanup")
-                .setEventId("fire-event-1"));
-        assertNull(service.pollCommand("DRONE-001"));
-        */
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         assertNull(service.issueCommand("DRONE-001", "visible-fire-hold"));
     }
 
     @Test
     void stableHoldAck_waitsForPostHoldRoiThenDispatchesLaserMeasure() {
-        /* Retired backend localization orchestration contract.
-        DualStreamServiceImpl service = new DualStreamServiceImpl();
-        Map<String, Double> original = Map.of("x", 0.4, "y", 0.3, "width", 0.2, "height", 0.2);
-        service.startVisibleLaserLocalization(
-                "fire-event-1", "task-1", "DRONE-001", 1_000L, original);
-        DualStreamCommandDTO hold = service.pollCommand("DRONE-001");
-
-        service.acceptEvent("task-1", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setSourceTs(hold.getIssuedAt() - 1)
-                .setAnalysisChannel("visible")
-                .setVisibleScore(0.9)
-                .setVisibleRoi(original));
-        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
-                .setCommandId(hold.getCommandId())
-                .setStatus("applied")
-                .setMessage("HOVER_STABLE")
-                .setEventId("fire-event-1"));
-        assertNull(service.pollCommand("DRONE-001"));
-
-        Map<String, Double> fresh = Map.of("x", 0.42, "y", 0.31, "width", 0.18, "height", 0.19);
-        service.acceptEvent("task-1", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setSourceTs(hold.getIssuedAt() + 1)
-                .setAnalysisChannel("visible")
-                .setVisibleScore(0.91)
-                .setVisibleRoi(fresh));
-
-        DualStreamCommandDTO measure = service.pollCommand("DRONE-001");
-        assertNotNull(measure);
-        assertEquals("visible-fire-laser-measure", measure.getAction());
-        assertTrue(measure.getUrgent());
-        assertEquals(fresh, measure.getParams().get("visibleRoi"));
-        assertEquals("fire-event-1", measure.getParams().get("eventId"));
-        */
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         assertNull(service.issueCommand("DRONE-001", "visible-fire-laser-measure"));
     }
 
     @Test
     void stableHoldAck_usesFreshRoiAfterNormalHoverFrameShift() {
-        /* Retired backend localization orchestration contract.
-        DualStreamServiceImpl service = new DualStreamServiceImpl();
-        Map<String, Double> original =
-                Map.of("x", 0.476, "y", 0.345, "width", 0.047, "height", 0.061);
-        service.startVisibleLaserLocalization(
-                "fire-event-shifted", "task-shifted", "DRONE-SHIFTED", 1_000L, original);
-        DualStreamCommandDTO hold = service.pollCommand("DRONE-SHIFTED");
-
-        service.acknowledgeCommand("DRONE-SHIFTED", new DualStreamCommandAckDTO()
-                .setCommandId(hold.getCommandId())
-                .setStatus("applied")
-                .setMessage("HOVER_STABLE")
-                .setEventId("fire-event-shifted"));
-
-        Map<String, Double> fresh =
-                Map.of("x", 0.461, "y", 0.683, "width", 0.069, "height", 0.150);
-        service.acceptEvent("task-shifted", new DualStreamEventDTO()
-                .setDroneSn("DRONE-SHIFTED")
-                .setSourceTs(hold.getIssuedAt() + 1)
-                .setAnalysisChannel("visible")
-                .setVisibleScore(0.63)
-                .setVisibleRoi(fresh));
-
-        DualStreamCommandDTO measure = service.pollCommand("DRONE-SHIFTED");
-        assertNotNull(measure);
-        assertEquals("visible-fire-laser-measure", measure.getAction());
-        assertEquals(fresh, measure.getParams().get("visibleRoi"));
-        */
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         assertNull(service.issueCommand("DRONE-SHIFTED", "visible-fire-laser-measure"));
     }
 
     @Test
     void successfulLaserAck_updatesOriginalEvent() {
-        /* Retired backend localization orchestration contract.
-        DualStreamServiceImpl service = new DualStreamServiceImpl();
-        FireEventService fireEventService = mock(FireEventService.class);
-        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
-        Map<String, Double> roi = Map.of("x", 0.4, "y", 0.3, "width", 0.2, "height", 0.2);
-        service.startVisibleLaserLocalization(
-                "fire-event-1", "task-1", "DRONE-001", 1_000L, roi);
-        DualStreamCommandDTO hold = service.pollCommand("DRONE-001");
-        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
-                .setCommandId(hold.getCommandId())
-                .setStatus("applied")
-                .setMessage("HOVER_STABLE")
-                .setEventId("fire-event-1"));
-        service.acceptEvent("task-1", new DualStreamEventDTO()
-                .setDroneSn("DRONE-001")
-                .setSourceTs(hold.getIssuedAt() + 1)
-                .setAnalysisChannel("visible")
-                .setVisibleScore(0.91)
-                .setVisibleRoi(roi));
-        DualStreamCommandDTO measure = service.pollCommand("DRONE-001");
-
-        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
-                .setCommandId(measure.getCommandId())
-                .setStatus("applied")
-                .setMessage("LASER_LOCATED")
-                .setEventId("fire-event-1")
-                .setFireLat(34.960123)
-                .setFireLng(109.316456)
-                .setFireAlt(530.0)
-                .setGeoMethod("LASER_RANGEFINDER")
-                .setGeoQuality("PRECISE")
-                .setGeoErrorRadiusM(5.0)
-                .setSourceTs(measure.getIssuedAt() + 100));
-
-        ArgumentCaptor<FireLaserLocationParam> captor =
-                ArgumentCaptor.forClass(FireLaserLocationParam.class);
-        verify(fireEventService).applyLaserLocation(eq("fire-event-1"), captor.capture());
-        assertEquals(34.960123, captor.getValue().getFireLat(), 1e-9);
-        assertEquals(109.316456, captor.getValue().getFireLng(), 1e-9);
-        assertEquals(5.0, captor.getValue().getGeoErrorRadiusM(), 1e-9);
-        */
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         assertNull(service.issueCommand("DRONE-001", "visible-fire-hold"));
     }
@@ -1457,126 +1424,6 @@ class DualStreamServiceImplTest {
         DualStreamLiveGroupDTO group = service.getGroup("DRONE-001");
         assertEquals("measure-thermal-region", group.getLastCommandAction());
         assertEquals("failed", group.getLastCommandStatus());
-    }
-
-    @Test
-    void acknowledgeRegionMeasurementAddsVersionToThermalImageUrlAfterAnnotationRefresh() throws Exception {
-        /* Retired backend AI-service annotation callback contract.
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        AtomicReference<String> requestBody = new AtomicReference<>();
-        server.createContext("/api/v1/snapshots/task-001-1779163200000/thermal-annotation", exchange -> {
-            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            byte[] body = "{\"url\":\"http://snapshots/task-001-1779163200000-annotated.jpg\"}".getBytes();
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
-        });
-        server.start();
-        try {
-            DualStreamServiceImpl service = new DualStreamServiceImpl();
-            FireEventService fireEventService = mock(FireEventService.class);
-            ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
-            ReflectionTestUtils.setField(service, "aiServiceBaseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-            Map<String, Double> roi = Map.of(
-                    "x", 0.25,
-                    "y", 0.30,
-                    "width", 0.20,
-                    "height", 0.15);
-            service.acceptEvent("task-001", new DualStreamEventDTO()
-                    .setTaskId("task-001")
-                    .setDroneSn("DRONE-001")
-                    .setSourceTs(1779163200000L)
-                    .setAnalysisChannel("thermal")
-                    .setRiskLevel("LOW")
-                    .setThermalScore(0.02)
-                    .setFusionScore(0.02)
-                    .setThermalImageUrl("http://snapshots/task-001-1779163200000-annotated.jpg")
-                    .setThermalMeasureRoi(roi));
-            DualStreamCommandDTO command = service.pollCommand("DRONE-001");
-
-            service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
-                    .setCommandId(command.getCommandId())
-                    .setStatus("applied")
-                    .setTaskId("task-001")
-                    .setSourceTs(1779163200000L)
-                    .setThermalTemperature(57.6)
-                    .setThermalMeasureRoi(roi));
-
-            List<DualStreamEventDTO> events = service.listEvents("task-001");
-            assertEquals(
-                    "http://snapshots/task-001-1779163200000-annotated.jpg?thermal_v=1779163200000",
-                    events.get(0).getThermalImageUrl());
-            assertTrue(requestBody.get().contains("\"thermal_temperature\":57.6"));
-            assertTrue(requestBody.get().contains("\"thermal_measure_roi\""));
-
-            // 57.6°C 达确认线：串行链在标注刷新后建事件
-            verify(fireEventService).create(any(FireEventCreateParam.class));
-        } finally {
-            server.stop(0);
-        }
-        */
-        assertTrue(true);
-    }
-
-    @Test
-    void directThermalConfirmationRefreshesAnnotationBeforeCreatingFireEvent() throws Exception {
-        /* Retired backend AI-service annotation callback contract.
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        AtomicReference<String> requestBody = new AtomicReference<>();
-        server.createContext("/api/v1/snapshots/task-001-1779163200000/thermal-annotation", exchange -> {
-            requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            byte[] body = "{\"url\":\"http://snapshots/task-001-1779163200000-annotated.jpg\"}".getBytes();
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
-        });
-        server.start();
-        try {
-            DualStreamServiceImpl service = new DualStreamServiceImpl();
-            FireEventService fireEventService = mock(FireEventService.class);
-            ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
-            ReflectionTestUtils.setField(service, "aiServiceBaseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
-            Map<String, Double> roi = Map.of(
-                    "x", 0.25,
-                    "y", 0.30,
-                    "width", 0.20,
-                    "height", 0.15);
-            List<Map<String, Object>> measurements = List.of(
-                    Map.of("temperatureC", 88.8, "roi", roi),
-                    Map.of("temperatureC", 57.2, "roi", Map.of(
-                            "x", 0.10,
-                            "y", 0.70,
-                            "width", 0.06,
-                            "height", 0.06)));
-
-            service.acceptEvent("task-001", new DualStreamEventDTO()
-                    .setTaskId("task-001")
-                    .setDroneSn("DRONE-001")
-                    .setSourceTs(1779163200000L)
-                    .setAnalysisChannel("thermal")
-                    .setRiskLevel("HIGH")
-                    .setThermalScore(0.80)
-                    .setFusionScore(0.80)
-                    .setThermalTemperature(88.8)
-                    .setThermalImageUrl("http://snapshots/task-001-1779163200000-annotated.jpg")
-                    .setThermalMeasureRoi(roi)
-                    .setThermalMeasurements(measurements));
-
-            ArgumentCaptor<FireEventCreateParam> paramCaptor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-            verify(fireEventService).create(paramCaptor.capture());
-            assertEquals(
-                    "http://snapshots/task-001-1779163200000-annotated.jpg?thermal_v=1779163200000",
-                    paramCaptor.getValue().getThermalImageUrl());
-            assertTrue(requestBody.get().contains("\"thermal_temperature\":88.8"));
-            assertTrue(requestBody.get().contains("\"thermal_measure_roi\""));
-            assertTrue(requestBody.get().contains("\"thermal_detect_roi\""));
-            assertTrue(requestBody.get().contains("\"thermal_measurements\""));
-            assertTrue(requestBody.get().contains("57.2"));
-        } finally {
-            server.stop(0);
-        }
-        */
-        assertTrue(true);
     }
 
     @Test

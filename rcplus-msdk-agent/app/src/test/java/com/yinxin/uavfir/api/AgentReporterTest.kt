@@ -68,6 +68,7 @@ class AgentReporterTest {
         var lastCapabilityBody: CapabilityReportRequest? = null
 
         override suspend fun heartbeat(
+            agentToken: String,
             droneSn: String,
             body: AgentHeartbeatRequest,
         ) {
@@ -76,6 +77,7 @@ class AgentReporterTest {
         }
 
         override suspend fun status(
+            agentToken: String,
             droneSn: String,
             body: AgentStatusRequest,
         ) {
@@ -84,6 +86,7 @@ class AgentReporterTest {
         }
 
         override suspend fun capability(
+            agentToken: String,
             droneSn: String,
             body: CapabilityReportRequest,
         ) {
@@ -91,9 +94,10 @@ class AgentReporterTest {
             lastCapabilityBody = body
         }
 
-        override suspend fun pollCommand(droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = null
+        override suspend fun pollCommand(agentToken: String, droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = null
 
         override suspend fun ackCommand(
+            agentToken: String,
             droneSn: String,
             body: AgentCommandAckRequest,
         ) = Unit

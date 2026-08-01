@@ -54,4 +54,6 @@ public class DualStreamLiveGroupDTO {
     private String detectorReason;
 
     private Long detectorObservedAt;
+
+    private Long detectorIntentVersion;
 }

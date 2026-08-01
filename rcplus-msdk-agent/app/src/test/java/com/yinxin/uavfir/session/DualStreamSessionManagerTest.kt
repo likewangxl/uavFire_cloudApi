@@ -13,6 +13,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DualStreamSessionManagerTest {
+    private fun healthyDetectorGates() = CoordinatorArmingHealth(
+        featureEnabled = true,
+        detectorArmRequested = true,
+        visibleSourceActive = true,
+        sourceGenerationValid = true,
+        detectorHealthy = true,
+        storeHealthy = true,
+        outboxHealthy = true,
+        missionAdaptersHealthy = true,
+        safetyAdaptersHealthy = true,
+        manualHoldActive = false,
+        competingOwnerActive = false,
+    )
+
     @Test
     fun detectorArmAndDisarmCommandsExposeFailClosedLocalState() = runTest {
         val control = VisibleDetectorControl {
@@ -37,6 +51,19 @@ class DualStreamSessionManagerTest {
         assertEquals("UNHEALTHY", manager.detectorStatus().health)
         assertEquals("applied", manager.executeCommand("DRONE-001", "visible-detector-disarm").status)
         assertEquals("DISARMED", manager.detectorStatus().state)
+    }
+
+    @Test
+    fun detectorIntentCommandsApplyBackendVersionAndRejectStaleArm() = runTest {
+        val control = VisibleDetectorControl { healthyDetectorGates() }
+        val manager = DualStreamSessionManager(MockStreamProvider(), visibleDetectorControl = control)
+
+        assertEquals("applied", manager.executeCommand("DRONE-001", "visible-detector-disarm", mapOf("intentVersion" to 8L)).status)
+        assertEquals("ignored", manager.executeCommand("DRONE-001", "visible-detector-arm", mapOf("intentVersion" to 7L)).status)
+        assertEquals("DISARMED", manager.detectorStatus().intent)
+        assertEquals(8L, manager.detectorStatus().intentVersion)
+        assertEquals("applied", manager.executeCommand("DRONE-001", "visible-detector-disarm", mapOf("intentVersion" to 8L)).status)
+        assertEquals("failed", manager.executeCommand("DRONE-001", "visible-detector-arm", mapOf("intentVersion" to 8.5)).status)
     }
 
     @Test

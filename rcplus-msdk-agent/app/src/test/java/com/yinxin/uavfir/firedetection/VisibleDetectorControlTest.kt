@@ -42,4 +42,34 @@ class VisibleDetectorControlTest {
         assertEquals("DISARMED", stopped.intent)
         assertFalse(stopped.running)
     }
+
+    @Test
+    fun `persisted version survives restart and stale arm cannot overwrite newer disarm`() {
+        val store = InMemoryDetectorIntentStore()
+        val first = VisibleDetectorControl(store) { health() }
+        assertTrue(first.applyIntent("ARMED", 5L).applied)
+        assertTrue(first.snapshot().running)
+
+        val restarted = VisibleDetectorControl(store) { health() }
+        assertEquals(5L, restarted.snapshot().intentVersion)
+        assertEquals("ARMED", restarted.snapshot().intent)
+        assertTrue(restarted.applyIntent("DISARMED", 6L).applied)
+
+        val stale = restarted.applyIntent("ARMED", 5L)
+        assertFalse(stale.applied)
+        assertEquals("stale-intent-version", stale.reason)
+        assertEquals("DISARMED", restarted.snapshot().intent)
+        assertEquals(6L, restarted.snapshot().intentVersion)
+    }
+
+    @Test
+    fun `same version and same intent is idempotent but conflict is rejected`() {
+        val control = VisibleDetectorControl { health() }
+        assertTrue(control.applyIntent("ARMED", 2L).applied)
+        assertTrue(control.applyIntent("ARMED", 2L).applied)
+        val conflict = control.applyIntent("DISARMED", 2L)
+        assertFalse(conflict.applied)
+        assertEquals("intent-version-conflict", conflict.reason)
+        assertEquals("ARMED", control.snapshot().intent)
+    }
 }

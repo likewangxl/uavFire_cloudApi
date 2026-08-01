@@ -11,6 +11,7 @@ import com.yinxin.uavfir.firedetection.VisibleDetectorStatus
 
 class AgentBackendClient(
     private val api: DualStreamApi,
+    private val agentToken: suspend (String) -> String = { "" },
 ) {
     /** Task 10 staged report path; the transport sends the durable payload unchanged. */
     suspend fun sendAgentFireReport(row: OutboxRow, agentToken: String): SendOutcome =
@@ -23,7 +24,7 @@ class AgentBackendClient(
         detectorStatus: VisibleDetectorStatus = VisibleDetectorStatus.disarmed(),
     ) {
         debug("heartbeat request drone=$droneSn state=$connectionState session=$sessionState")
-        api.heartbeat(droneSn, buildHeartbeatRequest(droneSn, connectionState, sessionState, detectorStatus))
+        api.heartbeat(agentToken(droneSn), droneSn, buildHeartbeatRequest(droneSn, connectionState, sessionState, detectorStatus))
         debug("heartbeat response drone=$droneSn")
     }
 
@@ -40,6 +41,7 @@ class AgentBackendClient(
         detectorState = detectorStatus.state,
         detectorHealth = detectorStatus.health,
         detectorReason = detectorStatus.reason,
+        detectorIntentVersion = detectorStatus.intentVersion,
     )
 
     suspend fun sendStatus(
@@ -51,7 +53,7 @@ class AgentBackendClient(
         ),
     ) {
         debug("status request drone=$droneSn state=$connectionState")
-        api.status(droneSn, buildStatusRequest(droneSn, connectionState, message, runtimeStatus))
+        api.status(agentToken(droneSn), droneSn, buildStatusRequest(droneSn, connectionState, message, runtimeStatus))
         debug("status response drone=$droneSn")
     }
 
@@ -87,7 +89,7 @@ class AgentBackendClient(
         capability: CameraCapability,
     ) {
         debug("capability request drone=$droneSn visible=${capability.visibleSupported} thermal=${capability.thermalSupported}")
-        api.capability(droneSn, buildCapabilityReportRequest(droneSn, capability))
+        api.capability(agentToken(droneSn), droneSn, buildCapabilityReportRequest(droneSn, capability))
         debug("capability response drone=$droneSn")
     }
 
@@ -182,7 +184,7 @@ class AgentBackendClient(
         droneSn: String,
     ): AgentCommandResponse? {
         debug("poll request drone=$droneSn")
-        val response = api.pollCommand(droneSn)?.data
+        val response = api.pollCommand(agentToken(droneSn), droneSn)?.data
         debug("poll response drone=$droneSn command=${response?.commandId ?: "none"}")
         return response
     }
@@ -206,6 +208,7 @@ class AgentBackendClient(
     ) {
         debug("ack request drone=$droneSn command=$commandId status=$status")
         api.ackCommand(
+            agentToken = agentToken(droneSn),
             droneSn = droneSn,
             body = AgentCommandAckRequest(
                 commandId = commandId,

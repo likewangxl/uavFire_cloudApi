@@ -1,44 +1,113 @@
 package com.yinxin.uavfir.firedetection
 
+import android.content.SharedPreferences
+
 data class VisibleDetectorStatus(
     val intent: String,
     val state: String,
     val health: String,
     val reason: String? = null,
+    val intentVersion: Long = 0L,
 ) {
     val running: Boolean get() = state == "ARMED" && health == "HEALTHY"
 
     companion object {
-        fun disarmed() = VisibleDetectorStatus("DISARMED", "DISARMED", "HEALTHY", "operator-disarmed")
+        fun disarmed(version: Long = 0L) = VisibleDetectorStatus("DISARMED", "DISARMED", "HEALTHY", "operator-disarmed", version)
     }
 }
 
+data class PersistedDetectorIntent(val intent: String, val version: Long)
+
+interface DetectorIntentStore {
+    fun load(): PersistedDetectorIntent?
+    fun save(intent: PersistedDetectorIntent): Boolean
+}
+
+class InMemoryDetectorIntentStore : DetectorIntentStore {
+    @Volatile private var value: PersistedDetectorIntent? = null
+    override fun load(): PersistedDetectorIntent? = value
+    override fun save(intent: PersistedDetectorIntent): Boolean {
+        value = intent
+        return true
+    }
+}
+
+class SharedPreferencesDetectorIntentStore(
+    private val preferences: SharedPreferences,
+) : DetectorIntentStore {
+    override fun load(): PersistedDetectorIntent? {
+        if (!preferences.contains(KEY_VERSION)) return null
+        return PersistedDetectorIntent(
+            preferences.getString(KEY_INTENT, "DISARMED") ?: "DISARMED",
+            preferences.getLong(KEY_VERSION, 0L),
+        )
+    }
+
+    override fun save(intent: PersistedDetectorIntent): Boolean = preferences.edit()
+        .putString(KEY_INTENT, intent.intent)
+        .putLong(KEY_VERSION, intent.version)
+        .commit()
+
+    private companion object {
+        const val KEY_INTENT = "detector_intent"
+        const val KEY_VERSION = "detector_intent_version"
+    }
+}
+
+data class DetectorIntentApplication(val applied: Boolean, val status: VisibleDetectorStatus, val reason: String? = null)
+
 class VisibleDetectorControl(
+    private val store: DetectorIntentStore = InMemoryDetectorIntentStore(),
     private val armingHealth: () -> CoordinatorArmingHealth,
 ) {
     @Volatile
-    private var armRequested = false
+    private var desired = store.load()
+        ?.takeIf { it.version >= 0L && (it.intent == "ARMED" || it.intent == "DISARMED") }
+        ?: PersistedDetectorIntent("DISARMED", 0L)
 
-    fun isArmRequested(): Boolean = armRequested
+    fun isArmRequested(): Boolean = desired.intent == "ARMED"
 
     fun arm(): VisibleDetectorStatus {
-        armRequested = true
-        return snapshot()
+        return applyIntent("ARMED", desired.version + 1L).status
     }
 
     fun disarm(): VisibleDetectorStatus {
-        armRequested = false
-        return snapshot()
+        return applyIntent("DISARMED", desired.version + 1L).status
+    }
+
+    @Synchronized
+    fun applyIntent(intent: String, version: Long): DetectorIntentApplication {
+        val normalized = intent.uppercase()
+        if (normalized != "ARMED" && normalized != "DISARMED") {
+            return DetectorIntentApplication(false, snapshot(), "invalid-intent")
+        }
+        if (version < desired.version) {
+            return DetectorIntentApplication(false, snapshot(), "stale-intent-version")
+        }
+        if (version == desired.version) {
+            return if (normalized == desired.intent) {
+                DetectorIntentApplication(true, snapshot(), "intent-already-applied")
+            } else {
+                DetectorIntentApplication(false, snapshot(), "intent-version-conflict")
+            }
+        }
+        val next = PersistedDetectorIntent(normalized, version)
+        if (!store.save(next)) {
+            return DetectorIntentApplication(false, snapshot(), "intent-persist-failed")
+        }
+        desired = next
+        return DetectorIntentApplication(true, snapshot())
     }
 
     fun snapshot(): VisibleDetectorStatus {
-        if (!armRequested) return VisibleDetectorStatus.disarmed()
+        val current = desired
+        if (current.intent != "ARMED") return VisibleDetectorStatus.disarmed(current.version)
         val gates = armingHealth().copy(detectorArmRequested = true)
         val reason = gates.firstFailureReason()
         return if (reason == null) {
-            VisibleDetectorStatus("ARMED", "ARMED", "HEALTHY")
+            VisibleDetectorStatus("ARMED", "ARMED", "HEALTHY", intentVersion = current.version)
         } else {
-            VisibleDetectorStatus("ARMED", "BLOCKED", "UNHEALTHY", reason)
+            VisibleDetectorStatus("ARMED", "BLOCKED", "UNHEALTHY", reason, current.version)
         }
     }
 }

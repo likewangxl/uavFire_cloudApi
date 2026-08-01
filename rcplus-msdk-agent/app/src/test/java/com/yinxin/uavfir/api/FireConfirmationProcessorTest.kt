@@ -1410,11 +1410,11 @@ class FireConfirmationProcessorTest {
         val taskEvents = mutableListOf<DualStreamEventRequest>()
         val recordMarkers = mutableListOf<Int>()
 
-        override suspend fun heartbeat(droneSn: String, body: AgentHeartbeatRequest) = Unit
-        override suspend fun status(droneSn: String, body: AgentStatusRequest) = Unit
-        override suspend fun capability(droneSn: String, body: CapabilityReportRequest) = Unit
-        override suspend fun pollCommand(droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = null
-        override suspend fun ackCommand(droneSn: String, body: AgentCommandAckRequest) = Unit
+        override suspend fun heartbeat(agentToken: String, droneSn: String, body: AgentHeartbeatRequest) = Unit
+        override suspend fun status(agentToken: String, droneSn: String, body: AgentStatusRequest) = Unit
+        override suspend fun capability(agentToken: String, droneSn: String, body: CapabilityReportRequest) = Unit
+        override suspend fun pollCommand(agentToken: String, droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = null
+        override suspend fun ackCommand(agentToken: String, droneSn: String, body: AgentCommandAckRequest) = Unit
 
         override suspend fun recordTaskEvent(taskId: String, body: DualStreamEventRequest) {
             onRecord?.let { recordMarkers += it() }

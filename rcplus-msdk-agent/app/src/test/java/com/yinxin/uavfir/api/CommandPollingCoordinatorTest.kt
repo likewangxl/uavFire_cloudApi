@@ -6,6 +6,8 @@ import com.yinxin.uavfir.stream.MockStreamProvider
 import com.yinxin.uavfir.stream.StreamProvider
 import com.yinxin.uavfir.stream.StreamStartResult
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
+import com.yinxin.uavfir.firedetection.CoordinatorArmingHealth
+import com.yinxin.uavfir.firedetection.VisibleDetectorControl
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
@@ -16,6 +18,35 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CommandPollingCoordinatorTest {
+    @Test
+    fun pollerAppliesVersionedDisarmAndIgnoresOlderArm() = runTest {
+        val control = VisibleDetectorControl {
+            CoordinatorArmingHealth(
+                featureEnabled = true, detectorArmRequested = true, visibleSourceActive = true,
+                sourceGenerationValid = true, detectorHealthy = true, storeHealthy = true,
+                outboxHealthy = true, missionAdaptersHealthy = true, safetyAdaptersHealthy = true,
+                manualHoldActive = false, competingOwnerActive = false,
+            )
+        }
+        val manager = DualStreamSessionManager(MockStreamProvider(), visibleDetectorControl = control)
+        val disarmApi = RecordingDualStreamApi(AgentApiEnvelope(data = AgentCommandResponse(
+            commandId = "cmd-disarm-8", droneSn = "DRONE-001", action = "visible-detector-disarm",
+            status = "pending", urgent = true, params = mapOf("intentVersion" to 8.0),
+        )))
+        CommandPollingCoordinator(AgentBackendClient(disarmApi), manager, pollMsdk = false).pollOnce("DRONE-001")
+        assertEquals("applied", disarmApi.lastAck?.status)
+
+        val staleArmApi = RecordingDualStreamApi(AgentApiEnvelope(data = AgentCommandResponse(
+            commandId = "cmd-arm-7", droneSn = "DRONE-001", action = "visible-detector-arm",
+            status = "pending", urgent = true, params = mapOf("intentVersion" to 7.0),
+        )))
+        CommandPollingCoordinator(AgentBackendClient(staleArmApi), manager, pollMsdk = false).pollOnce("DRONE-001")
+
+        assertEquals("ignored", staleArmApi.lastAck?.status)
+        assertEquals("DISARMED", manager.detectorStatus().intent)
+        assertEquals(8L, manager.detectorStatus().intentVersion)
+    }
+
     @Test
     fun urgentPoller_executesUrgentLegacyDualStreamCommand() = runTest {
         val api = RecordingDualStreamApi(
@@ -855,11 +886,13 @@ class CommandPollingCoordinatorTest {
         var lastStatusBody: AgentStatusRequest? = null
 
         override suspend fun heartbeat(
+            agentToken: String,
             droneSn: String,
             body: AgentHeartbeatRequest,
         ) = Unit
 
         override suspend fun status(
+            agentToken: String,
             droneSn: String,
             body: AgentStatusRequest,
         ) {
@@ -867,13 +900,15 @@ class CommandPollingCoordinatorTest {
         }
 
         override suspend fun capability(
+            agentToken: String,
             droneSn: String,
             body: CapabilityReportRequest,
         ) = Unit
 
-        override suspend fun pollCommand(droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = nextCommand
+        override suspend fun pollCommand(agentToken: String, droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = nextCommand
 
         override suspend fun ackCommand(
+            agentToken: String,
             droneSn: String,
             body: AgentCommandAckRequest,
         ) {

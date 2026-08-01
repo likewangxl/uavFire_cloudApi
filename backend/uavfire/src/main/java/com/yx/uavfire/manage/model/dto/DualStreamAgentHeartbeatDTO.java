@@ -24,4 +24,6 @@ public class DualStreamAgentHeartbeatDTO {
     private String detectorHealth;
 
     private String detectorReason;
+
+    private Long detectorIntentVersion;
 }

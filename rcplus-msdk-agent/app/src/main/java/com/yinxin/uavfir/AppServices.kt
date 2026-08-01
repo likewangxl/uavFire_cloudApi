@@ -44,6 +44,7 @@ import com.yinxin.uavfir.firedetection.OwnedResumeSafetyEvidenceProvider
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorArmingResult
 import com.yinxin.uavfir.firedetection.VisibleFireDetectorFactory
 import com.yinxin.uavfir.firedetection.VisibleDetectorControl
+import com.yinxin.uavfir.firedetection.SharedPreferencesDetectorIntentStore
 import com.yinxin.uavfir.firedetection.VisibleFrameIngress
 import com.yinxin.uavfir.firedetection.VisibleInferenceLoop
 import com.yinxin.uavfir.firedetection.VisibleInferenceResultJournal
@@ -102,12 +103,12 @@ class AppServices(
     private val kmzCacheDir = File(application.getExternalFilesDir(null), "wayline-kmz")
     private val localKmzDir = File(application.filesDir, "wayline-local")
     private val api = AgentBackendApiFactory.create()
-    private val backendClient = AgentBackendClient(api)
     private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
     private val waylineClient = WaylineAgentClient(
         api = waylineApi,
         sharedSecret = BuildConfig.AGENT_WAYLINE_SHARED_SECRET,
     )
+    private val backendClient = AgentBackendClient(api, waylineClient::ensureToken)
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val latestVisibleFrameBuffer = LatestVisibleFrameBuffer()
@@ -188,7 +189,12 @@ class AppServices(
         if (visibleInferenceLoop != null) latestVisibleFrameBuffer else VisibleFrameIngress.NO_OP
     private val thermalHotspotTriggerBridge = ThermalHotspotTriggerBridge()
     private val fireConfirmationRunnerBridge = FireConfirmationRunnerBridge()
-    private val visibleDetectorControl = VisibleDetectorControl(::currentDetectorArmingHealth)
+    private val visibleDetectorControl = VisibleDetectorControl(
+        SharedPreferencesDetectorIntentStore(
+            application.getSharedPreferences("visible-detector-control", Application.MODE_PRIVATE),
+        ),
+        ::currentDetectorArmingHealth,
+    )
     private val sessionManager = DualStreamSessionManager(
         RealMsdkStreamProvider(
             hotspotCandidateListener = thermalHotspotTriggerBridge,

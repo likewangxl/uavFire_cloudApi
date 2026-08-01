@@ -27,6 +27,8 @@ public interface IDualStreamService {
 
     DualStreamCommandDTO issueCommand(String droneSn, String action, Map<String, Object> params);
 
+    DualStreamCommandDTO setDetectorIntent(String droneSn, boolean armed);
+
     DualStreamCommandDTO pollCommand(String droneSn);
 
     void acknowledgeCommand(String droneSn, DualStreamCommandAckDTO ack);

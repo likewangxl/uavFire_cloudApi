@@ -10,6 +10,7 @@ import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
+import com.yx.uavfire.manage.model.dto.DetectorIntentRecordDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -35,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 @Service
@@ -65,6 +68,13 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     private static final String GROUP_KEY_PREFIX = "dual-stream:group:";
     private static final String TASK_EVENTS_KEY_PREFIX = "dual-stream:task-events:";
+    private static final String DETECTOR_INTENT_KEY_PREFIX = "dual-stream:detector-intent:";
+    private static final String DETECTOR_INTENT_VERSION_KEY_PREFIX = "dual-stream:detector-intent-version:";
+    private static final DefaultRedisScript<Long> SET_DETECTOR_INTENT_SCRIPT = new DefaultRedisScript<>(
+            "local version = redis.call('INCR', KEYS[1]); "
+                    + "redis.call('SET', KEYS[2], cjson.encode({intent=ARGV[1], version=version})); "
+                    + "return version;",
+            Long.class);
     private static final String DEFAULT_VISIBLE_STREAM_SUFFIX = "-0";
     private static final List<String> URGENT_ACTIONS = List.of(
             "thermal-monitor-on",
@@ -90,6 +100,8 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private final Map<String, Long> lastVisibleFocusIssuedAtByDrone = new ConcurrentHashMap<>();
     private final Map<String, DualStreamEventDTO> confirmedThermalEventByTask = new ConcurrentHashMap<>();
     private final Map<String, String> confirmedThermalFireEventIdByTask = new ConcurrentHashMap<>();
+    private final Map<String, DetectorIntentRecordDTO> desiredDetectorIntentByDrone = new ConcurrentHashMap<>();
+    private final AtomicLong fallbackDetectorIntentVersion = new AtomicLong();
 
     @Value("${livestream.playback.webrtc-host:}")
     private String webrtcPlaybackHost;
@@ -119,6 +131,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
     // 证据照挂接成功或 agent 报终态即提前解除。
     @Value("${dual-stream.visible-confirmation-grace-ms:30000}")
     private long visibleConfirmationGraceMs = 30_000L;
+
+    @Value("${dual-stream.detector-intent.allow-in-memory:false}")
+    private boolean allowInMemoryDetectorIntent;
 
     private final Map<String, Long> visibleConfirmationGraceUntilByDrone = new ConcurrentHashMap<>();
     // 宽限期内我们主动下发过 thermal-monitor-off 的机器：解除时要对称地 thermal-monitor-on 恢复探针
@@ -152,8 +167,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
             group.setDetectorState(heartbeat.getDetectorState());
             group.setDetectorHealth(heartbeat.getDetectorHealth());
             group.setDetectorReason(heartbeat.getDetectorReason());
+            group.setDetectorIntentVersion(heartbeat.getDetectorIntentVersion());
             group.setDetectorObservedAt(System.currentTimeMillis());
         });
+        reconcileDetectorIntent(resolvedDroneSn, heartbeat);
     }
 
     @Override
@@ -289,10 +306,25 @@ public class DualStreamServiceImpl implements IDualStreamService {
     }
 
     @Override
+    public DualStreamCommandDTO setDetectorIntent(String droneSn, boolean armed) {
+        if (!StringUtils.hasText(droneSn)) {
+            return null;
+        }
+        String intent = armed ? "ARMED" : "DISARMED";
+        DetectorIntentRecordDTO record = persistNextDetectorIntent(droneSn, intent);
+        if (record == null) {
+            return null;
+        }
+        desiredDetectorIntentByDrone.put(droneSn, copyDetectorIntent(record));
+        return enqueueDetectorIntentCommand(droneSn, record);
+    }
+
+    @Override
     public DualStreamCommandDTO pollCommand(String droneSn) {
         if (!StringUtils.hasText(droneSn)) {
             return null;
         }
+        reconcileDetectorIntent(droneSn, null);
         expireTimedOutCommands(droneSn);
         DualStreamCommandDTO active = commandByDrone.get(droneSn);
         if (active == null || !COMMAND_STATUS_PENDING.equals(normalize(active.getStatus()))) {
@@ -390,6 +422,123 @@ public class DualStreamServiceImpl implements IDualStreamService {
             return;
         }
         commandQueueByDrone.computeIfAbsent(droneSn, ignored -> new ArrayDeque<>()).addLast(command);
+    }
+
+    private DetectorIntentRecordDTO persistNextDetectorIntent(String droneSn, String intent) {
+        if (stringRedisTemplate == null || objectMapper == null) {
+            if (!allowInMemoryDetectorIntent) {
+                log.error("refusing detector intent without durable Redis store drone={} intent={}", droneSn, intent);
+                return null;
+            }
+            return new DetectorIntentRecordDTO(intent, fallbackDetectorIntentVersion.incrementAndGet());
+        }
+        try {
+            Long version = stringRedisTemplate.execute(
+                    SET_DETECTOR_INTENT_SCRIPT,
+                    List.of(
+                            DETECTOR_INTENT_VERSION_KEY_PREFIX + droneSn,
+                            DETECTOR_INTENT_KEY_PREFIX + droneSn),
+                    intent);
+            if (version == null) {
+                return null;
+            }
+            return new DetectorIntentRecordDTO(intent, version);
+        } catch (RuntimeException error) {
+            log.error("failed to persist detector intent drone={} intent={}", droneSn, intent, error);
+            return null;
+        }
+    }
+
+    private DetectorIntentRecordDTO loadDetectorIntent(String droneSn) {
+        DetectorIntentRecordDTO cached = desiredDetectorIntentByDrone.get(droneSn);
+        if (cached != null) {
+            return copyDetectorIntent(cached);
+        }
+        if (stringRedisTemplate == null || objectMapper == null) {
+            return null;
+        }
+        try {
+            String raw = stringRedisTemplate.opsForValue().get(DETECTOR_INTENT_KEY_PREFIX + droneSn);
+            if (!StringUtils.hasText(raw)) {
+                return null;
+            }
+            DetectorIntentRecordDTO restored = objectMapper.readValue(raw, DetectorIntentRecordDTO.class);
+            desiredDetectorIntentByDrone.put(droneSn, copyDetectorIntent(restored));
+            return restored;
+        } catch (RuntimeException | JsonProcessingException error) {
+            log.error("failed to restore detector intent drone={}", droneSn, error);
+            return null;
+        }
+    }
+
+    private void reconcileDetectorIntent(String droneSn, DualStreamAgentHeartbeatDTO heartbeat) {
+        DetectorIntentRecordDTO desired = loadDetectorIntent(droneSn);
+        if (desired == null || desired.getVersion() == null) {
+            return;
+        }
+        Long observedVersion = heartbeat == null ? null : heartbeat.getDetectorIntentVersion();
+        String observedIntent = heartbeat == null ? null : heartbeat.getDetectorIntent();
+        if (Objects.equals(desired.getVersion(), observedVersion)
+                && desired.getIntent().equalsIgnoreCase(observedIntent == null ? "" : observedIntent)) {
+            removeDetectorIntentCommands(droneSn);
+            return;
+        }
+        enqueueDetectorIntentCommand(droneSn, desired);
+    }
+
+    private DualStreamCommandDTO enqueueDetectorIntentCommand(String droneSn, DetectorIntentRecordDTO desired) {
+        String action = "ARMED".equalsIgnoreCase(desired.getIntent())
+                ? "visible-detector-arm" : "visible-detector-disarm";
+        DualStreamCommandDTO existing = findDetectorIntentCommand(droneSn, action, desired.getVersion());
+        if (existing != null) {
+            return copyCommand(existing);
+        }
+        removeDetectorIntentCommands(droneSn);
+        return issueCommand(droneSn, action, Map.of("intentVersion", desired.getVersion()));
+    }
+
+    private DualStreamCommandDTO findDetectorIntentCommand(String droneSn, String action, Long version) {
+        DualStreamCommandDTO active = commandByDrone.get(droneSn);
+        if (matchesDetectorIntentCommand(active, action, version)) {
+            return active;
+        }
+        Deque<DualStreamCommandDTO> queue = commandQueueByDrone.get(droneSn);
+        if (queue != null) {
+            for (DualStreamCommandDTO command : queue) {
+                if (matchesDetectorIntentCommand(command, action, version)) {
+                    return command;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean matchesDetectorIntentCommand(DualStreamCommandDTO command, String action, Long version) {
+        return command != null
+                && action.equalsIgnoreCase(command.getAction())
+                && command.getParams() != null
+                && Objects.equals(version, command.getParams().get("intentVersion"));
+    }
+
+    private void removeDetectorIntentCommands(String droneSn) {
+        commandByDrone.computeIfPresent(droneSn, (sn, command) ->
+                isDetectorIntentAction(command.getAction()) ? null : command);
+        Deque<DualStreamCommandDTO> queue = commandQueueByDrone.get(droneSn);
+        if (queue != null) {
+            queue.removeIf(command -> isDetectorIntentAction(command.getAction()));
+            if (queue.isEmpty()) {
+                commandQueueByDrone.remove(droneSn, queue);
+            }
+        }
+    }
+
+    private boolean isDetectorIntentAction(String action) {
+        return "visible-detector-arm".equalsIgnoreCase(action)
+                || "visible-detector-disarm".equalsIgnoreCase(action);
+    }
+
+    private DetectorIntentRecordDTO copyDetectorIntent(DetectorIntentRecordDTO record) {
+        return new DetectorIntentRecordDTO(record.getIntent(), record.getVersion());
     }
 
     private void mergeGroup(String droneSn, Consumer<DualStreamLiveGroupDTO> updater) {
@@ -692,7 +841,13 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setLastCommandStatus(group.getLastCommandStatus())
                 .setVisibleSupported(group.getVisibleSupported())
                 .setThermalSupported(group.getThermalSupported())
-                .setThermalCenterTemperatureC(group.getThermalCenterTemperatureC());
+                .setThermalCenterTemperatureC(group.getThermalCenterTemperatureC())
+                .setDetectorIntent(group.getDetectorIntent())
+                .setDetectorState(group.getDetectorState())
+                .setDetectorHealth(group.getDetectorHealth())
+                .setDetectorReason(group.getDetectorReason())
+                .setDetectorObservedAt(group.getDetectorObservedAt())
+                .setDetectorIntentVersion(group.getDetectorIntentVersion());
     }
 
     private DualStreamEventDTO copyEvent(DualStreamEventDTO event) {

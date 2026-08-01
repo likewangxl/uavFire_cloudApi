@@ -82,5 +82,12 @@ class GlobalMVCConfigurerTest {
             return interceptor == waylineAgentAuthInterceptor && patterns != null &&
                 patterns.contains("/manage/api/v1/fire-events/agent-report");
         }));
+        assertTrue(registrations.stream().anyMatch(registration -> {
+            Object interceptor = ReflectionTestUtils.getField(registration, "interceptor");
+            @SuppressWarnings("unchecked")
+            List<String> patterns = (List<String>) ReflectionTestUtils.getField(registration, "includePatterns");
+            return interceptor == waylineAgentAuthInterceptor && patterns != null &&
+                patterns.contains("/manage/api/v1/dual-stream/agents/**");
+        }));
     }
 }

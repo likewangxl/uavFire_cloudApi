@@ -16,6 +16,7 @@ class AgentBackendApiFactoryTest {
             detectorState = "BLOCKED",
             detectorHealth = "UNHEALTHY",
             detectorReason = "feature-disabled",
+            detectorIntentVersion = 9L,
         )
 
         val json = backendGson().toJson(payload)
@@ -28,6 +29,7 @@ class AgentBackendApiFactoryTest {
         assertTrue(node.has("detector_state"))
         assertTrue(node.has("detector_health"))
         assertTrue(node.has("detector_reason"))
+        assertTrue(node.has("detector_intent_version"))
         assertFalse(node.has("droneSn"))
         assertFalse(node.has("connectionState"))
         assertFalse(node.has("sessionState"))

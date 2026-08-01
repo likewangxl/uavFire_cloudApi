@@ -66,7 +66,10 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         registry.addInterceptor(authInterceptor).addPathPatterns("/**").excludePathPatterns(EXCLUDE_PATHS);
 
         registry.addInterceptor(waylineAgentAuthInterceptor)
-                .addPathPatterns(waylineAgentBase + "/agents/**", agentFireReportPath);
+                .addPathPatterns(
+                        waylineAgentBase + "/agents/**",
+                        agentFireReportPath,
+                        "/" + managePrefix + manageVersion + "/dual-stream/agents/**");
     }
 
     @Override

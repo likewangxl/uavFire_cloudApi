@@ -21,6 +21,16 @@ import okio.Buffer
 
 class AgentBackendClientTest {
     @Test
+    fun controlPlaneRequestsCarryAgentJwt() = runTest {
+        val api = RecordingDualStreamApi()
+        val client = AgentBackendClient(api) { "jwt-for-$it" }
+
+        client.sendHeartbeat("DRONE-A", AgentConnectionState.STREAMING, DualStreamSessionState.RUNNING)
+
+        assertEquals("jwt-for-DRONE-A", api.lastAgentToken)
+    }
+
+    @Test
     fun sendAgentFireReport_preservesDurablePayload() = runTest {
         val api = RecordingDualStreamApi()
         val client = AgentBackendClient(api)
@@ -423,6 +433,7 @@ class AgentBackendClientTest {
                     lastAgentFireBody = Buffer().also { buffer -> body.writeTo(buffer) }.readUtf8()
                 }
         var lastHeartbeatDroneSn: String? = null
+        var lastAgentToken: String? = null
         var lastHeartbeatBody: AgentHeartbeatRequest? = null
         var lastStatusDroneSn: String? = null
         var lastStatusBody: AgentStatusRequest? = null
@@ -440,14 +451,17 @@ class AgentBackendClientTest {
         var lastMsdkAckBody: MsdkCommandAckRequest? = null
 
         override suspend fun heartbeat(
+            agentToken: String,
             droneSn: String,
             body: AgentHeartbeatRequest,
         ) {
+            lastAgentToken = agentToken
             lastHeartbeatDroneSn = droneSn
             lastHeartbeatBody = body
         }
 
         override suspend fun status(
+            agentToken: String,
             droneSn: String,
             body: AgentStatusRequest,
         ) {
@@ -456,6 +470,7 @@ class AgentBackendClientTest {
         }
 
         override suspend fun capability(
+            agentToken: String,
             droneSn: String,
             body: CapabilityReportRequest,
         ) {
@@ -463,9 +478,10 @@ class AgentBackendClientTest {
             lastCapabilityBody = body
         }
 
-        override suspend fun pollCommand(droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = nextCommand
+        override suspend fun pollCommand(agentToken: String, droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = nextCommand
 
         override suspend fun ackCommand(
+            agentToken: String,
             droneSn: String,
             body: AgentCommandAckRequest,
         ) {
