@@ -2,6 +2,7 @@ package com.yx.uavfire.firedetection;
 
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
+import com.yx.uavfire.manage.model.dto.DetectorIntentRecordDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,8 @@ public class FireDetectionService {
 
     public Map<String, Object> statusForDrone(String droneSn) {
         DualStreamLiveGroupDTO group = StringUtils.hasText(droneSn) ? dualStreamService.getGroup(droneSn) : null;
+        DetectorIntentRecordDTO desired = StringUtils.hasText(droneSn)
+                ? dualStreamService.getDetectorIntent(droneSn) : null;
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("drone_sn", droneSn);
         data.put("executor", "AGENT");
@@ -52,12 +55,25 @@ public class FireDetectionService {
                 && "ARMED".equalsIgnoreCase(group.getDetectorIntent())
                 && "ARMED".equalsIgnoreCase(group.getDetectorState())
                 && "HEALTHY".equalsIgnoreCase(group.getDetectorHealth());
+        boolean authorityMatches = desired != null
+                && group != null
+                && desired.getVersion() != null
+                && desired.getVersion().equals(group.getDetectorIntentVersion())
+                && desired.getIntent() != null
+                && desired.getIntent().equalsIgnoreCase(group.getDetectorIntent());
         boolean legalCombination = isLegalCombination(group);
-        boolean running = !stale && validRunningCombination;
+        boolean running = !stale && validRunningCombination && authorityMatches;
         data.put("running", running);
         data.put("heartbeat_stale", stale);
         if (stale) {
             data.put("status_reason", "agent-heartbeat-stale");
+        } else if (desired == null || desired.getVersion() == null || !StringUtils.hasText(desired.getIntent())) {
+            data.put("status_reason", "detector-authority-unavailable");
+        } else if (group != null && group.getDetectorIntentVersion() != null
+                && group.getDetectorIntentVersion() > desired.getVersion()) {
+            data.put("status_reason", "detector-authority-conflict");
+        } else if (!authorityMatches) {
+            data.put("status_reason", "detector-authority-reconciling");
         } else if (!legalCombination) {
             data.put("status_reason", "invalid-agent-detector-state");
         } else if (!validRunningCombination) {
@@ -71,6 +87,10 @@ public class FireDetectionService {
             putIfNotNull(data, "detector_reason", group.getDetectorReason());
             putIfNotNull(data, "detector_intent_version", group.getDetectorIntentVersion());
             putIfNotNull(data, "observed_at", group.getDetectorObservedAt());
+        }
+        if (desired != null) {
+            putIfNotNull(data, "desired_detector_intent", desired.getIntent());
+            putIfNotNull(data, "desired_detector_intent_version", desired.getVersion());
         }
         return data;
     }

@@ -8,6 +8,8 @@ import com.yinxin.uavfir.stream.StreamStartResult
 import com.yinxin.uavfir.stream.ThermalMeasureRegion
 import com.yinxin.uavfir.firedetection.CoordinatorArmingHealth
 import com.yinxin.uavfir.firedetection.VisibleDetectorControl
+import com.yinxin.uavfir.firedetection.DetectorIntentStore
+import com.yinxin.uavfir.firedetection.PersistedDetectorIntent
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
@@ -18,6 +20,42 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CommandPollingCoordinatorTest {
+    @Test
+    fun ackAuthRetryDoesNotExecuteDetectorCommandTwice() = runTest {
+        var saves = 0
+        val store = object : DetectorIntentStore {
+            override fun load(): PersistedDetectorIntent? = null
+            override fun save(intent: PersistedDetectorIntent): Boolean {
+                saves++
+                return true
+            }
+        }
+        val control = VisibleDetectorControl(store) {
+            CoordinatorArmingHealth(
+                featureEnabled = true, detectorArmRequested = true, visibleSourceActive = true,
+                sourceGenerationValid = true, detectorHealthy = true, storeHealthy = true,
+                outboxHealthy = true, missionAdaptersHealthy = true, safetyAdaptersHealthy = true,
+                manualHoldActive = false, competingOwnerActive = false,
+            )
+        }
+        val api = RecordingDualStreamApi(AgentApiEnvelope(data = AgentCommandResponse(
+            commandId = "cmd-arm-once", droneSn = "DRONE-001", action = "visible-detector-arm",
+            status = "pending", urgent = true, params = mapOf("intentVersion" to 1.0),
+        ))).apply { rejectAckOnce = true }
+        var invalidations = 0
+        val client = AgentBackendClient(api, { invalidations++ }, { "token" })
+
+        CommandPollingCoordinator(
+            client = client,
+            sessionManager = DualStreamSessionManager(MockStreamProvider(), visibleDetectorControl = control),
+            pollMsdk = false,
+        ).pollOnce("DRONE-001")
+
+        assertEquals(1, saves)
+        assertEquals(2, api.ackCalls)
+        assertEquals(1, invalidations)
+    }
+
     @Test
     fun pollerAppliesVersionedDisarmAndIgnoresOlderArm() = runTest {
         val control = VisibleDetectorControl {
@@ -884,6 +922,8 @@ class CommandPollingCoordinatorTest {
         var lastAck: AgentCommandAckRequest? = null
         var lastMsdkAck: MsdkCommandAckRequest? = null
         var lastStatusBody: AgentStatusRequest? = null
+        var rejectAckOnce = false
+        var ackCalls = 0
 
         override suspend fun heartbeat(
             agentToken: String,
@@ -912,6 +952,13 @@ class CommandPollingCoordinatorTest {
             droneSn: String,
             body: AgentCommandAckRequest,
         ) {
+            ackCalls++
+            if (rejectAckOnce) {
+                rejectAckOnce = false
+                throw retrofit2.HttpException(retrofit2.Response.error<Any>(
+                    401, okhttp3.ResponseBody.create(null, "expired"),
+                ))
+            }
             lastAck = body
         }
 

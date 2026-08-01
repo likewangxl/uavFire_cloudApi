@@ -5,6 +5,7 @@ import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import com.yx.uavfire.manage.service.impl.DualStreamServiceImpl;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentHeartbeatDTO;
+import com.yx.uavfire.manage.model.dto.DetectorIntentRecordDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -47,7 +48,10 @@ class FireDetectionServiceTest {
                 .setDetectorIntent("ARMED")
                 .setDetectorState("ARMED")
                 .setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(4L)
                 .setDetectorObservedAt(System.currentTimeMillis()));
+        when(commands.getDetectorIntent("DRONE-001"))
+                .thenReturn(new DetectorIntentRecordDTO("ARMED", 4L));
         FireDetectionService service = new FireDetectionService(commands);
 
         Map<String, Object> status = service.statusForDrone("DRONE-001");
@@ -57,9 +61,41 @@ class FireDetectionServiceTest {
     }
 
     @Test
+    void statusForDrone_failsClosedWhenObservedArmConflictsWithDesiredDisarm() {
+        IDualStreamService commands = mock(IDualStreamService.class);
+        when(commands.getGroup("DRONE-001")).thenReturn(new DualStreamLiveGroupDTO()
+                .setConnectionState("STREAMING").setSessionState("RUNNING")
+                .setDetectorIntent("ARMED").setDetectorState("ARMED").setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(6L).setDetectorObservedAt(System.currentTimeMillis()));
+        when(commands.getDetectorIntent("DRONE-001"))
+                .thenReturn(new DetectorIntentRecordDTO("DISARMED", 5L));
+
+        Map<String, Object> status = new FireDetectionService(commands).statusForDrone("DRONE-001");
+
+        assertFalse((Boolean) status.get("running"));
+        assertEquals("detector-authority-conflict", status.get("status_reason"));
+    }
+
+    @Test
+    void statusForDrone_failsClosedWhenDesiredAuthorityCannotBeRead() {
+        IDualStreamService commands = mock(IDualStreamService.class);
+        when(commands.getGroup("DRONE-001")).thenReturn(new DualStreamLiveGroupDTO()
+                .setConnectionState("STREAMING").setSessionState("RUNNING")
+                .setDetectorIntent("ARMED").setDetectorState("ARMED").setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(6L).setDetectorObservedAt(System.currentTimeMillis()));
+
+        Map<String, Object> status = new FireDetectionService(commands).statusForDrone("DRONE-001");
+
+        assertFalse((Boolean) status.get("running"));
+        assertEquals("detector-authority-unavailable", status.get("status_reason"));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void statusForDrone_usesDetectorFieldsRestoredThroughRealRedisGroupCopy() {
         Map<String, String> redis = new ConcurrentHashMap<>();
+        redis.put("dual-stream:detector-intent:DRONE-REDIS", "{\"intent\":\"ARMED\",\"version\":3}");
+        redis.put("dual-stream:detector-intent-version:DRONE-REDIS", "3");
         StringRedisTemplate template = mock(StringRedisTemplate.class);
         ValueOperations<String, String> values = mock(ValueOperations.class);
         when(template.opsForValue()).thenReturn(values);
@@ -115,8 +151,11 @@ class FireDetectionServiceTest {
                 .setDetectorIntent("DISARMED")
                 .setDetectorState("ARMED")
                 .setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(1L)
                 .setDetectorObservedAt(System.currentTimeMillis());
         when(commands.getGroup("DRONE-001")).thenReturn(group);
+        when(commands.getDetectorIntent("DRONE-001"))
+                .thenReturn(new DetectorIntentRecordDTO("DISARMED", 1L));
 
         Map<String, Object> status = new FireDetectionService(commands).statusForDrone("DRONE-001");
 

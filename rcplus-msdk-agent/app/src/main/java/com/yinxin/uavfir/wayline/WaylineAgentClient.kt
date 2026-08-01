@@ -32,13 +32,17 @@ class WaylineAgentClient(
         return fresh
     }
 
+    fun invalidateToken(droneSn: String) {
+        tokenByDrone.remove(droneSn)
+    }
+
     suspend fun pollCommand(droneSn: String): WaylineAgentCommand? {
         return try {
             api.pollCommand(ensureToken(droneSn), droneSn)?.data
         } catch (e: HttpException) {
             if (e.code() == 401 || e.code() == 403) {
                 Log.w(TAG, "token rejected for $droneSn, clearing for retry")
-                tokenByDrone.remove(droneSn)
+                invalidateToken(droneSn)
             }
             null
         }

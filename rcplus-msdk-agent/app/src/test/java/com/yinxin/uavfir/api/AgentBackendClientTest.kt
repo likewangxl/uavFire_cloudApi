@@ -18,8 +18,44 @@ import com.yinxin.uavfir.firedetection.store.OutboxStatus
 import com.yinxin.uavfir.firedetection.store.SendOutcome
 import com.yinxin.uavfir.firedetection.store.sha256
 import okio.Buffer
+import retrofit2.HttpException
 
 class AgentBackendClientTest {
+    @Test
+    fun heartbeat401InvalidatesTokenAndRetriesExactlyOnce() = runTest {
+        val api = RecordingDualStreamApi().apply { rejectHeartbeatOnce = true }
+        var issues = 0
+        var invalidations = 0
+        val client = AgentBackendClient(api, { invalidations++ }, { "token-${++issues}" })
+
+        client.sendHeartbeat("DRONE-A", AgentConnectionState.STREAMING, DualStreamSessionState.RUNNING)
+
+        assertEquals(2, api.heartbeatCalls)
+        assertEquals(2, issues)
+        assertEquals(1, invalidations)
+        assertEquals("token-2", api.lastAgentToken)
+    }
+
+    @Test
+    fun pollAndAck403EachInvalidateAndRetryOnce() = runTest {
+        val api = RecordingDualStreamApi().apply {
+            rejectPollOnce = true
+            rejectAckOnce = true
+            nextCommand = AgentApiEnvelope(data = AgentCommandResponse("cmd-1", "DRONE-A", "visible-detector-disarm", "pending"))
+        }
+        var issues = 0
+        var invalidations = 0
+        val client = AgentBackendClient(api, { invalidations++ }, { "token-${++issues}" })
+
+        assertEquals("cmd-1", client.pollCommand("DRONE-A")?.commandId)
+        client.ackCommand("DRONE-A", "cmd-1", "applied")
+
+        assertEquals(2, api.pollCalls)
+        assertEquals(2, api.ackCalls)
+        assertEquals(2, invalidations)
+        assertEquals(4, issues)
+    }
+
     @Test
     fun controlPlaneRequestsCarryAgentJwt() = runTest {
         val api = RecordingDualStreamApi()
@@ -423,6 +459,12 @@ class AgentBackendClientTest {
     }
 
     private class RecordingDualStreamApi : DualStreamApi {
+        var rejectHeartbeatOnce = false
+        var rejectPollOnce = false
+        var rejectAckOnce = false
+        var heartbeatCalls = 0
+        var pollCalls = 0
+        var ackCalls = 0
         var lastAgentFireBody: String? = null
         var lastAgentFireToken: String? = null
         override suspend fun reportAgentFire(agentToken: String, body: RequestBody): Response<okhttp3.ResponseBody> =
@@ -455,6 +497,11 @@ class AgentBackendClientTest {
             droneSn: String,
             body: AgentHeartbeatRequest,
         ) {
+            heartbeatCalls++
+            if (rejectHeartbeatOnce) {
+                rejectHeartbeatOnce = false
+                throw authFailure(401)
+            }
             lastAgentToken = agentToken
             lastHeartbeatDroneSn = droneSn
             lastHeartbeatBody = body
@@ -478,16 +525,32 @@ class AgentBackendClientTest {
             lastCapabilityBody = body
         }
 
-        override suspend fun pollCommand(agentToken: String, droneSn: String): AgentApiEnvelope<AgentCommandResponse>? = nextCommand
+        override suspend fun pollCommand(agentToken: String, droneSn: String): AgentApiEnvelope<AgentCommandResponse>? {
+            pollCalls++
+            if (rejectPollOnce) {
+                rejectPollOnce = false
+                throw authFailure(403)
+            }
+            return nextCommand
+        }
 
         override suspend fun ackCommand(
             agentToken: String,
             droneSn: String,
             body: AgentCommandAckRequest,
         ) {
+            ackCalls++
+            if (rejectAckOnce) {
+                rejectAckOnce = false
+                throw authFailure(403)
+            }
             lastAckDroneSn = droneSn
             lastAckBody = body
         }
+
+        private fun authFailure(code: Int): HttpException = HttpException(
+            Response.error<Any>(code, okhttp3.ResponseBody.create(null, "auth-failed")),
+        )
 
         override suspend fun recordTaskEvent(
             taskId: String,

@@ -8,9 +8,11 @@ import java.util.Locale
 import com.yinxin.uavfir.firedetection.store.OutboxRow
 import com.yinxin.uavfir.firedetection.store.SendOutcome
 import com.yinxin.uavfir.firedetection.VisibleDetectorStatus
+import retrofit2.HttpException
 
 class AgentBackendClient(
     private val api: DualStreamApi,
+    private val invalidateAgentToken: (String) -> Unit = {},
     private val agentToken: suspend (String) -> String = { "" },
 ) {
     /** Task 10 staged report path; the transport sends the durable payload unchanged. */
@@ -24,7 +26,9 @@ class AgentBackendClient(
         detectorStatus: VisibleDetectorStatus = VisibleDetectorStatus.disarmed(),
     ) {
         debug("heartbeat request drone=$droneSn state=$connectionState session=$sessionState")
-        api.heartbeat(agentToken(droneSn), droneSn, buildHeartbeatRequest(droneSn, connectionState, sessionState, detectorStatus))
+        withAgentAuthRetry(droneSn) { token ->
+            api.heartbeat(token, droneSn, buildHeartbeatRequest(droneSn, connectionState, sessionState, detectorStatus))
+        }
         debug("heartbeat response drone=$droneSn")
     }
 
@@ -53,7 +57,9 @@ class AgentBackendClient(
         ),
     ) {
         debug("status request drone=$droneSn state=$connectionState")
-        api.status(agentToken(droneSn), droneSn, buildStatusRequest(droneSn, connectionState, message, runtimeStatus))
+        withAgentAuthRetry(droneSn) { token ->
+            api.status(token, droneSn, buildStatusRequest(droneSn, connectionState, message, runtimeStatus))
+        }
         debug("status response drone=$droneSn")
     }
 
@@ -89,7 +95,9 @@ class AgentBackendClient(
         capability: CameraCapability,
     ) {
         debug("capability request drone=$droneSn visible=${capability.visibleSupported} thermal=${capability.thermalSupported}")
-        api.capability(agentToken(droneSn), droneSn, buildCapabilityReportRequest(droneSn, capability))
+        withAgentAuthRetry(droneSn) { token ->
+            api.capability(token, droneSn, buildCapabilityReportRequest(droneSn, capability))
+        }
         debug("capability response drone=$droneSn")
     }
 
@@ -184,7 +192,7 @@ class AgentBackendClient(
         droneSn: String,
     ): AgentCommandResponse? {
         debug("poll request drone=$droneSn")
-        val response = api.pollCommand(agentToken(droneSn), droneSn)?.data
+        val response = withAgentAuthRetry(droneSn) { token -> api.pollCommand(token, droneSn) }?.data
         debug("poll response drone=$droneSn command=${response?.commandId ?: "none"}")
         return response
     }
@@ -207,10 +215,7 @@ class AgentBackendClient(
         geoErrorRadiusM: Double? = null,
     ) {
         debug("ack request drone=$droneSn command=$commandId status=$status")
-        api.ackCommand(
-            agentToken = agentToken(droneSn),
-            droneSn = droneSn,
-            body = AgentCommandAckRequest(
+        val request = AgentCommandAckRequest(
                 commandId = commandId,
                 status = status,
                 message = message,
@@ -225,9 +230,21 @@ class AgentBackendClient(
                 geoMethod = geoMethod,
                 geoQuality = geoQuality,
                 geoErrorRadiusM = geoErrorRadiusM,
-            ),
-        )
+            )
+        withAgentAuthRetry(droneSn) { token ->
+            api.ackCommand(agentToken = token, droneSn = droneSn, body = request)
+        }
         debug("ack response drone=$droneSn command=$commandId")
+    }
+
+    private suspend fun <T> withAgentAuthRetry(droneSn: String, call: suspend (String) -> T): T {
+        return try {
+            call(agentToken(droneSn))
+        } catch (failure: HttpException) {
+            if (failure.code() != 401 && failure.code() != 403) throw failure
+            invalidateAgentToken(droneSn)
+            call(agentToken(droneSn))
+        }
     }
 
     suspend fun recordThermalHotspotEvent(

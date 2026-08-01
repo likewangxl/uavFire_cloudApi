@@ -89,20 +89,164 @@ class DualStreamServiceImplTest {
         assertEquals(2L, ((Number) replay.getParams().get("intentVersion")).longValue());
     }
 
+    @Test
+    void convergedHeartbeatKeepsRepeatedPollsEmptyIncludingBackendRestart() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl first = serviceWithRedis(redis, version);
+        first.setDetectorIntent("DRONE-CONVERGED", true);
+        first.acceptHeartbeat("DRONE-CONVERGED", new DualStreamAgentHeartbeatDTO()
+                .setDroneSn("DRONE-CONVERGED")
+                .setConnectionState("STREAMING")
+                .setSessionState("RUNNING")
+                .setDetectorIntent("ARMED")
+                .setDetectorState("ARMED")
+                .setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(1L));
+
+        assertNull(first.pollCommand("DRONE-CONVERGED"));
+        assertNull(first.pollCommand("DRONE-CONVERGED"));
+        assertNull(serviceWithRedis(redis, version).pollCommand("DRONE-CONVERGED"));
+    }
+
+    @Test
+    void secondBackendNodeNewerDisarmOverridesFirstNodeCachedArm() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl first = serviceWithRedis(redis, version);
+        DualStreamServiceImpl second = serviceWithRedis(redis, version);
+        first.setDetectorIntent("DRONE-MULTI", true);
+        second.setDetectorIntent("DRONE-MULTI", false);
+
+        DualStreamCommandDTO command = first.pollCommand("DRONE-MULTI");
+
+        assertEquals("visible-detector-disarm", command.getAction());
+        assertEquals(2L, ((Number) command.getParams().get("intentVersion")).longValue());
+    }
+
+    @Test
+    void observedAheadRaisesAuthorityFloorBeforeReissuingArm() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl service = serviceWithRedis(redis, version);
+        service.setDetectorIntent("DRONE-FLOOR", true);
+
+        service.acceptHeartbeat("DRONE-FLOOR", new DualStreamAgentHeartbeatDTO()
+                .setDroneSn("DRONE-FLOOR")
+                .setDetectorIntent("DISARMED")
+                .setDetectorIntentVersion(5L));
+        DualStreamCommandDTO command = service.pollCommand("DRONE-FLOOR");
+
+        assertEquals("visible-detector-arm", command.getAction());
+        assertEquals(6L, ((Number) command.getParams().get("intentVersion")).longValue());
+    }
+
+    @Test
+    void operatorDisarmRecoversAboveObservationAfterRedisRecordAndCounterLoss() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl service = serviceWithRedis(redis, version);
+        service.setDetectorIntent("DRONE-LOSS", true);
+        redis.remove("dual-stream:detector-intent:DRONE-LOSS");
+        redis.remove("dual-stream:detector-intent-version:DRONE-LOSS");
+        version.set(0L);
+        service.acceptHeartbeat("DRONE-LOSS", new DualStreamAgentHeartbeatDTO()
+                .setDroneSn("DRONE-LOSS")
+                .setDetectorIntent("ARMED")
+                .setDetectorState("ARMED")
+                .setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(10L));
+
+        DualStreamCommandDTO command = service.setDetectorIntent("DRONE-LOSS", false);
+
+        assertEquals("visible-detector-disarm", command.getAction());
+        assertEquals(11L, ((Number) command.getParams().get("intentVersion")).longValue());
+    }
+
+    @Test
+    void observedAheadArmRaisesAuthorityFloorBeforeReissuingDisarm() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl service = serviceWithRedis(redis, version);
+        service.setDetectorIntent("DRONE-FLOOR-DISARM", false);
+
+        service.acceptHeartbeat("DRONE-FLOOR-DISARM", new DualStreamAgentHeartbeatDTO()
+                .setDroneSn("DRONE-FLOOR-DISARM")
+                .setDetectorIntent("ARMED")
+                .setDetectorState("ARMED")
+                .setDetectorHealth("HEALTHY")
+                .setDetectorIntentVersion(7L));
+        DualStreamCommandDTO command = service.pollCommand("DRONE-FLOOR-DISARM");
+
+        assertEquals("visible-detector-disarm", command.getAction());
+        assertEquals(8L, ((Number) command.getParams().get("intentVersion")).longValue());
+    }
+
+    @Test
+    void persistedArmReconciliationHeartbeatReceivesSameVersionConfirmationCommand() {
+        Map<String, String> redis = new ConcurrentHashMap<>();
+        AtomicLong version = new AtomicLong();
+        DualStreamServiceImpl service = serviceWithRedis(redis, version);
+        service.setDetectorIntent("DRONE-RECONFIRM", true);
+
+        service.acceptHeartbeat("DRONE-RECONFIRM", new DualStreamAgentHeartbeatDTO()
+                .setDroneSn("DRONE-RECONFIRM")
+                .setDetectorIntent("ARMED")
+                .setDetectorState("BLOCKED")
+                .setDetectorHealth("UNHEALTHY")
+                .setDetectorReason("authority-reconciliation-required")
+                .setDetectorIntentVersion(1L));
+        DualStreamCommandDTO command = service.pollCommand("DRONE-RECONFIRM");
+
+        assertEquals("visible-detector-arm", command.getAction());
+        assertEquals(1L, ((Number) command.getParams().get("intentVersion")).longValue());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void detectorAuthorityReadFailureIsUnavailableInsteadOfUsingProcessCache() {
+        StringRedisTemplate template = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        when(template.opsForValue()).thenReturn(values);
+        when(values.get(any(String.class))).thenThrow(new IllegalStateException("redis-unavailable"));
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        ReflectionTestUtils.setField(service, "stringRedisTemplate", template);
+        ReflectionTestUtils.setField(service, "objectMapper", new ObjectMapper());
+
+        assertNull(service.getDetectorIntent("DRONE-REDIS-DOWN"));
+    }
+
     @SuppressWarnings("unchecked")
     private DualStreamServiceImpl serviceWithRedis(Map<String, String> redis, AtomicLong version) {
         StringRedisTemplate template = mock(StringRedisTemplate.class);
         ValueOperations<String, String> values = mock(ValueOperations.class);
         when(template.opsForValue()).thenReturn(values);
         when(values.get(any(String.class))).thenAnswer(invocation -> redis.get(invocation.getArgument(0)));
-        when(template.execute(any(RedisScript.class), anyList(), any(String.class))).thenAnswer(invocation -> {
+        when(template.execute(any(RedisScript.class), anyList(), any(String.class), any(String.class))).thenAnswer(invocation -> {
             List<String> keys = invocation.getArgument(1);
             String intent = invocation.getArgument(2);
-            long next = version.incrementAndGet();
+            long floor = Long.parseLong(invocation.getArgument(3));
+            long next = version.updateAndGet(current -> Math.max(current, floor) + 1L);
             redis.put(keys.get(0), Long.toString(next));
             redis.put(keys.get(1), "{\"intent\":\"" + intent + "\",\"version\":" + next + "}");
             return next;
         });
+        when(template.execute(
+                any(RedisScript.class), anyList(), any(String.class), any(String.class), any(String.class)))
+                .thenAnswer(invocation -> {
+                    List<String> keys = invocation.getArgument(1);
+                    String intent = invocation.getArgument(2);
+                    long expectedVersion = Long.parseLong(invocation.getArgument(3));
+                    long floor = Long.parseLong(invocation.getArgument(4));
+                    String expected = "{\"intent\":\"" + intent + "\",\"version\":" + expectedVersion + "}";
+                    if (!expected.equals(redis.get(keys.get(1)))) {
+                        return 0L;
+                    }
+                    long next = version.updateAndGet(current -> Math.max(current, floor) + 1L);
+                    redis.put(keys.get(0), Long.toString(next));
+                    redis.put(keys.get(1), "{\"intent\":\"" + intent + "\",\"version\":" + next + "}");
+                    return next;
+                });
         doAnswer(invocation -> {
             redis.put(invocation.getArgument(0), invocation.getArgument(1));
             return null;

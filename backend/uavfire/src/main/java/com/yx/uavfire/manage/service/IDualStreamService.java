@@ -7,6 +7,7 @@ import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
+import com.yx.uavfire.manage.model.dto.DetectorIntentRecordDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,8 @@ public interface IDualStreamService {
     DualStreamCommandDTO issueCommand(String droneSn, String action, Map<String, Object> params);
 
     DualStreamCommandDTO setDetectorIntent(String droneSn, boolean armed);
+
+    DetectorIntentRecordDTO getDetectorIntent(String droneSn);
 
     DualStreamCommandDTO pollCommand(String droneSn);
 

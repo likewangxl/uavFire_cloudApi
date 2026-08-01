@@ -108,7 +108,11 @@ class AppServices(
         api = waylineApi,
         sharedSecret = BuildConfig.AGENT_WAYLINE_SHARED_SECRET,
     )
-    private val backendClient = AgentBackendClient(api, waylineClient::ensureToken)
+    private val backendClient = AgentBackendClient(
+        api = api,
+        invalidateAgentToken = waylineClient::invalidateToken,
+        agentToken = waylineClient::ensureToken,
+    )
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val latestVisibleFrameBuffer = LatestVisibleFrameBuffer()
