@@ -43,9 +43,12 @@ public class AgentFlightExecutionBindingLedgerImpl implements AgentFlightExecuti
         if (drone == null) throw new IllegalStateException("flight execution has no authoritative drone binding");
         AgentFlightExecutionBindingEntity row = bindings.selectByFlightIdForUpdate(task.getFlightId());
         if (!sameIdentity(row, task)) throw new IllegalStateException("flight execution binding identity mismatch");
+        if (row.getTerminalAt() != null)
+            throw new IllegalStateException("terminal flight cannot execute again; prepare a new flight first");
         if (row.getExecutionStartedAt() != null && !drone.equals(row.getAssignedDroneSn()))
             throw new IllegalStateException("flight execution drone binding is immutable");
-        bindings.markStarted(task.getFlightId(), drone, startedAt);
+        if (bindings.markStarted(task.getFlightId(), drone, startedAt) != 1)
+            throw new IllegalStateException("flight execution binding could not start; prepare a new flight first");
     }
 
     @Override @Transactional

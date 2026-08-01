@@ -29,12 +29,44 @@ class AgentFlightExecutionBindingLedgerImplTest {
         PlannedWaylineEntity task = task("flight-A", "drone-A");
         AgentFlightExecutionBindingEntity row = row("flight-A", "drone-A", null, null);
         when(mapper.selectByFlightIdForUpdate("flight-A")).thenReturn(row);
+        when(mapper.markStarted("flight-A", "drone-A", 10_000L)).thenReturn(1);
         ledger.recordExecutionStarted(task, 10_000L);
         verify(mapper).markStarted("flight-A", "drone-A", 10_000L);
 
         row.setExecutionStartedAt(10_000L); row.setAssignedDroneSn("drone-A");
         task.setDroneSn("drone-B"); task.setAircraftSn("drone-B");
         assertThrows(IllegalStateException.class, () -> ledger.recordExecutionStarted(task, 11_000L));
+    }
+
+    @Test void executionCannotReopenFinishedStoppedCanceledOrFailedFlight() {
+        for (String status : new String[]{"finished", "stopped", "canceled", "failed"}) {
+            reset(mapper);
+            AgentFlightExecutionBindingEntity terminal = row("flight-A", "drone-A", 10_000L, 20_000L);
+            terminal.setExecutionStatus(status);
+            terminal.setTerminalStatus(status);
+            when(mapper.selectByFlightIdForUpdate("flight-A")).thenReturn(terminal);
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> ledger.recordExecutionStarted(task("flight-A", "drone-A"), 30_000L), status);
+            assertTrue(error.getMessage().contains("new flight"), status);
+            verify(mapper, never()).markStarted(anyString(), anyString(), anyLong());
+        }
+    }
+
+    @Test void cancelBeforeFirstStartCannotBeExecutedAndZeroRowStartFailsClosed() {
+        AgentFlightExecutionBindingEntity canceledBeforeStart = row("flight-A", "drone-A", null, 20_000L);
+        canceledBeforeStart.setExecutionStatus("canceled");
+        canceledBeforeStart.setTerminalStatus("canceled");
+        when(mapper.selectByFlightIdForUpdate("flight-A")).thenReturn(canceledBeforeStart);
+        assertThrows(IllegalStateException.class,
+            () -> ledger.recordExecutionStarted(task("flight-A", "drone-A"), 30_000L));
+
+        reset(mapper);
+        when(mapper.selectByFlightIdForUpdate("flight-A"))
+            .thenReturn(row("flight-A", "drone-A", null, null));
+        when(mapper.markStarted("flight-A", "drone-A", 30_000L)).thenReturn(0);
+        assertThrows(IllegalStateException.class,
+            () -> ledger.recordExecutionStarted(task("flight-A", "drone-A"), 30_000L));
     }
 
     @Test void firstTerminalTimestampIsImmutableAndLaterStatusMutationCannotWidenIt() {

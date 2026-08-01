@@ -1822,6 +1822,115 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void executeTerminalAgentFlightRequiresPrepareAndEmitsNoDispatch() throws Exception {
+        for (String terminalStatus : List.of("finished", "stopped", "canceled", "failed")) {
+            IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+            IWaylineFileService files = mock(IWaylineFileService.class);
+            com.yx.uavfire.wayline.agent.service.IWaylineAgentService agent =
+                    mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+            com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                    mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+            PlannedWaylineEntity existing = executableAgentTask("terminal-" + terminalStatus, terminalStatus);
+            when(mapper.selectOne(any())).thenReturn(existing);
+            PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper(), files);
+            setField(service, "waylineAgentService", agent);
+            setField(service, "agentFlightExecutionBindingLedger", ledger);
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                    () -> service.executeTask("workspace-001", existing.getPlannedWaylineId()), terminalStatus);
+            assertTrue(error.getMessage().contains("重新准备"), terminalStatus);
+            verify(ledger, never()).recordExecutionStarted(any(), org.mockito.ArgumentMatchers.anyLong());
+            verify(agent, never()).prepareKmz(any(), any(), any());
+            verify(agent, never()).dispatchWayline(any(), any());
+            verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+        }
+    }
+
+    @Test
+    void executeTerminalDockFlightRequiresPrepareAndEmitsNoDockExecute() throws Exception {
+        for (String terminalStatus : List.of("finished", "stopped", "canceled", "failed")) {
+            IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+            com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                    mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+            com.yx.uavfire.wayline.service.impl.SDKWaylineService dock =
+                    mock(com.yx.uavfire.wayline.service.impl.SDKWaylineService.class);
+            PlannedWaylineEntity existing = executableAgentTask("dock-terminal-" + terminalStatus, terminalStatus);
+            existing.setDockSn("DOCK-001");
+            when(mapper.selectOne(any())).thenReturn(existing);
+            PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                    mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+            setField(service, "sdkWaylineService", dock);
+            setField(service, "agentFlightExecutionBindingLedger", ledger);
+
+            IllegalStateException error = assertThrows(IllegalStateException.class,
+                    () -> service.executeTask("workspace-001", existing.getPlannedWaylineId()), terminalStatus);
+            assertTrue(error.getMessage().contains("重新准备"), terminalStatus);
+            verify(ledger, never()).recordExecutionStarted(any(), org.mockito.ArgumentMatchers.anyLong());
+            verify(dock, never()).flighttaskExecute(any(), any());
+            verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+        }
+    }
+
+    @Test
+    void canceledBeforeFirstStartCannotDispatchWithoutNewPrepare() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService agent =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+        PlannedWaylineEntity existing = executableAgentTask("cancel-before-start", "ready");
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+        setField(service, "waylineAgentService", agent);
+        setField(service, "agentFlightExecutionBindingLedger", ledger);
+
+        service.cancelTask("workspace-001", "cancel-before-start");
+        assertEquals("canceled", existing.getTaskStatus());
+        org.mockito.Mockito.clearInvocations(mapper, agent, ledger);
+
+        assertThrows(IllegalStateException.class,
+                () -> service.executeTask("workspace-001", "cancel-before-start"));
+        verify(ledger, never()).recordExecutionStarted(any(), org.mockito.ArgumentMatchers.anyLong());
+        verify(agent, never()).prepareKmz(any(), any(), any());
+        verify(agent, never()).dispatchWayline(any(), any());
+        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+    }
+
+    @Test
+    void ledgerStartFailureAbortsAgentAndDockBeforeExternalExecute() throws Exception {
+        for (boolean dockRoute : List.of(false, true)) {
+            IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+            com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger ledger =
+                    mock(com.yx.uavfire.fc100.event.service.AgentFlightExecutionBindingLedger.class);
+            com.yx.uavfire.wayline.agent.service.IWaylineAgentService agent =
+                    mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+            com.yx.uavfire.wayline.service.impl.SDKWaylineService dock =
+                    mock(com.yx.uavfire.wayline.service.impl.SDKWaylineService.class);
+            PlannedWaylineEntity existing = executableAgentTask(
+                    dockRoute ? "ledger-fail-dock" : "ledger-fail-agent", "ready");
+            if (dockRoute) existing.setDockSn("DOCK-001");
+            when(mapper.selectOne(any())).thenReturn(existing);
+            org.mockito.Mockito.doThrow(new IllegalStateException("ledger start rejected"))
+                    .when(ledger).recordExecutionStarted(any(PlannedWaylineEntity.class),
+                            org.mockito.ArgumentMatchers.anyLong());
+            PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                    mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+            setField(service, "waylineAgentService", agent);
+            setField(service, "sdkWaylineService", dock);
+            setField(service, "agentFlightExecutionBindingLedger", ledger);
+
+            assertThrows(IllegalStateException.class,
+                    () -> service.executeTask("workspace-001", existing.getPlannedWaylineId()));
+            verify(agent, never()).prepareKmz(any(), any(), any());
+            verify(agent, never()).dispatchWayline(any(), any());
+            verify(dock, never()).flighttaskExecute(any(), any());
+            verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+        }
+    }
+
+    @Test
     void executeAgentWaylineShouldRejectMissingAircraftTarget() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
@@ -2029,6 +2138,28 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(normalizedWaylines.contains("<wpml:useStraightLine>1</wpml:useStraightLine>")),
                 () -> assertEquals(org.springframework.util.DigestUtils.md5DigestAsHex(kmzCaptor.getValue()),
                         dispatchCaptor.getValue().getKmzMd5()));
+    }
+
+    private static PlannedWaylineEntity executableAgentTask(String id, String status) throws IOException {
+        Path kmzPath = Files.createTempFile(id, ".kmz");
+        Files.write(kmzPath, new byte[]{1, 2, 3});
+        return PlannedWaylineEntity.builder()
+                .id(3900)
+                .plannedWaylineId(id)
+                .workspaceId("workspace-001")
+                .flightId("flight-" + id)
+                .name(id)
+                .aircraftModelKey("M4T")
+                .droneSn("M4T-SN-001")
+                .aircraftSn("M4T-SN-001")
+                .defaultHeight(30.0)
+                .maxSpeed(5.0)
+                .waypointsJson("[]")
+                .status(status)
+                .taskStatus(status)
+                .kmzUrl(kmzPath.toUri().toURL().toString())
+                .kmzMd5("md5-" + id)
+                .build();
     }
 
     private static void assertZipContains(byte[] content, String expectedEntry) throws IOException {

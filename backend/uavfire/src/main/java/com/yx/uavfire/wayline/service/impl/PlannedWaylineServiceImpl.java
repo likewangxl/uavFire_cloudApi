@@ -565,6 +565,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!StringUtils.hasText(existing.getFlightId())) {
             throw new IllegalArgumentException("Prepare the planned wayline task before executing it.");
         }
+        if (isTerminalTaskStatus(existing.getTaskStatus()) || isTerminalTaskStatus(existing.getStatus())) {
+            throw new IllegalStateException("该航班已结束，请重新准备任务生成新的 flightId 后再执行。");
+        }
         applyExecutionTarget(existing, param);
         long now = System.currentTimeMillis();
         existing.setStatus(STATUS_EXECUTING);
@@ -585,6 +588,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
         updateTaskFields(existing);
         return entity2Dto(existing);
+    }
+
+    private boolean isTerminalTaskStatus(String status) {
+        return STATUS_CANCELED.equalsIgnoreCase(status) || STATUS_STOPPED.equalsIgnoreCase(status)
+                || "finished".equalsIgnoreCase(status) || "failed".equalsIgnoreCase(status);
     }
 
     private void applyExecutionTarget(PlannedWaylineEntity existing, PreparePlannedWaylineTaskParam param) {
