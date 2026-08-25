@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
+import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.DJIGimbalKey
@@ -119,6 +120,9 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
     private val keyManager: KeyManager
         get() = KeyManager.getInstance()
 
+    private val componentIndex: ComponentIndexType
+        get() = PayloadSelectionRegistry.selectedComponentIndex()
+
     override suspend fun startTakeoff() {
         performEmptyAction(FlightControllerKey.KeyStartTakeoff.create())
     }
@@ -226,7 +230,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
             GIMBAL_RECENTER_TIMEOUT_SEC,
         )
         performAction(
-            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, ComponentIndexType.LEFT_OR_MAIN),
+            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, componentIndex),
             rotation,
         )
     }
@@ -243,7 +247,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
             CtrlInfo(false, false),
         )
         performAction(
-            KeyTools.createKey(DJIGimbalKey.KeyRotateBySpeed, ComponentIndexType.LEFT_OR_MAIN),
+            KeyTools.createKey(DJIGimbalKey.KeyRotateBySpeed, componentIndex),
             rotation,
         )
     }
@@ -263,7 +267,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
             GIMBAL_RECENTER_TIMEOUT_SEC,
         )
         performAction(
-            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, ComponentIndexType.LEFT_OR_MAIN),
+            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, componentIndex),
             rotation,
         )
     }
@@ -282,7 +286,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
             GIMBAL_NADIR_ROTATION_TIMEOUT_SEC,
         )
         performAction(
-            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, ComponentIndexType.LEFT_OR_MAIN),
+            KeyTools.createKey(DJIGimbalKey.KeyRotateByAngle, componentIndex),
             rotation,
         )
     }
@@ -291,7 +295,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         performEmptyAction(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyStartShootPhoto,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_WIDE,
             ),
         )
@@ -301,7 +305,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         performEmptyAction(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyStartRecord,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_WIDE,
             ),
         )
@@ -311,7 +315,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         performEmptyAction(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyStopRecord,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_WIDE,
             ),
         )
@@ -319,7 +323,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
 
     override suspend fun setStreamSource(source: String) {
         setValue(
-            KeyTools.createKey(CameraKey.KeyCameraVideoStreamSource, ComponentIndexType.LEFT_OR_MAIN),
+            KeyTools.createKey(CameraKey.KeyCameraVideoStreamSource, componentIndex),
             when (source.lowercase(Locale.US)) {
                 "thermal", "infrared", "ir" -> CameraVideoStreamSourceType.INFRARED_CAMERA
                 "zoom" -> CameraVideoStreamSourceType.ZOOM_CAMERA
@@ -331,7 +335,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
 
     override suspend fun setZoom(ratio: Double) {
         setValue(
-            KeyTools.createKey(CameraKey.KeyCameraZoomRatios, ComponentIndexType.LEFT_OR_MAIN),
+            KeyTools.createKey(CameraKey.KeyCameraZoomRatios, componentIndex),
             ratio.coerceIn(1.0, 200.0),
         )
     }
@@ -340,7 +344,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         setValue(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyCameraNightSceneMode,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_WIDE,
             ),
             if (enabled) CameraNightSceneMode.ENABLE else CameraNightSceneMode.DISABLE,
@@ -351,7 +355,7 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         setValue(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyLaserFillLightEnabled,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_WIDE,
             ),
             enabled,

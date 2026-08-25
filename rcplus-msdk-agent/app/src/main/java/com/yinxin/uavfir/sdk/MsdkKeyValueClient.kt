@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.sdk
 
+import com.yinxin.uavfir.BuildConfig
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJIKey
 import dji.sdk.keyvalue.key.FlightControllerKey
@@ -37,21 +38,59 @@ class RealMsdkKeyValueClient : MsdkKeyValueClient {
     }
 
     override fun loadCapability(): CameraCapability {
-        val sourceRange = KeyManager.getInstance().getValue(
-            KeyTools.createKey(
-                CameraKey.KeyCameraVideoStreamSourceRange,
-                ComponentIndexType.LEFT_OR_MAIN,
-            ),
-        ) as? List<*>
-
-        val sourceNames = sourceRange
-            ?.mapNotNull { it?.toString() }
-            .orEmpty()
-
-        return CameraCapability(
-            visibleSupported = sourceNames.any { it != "INFRARED_CAMERA" },
-            thermalSupported = sourceNames.any { it == "INFRARED_CAMERA" },
+        val aircraftModelKey = normalizeAircraftModel(loadAircraftModel())
+        val controllerModelKey = loadControllerModel()
+        val payloads = listOf(0, 1, 2).mapNotNull { position ->
+            val component = PayloadSelectionRegistry.componentForPosition(position) ?: return@mapNotNull null
+            val cameraType = runCatching {
+                KeyManager.getInstance().getValue(KeyTools.createKey(CameraKey.KeyCameraType, component))?.toString()
+            }.getOrNull()
+            val modelKey = normalizePayloadModel(cameraType) ?: return@mapNotNull null
+            val sources = (runCatching {
+                KeyManager.getInstance().getValue(
+                    KeyTools.createKey(CameraKey.KeyCameraVideoStreamSourceRange, component),
+                ) as? List<*>
+            }.getOrNull()).orEmpty().mapNotNull { it?.toString() }
+            val thermal = modelKey == "H20T" || modelKey == "H30T"
+            PayloadCapability(
+                payloadModelKey = modelKey,
+                payloadPositionIndex = position,
+                visibleSupported = sources.isEmpty() || sources.any { it != "INFRARED_CAMERA" },
+                thermalSupported = thermal && (sources.isEmpty() || sources.any { it == "INFRARED_CAMERA" }),
+                laserSupported = true,
+                tapZoomSupported = true,
+            )
+        }
+        if (aircraftModelKey != "M300" && payloads.isEmpty()) {
+            val legacySources = (runCatching {
+                KeyManager.getInstance().getValue(
+                    KeyTools.createKey(
+                        CameraKey.KeyCameraVideoStreamSourceRange,
+                        ComponentIndexType.LEFT_OR_MAIN,
+                    ),
+                ) as? List<*>
+            }.getOrNull()).orEmpty().mapNotNull { it?.toString() }
+            val legacyCapability = CameraCapability(
+                visibleSupported = legacySources.any { it != "INFRARED_CAMERA" },
+                thermalSupported = legacySources.any { it == "INFRARED_CAMERA" },
+                aircraftModelKey = aircraftModelKey,
+                controllerModelKey = controllerModelKey,
+                selectedPayloadPositionIndex = 0,
+                laserSupported = true,
+                fireClosedLoopReady = legacySources.isNotEmpty(),
+            )
+            PayloadSelectionRegistry.update(legacyCapability)
+            return legacyCapability
+        }
+        val capability = PayloadCapabilityResolver.resolve(
+            aircraftModelKey = aircraftModelKey,
+            controllerModelKey = controllerModelKey,
+            payloads = payloads,
+            operatorSelectedPositionIndex = BuildConfig.AGENT_PAYLOAD_POSITION_INDEX.takeIf { it in 0..2 },
+            m300FireClosedLoopEnabled = BuildConfig.M300_FIRE_CLOSED_LOOP_ENABLED,
         )
+        PayloadSelectionRegistry.update(capability)
+        return capability
     }
 
     override fun loadAircraftModel(): String? {
@@ -59,6 +98,38 @@ class RealMsdkKeyValueClient : MsdkKeyValueClient {
             KeyManager.getInstance().getValue(KeyTools.createKey(ProductKey.KeyProductType))?.toString()
         }.getOrNull()
             ?.takeIf { it.isNotBlank() }
+    }
+
+    private fun loadControllerModel(): String? {
+        val value = runCatching {
+            KeyManager.getInstance().getValue(
+                KeyTools.createKey(RemoteControllerKey.KeyRemoteControllerType),
+            )?.toString()
+        }.getOrNull()?.uppercase() ?: return null
+        return when (value) {
+            "DJI_RC_PLUS" -> "RC_PLUS"
+            "DJI_RC_PLUS_2" -> "RC_PLUS_2"
+            else -> value.takeIf { it != "NONE" && it != "UNKNOWN" }
+        }
+    }
+
+    private fun normalizeAircraftModel(value: String?): String? = when (
+        value?.uppercase()?.replace("_", "")?.replace("-", "")
+    ) {
+        "M300RTK", "MATRICE300RTK" -> "M300"
+        "DJIMATRICE4SERIES", "MATRICE4SERIES", "M4T" -> "M4T"
+        else -> value?.takeIf { it.isNotBlank() }
+    }
+
+    private fun normalizePayloadModel(value: String?): String? {
+        val normalized = value?.uppercase()?.replace("ZENMUSE_", "") ?: return null
+        return when {
+            normalized.contains("H30T") -> "H30T"
+            normalized.contains("H30") -> "H30"
+            normalized.contains("H20T") -> "H20T"
+            normalized.contains("H20") -> "H20"
+            else -> null
+        }
     }
 
     override fun loadFlightLimit(): DjiFlightLimit {

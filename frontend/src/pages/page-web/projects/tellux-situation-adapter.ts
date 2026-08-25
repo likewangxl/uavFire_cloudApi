@@ -17,6 +17,7 @@ interface TelluxSituationOptions {
   layers: SituationLayers
   quantizedMeshTerrainUrl?: string
   imageryUrl?: string
+  city3dTilesUrl?: string
   visualEffects?: {
     atmosphere?: boolean
     clouds?: boolean
@@ -72,6 +73,15 @@ export default async function mountTelluxSituationStage (options: TelluxSituatio
   })
 
   viewer.toneMappingExposure = 4.8
+
+  if (options.city3dTilesUrl) {
+    viewer.load3DTileset({
+      id: 'authorized-city-reality-model',
+      type: 'url',
+      url: options.city3dTilesUrl,
+      creasedNormals: false
+    })
+  }
 
   addBusinessGeoJsonLayers(viewer, options.layers)
   const businessRoot = new THREE.Group()

@@ -21,7 +21,7 @@ public class FireEventCreateParam {
     private String eventId;
 
     @NotBlank @Size(max = 32)
-    private String source;       // M4T / MANUAL / TEST
+    private String source;       // DJI_AGENT / MANUAL / TEST
 
     @Size(max = 64)
     private String deviceSn;

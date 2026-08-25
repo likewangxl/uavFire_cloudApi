@@ -14,6 +14,7 @@ import dji.sdk.keyvalue.value.camera.LaserMeasureState
 import dji.sdk.keyvalue.value.camera.LaserWorkMode
 import dji.sdk.keyvalue.value.common.CameraLensType
 import dji.sdk.keyvalue.value.common.ComponentIndexType
+import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.flightcontroller.WindDirection
 import dji.v5.common.callback.CommonCallbacks
@@ -941,7 +942,7 @@ class DjiLaserRangefinderClient(
     }
 
     private fun <T> laserKey(keyInfo: dji.sdk.keyvalue.key.DJIKeyInfo<T>): DJIKey<T> =
-        KeyTools.createCameraKey(keyInfo, ComponentIndexType.LEFT_OR_MAIN, CameraLensType.CAMERA_LENS_ZOOM)
+        KeyTools.createCameraKey(keyInfo, PayloadSelectionRegistry.selectedComponentIndex(), CameraLensType.CAMERA_LENS_ZOOM)
 
     private suspend fun <T> setValue(key: DJIKey<T>, value: T) {
         suspendCancellableCoroutine<Unit> { continuation ->

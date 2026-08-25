@@ -17,6 +17,8 @@ val agentMqttBrokerPassword = providers.gradleProperty("agentMqttBrokerPassword"
 val agentWaylineSharedSecret = providers.gradleProperty("agentWaylineSharedSecret").orElse("change-me-in-production")
 val agentAircraftSn = providers.gradleProperty("agentAircraftSn").orElse("")
 val agentGatewaySn = providers.gradleProperty("agentGatewaySn").orElse("")
+val m300FireClosedLoopEnabled = providers.gradleProperty("m300FireClosedLoopEnabled").orElse("false")
+val agentPayloadPositionIndex = providers.gradleProperty("agentPayloadPositionIndex").orElse("-1")
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -49,6 +51,8 @@ android {
         buildConfigField("String", "AGENT_WAYLINE_SHARED_SECRET", "\"${agentWaylineSharedSecret.get()}\"")
         buildConfigField("String", "AGENT_AIRCRAFT_SN", "\"${agentAircraftSn.get()}\"")
         buildConfigField("String", "AGENT_GATEWAY_SN", "\"${agentGatewaySn.get()}\"")
+        buildConfigField("boolean", "M300_FIRE_CLOSED_LOOP_ENABLED", m300FireClosedLoopEnabled.get())
+        buildConfigField("int", "AGENT_PAYLOAD_POSITION_INDEX", agentPayloadPositionIndex.get())
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

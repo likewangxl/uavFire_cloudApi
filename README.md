@@ -1,10 +1,16 @@
 ﻿# uavFire Cloud API
 
-本仓库最初来自 DJI Cloud API 前后端工程，现在已经扩展为 M4T + RC Plus 2 的森林消防联动系统。当前最新状态见：
+本仓库最初来自 DJI Cloud API 前后端工程，现在已经扩展为 M4T / RC Plus 2 巡检火情识别与 FC100 重载灭火协同系统。
 
-- `docs/CURRENT_PROJECT_STATUS_2026-05-21.md`
+生产分支是 `feature/fire-precision-and-realtime-detection`，跟踪 `origin/feature/fire-precision-and-realtime-detection`。发布和验收时必须以该分支已提交内容为准，不得把未提交工作区改动宣称为已上线能力。
+
+当前项目状态与运行入口：
+
+- `docs/CURRENT_PROJECT_STATUS_2026-08-05.md`
+- `RUNBOOK.md`
+- `HANDOFF_2026-07-28_VISIBLE_ONLY_FIRE_DETECTION.md`
 - `docs/MSDK_MIGRATION_PLAN.md`
-- `docs/poc/pilot2-composite-stream.md`
+- `docs/CURRENT_PROJECT_STATUS_2026-05-21.md`（历史状态）
 
 ## 目录
 
@@ -38,9 +44,11 @@
 
 ## 当前关键结论
 
-- Pilot 2 PIP 复合推流方案不可行：PIP 小窗不会进入 Cloud SDK livestream 输出。
-- Cloud SDK livestream 在 RC 手飞下单路可见光已验证可用，但双路未验证。
-- M4T + MSDK v5 当前不暴露 visible + thermal 两路独立 raw stream；热成像需要走降级路线。
-- 第一阶段迁移方向是 MSDK Agent 数据面，Cloud SDK livestream 暂保留为 fallback。
+- 生产火情识别主链路是可见光 YOLO，不再依赖红外测温确认。
+- 可见光候选火情可触发悬停、ROI 对准和 DJI 激光测距，成功后更新同一事件为 `PRECISE`。
+- FC100 任务以 20 态状态机为唯一事实源，派发前经过 15 项合规与安全预检。
+- 释放默认为 `MANUAL_CONFIRM + OFFICIAL_HOOK_MANUAL`；Delivery Sync 远程开钩未获书面确认前不可作为生产路径。
+- UOM/空域数据目前只作参考层和审批证据留存，不等于已完成正式自动审批接入。
+- Pilot 2 PIP 复合推流不进入 Cloud SDK livestream，旧双流方案只作历史研究与降级参考。
 
 当前配置基准是 `172.20.10.7`，如果切换 WiFi 或网卡，需要同步更新 backend、frontend、agent、ZLM 配置。

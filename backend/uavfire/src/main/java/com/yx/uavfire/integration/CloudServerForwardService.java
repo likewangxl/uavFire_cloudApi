@@ -175,6 +175,9 @@ public class CloudServerForwardService {
             return "DOCK";
         }
         if (DeviceDomainEnum.DRONE == device.getDomain()) {
+            if (DeviceTypeEnum.M300 == device.getType()) {
+                return "M300";
+            }
             if (DeviceTypeEnum.M4_SERIES == device.getType()) {
                 if (DeviceSubTypeEnum.ONE == device.getSubType()) {
                     return "M4T";

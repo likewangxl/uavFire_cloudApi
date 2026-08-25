@@ -1,5 +1,7 @@
 # UAVFire Current Project Status
 
+> **历史状态快照：** 本文档只保留 2026-05-21 的项目状态。当前生产口径请阅读 `CURRENT_PROJECT_STATUS_2026-08-05.md`，运行步骤以根目录 `RUNBOOK.md` 为准。
+
 > Updated: 2026-05-21
 > Source priority: `AGENTS.md` memory summary, Claude-authored plans/specs, current working tree code, then older handoff records.
 

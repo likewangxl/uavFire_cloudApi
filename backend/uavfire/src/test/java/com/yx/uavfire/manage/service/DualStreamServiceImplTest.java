@@ -1860,7 +1860,7 @@ class DualStreamServiceImplTest {
         verify(fireEventService).create(fireEventCaptor.capture());
         FireEventCreateParam fireEvent = fireEventCaptor.getValue();
         assertEquals("task-001-1779163200000", fireEvent.getEventId());
-        assertEquals("M4T", fireEvent.getSource());
+        assertEquals("DJI_AGENT", fireEvent.getSource());
         assertEquals("DRONE-001", fireEvent.getDeviceSn());
         assertEquals("HIGH", fireEvent.getFireLevel());
         assertEquals(90.0, fireEvent.getThermalTemperature(), 1e-6);

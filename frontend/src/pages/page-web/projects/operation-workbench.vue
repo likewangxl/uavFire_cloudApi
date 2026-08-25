@@ -59,8 +59,10 @@ import { operationComplianceApi } from '/@/api/operation/compliance'
 import { eventApi } from '/@/api/fire/event'
 import { missionApi } from '/@/api/fire/mission'
 import { payloadApi } from '/@/api/fire/payload'
-import { deliveryApi, type DeliveryDeviceDTO, type DeliveryDeviceProperties } from '/@/api/fire/delivery'
-import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
+import { deliveryApi } from '/@/api/fire/delivery'
+import type { DeliveryDeviceDTO, DeliveryDeviceProperties } from '/@/api/fire/delivery'
+import { listMsdkDevices } from '/@/api/msdk-device'
+import type { MsdkDeviceState } from '/@/api/msdk-device'
 import type {
   OperationIncidentDTO,
   OperationIncidentDetailDTO,
@@ -605,7 +607,7 @@ function toMonitorDeviceOption (device: MsdkDeviceState): AssignableDeviceOption
   return withOptionLabel({
     kind: 'MONITOR',
     resourceSn: device.aircraftSn,
-    displayName: device.deviceName || device.model || 'M4T 巡检机',
+    displayName: device.deviceName || device.model || 'DJI 巡检机',
     model: device.model,
     online: device.online,
     onlineLabel: device.online ? '在线' : (device.connectionState || '离线'),

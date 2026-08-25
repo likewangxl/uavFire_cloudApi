@@ -1280,7 +1280,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
         DualStreamEventDTO visibleEvent = visibleTriggerByTask.get(event.getTaskId());
         FireEventCreateParam param = new FireEventCreateParam();
         param.setEventId(event.getTaskId() + "-" + sourceTs);
-        param.setSource("M4T");
+        param.setSource("DJI_AGENT");
         param.setDeviceSn(event.getDroneSn());
         param.setConfidence(BigDecimal.valueOf(resolveConfirmedConfidence(event)));
         param.setFireLevel(resolveConfirmedFireLevel(event));

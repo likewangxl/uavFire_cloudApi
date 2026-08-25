@@ -24,6 +24,20 @@ export interface MsdkDeviceState {
   positionFixed?: boolean
   updatedAt?: number
   capabilities?: Record<string, boolean>
+  aircraftModelKey?: string
+  controllerModelKey?: string
+  payloads?: Array<{
+    payloadModelKey: string
+    payloadPositionIndex: number
+    visibleSupported?: boolean
+    thermalSupported?: boolean
+    laserSupported?: boolean
+    tapZoomSupported?: boolean
+  }>
+  selectedPayloadPositionIndex?: number
+  laserSupported?: boolean
+  fireClosedLoopReady?: boolean
+  blockingReasons?: string[]
 }
 
 const pick = (source: any, camelKey: string, snakeKey: string) => {
@@ -69,6 +83,13 @@ export function normalizeMsdkDeviceState (device: any): MsdkDeviceState {
     positionFixed: pick(device, 'positionFixed', 'position_fixed'),
     updatedAt: pick(device, 'updatedAt', 'updated_at'),
     capabilities: pick(device, 'capabilities', 'capabilities') || {},
+    aircraftModelKey: pick(device, 'aircraftModelKey', 'aircraft_model_key'),
+    controllerModelKey: pick(device, 'controllerModelKey', 'controller_model_key'),
+    payloads: pick(device, 'payloads', 'payloads') || [],
+    selectedPayloadPositionIndex: pick(device, 'selectedPayloadPositionIndex', 'selected_payload_position_index'),
+    laserSupported: Boolean(pick(device, 'laserSupported', 'laser_supported')),
+    fireClosedLoopReady: Boolean(pick(device, 'fireClosedLoopReady', 'fire_closed_loop_ready')),
+    blockingReasons: pick(device, 'blockingReasons', 'blocking_reasons') || [],
   }
 }
 

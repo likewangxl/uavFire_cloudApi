@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS `planned_wayline` (
   `workspace_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'Which workspace the current planned wayline belongs to.',
   `name` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'planned wayline name',
   `aircraft_model_key` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'device product enum. format: domain-device_type-sub_type',
+  `payload_model_key` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT 'DJI payload model key.',
+  `payload_position_index` tinyint DEFAULT NULL COMMENT 'DJI gimbal position: 0 left/main, 1 right, 2 upper.',
   `gateway_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The gateway sn used for this planned wayline.',
   `aircraft_sn` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The aircraft sn used for this planned wayline.',
   `default_height` double NOT NULL COMMENT 'default flight height',

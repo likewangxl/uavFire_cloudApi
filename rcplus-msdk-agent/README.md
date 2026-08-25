@@ -62,6 +62,15 @@ agentGatewaySn=9N9CMA500100B8
 
 `agentAircraftSn` 为空时会禁用 OSD/HMS reporters；非空时 `DjiLiveStreamController` 也会优先用该 SN 生成 ZLM stream id。
 
+M300 RTK 负载选择与消防闭环默认采用 fail-closed 配置：
+
+```properties
+# -1 表示自动选择；检测到多个兼容负载时必须改为 0/1/2 明确指定安装位
+agentPayloadPositionIndex=-1
+# 仅在对应飞机、RC Plus、负载和 AI 验收完成后启用
+m300FireClosedLoopEnabled=false
+```
+
 ## 已实现模块
 
 - `api/`：backend Retrofit client、runtime loop、command poll/ack、status/capability 上报。

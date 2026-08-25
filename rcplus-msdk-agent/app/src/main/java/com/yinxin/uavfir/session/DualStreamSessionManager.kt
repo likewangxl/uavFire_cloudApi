@@ -6,6 +6,7 @@ import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.api.VisibleFireLaserLocator
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiDeviceState
+import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
 import com.yinxin.uavfir.stream.BoundStreamState
 import com.yinxin.uavfir.stream.StreamProvider
 import com.yinxin.uavfir.stream.StreamStartResult
@@ -220,6 +221,20 @@ class DualStreamSessionManager(
         action: String,
         params: Map<String, Any?>,
     ): CommandExecutionResult {
+        if (action.lowercase() in setOf(
+                "visible-fire-hold",
+                "visible-fire-laser-measure",
+                "fire-confirmation-mission",
+            )
+        ) {
+            val capability = PayloadSelectionRegistry.currentCapability()
+            if (capability.aircraftModelKey == "M300" && !capability.fireClosedLoopReady) {
+                return CommandExecutionResult(
+                    status = "failed",
+                    message = "FIRE_CLOSED_LOOP_BLOCKED:${capability.blockingReasons.joinToString(",")}",
+                )
+            }
+        }
         if (action.equals("visible-fire-hold", ignoreCase = true)) {
             val eventId = params["eventId"]?.toString()
                 ?: return CommandExecutionResult(

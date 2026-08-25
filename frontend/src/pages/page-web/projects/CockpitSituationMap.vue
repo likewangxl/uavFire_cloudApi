@@ -13,7 +13,7 @@
         :class="{ active: viewMode === 'tellux' }"
         @click="activateTelluxMode"
       >
-        三维地形
+        三维城市
       </button>
     </div>
 
@@ -100,6 +100,8 @@ let uomAirspaceTouched = false
 const telluxModuleUrl = ((import.meta.env.VITE_TELLUX_MODULE_URL as string | undefined) || '').trim()
 const quantizedMeshTerrainUrl = ((import.meta.env.VITE_TELLUX_QUANTIZED_MESH_URL as string | undefined) || '').trim()
 const telluxImageryUrl = ((import.meta.env.VITE_TELLUX_IMAGERY_URL as string | undefined) || '').trim()
+const city3dTilesUrl = ((import.meta.env.VITE_CITY_3D_TILES_URL as string | undefined) || '').trim()
+const city3dProviderLabel = ((import.meta.env.VITE_CITY_3D_PROVIDER_LABEL as string | undefined) || '授权实景三维').trim()
 
 const layers = computed(() => props.layers || {
   fireMarkers: [],
@@ -111,6 +113,7 @@ const layers = computed(() => props.layers || {
 })
 
 const telluxStatusLabel = computed(() => {
+  if (telluxStatus.value === 'loaded' && city3dTilesUrl) return city3dProviderLabel
   if (telluxStatus.value === 'loaded') return 'Tellux Terrain'
   if (telluxStatus.value === 'loading') return 'Loading Tellux'
   if (telluxFallbackActive.value) return 'Terrain Fallback'
@@ -119,13 +122,14 @@ const telluxStatusLabel = computed(() => {
 
 const telluxStatusText = computed(() => {
   if (telluxStatus.value === 'loaded') {
+    if (city3dTilesUrl) return `已接入${city3dProviderLabel}城市模型，并叠加实时火情、航线与飞机态势。`
     return quantizedMeshTerrainUrl
       ? 'Tellux 已动态加载，并接入 quantized-mesh 地形源。'
       : 'Tellux 已动态加载；当前使用影像底图与 3D 业务覆盖物，等待真实地形源。'
   }
   if (telluxStatus.value === 'loading') return '正在动态加载 Tellux，不影响二维态势首屏。'
   if (telluxFallbackActive.value) return 'Tellux 未配置或加载失败，当前显示 MapLibre DEM 降级预览。'
-  return '将加载项目内置 Tellux 适配器；可选配置 VITE_TELLUX_QUANTIZED_MESH_URL。'
+  return '配置授权的 3D Tiles 城市模型后，将显示真实建筑纹理与城市空间。'
 })
 
 onMounted(async () => {
@@ -181,7 +185,7 @@ async function activateTelluxMode () {
     return
   }
   if (telluxStatus.value === 'loading') return
-  if (!quantizedMeshTerrainUrl && !telluxModuleUrl) {
+  if (!quantizedMeshTerrainUrl && !city3dTilesUrl && !telluxModuleUrl) {
     telluxStatus.value = 'unconfigured'
     activateFallbackTerrain()
     return
@@ -224,6 +228,7 @@ async function mountTelluxStage () {
     layers: layers.value,
     quantizedMeshTerrainUrl,
     imageryUrl: telluxImageryUrl,
+    city3dTilesUrl,
     visualEffects: {
       atmosphere: true,
       clouds: true,

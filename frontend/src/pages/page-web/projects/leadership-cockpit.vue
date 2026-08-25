@@ -360,7 +360,8 @@
                 <button
                   class="fire-detect-btn"
                   :class="{ active: fireDetectionState.running }"
-                  :disabled="fireDetectionState.loading"
+                  :disabled="fireDetectionState.loading || fireClosedLoopBlocked"
+                  :title="fireClosedLoopBlockingText"
                   @click="onToggleFireDetection"
                 >
                   {{ fireDetectionButtonText }}
@@ -696,19 +697,21 @@ import {
   requestDualStreamFocus,
   requestFireDetectionStart,
   requestFireDetectionStop,
-  getFireDetectionStatus,
-  type DualStreamEvent,
-  type DualStreamGroup
+  getFireDetectionStatus
 } from '/@/api/manage'
+import type { DualStreamEvent, DualStreamGroup } from '/@/api/manage'
 import { eventApi as fireEventApi } from '/@/api/fire/event'
 import { waypointApi } from '/@/api/fire/waypoint'
-import { deliveryApi, type DeliveryDeviceDTO } from '/@/api/fire/delivery'
-import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
+import { deliveryApi } from '/@/api/fire/delivery'
+import type { DeliveryDeviceDTO } from '/@/api/fire/delivery'
+import { listMsdkDevices } from '/@/api/msdk-device'
+import type { MsdkDeviceState } from '/@/api/msdk-device'
 import type { FireEventDTO } from '/@/types/fire/event'
 import type { WaypointDTO } from '/@/types/fire/waypoint'
 import { useMyStore } from '/@/store'
 import { EModeCode } from '/@/types/device'
-import CockpitAircraftStreamSelector, { type CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
+import CockpitAircraftStreamSelector from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
+import type { CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
 import CockpitDeliveryExecutionPanel from '/@/components/cockpit/CockpitDeliveryExecutionPanel.vue'
 import CockpitFlightControlPanel from '/@/components/cockpit/CockpitFlightControlPanel.vue'
 import CockpitSituationMap from './CockpitSituationMap.vue'
@@ -978,11 +981,15 @@ const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
     const groupForDevice = dualStreamState.group?.droneSn === device.aircraftSn ? dualStreamState.group : null
     const deviceName = device.deviceName || device.model || `火情监测 ${device.aircraftSn.slice(-4)}`
     const modelSuffix = device.model && device.model !== deviceName ? ` ${device.model}` : ''
+    const selectedPayload = device.payloads?.find(payload =>
+      payload.payloadPositionIndex === device.selectedPayloadPositionIndex)
+    const capabilitySuffix = [device.aircraftModelKey, selectedPayload?.payloadModelKey]
+      .filter(Boolean).join(' / ')
     targets.set(device.aircraftSn, {
       key: `fire-monitor:${device.aircraftSn}`,
       role: 'fire-monitor',
       deviceSn: device.aircraftSn,
-      callsign: `${deviceName}${modelSuffix}`,
+      callsign: `${deviceName}${modelSuffix}${capabilitySuffix ? ` · ${capabilitySuffix}` : ''}`,
       online: device.online,
       taskStatus: groupForDevice?.sessionState || device.connectionState || device.mode,
       primaryPlayUrl: groupForDevice?.visiblePlayUrl || '',
@@ -1050,6 +1057,23 @@ const selectedFireMonitorMsdkDevice = computed(() => {
   const sn = selectedFireMonitorTarget.value?.deviceSn
   if (!sn) return null
   return msdkDeviceSnapshots.value.find(device => device.aircraftSn === sn) || null
+})
+
+const selectedIsM300 = computed(() => {
+  const model = selectedFireMonitorMsdkDevice.value?.aircraftModelKey || selectedFireMonitorMsdkDevice.value?.model || ''
+  return ['M300', 'M300RTK', 'MATRICE300RTK'].includes(model.toUpperCase().replace(/[_-]/g, ''))
+})
+
+const fireClosedLoopBlocked = computed(() => (
+  !fireDetectionState.running &&
+  selectedIsM300.value &&
+  selectedFireMonitorMsdkDevice.value?.fireClosedLoopReady !== true
+))
+
+const fireClosedLoopBlockingText = computed(() => {
+  if (!fireClosedLoopBlocked.value) return ''
+  const reasons = selectedFireMonitorMsdkDevice.value?.blockingReasons || []
+  return reasons.length > 0 ? reasons.join('；') : 'M300 消防闭环能力尚未就绪'
 })
 
 const selectedFireMonitorOsd = computed(() => {
@@ -1465,6 +1489,13 @@ const resolveFireDetectionDroneSn = async () => {
 
 const onToggleFireDetection = async () => {
   if (fireDetectionState.loading) return
+  if (fireClosedLoopBlocked.value) {
+    notification.warning({
+      message: 'M300 火情监测已阻止',
+      description: fireClosedLoopBlockingText.value
+    })
+    return
+  }
   try {
     fireDetectionState.loading = true
     if (!fireDetectionState.droneSn) {

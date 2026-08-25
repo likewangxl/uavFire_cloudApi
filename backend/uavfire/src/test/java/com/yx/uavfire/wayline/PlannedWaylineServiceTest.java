@@ -424,7 +424,9 @@ class PlannedWaylineServiceTest {
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
             PlannedWaylineEntity updated = invocation.getArgument(0);
             assertEquals("Survey B", updated.getName());
-            assertEquals("M300RTK", updated.getAircraftModelKey());
+            assertEquals("M300", updated.getAircraftModelKey());
+            assertEquals("H20T", updated.getPayloadModelKey());
+            assertEquals(1, updated.getPayloadPositionIndex());
             assertEquals("GW-002", updated.getGatewaySn());
             assertEquals("AC-002", updated.getAircraftSn());
             assertEquals(100.0, updated.getDefaultHeight(), 0.0001);
@@ -436,6 +438,8 @@ class PlannedWaylineServiceTest {
         PlannedWaylineDTO updated = service.update("workspace-001", "pw-001", UpdatePlannedWaylineParam.builder()
                 .name("Survey B")
                 .aircraftModelKey("M300RTK")
+                .payloadModelKey("H20T")
+                .payloadPositionIndex(1)
                 .gatewaySn("GW-002")
                 .aircraftSn("AC-002")
                 .defaultHeight(100.0)
@@ -451,7 +455,9 @@ class PlannedWaylineServiceTest {
                 .build());
 
         assertEquals("Survey B", updated.getName());
-        assertEquals("M300RTK", updated.getAircraftModelKey());
+        assertEquals("M300", updated.getAircraftModelKey());
+        assertEquals("H20T", updated.getPayloadModelKey());
+        assertEquals(1, updated.getPayloadPositionIndex());
         assertEquals("GW-002", updated.getGatewaySn());
         assertEquals("AC-002", updated.getAircraftSn());
         assertEquals(100.0, updated.getDefaultHeight(), 0.0001);
@@ -1312,6 +1318,40 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void m300KmzShouldEncodeAllSupportedPayloadsAtAllPositions() throws IOException {
+        String[] models = {"H20", "H20T", "H30", "H30T"};
+        int[] enums = {42, 43, 82, 83};
+        for (int modelIndex = 0; modelIndex < models.length; modelIndex++) {
+            for (int position = 0; position <= 2; position++) {
+                IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+                IWaylineFileService fileService = mock(IWaylineFileService.class);
+                PlannedWaylineEntity entity = PlannedWaylineEntity.builder()
+                        .id(1).plannedWaylineId("m300-" + modelIndex + "-" + position)
+                        .workspaceId("workspace-001").name("M300 payload matrix")
+                        .aircraftModelKey("MATRICE_300_RTK")
+                        .payloadModelKey(models[modelIndex]).payloadPositionIndex(position)
+                        .defaultHeight(30.0).maxSpeed(5.0)
+                        .waypointsJson("[{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}]")
+                        .status("draft").createTime(1000L).updateTime(1000L).build();
+                when(mapper.selectOne(any())).thenReturn(entity);
+                when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+                when(fileService.createPublishedWayline(eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                        .thenReturn(PublishedWaylineFileDTO.builder().waylineId("published").name("matrix").objectKey("matrix.kmz").build());
+                PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper(), fileService);
+
+                service.publish("workspace-001", entity.getPlannedWaylineId(), "tester");
+
+                ArgumentCaptor<PublishedWaylineCreateDTO> captor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+                verify(fileService).createPublishedWayline(eq("workspace-001"), captor.capture());
+                String template = readZipEntry(captor.getValue().getContent(), "wpmz/template.kml");
+                assertTrue(template.contains("<wpml:droneEnumValue>60</wpml:droneEnumValue>"));
+                assertTrue(template.contains("<wpml:payloadEnumValue>" + enums[modelIndex] + "</wpml:payloadEnumValue>"));
+                assertTrue(template.contains("<wpml:payloadPositionIndex>" + position + "</wpml:payloadPositionIndex>"));
+            }
+        }
+    }
+
+    @Test
     void m4tKmzHasPilot2EnumValues() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
@@ -1948,6 +1988,36 @@ class PlannedWaylineServiceTest {
         ArgumentCaptor<PlannedWaylineEntity> updateCaptor = ArgumentCaptor.forClass(PlannedWaylineEntity.class);
         verify(mapper).updateById(updateCaptor.capture());
         assertEquals("M4T-SN-ONLINE", updateCaptor.getValue().getDroneSn());
+    }
+
+    @Test
+    void executeM300WaylineShouldRejectOnlinePayloadMismatch() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService agentService =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        MsdkDeviceStateService stateService = new MsdkDeviceStateService();
+        stateService.upsert(new MsdkDeviceStateDTO()
+                .setAircraftSn("M300-SN-001").setOnline(true).setConnectionState("CONNECTED")
+                .setAircraftModelKey("M300").setSelectedPayloadPositionIndex(1)
+                .setPayloads(List.of(new com.yx.uavfire.msdk.model.PayloadCapabilityDTO()
+                        .setPayloadModelKey("H30T").setPayloadPositionIndex(1))));
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3010).plannedWaylineId("pw-m300-mismatch").workspaceId("workspace-001")
+                .flightId("flight-m300-mismatch").aircraftModelKey("M300")
+                .payloadModelKey("H20T").payloadPositionIndex(1)
+                .droneSn("M300-SN-001").aircraftSn("M300-SN-001")
+                .kmzUrl("file:///unused.kmz").status("ready").taskStatus("ready").build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+        setField(service, "waylineAgentService", agentService);
+        setField(service, "msdkDeviceStateService", stateService);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.executeTask("workspace-001", "pw-m300-mismatch"));
+
+        assertEquals("Online payload model does not match the wayline; dispatch blocked.", error.getMessage());
+        verify(agentService, never()).prepareKmz(any(), any(), any());
     }
 
     @Test

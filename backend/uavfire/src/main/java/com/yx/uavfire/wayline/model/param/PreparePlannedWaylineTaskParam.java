@@ -5,7 +5,7 @@ import lombok.Data;
 @Data
 public class PreparePlannedWaylineTaskParam {
 
-    /** 非空表示走 dock 路径,空表示走 agent (RC + M4T) 路径。 */
+    /** 非空表示走 dock 路径,空表示走 agent (RC + DJI aircraft) 路径。 */
     private String dockSn;
 
     private String droneSn;

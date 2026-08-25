@@ -15,6 +15,9 @@ class TaskCreateRequest(BaseModel):
     drone_sn: str
     visible_stream_url: str
     thermal_stream_url: str
+    payload_model_key: str | None = None
+    visible_model_path: str | None = None
+    visible_confidence_floor: float | None = None
 
 
 class TaskRecord(TaskCreateRequest):

@@ -1,5 +1,7 @@
 package com.yinxin.uavfir.api
 
+import com.yinxin.uavfir.sdk.PayloadCapability
+
 data class MsdkDeviceStateRequest(
     val gatewaySn: String,
     val aircraftSn: String,
@@ -22,4 +24,11 @@ data class MsdkDeviceStateRequest(
     val positionFixed: Boolean? = null,
     val updatedAt: Long = System.currentTimeMillis(),
     val capabilities: Map<String, Boolean> = emptyMap(),
+    val aircraftModelKey: String? = null,
+    val controllerModelKey: String? = null,
+    val payloads: List<PayloadCapability> = emptyList(),
+    val selectedPayloadPositionIndex: Int? = null,
+    val laserSupported: Boolean = false,
+    val fireClosedLoopReady: Boolean = false,
+    val blockingReasons: List<String> = emptyList(),
 )

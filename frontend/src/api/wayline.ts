@@ -63,9 +63,18 @@ function validatePlannedWaylineBody<T extends CreatePlannedWaylineBody | UpdateP
     message.error('规划航线参数不完整，请确认航线名称和航点。')
     throw new Error('planned wayline payload incomplete')
   }
+  const aircraftModelKey = body.aircraftModelKey || DEFAULT_PLANNED_WAYLINE_MODEL
+  if (aircraftModelKey === 'M300') {
+    const supportedPayloads = ['H20', 'H20T', 'H30', 'H30T']
+    if (!body.payloadModelKey || !supportedPayloads.includes(body.payloadModelKey) ||
+      ![0, 1, 2].includes(Number(body.payloadPositionIndex))) {
+      message.error('M300 航线必须选择 H20/H20T/H30/H30T 负载和云台安装位。')
+      throw new Error('M300 payload model and position are required')
+    }
+  }
   return {
     ...body,
-    aircraftModelKey: body.aircraftModelKey || DEFAULT_PLANNED_WAYLINE_MODEL,
+    aircraftModelKey,
     defaultHeight: positiveNumber(body.defaultHeight, DEFAULT_PLANNED_WAYLINE_HEIGHT),
     maxSpeed: positiveNumber(body.maxSpeed, DEFAULT_PLANNED_WAYLINE_SPEED),
     waypoints: body.waypoints.map((waypoint, index) => assertPlannedWaypoint(waypoint, index)),
@@ -112,6 +121,8 @@ function normalizePlannedWaylineResponse (record: any): PlannedWaylineRecord {
     workspaceId: record?.workspaceId ?? record?.workspace_id,
     name: record?.name,
     aircraftModelKey: record?.aircraftModelKey ?? record?.aircraft_model_key,
+    payloadModelKey: record?.payloadModelKey ?? record?.payload_model_key,
+    payloadPositionIndex: record?.payloadPositionIndex ?? record?.payload_position_index,
     gatewaySn: record?.gatewaySn ?? record?.gateway_sn,
     aircraftSn: record?.aircraftSn ?? record?.aircraft_sn,
     defaultHeight: record?.defaultHeight ?? record?.default_height,

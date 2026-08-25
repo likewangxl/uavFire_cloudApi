@@ -787,8 +787,10 @@ import noData from '/@/assets/icons/no-data.png'
 import { OnlineDevice, EModeCode, OSDVisible, EDockModeCode, DeviceOsd, DrcStateEnum } from '/@/types/device'
 import { useMyStore } from '/@/store'
 import { getUnreadDeviceHms, updateDeviceHms } from '/@/api/manage'
-import { listMsdkDevices, sendMsdkCommand, type MsdkDeviceState } from '/@/api/msdk-device'
-import { deliveryApi, type DeliveryDeviceDTO, type DeliveryDeviceProperties } from '/@/api/fire/delivery'
+import { listMsdkDevices, sendMsdkCommand } from '/@/api/msdk-device'
+import type { MsdkDeviceState } from '/@/api/msdk-device'
+import { deliveryApi } from '/@/api/fire/delivery'
+import type { DeliveryDeviceDTO, DeliveryDeviceProperties } from '/@/api/fire/delivery'
 import {
   RocketOutlined,
   EyeInvisibleOutlined,

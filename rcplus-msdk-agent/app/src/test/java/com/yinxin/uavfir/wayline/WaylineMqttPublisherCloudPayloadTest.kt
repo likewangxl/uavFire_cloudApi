@@ -54,4 +54,13 @@ class WaylineMqttPublisherCloudPayloadTest {
         assertEquals(0, envelope["need_reply"])
         assertEquals(mapOf("list" to emptyList<Map<String, Any?>>()), envelope["data"])
     }
+
+    @Test
+    fun m300AndRcPlusTopologyUsesCloudApiEnums() {
+        val topology = WaylineMqttPublisher.resolveCloudTopology("MATRICE_300_RTK")
+
+        assertEquals(119, topology.gatewayType)
+        assertEquals(60, topology.aircraftType)
+        assertEquals(0, topology.aircraftSubType)
+    }
 }

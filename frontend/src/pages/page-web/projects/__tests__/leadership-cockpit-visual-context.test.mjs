@@ -323,8 +323,8 @@ test('terrain tab loads Tellux dynamically and keeps MapLibre terrain as fallbac
   )
   assert.match(
     situationMapSource,
-    /if \(!quantizedMeshTerrainUrl && !telluxModuleUrl\)[\s\S]*?activateFallbackTerrain\(\)/,
-    'terrain mode should use MapLibre DEM fallback when no real Tellux terrain source is configured'
+    /if \(!quantizedMeshTerrainUrl && !city3dTilesUrl && !telluxModuleUrl\)[\s\S]*?activateFallbackTerrain\(\)/,
+    '3D mode should use MapLibre DEM fallback when no real terrain or city model source is configured'
   )
   assert.match(
     situationMapSource,
@@ -360,6 +360,16 @@ test('terrain tab loads Tellux dynamically and keeps MapLibre terrain as fallbac
     telluxAdapterSource,
     /terrain:\s*options\.quantizedMeshTerrainUrl[\s\S]*?\{\s*url:\s*options\.quantizedMeshTerrainUrl\s*\}/,
     'Tellux adapter should pass quantized-mesh terrain URLs into Tellux terrain.url'
+  )
+  assert.match(
+    situationMapSource,
+    /VITE_CITY_3D_TILES_URL/,
+    '3D city mode should accept an authorized standard 3D Tiles endpoint'
+  )
+  assert.match(
+    telluxAdapterSource,
+    /viewer\.load3DTileset\([\s\S]*?type:\s*'url'[\s\S]*?url:\s*options\.city3dTilesUrl/,
+    'Tellux adapter should load the configured photogrammetry city tileset'
   )
   assert.match(
     telluxAdapterSource,

@@ -34,6 +34,12 @@ public class PlannedWaylineEntity implements Serializable {
     @TableField("aircraft_model_key")
     private String aircraftModelKey;
 
+    @TableField("payload_model_key")
+    private String payloadModelKey;
+
+    @TableField("payload_position_index")
+    private Integer payloadPositionIndex;
+
     @TableField("gateway_sn")
     private String gatewaySn;
 

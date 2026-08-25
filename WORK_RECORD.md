@@ -1784,7 +1784,7 @@ mvn -v
 ## 13. DRC / 云控语义排查规则
 
 > 2026-04-19 本轮详细交接文档：
-> [HANDOFF_2026-04-19_DRC_TAKEOFF.md](/Users/likewang/uavfire/HANDOFF_2026-04-19_DRC_TAKEOFF.md)
+> [HANDOFF_2026-04-19_DRC_TAKEOFF.md](HANDOFF_2026-04-19_DRC_TAKEOFF.md)
 
 ### 13.1 本次纠偏
 
@@ -2320,3 +2320,470 @@ VM YOLO load -> model_loaded=YOLO，names={0:'fire',1:'other',2:'smoke'}
 - 当前 ai-service 使用 CPU 版 PyTorch，不启用 VMware GPU 直通。
 - 宿主机有 GTX 1660S 不能自动让 VM 使用 CUDA；除非 VM 内 `nvidia-smi` 能看到 NVIDIA 设备，否则仍是 CPU 推理。
 - 花生壳 TCP 映射访问 WebRTC HTTP 信令可能返回“映射不支持网页访问”，如浏览器侧加载 ZLMRTCClient 失败，需要把 WebRTC 信令映射改成花生壳“网站应用类型”。
+
+## 21. 2026-06-01 驾驶舱真实数据布局与火情数据链整合
+
+> 主要提交：`8d5a701 feat: connect cockpit real data layout`
+
+本轮是 5 月公网直播和 AI 服务部署之后的首次大规模收口，将驾驶舱、AI、后端火情事件和 RC Plus Agent 中分散的数据链接成真实数据布局。
+
+### 21.1 驾驶舱与前端
+
+- 重组领导驾驶舱布局，增加真实总览数据、飞机直播选择、FC100 执行态势、火情事件和灭火任务数据展示。
+- 新增 `leadership-cockpit-summary.mjs`、交付执行 HUD 策略和多个布局/数据契约测试。
+- 火情列表和灭火任务列表增强真实图片、状态、设备和任务信息展示。
+
+### 21.2 AI 与火情事件
+
+- `ai-service` 补强任务 API、连续运行注册、可见光/热成像分析、快照书写、视频源和后端事件上报。
+- 新增火情坐标质量迁移，引入 `FireGeoSnapshotDTO`、坐标定位服务和 Ray-DEM 单帧定位实现。
+- 火情空间合并、坐标更新、快照、置信度和历史记录链路完成扩展。
+
+### 21.3 RC Plus Agent
+
+- 新增热点监测、热快照上传、热帧探针、热区分类和帧热点检测。
+- 完善 Agent 与 backend 的 dual-stream 事件报文和会话状态协作。
+- 同步增加大量 Agent、backend、AI 和 frontend 契约/回归测试。
+
+本次提交共涉及 91 个文件，约 9100 行新增。它建立了后续驾驶舱真实数据、火情事件融合和 Agent 热点管线的基础，但当时热成像链路仍属快速演进阶段，不应将此节的实现理解为 7 月末的最终生产链路。
+
+## 22. 2026-06-10–06-12 MSDK 设备状态隔离、FC100 AGL 与火情监测服务化
+
+> 主要提交：`b5d63ce`、`ed533e3`
+
+### 22.1 MSDK 设备与航线选择隔离
+
+- 将 MSDK 设备状态从航线选择和页面局部状态中抽离，避免不同页面/不同机型共用错误设备。
+- 后端增强 `MsdkDeviceStateService`、航线事件监听和 planned wayline 查询。
+- 前端新增设备选择策略、航线位置状态、飞行控制面板和航线选机逻辑。
+- Agent 完善设备状态采集、命令执行和航线执行状态回传。
+
+### 22.2 FC100 航点高度口径
+
+- FC100 WPML 高度统一改为相对起飞点 AGL，巡航高度按“投放高度 + 20m”构建。
+- 载荷释放从“经过点即执行”收紧为到点悬停后才能进入释放流程。
+- `AltitudeLimitCheck` 与 `WaypointPlannerServiceImpl` 统一使用 AGL 口径，清理了与绝对椭球高混用的失效依赖。
+
+### 22.3 火情监测服务化
+
+- 新增 `FireDetectionService` 作为 backend 对 `AiServiceClient` 的统一门面。
+- 新增 `FireDetectionActivityTracker`，航线到达首航点时启动检测，任务终态时关闭检测。
+- AI HTTP 传输增加超时保护，事件回传失败时保留后续帧补报机会。
+- 航线事件对乱序 completed/failed 回报增加健壮性判断，避免已有执行进度的任务被错误翻转为 failed。
+
+## 23. 2026-06-12 航线规划页全面重构与 DEM 高程服务
+
+> 设计与计划：[wayline planner 设计](docs/superpowers/specs/2026-06-12-wayline-planner-flighthub2-design.md)、[17 任务实施计划](docs/superpowers/plans/2026-06-12-wayline-planner-flighthub2.md)
+
+本日按司空 2 / FlightHub 2 式交互对航线规划页进行了连续拆分和重构。
+
+### 23.1 后端 DEM 与地形服务
+
+- 新增 `.hgt` DEM 瓦片服务，支持双线性插值、瓦片 LRU 缓存和缺失瓦片降级。
+- 增加 `dem-dir` 条件装配；无 DEM 目录时与 Missing 实现等价，不阻塞系统启动。
+- 新增 `POST /terrain/elevations` 批量高程接口及对应 controller 测试。
+- 增加 GLO-30 下载/转换脚本，用于补充规划区域 DEM 瓦片。
+
+### 23.2 规划纯函数与状态抽离
+
+- 抽离航线距离、预计时长、航点采样和预演时间轴纯函数。
+- 新增规划 UI 状态 hook，统一管理页签、参数抽屉、高度剖面和模拟预演。
+- FC100 投放区从航线页主文件抽离为 `Fc100DeliveryView` 和 `use-fc100-delivery` store，规划页改为巡检/FC100 双页签。
+
+### 23.3 司空 2 风格规划工作区
+
+- 新增 `PlannerWorkspace`、`MissionStatsBar`、`WaypointListPanel`、`WaypointParamDrawer`、`MissionParamsPanel` 和 `PlannerToolbar`。
+- 原 `wayline.vue` 中大量规划交互和死样式被拆离，航点级参数进入右侧抽屉，任务级参数独立成面板。
+- 地图默认切到卫星底图并叠加路网/矢量 POI 注记。
+- 规划覆盖物从 `GMap.vue` 抽离到 `use-planner-overlays`，规划页与飞行页按页签切换显隐。
+
+### 23.4 航点交互、高度剖面与预演
+
+- 航点支持拖拽改位、航段中点插点和右键删除。
+- 地图常显航点、航段距离、起飞点 H 标记和航向箭头。
+- 高度剖面批量采样 DEM，同时展示航线高度和地形线；DEM 缺失时仅显示航线并明确提示降级。
+- 新增 2D 模拟预演，支持幻影飞机、播放/暂停、倍速和进度控制，与真实任务执行互斥。
+
+### 23.5 航点动作保存缺陷
+
+- 定位到前端 API 层在保存和读回时重建航点对象，仅保留坐标/高度，导致 `actions`、速度、云台、朝向和转弯参数在请求前被静默剔除。
+- 修复保存和读回两条路径的字段透传，并增加回归断言锁定后续行为。
+
+## 24. 2026-06-15–06-18 航点动作完整性、生产构建修复与 MapLibre 迁移
+
+### 24.1 航点动作字段再修复
+
+> 提交：`2df9ff2`
+
+- 解决全局 Jackson `SNAKE_CASE` 与前端 camelCase 冲突导致 `WaypointActionDTO` 入站字段静默丢失的问题。
+- DTO 增加 `@JsonAlias`，前端增加 action 字段 snake_case 到 camelCase 归一化。
+- 航线预览补全速度和动作，修复动作保存后再编辑显示 `?` 的问题。
+- 航点/任务参数面板补齐中文标签、暗色字色和路由切换时抽屉清理。
+
+### 24.2 生产构建白屏修复
+
+> 提交：`c36c9a8`
+
+- 生产构建中 `ant-design-vue` 被 `manualChunks` 拆成多个子 chunk，循环依赖初始化顺序导致 `PropTypes` 为 `undefined`。
+- 开发模式不打包，因此只在生产包暴露整页白屏。
+- 将 `ant-design-vue` 合并为单一 chunk，交由 Rollup 正确处理库内循环依赖。
+
+### 24.3 MapLibre + 天地图迁移
+
+> 提交：`3e4329f`
+
+- 地图栈从原高德实现迁移到 MapLibre GL，接入天地图标准/影像/混合栅格样式。
+- 天地图 CGCS2000 与飞机 WGS84 数据按当前精度需求直接叠加，消除互联网偏移地图造成的系统性位置偏差。
+- 新增面状测区规划：弓字形蛇形航线、重叠率转间距、凸包和面状指纹判定。
+- 新增基于 Haversine 球面距离的 MapLibre 测距工具。
+- 对 `GMap.vue`、覆盖物 hooks、TSA 图层、鼠标工具和规划页进行成套迁移。
+
+## 25. 2026-06-22–06-29 航线规划交互收口、飞行区合规和 DJI 限飞区
+
+### 25.1 规划页交互收口
+
+> 提交：`c331c8c`
+
+- 修复同一飞机在规划层和 TSA 设备层显示两个图标的问题。
+- 航线页默认影像底图真正生效，并改善图层加载时序。
+- 航点拖动时实时预览航线连线；航线默认名称按航点/面状类型生成。
+- 任务下发前增加贴边飞行器选择弹窗，强制明确选机。
+- FC100 投放任务改为贴边弹窗，支持创建、执行和按 `plannedWaylineId` 反显已建任务。
+
+### 25.2 规划阶段飞行区合规检查
+
+> 设计文档：[禁飞区与合规飞行区方案](docs/禁飞区与合规飞行区-规划阶段接入-需求与方案.md)
+> 提交：`4599676`
+
+- 新增航点落入 NFZ、航段穿越 NFZ 和 DFENCE 作业区判定。
+- 保存/下发前运行合规检查，并在地图叠加飞行区和 FC100 实时位置。
+- 为几何合规算法增加 9 个定向测试。
+
+### 25.3 DJI FlySafe 西安周边限飞区离线接入
+
+> 提交：`7dc6ce3`
+> 评估文档：[适飞空域接入可行性评估](docs/适飞空域接入-可行性评估与方案.md)
+
+- 离线导入西安周边 100km DJI FlySafe 数据，将 12 个区展开为 13 个可渲染要素。
+- GeoJSON 归一化为 `nfz`、`warning`、`dfence` 类型，复用已有规划期渲染和航线判定逻辑。
+- 离线数据通过动态 import 分包，不进入前端主包。
+- 明确产品边界：DJI GEO 数据表示限飞/警告区，不等于 UOM 正式适飞空域或授权结果。
+- 验证记录：新增 5 个导入测试与原 9 个合规测试全部通过；Vite 构建产生独立 JSON 分包；浏览器实测 13 个要素正常展示。
+
+### 25.4 月末参数调整
+
+- 6 月 29 日将 TSA/航线页默认缩放级别对齐至约 100m 尺度（zoom 17），并升级缓存版本作废旧 zoom 设置。
+- 开发环境 backend 地址一度切换到 `192.168.50.254`；该地址只是当时现场网络记录，后续运行以 `RUNBOOK.md` 为准。
+
+## 26. 2026-07-01 领导驾驶舱态势面板重设计
+
+> 提交：`229ee48 feat(cockpit): redesign leadership cockpit situation panels`
+
+- 新增 `CockpitSituationMap.vue`、态势数据纯函数和 Tellux 适配层。
+- 驾驶舱重组情况地图、设备摘要、任务摘要、视频选择和 FC100 交付态势。
+- 接入 UOM 空域参考图层，并将西安/未央的参考 GeoJSON 用于地图态势展示。
+- 同步调整 Delivery Sync adapter 的设备数据字段和前端交付面板。
+- 新增态势、空域图层、布局和视觉上下文测试。
+
+## 27. 2026-07-02 S1–S9 智能集群巡检灭火一期闭环
+
+> 方案：`../02_需求与方案设计/智能集群巡检灭火详细设计与开发方案.md`
+> 验收：[S8 一期联调验收报告](work-records/codex/S8-acceptance-report-20260702.md)
+
+7 月 2 日按 S1–S9 任务卡集中完成了释放安全边界、处置事件编排、资源锁、指令队列、合规预检、巡检火情闭环、FC100 灭火闭环和前端处置工作台。
+
+### 27.1 S1：释放安全边界
+
+- `fc100_fire_mission` 落地 `release_policy` 和 `release_execution_mode`。
+- 默认 `MANUAL_CONFIRM + OFFICIAL_HOOK_MANUAL`；`DRY_RUN` 只记录不下发；`CONTROLLED_TEST_AUTO` 受配置开关阻断；`DELIVERY_SYNC_REMOTE` 未确认能力时直接拒绝。
+- 无操作人或无确认标记的释放请求被拒绝并写审计。
+- 验证：前端策略 76/76 通过，frontend build 和 lint 通过，backend compile 通过；backend 全量测试当时仍受既有非本任务错误影响。
+
+### 27.2 S2：处置事件与编排数据模型
+
+- 新增 incident、assignment、resource lease、command event 数据表/实体/接口。
+- 建立处置事件状态迁移表，非法迁移拒绝并记录。
+- 火情确认、事件创建、监测/投送设备分配、派发、中止、关闭和时间线接口完成。
+- 验证：S2 聚焦测试 11/11，S1 回归 45/45，均 `BUILD SUCCESS`。
+
+### 27.3 S3：事件处置工作台骨架
+
+- 完成事件列表、地图、详情、操作区和时间线五区布局。
+- 复用 UOM 参考层，增加 mock 数据开关和操作按钮可见性策略。
+- 验证：前端策略测试 81/81，Vite build 和 lint 通过。
+
+### 27.4 S4：资源锁与持久化指令队列
+
+- 实现资源 lease 获取、续约、过期和释放，两线程同时抢占同一 SN 时仅一个成功。
+- 指令队列实现 `PENDING -> SENDING -> WAIT_ACK -> ACKED`，失败分支支持 `FAILED / TIMEOUT / DEAD`。
+- 默认最大重试 3 次，发送超时 10s，ack 超时 30s，超限后标记待人工接管。
+- 释放指令入队前仍必须通过 S1 释放策略检查。
+- 验证：目标测试 28/28，S1 回归 46/46。
+
+### 27.5 S5：R01–R15 安全合规门禁
+
+- 建立可配置 `PreflightRuleEngine`，完成 15 项预检规则。
+- 预检上下文整合火情、incident、FC100 任务草稿、设备状态、lease、指令队列、飞行申请、运行资质、DeliveryHub 健康和 UOM 参考层。
+- 新增 `record-flight-application`、`record-takeoff-confirmation`、`record-landing-report` 和 qualifications 接口。
+- R09 默认为无正式 UOM 接入时返回 WARN，不伪装已自动审批。
+- 验证：预检/合规/编排范围 50/50，释放回归 31/31。
+
+### 27.6 S6：巡检火情确认闭环
+
+- AI/巡检上报只生成 `CANDIDATE`，不再在人工确认前自动创建可派发灭火任务。
+- 新增火情 confirm/reject/recheck-result 接口。
+- 仅 `PRECISE` 坐标在人工确认后创建 `CREATED` 草稿；其他坐标质量只生成复测/人工标注建议。
+- 复测判定增加热成像饱和处理，不仅依赖绝对温度下降。
+- 验证：backend 85/85，frontend policies 85/85，frontend build 通过。
+
+### 27.7 S7：FC100 灭火闭环和人工释放留证
+
+- Delivery Sync 任务状态统一通过 `DeliveryTaskStatusMapper` 映射到 `FireMissionEvent`。
+- 创建/启动/轮询连续失败超限后进入 `MANUAL_TAKEOVER`。
+- 进入 `PAYLOAD_RELEASE_PENDING` 时签发一次性释放 token；无 token、错 token、过期或重放均拒绝并写审计。
+- 默认待释放超时 5 分钟，超时经 S4 指令队列发起返航，保留 FC100 满载悬停的返航余量。
+- `OFFICIAL_HOOK_MANUAL` 只表示平台留证，真实开钩由飞手在官方遥控端完成；未实现 Delivery Sync 真实远程开钩。
+- 验证：backend 129/129，frontend policies 86/86，frontend build 通过。
+
+### 27.8 S8：一期 Mock 联调验收
+
+- 新增 `EndToEndMockDrillTest`，演练 M4T 告警、人工确认、资源分配、预检、Delivery task、待释放、人工留证、返航、复测和归档。
+- 主方案§12.2 的 8 个业务验收场景均建立自动化或脚本证据。
+- backend 全量统计为 384 tests，379 passed、5 errors；5 个 error 来自已知环境问题，S8 新增演练通过。
+- frontend policies 86/86，Vite build 通过。
+- 遗留：Delivery task 开始后 incident `DISPATCHING -> RESPONDING` 当时缺明确的服务层自动桥接；UOM 仍是参考/留证而非正式自动对接。
+
+### 27.9 S9：工作台处置链路接线
+
+- 新增分配 FC100/巡检机入口，支持主/备投送和主/复测巡检角色。
+- 前端真实调用预检接口，`CompliancePanel` 展示 R01–R15 及 BLOCK 明细。
+- 新增飞行申请、起飞确认、落地报告和四类运行资质档案录入。
+- 未臆造独立“生成任务” API，按后端实际语义显示“确认火情时自动创建草稿”。
+- 验证：frontend policies 88/88，Vite production build 通过。
+
+## 28. 2026-07-06–07-07 火情识别提速 T1/T2/T3
+
+> 汇总：[火情识别提速最终报告](work-records/codex/FINAL-fire-detection-speedup-20260706.md)
+> 提交：`7815e04`
+
+### 28.1 Agent 事件驱动测温
+
+- 热点探测间隔从 10s 缩短到 2s。
+- `ThermalFrameProbe` 发现候选热点后以 2s 去抖触发测温，避免纯定时轮询带来的长等待。
+- 首次事件先上报，热快照缺失时异步补图后重报，不再让快照上传阻塞告警。
+
+### 28.2 Backend urgent 命令通道
+
+- 热监测 cooldown 从 30s 缩短到 5s，timeout 从 120s 缩短到 20s。
+- `DualStreamCommandDTO` 新增可空 `urgent`，旧 Agent/旧报文缺字段时保持普通通道语义。
+- focus/monitor 等紧急命令可走 urgent 通道，Agent 轮询器增加普通/紧急并发去重。
+
+### 28.3 构建与验证环境修复
+
+- 新增最小 `uxsdk-stub`，外部 DJI UXSDK sample 不存在时仍可进行本地单测编译。
+- Windows 中文工作区会导致 Gradle test worker `ClassNotFoundException`，验证改为 ASCII 路径副本/联接并使用 JDK 17。
+- 最终验证：Agent 156 tests、0 failures；backend dual-stream 与 Spring context 68 tests、0 failures。
+
+## 29. 2026-07-07–07-10 悬停确认、空间去重、抵近激光定位与双模型演进
+
+### 29.1 T-A 悬停温度趋势确认
+
+> 提交：`2f26e81`
+
+- 热点达阈值后暂停航线，稳定 2s 后按默认 4 样本/1.5s 间隔持续测温，3/4 命中才确认。
+- 连续两次测温失败时 fail-open 直接上报，选择“宁可误报，不静默漏火”。
+- 悬停/恢复操作幂等，`finally` 强制恢复任务状态。
+- Agent 全量 164 tests、0 failures。
+
+### 29.2 T-B/TB.2 空间去重合并
+
+> 提交：`8bf9873`、`9415aae`
+
+- 火情合并从“同设备 10m”升级为“同 workspace 跨设备可配半径”，默认 40m/30min。
+- 合并时更新 lastSeen/reportCount/最高温度，快照只补空，坐标仅在新误差半径更优时覆盖。
+- 保留火等级升级时 `notificationVersion` 递增的驾驶舱重通知契约。
+- TB.2 增加 MySQL `GET_LOCK` workspace 命名锁，保护并发查询/合并/新建临界区。
+- 合并半径改为基于双方 `geoErrorRadiusM` 的自适应门限，限制在 15–60m；精确火点不再轻易吞并附近第二火点。
+- `MISSION_CREATED` 事件豁免 30min 活跃窗，任务执行期复报不重复建事件。
+- 验证节点：backend 396/396，随后 TB.2 节点 418/418。
+
+### 29.3 T-C/TC1/TC.2 抵近确认与激光精确定位
+
+> 实机检查清单：[外场验证清单](docs/superpowers/plans/2026-07-08-field-validation-checklist.md)
+
+- `FireConfirmationProcessor` 建立 `FLY_TO -> MEASURE_CLOSE -> VISIBLE_CONFIRM -> RESET` 四阶段状态机。
+- 通过 DJI MSDK 激光测距 key 读取 NORMAL 样本坐标，失败时降级为 standoff 悬停点。
+- 自动抵近默认关闭，实飞验证前只能显式启用或手动下发 urgent `fire-confirmation-mission`。
+- 后端 `FireApproachDispatcher` 为候选火情派发带坐标参数的抵近任务，事件冷却默认 10 分钟。
+- ROI 中心偏移换算云台角度，最多 3 轮迭代对中；激光默认 5 次采样、至少 3 个有效值、离散不超 15m，取分量中位数。
+- 仅 HIGH 置信的激光 fix 上报 `LASER_RANGEFINDER / 5m`；backend 保留该坐标，不再被 Ray-DEM 覆盖。
+- 后续扩展两段递进抵近（默认 100m/60m）、离散环绕多观测点交会和上风向接近。
+- 验证节点：Agent 173、180、182、192 tests 分阶段全绿；backend 396、404、409 tests 分阶段全绿。
+
+### 29.4 7 月 9 日对抗性模拟与 TC.3 修复
+
+> 发现记录：[对抗性模拟测试发现](docs/superpowers/plans/2026-07-09-simulation-findings.md)
+> 修复提交：`2da68ed`
+
+模拟探针暴露了原先单元测试未覆盖的端到端问题：抵近上报因缺热图被 backend 丢弃、激光背景误回波可把 222m 偏移写成 5m 精度、离散检查全弃、dwell 失败样本消耗预算、末段测温失败丢弃已获激光 fix。
+
+TC.3 完成以下收紧：
+
+- 末段近测快照上传并重试，解除 backend 热图门丢弃。
+- 激光 fix 相对疑似点偏移不得超 80m；飞行高度保持机体当前高度。
+- 新增 30% 电量门槛、6 分钟总时长上限和位置背离中止。
+- 激光离散改为中位数修剪；dwell 失败样本不占有效样本预算。
+- 末段测温失败时允许用前段合格结果上报；环绕后回上风点拍可见光证据。
+- 5 个一次性探针场景转为正式回归测试，Agent 204 tests 全绿。
+
+### 29.5 红外 YOLO 与新双模型
+
+> 提交：`75ae77f`、`e9fc463`
+
+- 新增 `YoloThermalAnalyzer`，支持 `brightness / yolo / max` 三模式，加载/推理失败时 fail-safe 返回 0 并降级 brightness。
+- 热成像模型真图冒烟中，3 张正样本信度约 0.939–0.945，3 张负样本为 0。
+- AI 验证：145 passed、1 skipped，真模型冒烟 1 passed。
+- 纳入红外真值训练 yolov8n（记录 val mAP50 0.854）和可见光 hard-negative yolov8s 权重，并隔离测试对本地 `.env` 的依赖。
+
+## 30. 2026-07-23 遥测与 HUD RTK 状态修正
+
+> 提交：`33c9831`、`4ed4ff8`
+
+- Agent 补采 GPS 卫星数和 RTK 卫星数，修复驾驶舱设备卡片 GPS/RTK 长期显示 `--`。
+- RTK 定点状态接入 `KeyRTKLocation.positioningSolution`，仅 `FIXED_POINT` 上报 `positionFixed=true`。
+- 前端 `is_fixed` 映射改为仅真实 `true` 时显示定点，避免 `null` 被错误当成已定点。
+- HUD 中原简写 `R` 改为明确的 `RTK`。
+
+## 31. 2026-07-24–07-27 实飞驱动的双模型、测温、去重和推流修复
+
+> 主要提交：`48e286f`、`134a723`、`f4dabff`、`274587e`、`7c15e2f`、`4448335`
+
+### 31.1 AI 断流自愈
+
+- 红外 YOLO 框、测温 ROI 和快照标注按 7 月 24–25 日实飞数据调整。
+- `continuous_runner` 在快速重连预算耗尽后转为 30s 慢速重试，Agent 恢复推流后自动恢复检测，不再因短时断流终止整个任务。
+- AI 154 tests 全绿。
+
+### 31.2 当时的串行红外确认链路
+
+- 7 月 25 日实飞发现盛夏日晒地面和污染 HUD 温度可导致旧弱佐证/兜底规则误确认。
+- backend 一度改为“红外 YOLO 命中 -> 框内实测温度 -> 温度达 80°C 才建事件”，可见光只作证据照。
+- 实飞记录为三轮飞行 8 次以上确认、零误报，后端 422 tests 全绿。
+- 注意：该链路在 7 月 27–30 日已被纯可见光生产路线取代，本节仅作历史演进记录。
+
+### 31.3 空间去重时序与抵近护栏
+
+- 实飞发现火情去重资格在 OSD 坐标回填之前判定，导致无入参坐标的串行链事件整体跳过去重。
+- 将资格判定移到 OSD 回填后，同一火源复报恢复合并。
+- `FireApproachDispatcher` 增加起飞护栏：OSD 相对高度 <2m 时不派发抵近任务，且不消耗冷却。
+- 实飞暴露 DJI FlyTo 固件转场高度可爬升至类似 Pilot 返航高度，因此 auto-approach 继续默认关闭，并在 7 月 27 日增加 FlyTo 高度轮廓约束。
+
+### 31.4 Agent 测温、身份和推流自愈
+
+- 原 `ThermalHotspotMonitor` 从事件决策器降级为 HUD 供数，避免 45°C 触发线被 41–48°C 日晒地面持续击穿导致镜头拉锯。
+- 框内测温改为近饱和亮块优先 + 框级区域测温兜底，珆火实测从原 39–68°C 提高到 147–153°C。
+- Agent 会话 FAILED 后每 15s 退避重试起流；飞机晚于 Agent 上电时不再永久黑屏。
+- 真实飞机身份回归后，若流曾以占位 SN 启动，则按真实 SN 重启推流。
+- 修复 Agent 命令响应中 `params` 字段透传，抵近任务不再因坐标参数被反序列化丢弃而秒拒绝。
+- Agent 195 tests 全绿。
+
+### 31.5 驾驶舱显示
+
+- 飞行 HUD 新增热点温度，监测期间按 dual-stream group 探针温度更新。
+- MSDK 无定位解时上报的 `(0,0)` 不再显示为真实经纬度，改为占位符。
+
+## 32. 2026-07-27–07-30 纯可见光火情识别与悬停激光定位生产路线
+
+> 设计：[可见光悬停激光定位设计](docs/superpowers/specs/2026-07-28-visible-fire-hover-laser-geolocation-design.md)
+> 计划：[可见光悬停激光定位实施计划](docs/superpowers/plans/2026-07-28-visible-fire-hover-laser-geolocation.md)
+> 交接：[纯可见光火情识别交接](HANDOFF_2026-07-28_VISIBLE_ONLY_FIRE_DETECTION.md)
+> 主要提交：`a67f77d`、`6c91740`、`fec483d`
+
+### 32.1 生产路线决策
+
+7 月 27 日晚至 28 日凌晨，根据现场时延和检测机会分析，决定取消“可见光/红外 YOLO -> 自动切红外 -> 测温裁决 -> 可见光证据”串行链路，改为纯可见光生产检测：
+
+```text
+可见光 RTSP
+  -> YOLO 检测
+  -> 框内火色像素否决
+  -> 连续两帧、中心位移符合
+  -> 火情事件与驾驶舱告警
+  -> 人工确认/驳回
+```
+
+红外代码保留，但不再作为当前生产火情确认的前置条件。
+
+### 32.2 AI 可见光检测管线
+
+- 修复 `fire_event_reporter` 生产装配为 `None` 导致可见光事件从未上报的接线缺口。
+- 可见光上报阈值与画框阈值对齐为 0.25，保证“有事件就有可解释的检测框”。
+- 连续两帧确认窗口 6s，归一化中心距离不超 0.3；可见光事件去抖 10s，空间去重交给 backend。
+- 框内少于 5 个橙红火色像素的 fire 候选直接否决，降低夜间暗树丛高分误报。
+- Apple Silicon 使用 MPS，实测推理从约 273ms 降到 53ms；`torchvision::nms` 通过 MPS fallback 回退 CPU。
+- 新增 `LatestFrameVideoSource`：独立线程持续抓帧、检测线程只取最新帧，帧龄 10s 看门狗；解决 ZLM 只发 RTCP 保活时 OpenCV 读帧卡死 453s 且无日志的问题。
+- 流未就绪时任务不失败，流恢复后自动开始识别。
+
+### 32.3 端到端实火验证
+
+- 夜间盆火多轮验证“识别 -> 两帧确认 -> 事件 -> OSD 回填 -> 空间合并 -> 驾驶舱通知”闭环。
+- 事件保存带框标注图，同一火源复报增加 `report_count`。
+- 火入画到事件生成的经验时延约 2–3s。
+- 真火帧离线重跑分数/框位与运行时结果一致，确认黑树丛 fire 0.78 属模型误报而非画框坐标 bug。
+
+### 32.4 悬停后激光定位
+
+- 可见光两帧确认后立即创建同一火情事件，定位状态为 `LASER_LOCATING`，不等待悬停/测距完成才告警。
+- 航线飞行时暂停，否则直接悬停；水平速度 ≤0.3m/s、垂直速度绝对值 ≤0.2m/s 稳定 1s 后开始定位。
+- 取悬停后 1.5s 内新鲜 ROI，tap zoom 对准后再取帧。
+- 激光目标必须落在 ROI 内；按 300ms 间隔取 3 个 NORMAL 样本，样本散布不超 15m。
+- 成功时使用 DJI MSDK 直接返回的目标经纬高更新原事件为 `PRECISE`，暂定误差半径 5m；失败时更新同一事件为 `LASER_FAILED`。
+- `LASER_LOCATING/LASER_FAILED` 阶段的飞机 OSD 坐标不得作为火点坐标参与去重、地图标注和任务规划。
+- 定位流程结束后不自动恢复航线，由操作者确认后续动作。
+
+### 32.5 验证与现场部署
+
+交接文档记录的自动化验证：
+
+- AI：168 passed、1 skipped。
+- Backend：433 tests、0 failures、0 errors。0 skipped。
+- RC Plus Agent：`:app:testDebugUnitTest` 通过。
+- RC Plus APK：`:app:assembleDebug` 通过。
+- Frontend policy tests：99 passed、0 failed。
+- Frontend：`npm run build:test` 和 `npm run build` 通过。
+- `git diff --check` 通过。
+
+7 月 28 日现场完成 backend、AI 和 frontend 干净重启，RC Plus Agent 重新安装后心跳、命令轮询、OSD/HMS 上报和可见光检测正常。
+
+现场曾发生同包名、同 `versionCode=1` 旧 APK 覆盖新包，导致 DJI UX 白屏且 Agent 不识别 `visible-fire-hold`。修复为 `versionCode=2`、`versionName=0.1.1`，重新安装后通过设备侧 DEX 检查、界面、真实 SN、推流和命令轮询反向验证。
+
+### 32.6 7 月末尚未闭环事项
+
+1. 完整动态流程仍待实火/实飞验收：两帧确认、悬停、tap zoom、激光三样本和同一事件 `LASER_LOCATING -> PRECISE`。
+2. 夜间暗部高分误报、小余烬/稀薄烟雾漏检和真火低谷帧闪烁仍需新模型与样本。
+3. Agent 冷启动时占位 SN 与真实 SN 在某些时序下仍会并存。
+4. ai-service 重启/热加载后检测任务需人工重建，待 backend 定时对账自愈。
+5. 旧 `FireConfirmationProcessor` 仍包含红外测温步骤，如重启自动抵近必须先拆除该生产依赖。
+6. FC100 `ActionButtons` 的 antd-vue 弹窗参数遗留问题尚未处理。
+
+## 33. 2026-06–07 阶段总结与交接口径
+
+### 33.1 两个月的主要产出
+
+- 6 月：完成驾驶舱真实数据整合、MSDK 设备状态隔离、FC100 AGL 口径、火情监测服务化、航线规划页大规模重构、DEM 高程、MapLibre/天地图、面状测区、高度剖面、模拟预演、规划期合规检查和 DJI 限飞区接入。
+- 7 月上旬：完成 S1–S9 巡检灭火一期闭环、指令队列、15 项预检、工作台、检测提速、悬停确认、GPS 去重和激光抵近试验链。
+- 7 月下旬：基于实飞修正遥测、RTK、测温、去重、推流和抵近护栏，最终将生产火情识别收敛到纯可见光 + 悬停后 DJI 激光定位。
+
+### 33.2 文档事实源
+
+- 当前生产状态：[CURRENT_PROJECT_STATUS_2026-08-05.md](docs/CURRENT_PROJECT_STATUS_2026-08-05.md)
+- 当前运行方式：[RUNBOOK.md](RUNBOOK.md)
+- 纯可见光与激光定位交接：[HANDOFF_2026-07-28_VISIBLE_ONLY_FIRE_DETECTION.md](HANDOFF_2026-07-28_VISIBLE_ONLY_FIRE_DETECTION.md)
+- 7 月 2 日一期任务详细证据：`work-records/codex/S1–S9`
+- 7 月 6–10 日检测/定位专项证据：`work-records/codex/T*`、`docs/superpowers/plans/2026-07-*`
+
+### 33.3 阅读注意
+
+- 6 月的 Ray-DEM、7 月上中旬的红外 YOLO/测温确认和多段抵近都是真实实现过的历史阶段，但不是 7 月末最终生产口径。
+- 任务提示词、设计文档和 commit 不等于现场验收；本记录已尽量将“代码已实现”“自动化测试已通过”和“实机/实飞已验证”分开表述。
+- 与当前代码冲突时，以生产分支 `feature/fire-precision-and-realtime-detection` 的已提交代码和最新状态文档为准。

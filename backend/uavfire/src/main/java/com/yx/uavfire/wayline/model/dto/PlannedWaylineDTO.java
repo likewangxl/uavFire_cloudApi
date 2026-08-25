@@ -25,6 +25,10 @@ public class PlannedWaylineDTO {
 
     private String aircraftModelKey;
 
+    private String payloadModelKey;
+
+    private Integer payloadPositionIndex;
+
     private String gatewaySn;
 
     private String aircraftSn;

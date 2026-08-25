@@ -294,6 +294,13 @@ class AgentRuntimeLoop(
                         "thermalFocus" to (capability?.thermalSupported == true),
                         "thermalSecondStream" to false,
                     ),
+                    aircraftModelKey = capability?.aircraftModelKey,
+                    controllerModelKey = capability?.controllerModelKey,
+                    payloads = capability?.payloads.orEmpty(),
+                    selectedPayloadPositionIndex = capability?.selectedPayloadPositionIndex,
+                    laserSupported = capability?.laserSupported == true,
+                    fireClosedLoopReady = capability?.fireClosedLoopReady == true,
+                    blockingReasons = capability?.blockingReasons.orEmpty(),
                 ),
             )
         }.onFailure { onError("msdk-device-state", it) }

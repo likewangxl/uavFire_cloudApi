@@ -487,6 +487,7 @@ def _build_backend_client(settings: Settings) -> Optional[BackendClient]:
 
 
 def build_registry() -> TaskRegistry:
+    from app.config.payload_profiles import settings_for_task
     from app.fusion.service import DualStreamFusionService
     from app.services.continuous_runner import ContinuousTaskRunner
     from app.services.continuous_supervisor import (
@@ -535,6 +536,9 @@ def build_registry() -> TaskRegistry:
                 runner=ContinuousTaskRunner(
                     registry=registry,
                     visible_detector=_get_cached_visible_detector(settings),
+                    visible_detector_factory=lambda task: _get_cached_visible_detector(
+                        settings_for_task(settings, task)
+                    ),
                     thermal_analyzer=_build_thermal_analyzer(settings),
                     fusion_service=fusion,
                     # MPS 推理 ~53ms/帧，轮询从 0.5s 压到 0.2s，检测节奏 ~0.3s/帧。

@@ -248,6 +248,22 @@
               <a-input :value="String(savePlannedWaylineModal.waypointCount)" disabled />
             </div>
           </div>
+          <div v-if="savePlannedWaylineModal.aircraftModelKey === 'M300'" class="planning-row planning-two-col">
+            <div>
+              <span class="planning-label">云台负载</span>
+              <a-select size="small" style="width: 100%;" v-model:value="savePlannedWaylineModal.payloadModelKey">
+                <a-select-option v-for="payload in M300_PAYLOAD_OPTIONS" :key="payload" :value="payload">{{ payload }}</a-select-option>
+              </a-select>
+            </div>
+            <div>
+              <span class="planning-label">安装位</span>
+              <a-select size="small" style="width: 100%;" v-model:value="savePlannedWaylineModal.payloadPositionIndex">
+                <a-select-option :value="0">左/主云台</a-select-option>
+                <a-select-option :value="1">右云台</a-select-option>
+                <a-select-option :value="2">上云台</a-select-option>
+              </a-select>
+            </div>
+          </div>
           <div class="planning-row planning-two-col">
             <div>
               <span class="planning-label">默认高度（米）</span>
@@ -270,6 +286,8 @@
             <span>名称</span><strong>{{ selectedPlannedWayline.name }}</strong>
             <span>状态</span><strong>{{ formatPlannedWaylineStatus(selectedPlannedWayline) }}</strong>
             <span>机型</span><strong>{{ selectedPlannedWayline.aircraftModelKey || '-' }}</strong>
+            <span>云台负载</span><strong>{{ selectedPlannedWayline.payloadModelKey || '-' }}</strong>
+            <span>安装位</span><strong>{{ formatPayloadPosition(selectedPlannedWayline.payloadPositionIndex) }}</strong>
             <span>飞行器</span><strong>{{ selectedPlannedWayline.aircraftSn || '-' }}</strong>
             <span>网关</span><strong>{{ selectedPlannedWayline.gatewaySn || '-' }}</strong>
             <span>默认高度</span><strong>{{ formatNumber(selectedPlannedWayline.defaultHeight) }} m</strong>
@@ -629,7 +647,8 @@ import {
   setTrackedAircraft,
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
-import { listMsdkDevices, type MsdkDeviceState } from '/@/api/msdk-device'
+import { listMsdkDevices } from '/@/api/msdk-device'
+import type { MsdkDeviceState } from '/@/api/msdk-device'
 import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
 import Fc100DeliveryView from '/@/components/wayline-planner/Fc100DeliveryView.vue'
 import PlannerWorkspace from '/@/components/wayline-planner/PlannerWorkspace.vue'
@@ -770,6 +789,8 @@ const savePlannedWaylineModal = reactive({
   saveAs: false,
   name: '',
   aircraftModelKey: '',
+  payloadModelKey: 'H20T',
+  payloadPositionIndex: 0,
   defaultHeight: 80,
   maxSpeed: 10,
   waypointCount: 0,
@@ -802,6 +823,8 @@ const AIRCRAFT_MODEL_KEY_MAP: Record<string, string> = {
 
 const AIRCRAFT_MODEL_NAME_ORDER = ['M3TD', 'M30T', 'M4T', 'M3T', 'M350', 'M300', 'M30', 'M3E', 'M3D', 'M4E']
 const PLANNED_WAYLINE_MODEL_OPTIONS = ['M4T', 'M4E', 'M30T', 'M30', 'M3T', 'M3E', 'M3TD', 'M3D', 'M350', 'M300']
+const M300_PAYLOAD_OPTIONS = ['H20', 'H20T', 'H30', 'H30T']
+const formatPayloadPosition = (value?: number) => ({ 0: '左/主云台', 1: '右云台', 2: '上云台' } as Record<number, string>)[Number(value)] || '-'
 const DEFAULT_PLANNED_WAYLINE_MODEL = 'M4T'
 
 watch(
@@ -1083,9 +1106,12 @@ function buildPagePlannedWaypointBody (wp: any, idx: number, defaultHeight: numb
 function buildPagePlannedWaylineBody (name: string, aircraftModelKey: string): CreatePlannedWaylineBody {
   const defaultHeight = positiveSaveNumber(savePlannedWaylineModal.defaultHeight, 30)
   const maxSpeed = positiveSaveNumber(savePlannedWaylineModal.maxSpeed, 5)
+  const normalizedAircraftModelKey = normalizePlannedWaylineModel(aircraftModelKey)
   return {
     name,
-    aircraftModelKey: normalizePlannedWaylineModel(aircraftModelKey),
+    aircraftModelKey: normalizedAircraftModelKey,
+    payloadModelKey: normalizedAircraftModelKey === 'M300' ? savePlannedWaylineModal.payloadModelKey : undefined,
+    payloadPositionIndex: normalizedAircraftModelKey === 'M300' ? savePlannedWaylineModal.payloadPositionIndex : undefined,
     gatewaySn: planningState.gatewaySn || '',
     aircraftSn: planningState.aircraftSn || '',
     defaultHeight,
@@ -1245,6 +1271,8 @@ function openSavePlannedWaylineModal (saveAs: boolean) {
   savePlannedWaylineModal.saveAs = saveAs
   savePlannedWaylineModal.name = defaultName
   savePlannedWaylineModal.aircraftModelKey = normalizePlannedWaylineModel(summary.aircraftModelKey)
+  savePlannedWaylineModal.payloadModelKey = editingRecord?.payloadModelKey || 'H20T'
+  savePlannedWaylineModal.payloadPositionIndex = editingRecord?.payloadPositionIndex ?? 0
   savePlannedWaylineModal.defaultHeight = planningState.defaultHeight
   savePlannedWaylineModal.maxSpeed = planningState.maxSpeed
   savePlannedWaylineModal.waypointCount = planningState.waypoints.length

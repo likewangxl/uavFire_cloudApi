@@ -9,6 +9,7 @@ import dji.sdk.keyvalue.value.camera.TapZoomMode
 import dji.sdk.keyvalue.value.camera.ZoomTargetPointInfo
 import dji.sdk.keyvalue.value.common.CameraLensType
 import dji.sdk.keyvalue.value.common.ComponentIndexType
+import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.Velocity3D
 import dji.v5.common.callback.CommonCallbacks
@@ -61,7 +62,7 @@ class DjiTapZoomClient(
         val key: DJIKey.ActionKey<ZoomTargetPointInfo, EmptyMsg> =
             KeyTools.createCameraKey(
                 DJICameraKey.KeyTapZoomAtTarget,
-                ComponentIndexType.LEFT_OR_MAIN,
+                PayloadSelectionRegistry.selectedComponentIndex(),
                 CameraLensType.CAMERA_LENS_ZOOM,
             )
         val target = ZoomTargetPointInfo(

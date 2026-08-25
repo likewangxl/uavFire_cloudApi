@@ -247,7 +247,7 @@ DJI Cloud API 官方文档：
 
 见：
 
-- [backend/uavfire/logs/cloud-api-sample.log:13837](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13837)
+- `backend/uavfire/logs/cloud-api-sample.log:13837`（历史日志，当前仓库未保留）
 
 #### 飞机规划路径
 
@@ -264,8 +264,8 @@ DJI Cloud API 官方文档：
 
 见：
 
-- [backend/uavfire/logs/cloud-api-sample.log:14004](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:14004)
-- [backend/uavfire/logs/cloud-api-sample.log:9598](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:9598)
+- `backend/uavfire/logs/cloud-api-sample.log:14004`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:9598`（历史日志，当前仓库未保留）
 
 这正说明飞机同时在处理：
 
@@ -285,11 +285,11 @@ DJI Cloud API 官方文档：
 
 见：
 
-- [backend/uavfire/logs/cloud-api-sample.log:13912](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13912)
-- [backend/uavfire/logs/cloud-api-sample.log:13953](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13953)
-- [backend/uavfire/logs/cloud-api-sample.log:13996](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:13996)
-- [backend/uavfire/logs/cloud-api-sample.log:14047](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:14047)
-- [backend/uavfire/logs/cloud-api-sample.log:14075](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:14075)
+- `backend/uavfire/logs/cloud-api-sample.log:13912`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:13953`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:13996`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:14047`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:14075`（历史日志，当前仓库未保留）
 
 因此可以明确排除：
 
@@ -456,9 +456,9 @@ DJI Cloud API 官方文档：
 
 关键日志在：
 
-- [backend/uavfire/logs/cloud-api-sample.log:23064](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:23064)
-- [backend/uavfire/logs/cloud-api-sample.log:23078](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:23078)
-- [backend/uavfire/logs/cloud-api-sample.log:23116](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:23116)
+- `backend/uavfire/logs/cloud-api-sample.log:23064`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:23078`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:23116`（历史日志，当前仓库未保留）
 
 时序：
 
@@ -497,28 +497,28 @@ DJI Cloud API 官方文档：
 
 ### 6.1 前端新增的策略文件
 
-- [frontend/src/pages/page-web/projects/drc-connection-policy.mjs](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/drc-connection-policy.mjs)
+- [frontend/src/pages/page-web/projects/drc-connection-policy.mjs](frontend/src/pages/page-web/projects/drc-connection-policy.mjs)
   - 作用：MQTT `close/error` 不再立刻视为断链，增加 10 秒宽限
 
-- [frontend/src/pages/page-web/projects/drc-ws-event-policy.mjs](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/drc-ws-event-policy.mjs)
+- [frontend/src/pages/page-web/projects/drc-ws-event-policy.mjs](frontend/src/pages/page-web/projects/drc-ws-event-policy.mjs)
   - 作用：把 WebSocket 层 DRC 事件拆分为：
     - DRC 链路状态变更
     - 摇杆可用性变更
     - 不再直接销毁远控会话
 
-- [frontend/src/pages/page-web/projects/official-takeoff-flow.mjs](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/official-takeoff-flow.mjs)
+- [frontend/src/pages/page-web/projects/official-takeoff-flow.mjs](frontend/src/pages/page-web/projects/official-takeoff-flow.mjs)
   - 作用：官方起飞两阶段参数构造与阶段状态判断
   - 当前已回退到固定 `30` 高度逻辑，未再使用 `osd.height + 30`
 
-- [frontend/src/pages/page-web/projects/cloud-control-auth-policy.mjs](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/cloud-control-auth-policy.mjs)
+- [frontend/src/pages/page-web/projects/cloud-control-auth-policy.mjs](frontend/src/pages/page-web/projects/cloud-control-auth-policy.mjs)
   - 作用：把 `cloud_control_auth` / `is_cloud_control_auth` 解析成前端单独授权状态
 
-- [frontend/src/pages/page-web/projects/official-takeoff-session-policy.mjs](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/official-takeoff-session-policy.mjs)
+- `frontend/src/pages/page-web/projects/official-takeoff-session-policy.mjs`（历史文件，当前仓库已移除）
   - 作用：官方起飞执行期间锁定遥控会话，禁止会话切换/退出
 
 ### 6.2 前端主要改动文件
 
-- [frontend/src/pages/page-web/projects/tsa.vue](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/tsa.vue)
+- [frontend/src/pages/page-web/projects/tsa.vue](frontend/src/pages/page-web/projects/tsa.vue)
 
 当前改动要点：
 
@@ -535,7 +535,7 @@ DJI Cloud API 官方文档：
 
 ### 6.3 后端主要改动文件
 
-- [backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/SDKControlService.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/SDKControlService.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/SDKControlService.java](backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/SDKControlService.java)
   - 增加 `takeoff_to_point_progress` 详细日志：
     - `flightId`
     - `status`
@@ -545,27 +545,27 @@ DJI Cloud API 官方文档：
     - `wayPointIndex`
     - `plannedPathPoints`
 
-- [backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java](backend/uavfire/src/main/java/com/yx/uavfire/control/service/impl/ControlServiceImpl.java)
   - 增加 `takeoff_to_point` 请求 JSON 输出
   - 增加 `flight authority` 抢占日志
 
-- [backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStateResolver.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStateResolver.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStateResolver.java](backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStateResolver.java)
   - 作用：从未知 `state` 消息中解析 `cloud_control_auth` / `is_cloud_control_auth`
 
-- [backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStatePushService.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStatePushService.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStatePushService.java](backend/uavfire/src/main/java/com/yx/uavfire/manage/service/impl/CloudControlAuthStatePushService.java)
   - 作用：把设备侧授权状态推送成 WebSocket 事件 `cloud_control_auth_update`
 
-- [backend/uavfire/src/main/java/com/yx/uavfire/component/websocket/model/BizCodeEnum.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/component/websocket/model/BizCodeEnum.java)
+- [backend/uavfire/src/main/java/com/yx/uavfire/component/websocket/model/BizCodeEnum.java](backend/uavfire/src/main/java/com/yx/uavfire/component/websocket/model/BizCodeEnum.java)
   - 新增 `CLOUD_CONTROL_AUTH_UPDATE`
 
 ### 6.4 测试文件
 
-- [frontend/scripts/drc-connection-policy.test.mjs](/Users/likewang/uavfire/frontend/scripts/drc-connection-policy.test.mjs)
-- [frontend/scripts/drc-ws-event-policy.test.mjs](/Users/likewang/uavfire/frontend/scripts/drc-ws-event-policy.test.mjs)
-- [frontend/scripts/official-takeoff-flow.test.mjs](/Users/likewang/uavfire/frontend/scripts/official-takeoff-flow.test.mjs)
-- [frontend/scripts/cloud-control-auth-policy.test.mjs](/Users/likewang/uavfire/frontend/scripts/cloud-control-auth-policy.test.mjs)
-- [frontend/scripts/official-takeoff-session-policy.test.mjs](/Users/likewang/uavfire/frontend/scripts/official-takeoff-session-policy.test.mjs)
-- [backend/uavfire/src/test/java/com/yx/uavfire/manage/service/CloudControlAuthStateResolverTest.java](/Users/likewang/uavfire/backend/uavfire/src/test/java/com/yx/uavfire/manage/service/CloudControlAuthStateResolverTest.java)
+- [frontend/scripts/drc-connection-policy.test.mjs](frontend/scripts/drc-connection-policy.test.mjs)
+- [frontend/scripts/drc-ws-event-policy.test.mjs](frontend/scripts/drc-ws-event-policy.test.mjs)
+- [frontend/scripts/official-takeoff-flow.test.mjs](frontend/scripts/official-takeoff-flow.test.mjs)
+- [frontend/scripts/cloud-control-auth-policy.test.mjs](frontend/scripts/cloud-control-auth-policy.test.mjs)
+- `frontend/scripts/official-takeoff-session-policy.test.mjs`（历史文件，当前仓库已移除）
+- [backend/uavfire/src/test/java/com/yx/uavfire/manage/service/CloudControlAuthStateResolverTest.java](backend/uavfire/src/test/java/com/yx/uavfire/manage/service/CloudControlAuthStateResolverTest.java)
 
 ## 7. 本次已经做过的验证
 
@@ -805,11 +805,11 @@ npm --prefix frontend run serve
 
 关键日志：
 
-- [backend/uavfire/logs/cloud-api-sample.log:29802](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:29802)
-- [backend/uavfire/logs/cloud-api-sample.log:29819](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:29819)
-- [backend/uavfire/logs/cloud-api-sample.log:29858](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:29858)
-- [backend/uavfire/logs/cloud-api-sample.log:30078](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:30078)
-- [backend/uavfire/logs/cloud-api-sample.log:30339](/Users/likewang/uavfire/backend/uavfire/logs/cloud-api-sample.log:30339)
+- `backend/uavfire/logs/cloud-api-sample.log:29802`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:29819`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:29858`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:30078`（历史日志，当前仓库未保留）
+- `backend/uavfire/logs/cloud-api-sample.log:30339`（历史日志，当前仓库未保留）
 
 时序要点：
 
@@ -838,14 +838,14 @@ npm --prefix frontend run serve
 
 新增/更新文件：
 
-- [frontend/src/pages/page-web/projects/official-takeoff-session-policy.mjs](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/official-takeoff-session-policy.mjs)
+- `frontend/src/pages/page-web/projects/official-takeoff-session-policy.mjs`（历史文件，当前仓库已移除）
   - 官方起飞执行期间锁定遥控会话
 
-- [frontend/src/pages/page-web/projects/drc-connection-policy.mjs](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/drc-connection-policy.mjs)
+- [frontend/src/pages/page-web/projects/drc-connection-policy.mjs](frontend/src/pages/page-web/projects/drc-connection-policy.mjs)
   - 新增 `officialTakeoffLocked` 分支
   - 官方起飞期间遇到 `close/error` 时优先 `preserve_session`
 
-- [frontend/src/pages/page-web/projects/tsa.vue](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/tsa.vue)
+- [frontend/src/pages/page-web/projects/tsa.vue](frontend/src/pages/page-web/projects/tsa.vue)
   - 官方起飞执行中禁用“进入遥控 / 重新授权 / 退出遥控”
   - 官方起飞执行中若 DRC 短暂波动，不立刻销毁当前会话
 
@@ -938,7 +938,7 @@ mvn -pl uavfire -Dtest=CloudControlAuthStateResolverTest test
 
 本轮已经新增规格文档：
 
-- [docs/superpowers/specs/2026-04-19-workspace-livestream-media-design.md](/Users/likewang/uavfire/docs/superpowers/specs/2026-04-19-workspace-livestream-media-design.md:1)
+- [docs/superpowers/specs/2026-04-19-workspace-livestream-media-design.md](docs/superpowers/specs/2026-04-19-workspace-livestream-media-design.md)
 
 这份规格写清了：
 
@@ -1067,9 +1067,9 @@ mvn -pl uavfire -Dtest=CloudControlAuthStateResolverTest test
 
 本轮已把代码默认 IP 改为 `172.20.10.7`，后续若本机网络再次变化，需要同时检查：
 
-- [backend/uavfire/src/main/resources/application.yml](/Users/likewang/uavfire/backend/uavfire/src/main/resources/application.yml:57)
-- [backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java](/Users/likewang/uavfire/backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java:13)
-- [frontend/src/api/http/config.ts](/Users/likewang/uavfire/frontend/src/api/http/config.ts:9)
+- [backend/uavfire/src/main/resources/application.yml](backend/uavfire/src/main/resources/application.yml)
+- [backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java](backend/uavfire/src/main/java/com/yx/uavfire/manage/controller/RootController.java)
+- [frontend/src/api/http/config.ts](frontend/src/api/http/config.ts)
 
 不要只改前端地址或只改 MQTT 地址，否则会再次出现：
 

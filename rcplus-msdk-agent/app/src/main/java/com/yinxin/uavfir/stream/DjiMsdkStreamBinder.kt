@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.stream
 
 import android.util.Log
+import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.DJICameraKey
 import dji.sdk.keyvalue.key.KeyTools
@@ -29,17 +30,22 @@ class DjiMsdkStreamBinder(
     private val tag = "DjiMsdkStreamBinder"
     private val keyManager: KeyManager
         get() = KeyManager.getInstance()
+    private val componentIndex: ComponentIndexType
+        get() = PayloadSelectionRegistry.selectedComponentIndex()
     private var visibleListener: ICameraStreamManager.ReceiveStreamListener? = null
-    private val thermalFrameProbe = ThermalFrameProbe(
-        hotspotCandidateListener = hotspotCandidateListener,
-    )
+    private val thermalFrameProbe by lazy {
+        ThermalFrameProbe(
+            componentIndex = PayloadSelectionRegistry.selectedComponentIndex(),
+            hotspotCandidateListener = hotspotCandidateListener,
+        )
+    }
 
     override suspend fun bindVisible(droneSn: String) {
         focusVisible(droneSn)
         val listener = ICameraStreamManager.ReceiveStreamListener { _, _, _, _ -> }
         MediaDataCenter.getInstance()
             .cameraStreamManager
-            .addReceiveStreamListener(ComponentIndexType.LEFT_OR_MAIN, listener)
+            .addReceiveStreamListener(componentIndex, listener)
         visibleListener = listener
         thermalFrameProbe.start()
     }
@@ -48,7 +54,7 @@ class DjiMsdkStreamBinder(
         val availableSources = KeyManager.getInstance().getValue(
             KeyTools.createKey(
                 CameraKey.KeyCameraVideoStreamSourceRange,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
             ),
         ) as? List<*>
 
@@ -69,7 +75,7 @@ class DjiMsdkStreamBinder(
         setValue(
             KeyTools.createKey(
                 CameraKey.KeyCameraVideoStreamSource,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
             ),
             preferredVisibleSource(),
         )
@@ -84,7 +90,7 @@ class DjiMsdkStreamBinder(
             setValue(
                 KeyTools.createKey(
                     CameraKey.KeyCameraZoomRatios,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                 ),
                 DEFAULT_VISIBLE_ZOOM_RATIO,
             )
@@ -97,7 +103,7 @@ class DjiMsdkStreamBinder(
         setValue(
             KeyTools.createKey(
                 CameraKey.KeyCameraVideoStreamSource,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
             ),
             CameraVideoStreamSourceType.INFRARED_CAMERA,
         )
@@ -105,7 +111,7 @@ class DjiMsdkStreamBinder(
             setValue(
                 KeyTools.createCameraKey(
                     DJICameraKey.KeyThermalDisplayMode,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
                 ThermalDisplayMode.THERMAL_ONLY,
@@ -166,7 +172,7 @@ class DjiMsdkStreamBinder(
         thermalCapabilityProbed = true
         fun <T> lensKey(key: dji.sdk.keyvalue.key.DJIKeyInfo<T>) = KeyTools.createCameraKey(
             key,
-            ComponentIndexType.LEFT_OR_MAIN,
+            componentIndex,
             CameraLensType.CAMERA_LENS_THERMAL,
         )
         val measureParamExisted =
@@ -192,7 +198,7 @@ class DjiMsdkStreamBinder(
         val gainMode = getValueAsync(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalGainMode,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             "thermal-gain-mode(lens)",
@@ -202,7 +208,7 @@ class DjiMsdkStreamBinder(
             setValueBestEffort(
                 KeyTools.createCameraKey(
                     DJICameraKey.KeyThermalGainMode,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
                 ThermalGainMode.AUTO,
@@ -212,7 +218,7 @@ class DjiMsdkStreamBinder(
         setValueBestEffort(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalTemperatureDataEnabled,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             true,
@@ -226,7 +232,7 @@ class DjiMsdkStreamBinder(
             getValueAsync(
                 KeyTools.createCameraKey(
                     DJICameraKey.KeyThermalGlobalMaxTemperature,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
                 "thermal-global-max-temperature(lens)",
@@ -301,7 +307,7 @@ class DjiMsdkStreamBinder(
         setValueBestEffort(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalTemperatureMeasureMode,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             ThermalTemperatureMeasureMode.REGION,
@@ -310,7 +316,7 @@ class DjiMsdkStreamBinder(
         setValueBestEffort(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalRegionMetersureArea,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             region,
@@ -321,7 +327,7 @@ class DjiMsdkStreamBinder(
             getValueAsync(
                 KeyTools.createCameraKey(
                     DJICameraKey.KeyThermalRegionMetersureTemperature,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
                 "thermal-region-temperature(lens)",
@@ -333,7 +339,7 @@ class DjiMsdkStreamBinder(
         setValueBestEffort(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalTemperatureMeasureMode,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             ThermalTemperatureMeasureMode.SPOT,
@@ -346,7 +352,7 @@ class DjiMsdkStreamBinder(
         setValueBestEffort(
             KeyTools.createCameraKey(
                 DJICameraKey.KeyThermalSpotMetersurePoint,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
                 CameraLensType.CAMERA_LENS_THERMAL,
             ),
             center,
@@ -357,7 +363,7 @@ class DjiMsdkStreamBinder(
             getValueAsync(
                 KeyTools.createCameraKey(
                     DJICameraKey.KeyThermalSpotMetersureTemperature,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
                 "thermal-spot-temperature(lens)",
@@ -369,7 +375,7 @@ class DjiMsdkStreamBinder(
         setValueBestEffort(
             KeyTools.createKey(
                 DJICameraKey.KeyThermalTemperatureMeasureMode,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
             ),
             ThermalTemperatureMeasureMode.REGION,
             "thermal-measure-mode(camera)",
@@ -377,7 +383,7 @@ class DjiMsdkStreamBinder(
         setValueBestEffort(
             KeyTools.createKey(
                 DJICameraKey.KeyThermalRegionMetersureArea,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
             ),
             region,
             "thermal-measure-area(camera)",
@@ -387,7 +393,7 @@ class DjiMsdkStreamBinder(
             getValueAsync(
                 KeyTools.createKey(
                     DJICameraKey.KeyThermalRegionMetersureTemperature,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                 ),
                 "thermal-region-temperature(camera)",
             )?.maxAreaTemperature,
@@ -417,7 +423,7 @@ class DjiMsdkStreamBinder(
         return (keyManager.getValue(
             KeyTools.createKey(
                 CameraKey.KeyCameraVideoStreamSourceRange,
-                ComponentIndexType.LEFT_OR_MAIN,
+                componentIndex,
             ),
         ) as? List<*>)
             ?.filterIsInstance<CameraVideoStreamSourceType>()
@@ -429,21 +435,21 @@ class DjiMsdkStreamBinder(
             val currentSource = keyManager.getValue(
                 KeyTools.createKey(
                     CameraKey.KeyCameraVideoStreamSource,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                 ),
             )
             val sourceRange = loadAvailableSources()
             val displayMode = keyManager.getValue(
                 KeyTools.createCameraKey(
                     DJICameraKey.KeyThermalDisplayMode,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
             )
             val pipPosition = keyManager.getValue(
                 KeyTools.createCameraKey(
                     DJICameraKey.KeyThermalPIPPosition,
-                    ComponentIndexType.LEFT_OR_MAIN,
+                    componentIndex,
                     CameraLensType.CAMERA_LENS_THERMAL,
                 ),
             )
@@ -451,7 +457,7 @@ class DjiMsdkStreamBinder(
                 keyManager.getValue(
                     KeyTools.createKey(
                         CameraKey.KeyCameraZoomRatios,
-                        ComponentIndexType.LEFT_OR_MAIN,
+                        componentIndex,
                     ),
                 )
             }.getOrNull()

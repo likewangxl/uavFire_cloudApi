@@ -29,6 +29,10 @@ public enum PayloadModelEnum {
 
     H20N("H20N", "61-0"),
 
+    H30("H30", "82-0"),
+
+    H30T("H30T", "83-0"),
+
     DOCK("DOCK", "165-0"),
 
     L1("L1", "90742-0");

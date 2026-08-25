@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, s
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.config.settings import Settings
+from app.config.payload_profiles import apply_payload_profile
 from app.models.event import DualStreamEvent, EventRecord
 from app.models.frame import FramePacket
 from app.models.task import TaskCreateRequest, TaskRecord
@@ -78,7 +79,10 @@ def healthz() -> Dict[str, str]:
 
 @router.post("/api/v1/dual-stream/tasks", response_model=TaskRecord, status_code=status.HTTP_201_CREATED)
 def create_task(payload: TaskCreateRequest) -> TaskRecord:
-    return registry.create(payload)
+    try:
+        return registry.create(apply_payload_profile(payload, Settings()))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 @router.post("/api/v1/dual-stream/tasks/{task_id}/start", response_model=TaskRecord)

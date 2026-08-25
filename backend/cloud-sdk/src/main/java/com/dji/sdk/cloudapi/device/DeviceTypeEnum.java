@@ -43,6 +43,10 @@ public enum DeviceTypeEnum {
 
     H20N(61),
 
+    H30(82),
+
+    H30T(83),
+
     DOCK_CAMERA(165),
 
     L1(90742),

@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.experimental.Accessors;
 
 import java.util.Map;
+import java.util.List;
 
 @Data
 @Accessors(chain = true)
@@ -52,4 +53,12 @@ public class MsdkDeviceStateDTO {
     private Long updatedAt;
 
     private Map<String, Boolean> capabilities;
+
+    private String aircraftModelKey;
+    private String controllerModelKey;
+    private List<PayloadCapabilityDTO> payloads;
+    private Integer selectedPayloadPositionIndex;
+    private Boolean laserSupported;
+    private Boolean fireClosedLoopReady;
+    private List<String> blockingReasons;
 }

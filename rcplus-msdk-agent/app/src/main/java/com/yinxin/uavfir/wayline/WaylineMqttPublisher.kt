@@ -125,9 +125,10 @@ class WaylineMqttPublisher(
      * keys it creates expire when the backend restarts or the RC powers off, so
      * OsdReporter re-sends it periodically to keep the subscription self-healing.
      */
-    fun publishUpdateTopo(aircraftSn: String, gatewaySn: String) {
+    fun publishUpdateTopo(aircraftSn: String, gatewaySn: String, aircraftModelKey: String? = null) {
         try {
             connect()
+            val topology = resolveCloudTopology(aircraftModelKey)
             val topic = "sys/product/$gatewaySn/status"
             val envelope = mapOf(
                 "bid" to java.util.UUID.randomUUID().toString(),
@@ -136,7 +137,7 @@ class WaylineMqttPublisher(
                 "method" to "update_topo",
                 "data" to mapOf(
                     "domain" to GATEWAY_DOMAIN_RC,
-                    "type" to GATEWAY_TYPE_RC_PLUS_2,
+                    "type" to topology.gatewayType,
                     "sub_type" to GATEWAY_SUB_TYPE_ZERO,
                     "device_secret" to "",
                     "nonce" to "",
@@ -145,8 +146,8 @@ class WaylineMqttPublisher(
                         mapOf(
                             "sn" to aircraftSn,
                             "domain" to DRONE_DOMAIN,
-                            "type" to DRONE_TYPE_M4_SERIES,
-                            "sub_type" to DRONE_SUB_TYPE_M4T,
+                            "type" to topology.aircraftType,
+                            "sub_type" to topology.aircraftSubType,
                             "index" to "A",
                             "device_secret" to "",
                             "nonce" to "",
@@ -201,11 +202,28 @@ class WaylineMqttPublisher(
         // （RC Plus 2 网关 2/174/0 + M4T runtime 0/99/1，thing_version 1.2.0）。
         private const val GATEWAY_DOMAIN_RC = 2
         private const val GATEWAY_TYPE_RC_PLUS_2 = 174
+        private const val GATEWAY_TYPE_RC_PLUS = 119
         private const val GATEWAY_SUB_TYPE_ZERO = 0
         private const val DRONE_DOMAIN = 0
         private const val DRONE_TYPE_M4_SERIES = 99
         private const val DRONE_SUB_TYPE_M4T = 1
+        private const val DRONE_TYPE_M300 = 60
         private const val THING_VERSION = "1.2.0"
+
+        data class CloudTopology(
+            val gatewayType: Int,
+            val aircraftType: Int,
+            val aircraftSubType: Int,
+        )
+
+        fun resolveCloudTopology(aircraftModelKey: String?): CloudTopology {
+            val normalized = aircraftModelKey?.uppercase()?.replace("_", "")?.replace("-", "")
+            return if (normalized in setOf("M300", "M300RTK", "MATRICE300RTK")) {
+                CloudTopology(GATEWAY_TYPE_RC_PLUS, DRONE_TYPE_M300, 0)
+            } else {
+                CloudTopology(GATEWAY_TYPE_RC_PLUS_2, DRONE_TYPE_M4_SERIES, DRONE_SUB_TYPE_M4T)
+            }
+        }
 
         fun buildCloudOsdEnvelope(
             gatewaySn: String,

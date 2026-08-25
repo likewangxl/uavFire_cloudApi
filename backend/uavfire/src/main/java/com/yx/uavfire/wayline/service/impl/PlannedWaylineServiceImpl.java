@@ -37,6 +37,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -106,6 +107,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     @Override
     public PlannedWaylineDTO create(String workspaceId, String username, CreatePlannedWaylineParam param) {
+        param.setAircraftModelKey(normalizeAircraftModelKey(param.getAircraftModelKey()));
         validateParam(param);
         PlannedWaylineEntity entity = dto2Entity(param);
         entity.setWorkspaceId(workspaceId);
@@ -355,7 +357,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     @Override
     public PlannedWaylineDTO update(String workspaceId, String id, UpdatePlannedWaylineParam param) {
-        validateParam(param);
+        param.setAircraftModelKey(normalizeAircraftModelKey(param.getAircraftModelKey()));
         PlannedWaylineEntity existing = mapper.selectOne(
                 new LambdaQueryWrapper<PlannedWaylineEntity>()
                         .eq(PlannedWaylineEntity::getWorkspaceId, workspaceId)
@@ -366,6 +368,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (STATUS_PUBLISHED.equalsIgnoreCase(existing.getStatus()) || StringUtils.hasText(existing.getPublishedWaylineId())) {
             throw new IllegalArgumentException("Published planned wayline cannot be updated. Save as a new planned wayline instead.");
         }
+        validateParam(param);
 
         applyEditableFields(existing, param);
         existing.setUpdateTime(System.currentTimeMillis());
@@ -789,6 +792,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalStateException("执行航线前需要选择在线飞行器。");
         }
 
+        validateAgentPayloadMatch(entity, droneSn);
+
         // Load KMZ into memory so the agent can download it via the HTTP KMZ endpoint.
         byte[] kmzBytes;
         try {
@@ -811,6 +816,36 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                         .setKmzMd5(DigestUtils.md5DigestAsHex(kmzBytes));
         waylineAgentService.dispatchWayline(droneSn, data);
         log.info("Dispatched wayline to agent {} flight {} kmzUrl={}", droneSn, entity.getFlightId(), httpKmzUrl);
+    }
+
+    private void validateAgentPayloadMatch(PlannedWaylineEntity entity, String droneSn) {
+        if (!"M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))) {
+            return;
+        }
+        if (msdkDeviceStateService == null) {
+            throw new IllegalStateException("M300 Agent state service is unavailable; dispatch blocked.");
+        }
+        MsdkDeviceStateDTO state = msdkDeviceStateService.listOnline().stream()
+                .filter(item -> droneSn.equals(item.getAircraftSn()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("M300 Agent is offline or stale; dispatch blocked."));
+        if (!"M300".equals(normalizeAircraftModelKey(state.getAircraftModelKey()))) {
+            throw new IllegalStateException("Online aircraft model does not match the wayline; dispatch blocked.");
+        }
+        if (state.getSelectedPayloadPositionIndex() == null
+                || !state.getSelectedPayloadPositionIndex().equals(entity.getPayloadPositionIndex())) {
+            throw new IllegalStateException("Online payload position does not match the wayline; dispatch blocked.");
+        }
+        String selectedPayload = state.getPayloads() == null ? null : state.getPayloads().stream()
+                .filter(payload -> state.getSelectedPayloadPositionIndex().equals(payload.getPayloadPositionIndex()))
+                .map(com.yx.uavfire.msdk.model.PayloadCapabilityDTO::getPayloadModelKey)
+                .findFirst()
+                .orElse(null);
+        if (!Objects.equals(
+                normalizePayloadModelKey(entity.getPayloadModelKey()),
+                normalizePayloadModelKey(selectedPayload))) {
+            throw new IllegalStateException("Online payload model does not match the wayline; dispatch blocked.");
+        }
     }
 
     private byte[] normalizeAgentRuntimeKmz(byte[] kmzBytes) throws IOException {
@@ -1070,7 +1105,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalArgumentException("Planned wayline param is required.");
         }
         validateEditableFields(param.getName(), param.getAircraftModelKey(), param.getGatewaySn(),
-                param.getAircraftSn(), param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
+                param.getAircraftSn(), param.getPayloadModelKey(), param.getPayloadPositionIndex(),
+                param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
     }
 
     private void validateParam(UpdatePlannedWaylineParam param) {
@@ -1078,13 +1114,16 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             throw new IllegalArgumentException("Planned wayline param is required.");
         }
         validateEditableFields(param.getName(), param.getAircraftModelKey(), param.getGatewaySn(),
-                param.getAircraftSn(), param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
+                param.getAircraftSn(), param.getPayloadModelKey(), param.getPayloadPositionIndex(),
+                param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
     }
 
     private void validateEditableFields(String name,
                                         String aircraftModelKey,
                                         String gatewaySn,
                                         String aircraftSn,
+                                        String payloadModelKey,
+                                        Integer payloadPositionIndex,
                                         Double defaultHeight,
                                         Double maxSpeed,
                                         List<PlannedWaypointDTO> waypoints) {
@@ -1093,6 +1132,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         if (!StringUtils.hasText(aircraftModelKey)) {
             throw new IllegalArgumentException("Planned wayline aircraft model key is required.");
+        }
+        if ("M300".equals(normalizeAircraftModelKey(aircraftModelKey))) {
+            if (!isM300FirePayload(payloadModelKey)) {
+                throw new IllegalArgumentException("M300 planned wayline requires payload model H20, H20T, H30, or H30T.");
+            }
+            if (payloadPositionIndex == null || payloadPositionIndex < 0 || payloadPositionIndex > 2) {
+                throw new IllegalArgumentException("M300 planned wayline requires payload position index 0, 1, or 2.");
+            }
         }
         if (!isFinite(defaultHeight)) {
             throw new IllegalArgumentException("Planned wayline default height is required.");
@@ -1133,11 +1180,42 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
     }
 
+    private String normalizeAircraftModelKey(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return raw;
+        }
+        String normalized = raw.trim().toUpperCase(Locale.ROOT).replace(" ", "").replace("-", "_");
+        if ("M300RTK".equals(normalized) || "MATRICE300RTK".equals(normalized)
+                || "MATRICE_300_RTK".equals(normalized)) {
+            return "M300";
+        }
+        return normalized;
+    }
+
+    private String normalizePayloadModelKey(String raw) {
+        return StringUtils.hasText(raw) ? raw.trim().toUpperCase(Locale.ROOT) : null;
+    }
+
+    private boolean isM300FirePayload(String payloadModelKey) {
+        String normalized = normalizePayloadModelKey(payloadModelKey);
+        return "H20".equals(normalized) || "H20T".equals(normalized)
+                || "H30".equals(normalized) || "H30T".equals(normalized);
+    }
+
     private boolean isFinite(Double value) {
         return value != null && Double.isFinite(value);
     }
 
     private void validatePublishableRecord(PlannedWaylineEntity entity) {
+        if ("M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))) {
+            if (!isM300FirePayload(entity.getPayloadModelKey())
+                    || entity.getPayloadPositionIndex() == null
+                    || entity.getPayloadPositionIndex() < 0
+                    || entity.getPayloadPositionIndex() > 2) {
+                throw new IllegalArgumentException(
+                        "M300 wayline must confirm payload H20/H20T/H30/H30T and position 0/1/2 before publishing.");
+            }
+        }
         if (!isFinite(entity.getDefaultHeight()) || entity.getDefaultHeight() <= 0) {
             throw new IllegalArgumentException("Planned wayline default height is invalid.");
         }
@@ -1204,7 +1282,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private byte[] buildPublishedKmz(PlannedWaylineEntity entity, String publishedName) {
         DeviceEnum droneDevice = resolveDroneDevice(entity.getAircraftModelKey());
-        DeviceEnum payloadDevice = resolvePayloadDevice(droneDevice);
+        DeviceEnum payloadDevice = resolvePayloadDevice(droneDevice, entity.getPayloadModelKey());
         List<PlannedWaypointDTO> waypoints = readWaypoints(entity.getWaypointsJson());
 
         try {
@@ -1225,13 +1303,26 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private DeviceEnum resolveDroneDevice(String aircraftModelKey) {
         try {
-            return DeviceEnum.valueOf(aircraftModelKey);
+            return DeviceEnum.valueOf(normalizeAircraftModelKey(aircraftModelKey));
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("Unsupported aircraft model for planned-wayline publish: " + aircraftModelKey);
         }
     }
 
-    private DeviceEnum resolvePayloadDevice(DeviceEnum droneDevice) {
+    private DeviceEnum resolvePayloadDevice(DeviceEnum droneDevice, String payloadModelKey) {
+        if (droneDevice == DeviceEnum.M300 || droneDevice == DeviceEnum.M350) {
+            String normalizedPayload = StringUtils.hasText(payloadModelKey)
+                    ? payloadModelKey.trim().toUpperCase(Locale.ROOT)
+                    : "H20T";
+            switch (normalizedPayload) {
+                case "H20": return DeviceEnum.H20;
+                case "H20T": return DeviceEnum.H20T;
+                case "H30": return DeviceEnum.H30;
+                case "H30T": return DeviceEnum.H30T;
+                default:
+                    throw new IllegalArgumentException("Unsupported M300/M350 payload: " + payloadModelKey);
+            }
+        }
         switch (droneDevice) {
             case M30:
                 return DeviceEnum.M30_CAMERA;
@@ -1249,9 +1340,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 return DeviceEnum.M3TD_CAMERA;
             case M4T:
                 return DeviceEnum.M4T_CAMERA;
-            case M300:
-            case M350:
-                return DeviceEnum.H20T;
             default:
                 throw new IllegalArgumentException("Unsupported aircraft model for planned-wayline publish: " + droneDevice.name());
         }
@@ -1348,7 +1436,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 entity.getGlobalTransitionalSpeed() != null ? entity.getGlobalTransitionalSpeed() : (double) GLOBAL_TRANSITIONAL_SPEED_MPS));
         writeDroneInfo(w, droneDevice);
         elem(w, "waylineAvoidLimitAreaMode", "0");
-        writePayloadInfo(w, payloadDevice);
+        writePayloadInfo(w, payloadDevice, entity.getPayloadPositionIndex());
         w.writeEndElement(); // /missionConfig
     }
 
@@ -1364,11 +1452,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         w.writeEndElement();
     }
 
-    private void writePayloadInfo(XMLStreamWriter w, DeviceEnum payloadDevice) throws XMLStreamException {
+    private void writePayloadInfo(XMLStreamWriter w, DeviceEnum payloadDevice, Integer payloadPositionIndex) throws XMLStreamException {
         w.writeStartElement(NS_WPML, "payloadInfo");
         elem(w, "payloadEnumValue", String.valueOf(payloadDevice.getType().getType()));
         elem(w, "payloadSubEnumValue", String.valueOf(payloadDevice.getSubType().getSubType()));
-        elem(w, "payloadPositionIndex", "0");
+        elem(w, "payloadPositionIndex", String.valueOf(payloadPositionIndex == null ? 0 : payloadPositionIndex));
         w.writeEndElement();
     }
 
@@ -1667,7 +1755,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private void applyEditableFields(PlannedWaylineEntity target, UpdatePlannedWaylineParam param) {
         target.setName(sanitizeDjiWaylineName(param.getName(), target.getPlannedWaylineId()));
-        target.setAircraftModelKey(param.getAircraftModelKey());
+        target.setAircraftModelKey(normalizeAircraftModelKey(param.getAircraftModelKey()));
+        target.setPayloadModelKey(normalizePayloadModelKey(param.getPayloadModelKey()));
+        target.setPayloadPositionIndex(param.getPayloadPositionIndex());
         target.setGatewaySn(param.getGatewaySn());
         target.setAircraftSn(param.getAircraftSn());
         target.setDefaultHeight(param.getDefaultHeight());
@@ -1681,7 +1771,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         return PlannedWaylineEntity.builder()
                 .name(sanitizeDjiWaylineName(param.getName(), null))
-                .aircraftModelKey(param.getAircraftModelKey())
+                .aircraftModelKey(normalizeAircraftModelKey(param.getAircraftModelKey()))
+                .payloadModelKey(normalizePayloadModelKey(param.getPayloadModelKey()))
+                .payloadPositionIndex(param.getPayloadPositionIndex())
                 .gatewaySn(param.getGatewaySn())
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
@@ -1705,6 +1797,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .workspaceId(dto.getWorkspaceId())
                 .name(dto.getName())
                 .aircraftModelKey(dto.getAircraftModelKey())
+                .payloadModelKey(dto.getPayloadModelKey())
+                .payloadPositionIndex(dto.getPayloadPositionIndex())
                 .gatewaySn(dto.getGatewaySn())
                 .aircraftSn(dto.getAircraftSn())
                 .defaultHeight(dto.getDefaultHeight())
@@ -1750,7 +1844,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         return PlannedWaylineEntity.builder()
                 .name(sanitizeDjiWaylineName(param.getName(), null))
-                .aircraftModelKey(param.getAircraftModelKey())
+                .aircraftModelKey(normalizeAircraftModelKey(param.getAircraftModelKey()))
+                .payloadModelKey(normalizePayloadModelKey(param.getPayloadModelKey()))
+                .payloadPositionIndex(param.getPayloadPositionIndex())
                 .gatewaySn(param.getGatewaySn())
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
@@ -1774,6 +1870,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .workspaceId(entity.getWorkspaceId())
                 .name(entity.getName())
                 .aircraftModelKey(entity.getAircraftModelKey())
+                .payloadModelKey(
+                        "M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))
+                                && !StringUtils.hasText(entity.getPayloadModelKey())
+                                ? "H20T" : entity.getPayloadModelKey())
+                .payloadPositionIndex(
+                        "M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))
+                                && entity.getPayloadPositionIndex() == null
+                                ? Integer.valueOf(0) : entity.getPayloadPositionIndex())
                 .gatewaySn(entity.getGatewaySn())
                 .aircraftSn(entity.getAircraftSn())
                 .defaultHeight(entity.getDefaultHeight())

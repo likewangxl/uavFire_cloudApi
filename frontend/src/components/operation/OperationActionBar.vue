@@ -184,7 +184,7 @@ const assignTitle = computed(() =>
 )
 
 const assignSnPlaceholder = computed(() =>
-  assignKind.value === 'DELIVERY' ? '选择 FC100 投送设备' : '选择 M4T 巡检设备',
+  assignKind.value === 'DELIVERY' ? '选择 FC100 投送设备' : '选择 DJI 巡检设备',
 )
 
 const currentDeviceOptions = computed(() =>

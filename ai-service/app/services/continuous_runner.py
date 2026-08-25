@@ -33,6 +33,7 @@ class ContinuousTaskRunner:
         visible_detector: VisibleDetector,
         thermal_analyzer: ThermalAnalyzer,
         fusion_service: DualStreamFusionService,
+        visible_detector_factory: Optional[Callable[[object], VisibleDetector]] = None,
         sleep: Callable[[float], None] = time.sleep,
         poll_interval_s: float = 0.5,
         max_consecutive_read_failures: int = 5,
@@ -42,6 +43,7 @@ class ContinuousTaskRunner:
     ) -> None:
         self._registry = registry
         self._visible_detector = visible_detector
+        self._visible_detector_factory = visible_detector_factory
         self._thermal_analyzer = thermal_analyzer
         self._fusion_service = fusion_service
         self._sleep = sleep
@@ -70,12 +72,16 @@ class ContinuousTaskRunner:
         )
         if visible_packet is None and thermal_packet is None:
             return None
-        visible_score = (
-            self._visible_detector.detect(visible_packet) if visible_packet is not None else 0.0
+        task = self._registry.get(task_id)
+        visible_detector = (
+            self._visible_detector_factory(task)
+            if self._visible_detector_factory is not None
+            else self._visible_detector
         )
+        visible_score = visible_detector.detect(visible_packet) if visible_packet is not None else 0.0
         # 仅在 detector 暴露了 last_boxes 时（如 YoloVisibleDetector）才有框信息，
         # ColorFire / Stub detector 没有这个属性 — 直接 fallback 到 None。
-        visible_boxes = getattr(self._visible_detector, "last_boxes", None)
+        visible_boxes = getattr(visible_detector, "last_boxes", None)
         thermal_score = (
             self._thermal_analyzer.analyze(thermal_packet) if thermal_packet is not None else 0.0
         )

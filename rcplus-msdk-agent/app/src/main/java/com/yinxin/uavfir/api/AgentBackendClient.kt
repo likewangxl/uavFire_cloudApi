@@ -85,6 +85,13 @@ class AgentBackendClient(
         droneSn = droneSn,
         visibleSupported = capability.visibleSupported,
         thermalSupported = capability.thermalSupported,
+        aircraftModelKey = capability.aircraftModelKey,
+        controllerModelKey = capability.controllerModelKey,
+        payloads = capability.payloads,
+        selectedPayloadPositionIndex = capability.selectedPayloadPositionIndex,
+        laserSupported = capability.laserSupported,
+        fireClosedLoopReady = capability.fireClosedLoopReady,
+        blockingReasons = capability.blockingReasons,
     )
 
     suspend fun sendMsdkDeviceState(
@@ -117,6 +124,7 @@ class AgentBackendClient(
         positionFixed: Boolean? = null,
         visibleSupported: Boolean = false,
         thermalSupported: Boolean = false,
+        cameraCapability: CameraCapability? = null,
         updatedAt: Long = System.currentTimeMillis(),
     ): MsdkDeviceStateRequest = MsdkDeviceStateRequest(
         gatewaySn = gatewaySn,
@@ -163,6 +171,13 @@ class AgentBackendClient(
             "thermalFocus" to thermalSupported,
             "thermalSecondStream" to false,
         ),
+        aircraftModelKey = cameraCapability?.aircraftModelKey,
+        controllerModelKey = cameraCapability?.controllerModelKey,
+        payloads = cameraCapability?.payloads.orEmpty(),
+        selectedPayloadPositionIndex = cameraCapability?.selectedPayloadPositionIndex,
+        laserSupported = cameraCapability?.laserSupported == true,
+        fireClosedLoopReady = cameraCapability?.fireClosedLoopReady == true,
+        blockingReasons = cameraCapability?.blockingReasons.orEmpty(),
     )
 
     suspend fun pollCommand(

@@ -32,6 +32,12 @@ public class CreatePlannedWaylineParam {
     @Builder.Default
     private String aircraftModelKey = "M30T";
 
+    @JsonAlias({"payloadModelKey", "payload_model_key"})
+    private String payloadModelKey;
+
+    @JsonAlias({"payloadPositionIndex", "payload_position_index"})
+    private Integer payloadPositionIndex;
+
     @JsonAlias({"gatewaySn", "gateway_sn"})
     private String gatewaySn;
 

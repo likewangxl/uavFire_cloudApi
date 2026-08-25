@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.stream
 
 import com.yinxin.uavfir.BuildConfig
+import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
 import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
@@ -44,7 +45,7 @@ class DjiLiveStreamController(
                 )
                 .build(),
         )
-        liveStreamManager.setCameraIndex(ComponentIndexType.LEFT_OR_MAIN)
+        liveStreamManager.setCameraIndex(PayloadSelectionRegistry.selectedComponentIndex())
         liveStreamManager.setLiveStreamQuality(StreamQuality.FULL_HD)
         liveStreamManager.setLiveAudioEnabled(false)
         awaitCompletion { callback ->

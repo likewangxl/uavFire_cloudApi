@@ -130,7 +130,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { Modal, notification } from 'ant-design-vue'
-import { sendMsdkCommand, getMsdkCommand, type MsdkDeviceState } from '/@/api/msdk-device'
+import { sendMsdkCommand, getMsdkCommand } from '/@/api/msdk-device'
+import type { MsdkDeviceState } from '/@/api/msdk-device'
 import { EModeCode } from '/@/types/device'
 import type { CockpitStreamTarget } from './CockpitAircraftStreamSelector.vue'
 import {

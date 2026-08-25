@@ -14,7 +14,7 @@
 
 ## 背景与现状
 
-当前 [wayline.vue](/Users/likewang/uavfire/frontend/src/pages/page-web/projects/wayline.vue:1) 页面包含两类能力：
+当前 [wayline.vue](../../../frontend/src/pages/page-web/projects/wayline.vue) 页面包含两类能力：
 
 - 现有航线库：
   - 查询正式航线文件
@@ -28,7 +28,7 @@
 
 当前点选飞行规划的数据只存在于前端运行态和本地草稿中：
 
-- [use-wayline-planning.ts](/Users/likewang/uavfire/frontend/src/hooks/use-wayline-planning.ts:1) 维护 app 级响应式状态
+- [use-wayline-planning.ts](../../../frontend/src/hooks/use-wayline-planning.ts) 维护 app 级响应式状态
 - `ELocalStorageKey.PlannedWaylineDraft` 只用于本地恢复临时草稿
 
 当前缺口：

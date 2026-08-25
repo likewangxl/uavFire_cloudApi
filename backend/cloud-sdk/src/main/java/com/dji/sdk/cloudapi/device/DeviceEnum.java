@@ -49,6 +49,10 @@ public enum DeviceEnum {
 
     H20N(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.H20N, DeviceSubTypeEnum.ZERO),
 
+    H30(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.H30, DeviceSubTypeEnum.ZERO),
+
+    H30T(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.H30T, DeviceSubTypeEnum.ZERO),
+
     DOCK_CAMERA(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.DOCK_CAMERA, DeviceSubTypeEnum.ZERO),
 
     L1(DeviceDomainEnum.PAYLOAD, DeviceTypeEnum.L1, DeviceSubTypeEnum.ZERO),

@@ -4,7 +4,7 @@
 
 This folder is the repo-local deployment scaffold for the media hub defined in:
 
-- [m_4_t双流直播与火情识别专项详细设计方案（评审修订版）.md](/Users/likewang/uavfire/m_4_t双流直播与火情识别专项详细设计方案（评审修订版）.md:121)
+- [m_4_t双流直播与火情识别专项详细设计方案（评审修订版）](../../m_4_t双流直播与火情识别专项详细设计方案（评审修订版）.md)
 
 The agreed route is:
 

@@ -35,6 +35,11 @@ public class AiServiceClient {
 
     /** 幂等启动一个 dual-stream fire-detection 任务。已存在的同 task_id 任务会被复用。 */
     public boolean startDetection(String taskId, String droneSn, String visibleStreamUrl, String thermalStreamUrl) {
+        return startDetection(taskId, droneSn, visibleStreamUrl, thermalStreamUrl, null);
+    }
+
+    public boolean startDetection(String taskId, String droneSn, String visibleStreamUrl,
+                                  String thermalStreamUrl, String payloadModelKey) {
         if (!StringUtils.hasText(taskId) || !StringUtils.hasText(droneSn) || !StringUtils.hasText(visibleStreamUrl)) {
             log.warn("ai-service start skipped, missing fields: task={} drone={} url={}", taskId, droneSn, visibleStreamUrl);
             return false;
@@ -44,6 +49,9 @@ public class AiServiceClient {
         body.put("drone_sn", droneSn);
         body.put("visible_stream_url", visibleStreamUrl);
         body.put("thermal_stream_url", thermalStreamUrl == null ? "" : thermalStreamUrl);
+        if (StringUtils.hasText(payloadModelKey)) {
+            body.put("payload_model_key", payloadModelKey);
+        }
         try {
             String json = objectMapper.writeValueAsString(body);
             Request create = new Request.Builder()

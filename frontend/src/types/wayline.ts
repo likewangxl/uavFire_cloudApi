@@ -92,6 +92,8 @@ export interface PlannedWaylineRecord {
   workspaceId: string
   name: string
   aircraftModelKey: string
+  payloadModelKey?: string
+  payloadPositionIndex?: number
   gatewaySn: string
   aircraftSn: string
   defaultHeight: number
@@ -154,6 +156,8 @@ export interface PreparePlannedWaylineTaskBody {
 interface PlannedWaylineBodyShared {
   name: string
   aircraftModelKey: string
+  payloadModelKey?: string
+  payloadPositionIndex?: number
   gatewaySn: string
   aircraftSn: string
   defaultHeight: number
