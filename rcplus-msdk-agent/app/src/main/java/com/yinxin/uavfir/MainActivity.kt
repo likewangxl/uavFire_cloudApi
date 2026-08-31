@@ -1,6 +1,7 @@
 package com.yinxin.uavfir
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.StatFs
 import android.util.Log
@@ -58,6 +59,8 @@ class MainActivity : AppCompatActivity() {
         executeLocalKmzButton = findViewById(R.id.executeLocalKmzButton)
         openSampleToolsButton = findViewById(R.id.openSampleToolsButton)
 
+        ensureRuntimePermissions()
+
         probeWaypointButton.setOnClickListener {
             runAction("probe-waypoint-push") {
                 val r = waypointProbe.probePush()
@@ -80,6 +83,29 @@ class MainActivity : AppCompatActivity() {
         }
 
         startHomeStatusRefresh()
+    }
+
+    private fun ensureRuntimePermissions() {
+        val app = application as App
+        if (RuntimePermissions.areGranted(this)) {
+            app.startRuntimeLoopIfPermitted()
+            return
+        }
+        requestPermissions(RuntimePermissions.required, RUNTIME_PERMISSION_REQUEST_CODE)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != RUNTIME_PERMISSION_REQUEST_CODE) return
+        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            (application as App).startRuntimeLoopIfPermitted()
+        } else {
+            Log.w(TAG, "required MSDK runtime permissions were denied")
+        }
     }
 
     override fun onDestroy() {
@@ -162,5 +188,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "ValidationConsole"
         private const val HOME_STATUS_REFRESH_MS = 2_000L
+        private const val RUNTIME_PERMISSION_REQUEST_CODE = 300
     }
 }

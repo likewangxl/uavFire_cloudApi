@@ -7,6 +7,8 @@ interface DjiSdkGateway {
 
     suspend fun loadCapability(): CameraCapability
 
+    suspend fun loadAircraftName(): String? = null
+
     suspend fun loadAircraftModel(): String?
 
     suspend fun loadFlightLimit(): DjiFlightLimit

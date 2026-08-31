@@ -725,12 +725,17 @@ import {
   shouldReconnectLivePlayer,
   swapPrimaryPreference
 } from './leadership-cockpit-live-layout.mjs'
-import { buildCockpitSummary } from './leadership-cockpit-summary.mjs'
+import {
+  buildCockpitSummary,
+  isConnectedDeliveryTarget,
+  isConnectedMsdkDevice,
+  isMockCockpitDeviceSn
+} from './leadership-cockpit-summary.mjs'
 import { buildSituationLayers } from './leadership-cockpit-situation.mjs'
 import { formatFireLocation, isUsableFireLocation } from './fire/fire-event-location.mjs'
 
 const store = useMyStore()
-const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || '1581F7K3D249E00AM3Q3'
+const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || ''
 
 // Flight HUD: 复用 WorkspaceLivestreamPanel 同款 OSD 展示。sn 来源优先级：
 // fireDetectionState.droneSn -> store.currentSn -> deviceInfo 第一个可用。
@@ -770,7 +775,7 @@ function toDeviceOsdFromMsdk (device: MsdkDeviceState) {
 async function refreshMsdkHudDevices () {
   const res = await listMsdkDevices()
   if (res.code !== 0) return
-  const devices = res.data || []
+  const devices = (res.data || []).filter(isConnectedMsdkDevice)
   msdkDeviceSnapshots.value = devices
   for (const device of devices) {
     if (!device.aircraftSn) continue
@@ -782,11 +787,14 @@ async function refreshMsdkHudDevices () {
 }
 
 const flightHudSn = computed<string | undefined>(() => {
+  const connectedSns = new Set(msdkDeviceSnapshots.value.map(device => device.aircraftSn))
   const fromFire = fireDetectionState?.droneSn
-  if (fromFire && store.state.deviceState.deviceInfo[fromFire]) return fromFire
+  if (fromFire && connectedSns.has(fromFire) && store.state.deviceState.deviceInfo[fromFire]) return fromFire
   const cur = store.state.deviceState.currentSn
-  if (cur && store.state.deviceState.deviceInfo[cur]) return cur
-  const keys = Object.keys(store.state.deviceState.deviceInfo || {})
+  if (cur && connectedSns.has(cur) && store.state.deviceState.deviceInfo[cur]) return cur
+  const keys = msdkDeviceSnapshots.value
+    .map(device => device.aircraftSn)
+    .filter(sn => Boolean(store.state.deviceState.deviceInfo[sn]))
   return keys.length > 0 ? keys[0] : undefined
 })
 const flightHudVisible = computed(() => !!flightHudSn.value)
@@ -1002,7 +1010,13 @@ const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
   }
 
   const group = dualStreamState.group
-  if (group?.droneSn && !targets.has(group.droneSn)) {
+  const groupExplicitlyConnected = Boolean(
+    group?.visiblePlayUrl ||
+    group?.thermalPlayUrl ||
+    String(group?.sessionState || '').toUpperCase() === 'RUNNING' ||
+    ['ONLINE', 'CONNECTED'].includes(String(group?.connectionState || '').toUpperCase())
+  )
+  if (group?.droneSn && groupExplicitlyConnected && !isMockCockpitDeviceSn(group.droneSn) && !targets.has(group.droneSn)) {
     targets.set(group.droneSn, {
       key: `fire-monitor:${group.droneSn}`,
       role: 'fire-monitor',
@@ -1014,21 +1028,6 @@ const fireMonitorTargets = computed<CockpitStreamTarget[]>(() => {
       thermalPlayUrl: group.thermalPlayUrl || '',
       streamStatus: group.visiblePlayUrl ? 'running' : 'idle',
       message: group.statusMessage || group.statusReason
-    })
-  }
-
-  // 仅当没有任何真实设备上报时，才回退到默认占位飞机用于引导 UI。
-  // 有真机连接（如 AF7PE）时不再展示这个占位机——否则它会一直显示成"在线"的幽灵设备。
-  if (targets.size === 0) {
-    targets.set(FIELD_AGENT_AIRCRAFT_SN, {
-      key: `fire-monitor:${FIELD_AGENT_AIRCRAFT_SN}`,
-      role: 'fire-monitor',
-      deviceSn: FIELD_AGENT_AIRCRAFT_SN,
-      callsign: `火情监测 ${FIELD_AGENT_AIRCRAFT_SN.slice(-4)}`,
-      online: true,
-      taskStatus: '默认监测机',
-      streamStatus: 'idle',
-      message: '默认 Agent 飞机'
     })
   }
 
@@ -1655,20 +1654,21 @@ async function loadDeliveryExecutionTargets () {
     const response = await deliveryApi.listDevices()
     const devices = response.data?.data || []
     const targets = devices
-      .filter(isFc100DeliveryAircraftDevice)
+      .filter(device => isFc100DeliveryAircraftDevice(device) && !isMockCockpitDeviceSn(device.deviceSn))
       .map(toDeliveryTarget)
 
     const enriched = await Promise.all(targets.map(async (target) => {
       try {
-        const [liveRes, propsRes] = await Promise.all([
-          deliveryApi.deviceLive(target.deviceSn),
-          deliveryApi.deviceProps(target.deviceSn).catch(() => null)
-        ])
-        const live = liveRes.data?.data
+        const propsRes = await deliveryApi.deviceProps(target.deviceSn).catch(() => null)
         const props = propsRes?.data?.data
+        const online = props?.onlineStatus ?? target.online
+        if (!isConnectedDeliveryTarget({ ...target, online })) return null
+
+        const liveRes = await deliveryApi.deviceLive(target.deviceSn).catch(() => null)
+        const live = liveRes?.data?.data
         const enrichedTarget: CockpitStreamTarget = {
           ...target,
-          online: props?.onlineStatus ?? target.online,
+          online,
           primaryPlayUrl: live?.playUrl || '',
           streamStatus: live?.streamStatus === 'running'
             ? 'running'
@@ -1688,9 +1688,12 @@ async function loadDeliveryExecutionTargets () {
       }
     }))
 
-    deliveryExecutionTargets.value = enriched
-    if (!enriched.some(target => target.key === selectedDeliveryTargetKey.value)) {
-      selectedDeliveryTargetKey.value = enriched[0]?.key || ''
+    const connectedTargets = enriched
+      .filter((target): target is CockpitStreamTarget => Boolean(target))
+      .filter(isConnectedDeliveryTarget)
+    deliveryExecutionTargets.value = connectedTargets
+    if (!connectedTargets.some(target => target.key === selectedDeliveryTargetKey.value)) {
+      selectedDeliveryTargetKey.value = connectedTargets[0]?.key || ''
     }
   } finally {
     deliveryTargetsLoading.value = false

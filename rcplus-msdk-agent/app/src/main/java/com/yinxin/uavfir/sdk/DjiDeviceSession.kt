@@ -37,6 +37,7 @@ class DjiDeviceSession(
                 identity = djiSdkGateway.loadDeviceIdentity(),
                 capability = djiSdkGateway.loadCapability(),
                 telemetry = loadTelemetry(),
+                aircraftName = djiSdkGateway.loadAircraftName(),
                 aircraftModel = djiSdkGateway.loadAircraftModel(),
                 flightLimit = djiSdkGateway.loadFlightLimit(),
             )

@@ -17,5 +17,5 @@
   "classes": ["fire", "smoke"],
   "confidenceThreshold": 0.25,
   "iouThreshold": 0.70,
-  "enabledByDefault": true
+  "enabledByDefault": false
 }

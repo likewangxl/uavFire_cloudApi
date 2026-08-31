@@ -166,17 +166,18 @@ class AgentRuntimeLoop(
         discovered: DjiDeviceIdentity?,
         configuredDroneSn: String,
     ): DjiDeviceIdentity? {
-        if (discovered?.isValid() == true) {
+        if (discovered?.isValid() == true && !discovered.isPlaceholderAircraft()) {
             return discovered
         }
-        return configuredDroneSn
+        val configuredIdentity = configuredDroneSn
             .takeIf { it.isNotBlank() }
             ?.let {
                 DjiDeviceIdentity(
-                    gatewaySn = gatewaySn,
+                    gatewaySn = discovered?.gatewaySn?.takeIf(String::isNotBlank) ?: gatewaySn,
                     aircraftSn = it,
                 )
             }
+        return configuredIdentity ?: discovered?.takeIf(DjiDeviceIdentity::isValid)
     }
 
     private suspend fun handleIdentityChange(identity: DjiDeviceIdentity) {
@@ -258,7 +259,7 @@ class AgentRuntimeLoop(
                     aircraftSn = identity.aircraftSn,
                     online = deviceState.connectionState != AgentConnectionState.ERROR,
                     connectionState = deviceState.connectionState.name,
-                    deviceName = deviceState.aircraftModel,
+                    deviceName = deviceState.aircraftName ?: deviceState.aircraftModel,
                     model = deviceState.aircraftModel,
                     latitude = telemetry?.latitude,
                     longitude = telemetry?.longitude,

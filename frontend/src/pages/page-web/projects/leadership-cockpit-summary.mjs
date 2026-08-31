@@ -26,6 +26,18 @@ export function isDeliveryOnline (device) {
   return onlineText === 'true' || onlineText === 'online' || onlineText === '1'
 }
 
+export function isMockCockpitDeviceSn (sn) {
+  return /(^|[_-])mock([_-]|$)/i.test(String(sn || '').trim())
+}
+
+export function isConnectedMsdkDevice (device) {
+  return Boolean(device?.aircraftSn) && device?.online === true && !isMockCockpitDeviceSn(device.aircraftSn)
+}
+
+export function isConnectedDeliveryTarget (target) {
+  return Boolean(target?.deviceSn) && isDeliveryOnline(target) && !isMockCockpitDeviceSn(target.deviceSn)
+}
+
 export function buildCockpitSummary ({
   fireEvents = [],
   aiEvents = [],
@@ -38,6 +50,9 @@ export function buildCockpitSummary ({
   aiEventsError = '',
   dualStreamError = ''
 } = {}) {
+  msdkDevices = msdkDevices.filter(isConnectedMsdkDevice)
+  deliveryTargets = deliveryTargets.filter(isConnectedDeliveryTarget)
+
   const activeFireEvents = fireEvents.filter(event => {
     const status = String(event?.status || '').toUpperCase()
     return status !== 'IGNORED' && status !== 'ARCHIVED'

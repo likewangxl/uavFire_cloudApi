@@ -69,6 +69,11 @@ public class WaylineAgentAuthInterceptor implements HandlerInterceptor {
             return false;
         }
         String pathSn = extractDroneSn(request.getRequestURI());
+        if (isAgentFireEventPath(request.getRequestURI()) && pathSn == null) {
+            response.setStatus(HttpStatus.FORBIDDEN.value());
+            log.warn("wayline-agent: agent fire event task is not bound to a drone: {}", request.getRequestURI());
+            return false;
+        }
         if (pathSn != null && !pathSn.equals(claimSn)) {
             response.setStatus(HttpStatus.FORBIDDEN.value());
             log.warn("wayline-agent: token droneSn={} does not match path droneSn={}", claimSn, pathSn);
@@ -92,11 +97,23 @@ public class WaylineAgentAuthInterceptor implements HandlerInterceptor {
     }
 
     private String extractDroneSn(String uri) {
-        String pattern = "/**/agents/{drone_sn}/**";
-        if (!PATH_MATCHER.match(pattern, uri)) {
+        String agentPattern = "/**/agents/{drone_sn}/**";
+        if (PATH_MATCHER.match(agentPattern, uri)) {
+            return PATH_MATCHER.extractUriTemplateVariables(agentPattern, uri).get("drone_sn");
+        }
+
+        String fireEventPattern = "/**/dual-stream/tasks/{task_id}/agent-fire-events";
+        if (!PATH_MATCHER.match(fireEventPattern, uri)) {
             return null;
         }
-        return PATH_MATCHER.extractUriTemplateVariables(pattern, uri).get("drone_sn");
+        String taskId = PATH_MATCHER.extractUriTemplateVariables(fireEventPattern, uri).get("task_id");
+        return StringUtils.hasText(taskId) && taskId.startsWith("fire-")
+                ? taskId.substring("fire-".length())
+                : null;
+    }
+
+    private boolean isAgentFireEventPath(String uri) {
+        return PATH_MATCHER.match("/**/dual-stream/tasks/*/agent-fire-events", uri);
     }
 
     private boolean isProtectedFireRequest(HttpServletRequest request) {

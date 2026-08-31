@@ -21,7 +21,8 @@ class ValidationConsoleControllerTest {
         val homeStatus = ValidationConsoleController.buildHomeStatus(
             deviceState = DjiDeviceState(
                 connectionState = AgentConnectionState.CAPABILITY_READY,
-                aircraftModel = "MATRICE 4T",
+                aircraftName = "森林灭火 M300-01",
+                aircraftModel = "M300_RTK",
                 flightLimit = DjiFlightLimit(
                     heightLimitMeters = 120,
                     distanceLimitEnabled = true,
@@ -37,8 +38,8 @@ class ValidationConsoleControllerTest {
         assertEquals(
             DjiHomeStatus(
                 flightLimitText = "飞行限制\n限高120m / 限距500m",
-                taskSpaceText = "任务空间\n23.6GB / 64.0GB",
-                aircraftStatusText = "当前飞行器\nMATRICE 4T    已连接",
+                taskSpaceText = "任务空间\n可用 23.6GB / 总计 64.0GB",
+                aircraftStatusText = "当前飞行器\n森林灭火 M300-01    已连接",
             ),
             homeStatus,
         )
@@ -55,10 +56,24 @@ class ValidationConsoleControllerTest {
             DjiHomeStatus(
                 flightLimitText = "飞行限制\n未连接",
                 taskSpaceText = "任务空间\n读取中",
-                aircraftStatusText = "当前飞行器\nMATRICE 4T    未连接",
+                aircraftStatusText = "当前飞行器\n未获取设备名称    未连接",
             ),
             homeStatus,
         )
+    }
+
+    @Test
+    fun buildHomeStatus_usesRealProductTypeWhenAircraftNameIsUnavailable() {
+        val homeStatus = ValidationConsoleController.buildHomeStatus(
+            deviceState = DjiDeviceState(
+                connectionState = AgentConnectionState.AIRCRAFT_CONNECTED,
+                aircraftName = "UNKNOWN",
+                aircraftModel = "M300_RTK",
+            ),
+            storageStatus = DjiStorageStatus(freeBytes = 1L, totalBytes = 2L),
+        )
+
+        assertEquals("当前飞行器\nDJI M300 RTK    已连接", homeStatus.aircraftStatusText)
     }
 
     @Test

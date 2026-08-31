@@ -28,9 +28,18 @@ class App : Application() {
         services = AppServices(this)
         Log.i(TAG, "application created, runtime loop ready for dynamic MSDK identity")
         if (runtimeLoopLifecyclePolicy.startOnApplicationCreate) {
-            Log.i(TAG, "application created, starting runtime loop")
-            services.runtimeLoop.start(LOCAL_DRONE_SN)
+            startRuntimeLoopIfPermitted()
         }
+    }
+
+    fun startRuntimeLoopIfPermitted(): Boolean {
+        if (!RuntimePermissions.areGranted(this)) {
+            Log.w(TAG, "runtime permissions missing, deferring MSDK runtime loop")
+            return false
+        }
+        Log.i(TAG, "runtime permissions granted, starting runtime loop")
+        services.runtimeLoop.start(LOCAL_DRONE_SN)
+        return true
     }
 
     private fun initializeUxSdkDefaults() {

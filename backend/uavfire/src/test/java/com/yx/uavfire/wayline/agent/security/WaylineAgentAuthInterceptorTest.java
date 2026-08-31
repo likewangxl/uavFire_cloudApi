@@ -168,4 +168,40 @@ class WaylineAgentAuthInterceptorTest {
         assertEquals("SN-A", claim.getDroneSn());
         assertEquals(WaylineAgentClaim.ROLE, claim.getRole());
     }
+
+    @Test
+    void preHandle_acceptsAgentFireEventWhenTaskDroneMatchesClaim() throws Exception {
+        String token = JwtUtil.createToken(Map.of("role", WaylineAgentClaim.ROLE, "droneSn", "SN-A"));
+        MockHttpServletRequest req = new MockHttpServletRequest(
+                "POST", "/manage/api/v1/dual-stream/tasks/fire-SN-A/agent-fire-events");
+        req.addHeader(WaylineAgentAuthInterceptor.HEADER_AGENT_TOKEN, token);
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        assertTrue(interceptor.preHandle(req, resp, new Object()));
+        assertEquals(200, resp.getStatus());
+    }
+
+    @Test
+    void preHandle_rejectsAgentFireEventWhenTaskDroneDoesNotMatchClaim() throws Exception {
+        String token = JwtUtil.createToken(Map.of("role", WaylineAgentClaim.ROLE, "droneSn", "SN-A"));
+        MockHttpServletRequest req = new MockHttpServletRequest(
+                "POST", "/manage/api/v1/dual-stream/tasks/fire-SN-B/agent-fire-events");
+        req.addHeader(WaylineAgentAuthInterceptor.HEADER_AGENT_TOKEN, token);
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(req, resp, new Object()));
+        assertEquals(403, resp.getStatus());
+    }
+
+    @Test
+    void preHandle_rejectsAgentFireEventWithoutFireTaskBinding() throws Exception {
+        String token = JwtUtil.createToken(Map.of("role", WaylineAgentClaim.ROLE, "droneSn", "SN-A"));
+        MockHttpServletRequest req = new MockHttpServletRequest(
+                "POST", "/manage/api/v1/dual-stream/tasks/manual-task/agent-fire-events");
+        req.addHeader(WaylineAgentAuthInterceptor.HEADER_AGENT_TOKEN, token);
+        MockHttpServletResponse resp = new MockHttpServletResponse();
+
+        assertFalse(interceptor.preHandle(req, resp, new Object()));
+        assertEquals(403, resp.getStatus());
+    }
 }

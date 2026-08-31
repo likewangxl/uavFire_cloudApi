@@ -22,6 +22,8 @@ class DjiMsdkRuntimeAdapter(
 
     override suspend fun loadCapability(): CameraCapability = keyValueClient.loadCapability()
 
+    override suspend fun loadAircraftName(): String? = keyValueClient.loadAircraftName()
+
     override suspend fun loadAircraftModel(): String? = keyValueClient.loadAircraftModel()
 
     override suspend fun loadFlightLimit(): DjiFlightLimit = keyValueClient.loadFlightLimit()

@@ -26,6 +26,7 @@ class DjiDeviceSessionTest {
                 initializeResult = true,
                 connected = true,
                 capability = capability,
+                aircraftName = "森林灭火 M300-01",
                 aircraftModel = "MATRICE 4T",
                 flightLimit = flightLimit,
             ),
@@ -36,6 +37,7 @@ class DjiDeviceSessionTest {
         assertEquals(AgentConnectionState.CAPABILITY_READY, state.connectionState)
         assertEquals(DjiDeviceIdentity("RC-001", "AIRCRAFT-001"), state.identity)
         assertEquals(capability, state.capability)
+        assertEquals("森林灭火 M300-01", state.aircraftName)
         assertEquals("MATRICE 4T", state.aircraftModel)
         assertEquals(flightLimit, state.flightLimit)
     }
@@ -98,6 +100,7 @@ class DjiDeviceSessionTest {
             visibleSupported = false,
             thermalSupported = false,
         ),
+        private val aircraftName: String? = null,
         private val aircraftModel: String? = null,
         private val flightLimit: DjiFlightLimit = DjiFlightLimit(),
         private val identity: DjiDeviceIdentity? = DjiDeviceIdentity("RC-001", "AIRCRAFT-001"),
@@ -107,6 +110,8 @@ class DjiDeviceSessionTest {
         override suspend fun isAircraftConnected(): Boolean = connected
 
         override suspend fun loadCapability(): CameraCapability = capability
+
+        override suspend fun loadAircraftName(): String? = aircraftName
 
         override suspend fun loadAircraftModel(): String? = aircraftModel
 

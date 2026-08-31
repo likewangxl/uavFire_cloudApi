@@ -132,6 +132,40 @@ class AgentRuntimeLoopTest {
     }
 
     @Test
+    fun tickOnce_usesConfiguredAircraftSnWhenMsdkIdentityIsPlaceholder() = runTest {
+        val api = RecordingDualStreamApi()
+        val poller = RecordingCommandPoller()
+        val loop = AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(
+                    connectionState = AgentConnectionState.CAPABILITY_READY,
+                    identity = DjiDeviceIdentity(
+                        gatewaySn = "RC-M300",
+                        aircraftSn = "UNKNOWN-AIRCRAFT-RC-M300",
+                    ),
+                    capability = CameraCapability(
+                        visibleSupported = true,
+                        thermalSupported = false,
+                    ),
+                ),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = poller,
+            sessionManager = FakeCommandExecutor(DualStreamSessionState.RUNNING),
+            scope = backgroundScope,
+        )
+
+        loop.tickOnce("M300-CONFIGURED-SN")
+
+        assertEquals("M300-CONFIGURED-SN", api.lastHeartbeatDroneSn)
+        assertEquals("M300-CONFIGURED-SN", api.lastStatusDroneSn)
+        assertEquals("M300-CONFIGURED-SN", api.lastCapabilityDroneSn)
+        assertEquals("M300-CONFIGURED-SN", api.lastMsdkDeviceState?.aircraftSn)
+        assertEquals("RC-M300", api.lastMsdkDeviceState?.gatewaySn)
+        assertEquals("M300-CONFIGURED-SN", poller.lastDroneSn)
+    }
+
+    @Test
     fun tickOnce_marksPreviousIdentityOfflineWhenAircraftIdentityChanges() = runTest {
         val api = RecordingDualStreamApi()
         val loop = AgentRuntimeLoop(

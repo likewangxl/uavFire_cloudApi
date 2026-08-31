@@ -24,6 +24,7 @@ class DjiSdkGatewayImplTest {
         assertTrue(gateway.initialize())
         assertTrue(gateway.isAircraftConnected())
         assertEquals(capability, gateway.loadCapability())
+        assertEquals("森林灭火 M300-01", gateway.loadAircraftName())
         assertEquals("MATRICE 4T", gateway.loadAircraftModel())
         assertEquals(DjiFlightLimit(heightLimitMeters = 120), gateway.loadFlightLimit())
         assertEquals(DjiDeviceIdentity("RC-001", "AIRCRAFT-001"), gateway.loadDeviceIdentity())
@@ -57,6 +58,8 @@ class DjiSdkGatewayImplTest {
         override suspend fun isAircraftConnected(): Boolean = connected
 
         override suspend fun loadCapability(): CameraCapability = capability
+
+        override suspend fun loadAircraftName(): String? = "森林灭火 M300-01"
 
         override suspend fun loadAircraftModel(): String? = "MATRICE 4T"
 

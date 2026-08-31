@@ -61,6 +61,7 @@ class DjiMsdkRuntimeAdapterTest {
             ),
             adapter.loadCapability(),
         )
+        assertEquals("森林灭火 M300-01", adapter.loadAircraftName())
         assertEquals("MATRICE 4T", adapter.loadAircraftModel())
         assertEquals(DjiFlightLimit(heightLimitMeters = 120), adapter.loadFlightLimit())
         assertEquals(DjiDeviceIdentity("RC-001", "AIRCRAFT-001"), adapter.loadDeviceIdentity())
@@ -87,6 +88,8 @@ class DjiMsdkRuntimeAdapterTest {
             visibleSupported = visibleSupported,
             thermalSupported = thermalSupported,
         )
+
+        override fun loadAircraftName(): String? = "森林灭火 M300-01"
 
         override fun loadAircraftModel(): String? = "MATRICE 4T"
 

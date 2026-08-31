@@ -7,6 +7,7 @@ data class DjiDeviceState(
     val identity: DjiDeviceIdentity? = null,
     val capability: CameraCapability? = null,
     val telemetry: DjiTelemetry? = null,
+    val aircraftName: String? = null,
     val aircraftModel: String? = null,
     val flightLimit: DjiFlightLimit = DjiFlightLimit(),
 )

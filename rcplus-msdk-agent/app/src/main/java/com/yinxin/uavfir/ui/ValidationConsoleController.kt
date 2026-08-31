@@ -91,11 +91,14 @@ class ValidationConsoleController(
             if (free == null || total == null || total <= 0L) {
                 return "任务空间\n读取中"
             }
-            return "任务空间\n${formatGb(free)} / ${formatGb(total)}"
+            return "任务空间\n可用 ${formatGb(free)} / 总计 ${formatGb(total)}"
         }
 
         private fun buildAircraftStatusText(deviceState: DjiDeviceState): String {
-            val model = normalizeAircraftModel(deviceState.aircraftModel)
+            val deviceName = resolveAircraftDisplayName(
+                aircraftName = deviceState.aircraftName,
+                aircraftModel = deviceState.aircraftModel,
+            )
             val status = when (deviceState.connectionState) {
                 AgentConnectionState.CAPABILITY_READY -> "已连接"
                 AgentConnectionState.SDK_READY -> "未连接"
@@ -105,18 +108,32 @@ class ValidationConsoleController(
                 AgentConnectionState.IDLE -> "未连接"
                 AgentConnectionState.ERROR -> "异常"
             }
-            return "当前飞行器\n$model    $status"
+            return "当前飞行器\n$deviceName    $status"
         }
 
-        private fun normalizeAircraftModel(model: String?): String {
-            val value = model?.trim().orEmpty()
+        private fun resolveAircraftDisplayName(
+            aircraftName: String?,
+            aircraftModel: String?,
+        ): String {
+            val name = aircraftName?.trim().orEmpty()
+            if (name.isNotBlank() && !isUnknownDeviceValue(name)) return name
+
+            val value = aircraftModel?.trim().orEmpty()
             return when {
-                value.isBlank() || value == "UNKNOWN" -> "MATRICE 4T"
+                isUnknownDeviceValue(value) -> "未获取设备名称"
+                value.equals("M300_RTK", ignoreCase = true) -> "DJI M300 RTK"
+                value.equals("M350_RTK", ignoreCase = true) -> "DJI M350 RTK"
                 value.contains("MATRICE_4T", ignoreCase = true) -> "MATRICE 4T"
-                value.contains("MATRICE_4_SERIES", ignoreCase = true) -> "MATRICE 4T"
+                value.contains("MATRICE_4_SERIES", ignoreCase = true) -> "DJI MATRICE 4 SERIES"
                 value.contains("Matrice 4T", ignoreCase = true) -> "MATRICE 4T"
-                else -> value
+                else -> value.replace('_', ' ')
             }
+        }
+
+        private fun isUnknownDeviceValue(value: String): Boolean {
+            return value.isBlank() ||
+                value.equals("UNKNOWN", ignoreCase = true) ||
+                value.equals("UNRECOGNIZED", ignoreCase = true)
         }
 
         private fun formatGb(bytes: Long): String {

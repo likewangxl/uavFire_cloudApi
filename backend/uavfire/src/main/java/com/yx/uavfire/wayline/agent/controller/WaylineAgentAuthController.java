@@ -23,7 +23,7 @@ import java.util.Map;
 @RequestMapping("${url.wayline-agent.prefix}${url.wayline-agent.version}/auth")
 public class WaylineAgentAuthController {
 
-    @Value("${wayline-agent.shared-secret:change-me}")
+    @Value("${wayline-agent.shared-secret:}")
     private String sharedSecret;
 
     @Value("${wayline-agent.token-ttl-seconds:86400}")

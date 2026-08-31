@@ -1,10 +1,10 @@
 # rcplus-msdk-agent
 
-`rcplus-msdk-agent/` 是面向 RC Plus 2 Android 端的 DJI MSDK v5 执行层子工程。它已经从早期骨架推进到真实 MSDK 初始化、runtime loop、后端状态上报、RTMP 推流、航线执行和 OSD 上报的 phase-1 实现。
+`rcplus-msdk-agent/` 是面向第一代 RC Plus Android 端的 DJI MSDK v5 执行层子工程。它已经从早期骨架推进到真实 MSDK 初始化、runtime loop、后端状态上报、RTMP 推流、航线执行和 OSD 上报的 phase-1 实现。
 
 ## 当前定位
 
-- RC Plus 2 上的 MSDK Agent，负责替代 Pilot 2 的部分数据面能力。
+- 第一代 RC Plus 上的 MSDK Agent，负责替代 Pilot 2 的部分数据面能力。
 - 向 backend 上报 DualStream runtime 状态、设备能力、心跳和命令执行结果。
 - 通过 MSDK `LiveStreamManager` 向 ZLMediaKit 推 RTMP：`live/{effectiveSn}-0`。
 - 通过 MQTT 模拟 Cloud SDK OSD/events topic，为 backend 提供遥测数据。
@@ -52,15 +52,19 @@ adb shell am start -n com.yinxin.uavfir/.MainActivity
 关键配置在 `gradle.properties`：
 
 ```text
-agentBackendBaseUrl=http://172.20.10.7:6789/
-agentMediaHost=172.20.10.7
+agentBackendBaseUrl=http://127.0.0.1:6789/
+agentMediaHost=127.0.0.1
 agentMediaRtmpPort=1935
 agentMediaStreamApp=live
-agentMqttBrokerUrl=tcp://172.20.10.7:1883
-agentAircraftSn=1581F7K3D249E00AM3Q3
-agentGatewaySn=9N9CMA500100B8
-agentFireOnnxEnabled=true
+agentMqttBrokerUrl=tcp://127.0.0.1:1883
+agentWaylineSharedSecret=
+agentAircraftSn=
+agentGatewaySn=
+agentFireOnnxEnabled=false
 ```
+
+`agentWaylineSharedSecret` 必须与后端环境变量 `WAYLINE_AGENT_SHARED_SECRET` 一致；两端默认均为空，
+未显式配置时 Agent 火情事件和航线控制鉴权保持不可用。
 
 `agentAircraftSn` 为空时会禁用 OSD/HMS reporters；非空时 `DjiLiveStreamController` 也会优先用该 SN 生成 ZLM stream id。
 
@@ -78,7 +82,8 @@ m300FireClosedLoopEnabled=false
 `68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271`。
 Agent 最多同时执行一次推理，只保留最新待处理帧；同类目标需在 6 秒内连续命中两帧才上报，
 同一任务 10 秒内去重。后端将结果保存为 `UNLOCATED`、`MANUAL_CONFIRM` 的待确认候选，
-不会据此自动抵近、测距或投放。需要快速回退时将 `agentFireOnnxEnabled=false` 后重新构建 APK。
+不会据此自动抵近、测距或投放。RC Plus 真机完成 RGBA、RTMP、ONNX 推理和 UXSDK 页面共存验收前，
+保持 `agentFireOnnxEnabled=false`；通过验收后再显式改为 `true` 并重新构建 APK。
 
 识别结果不会直接从推理协程发 HTTP：Agent 先生成不超过 64 字符的稳定 `event_id`，写入
 本地 SQLite `fire_event_outbox`，再由单独工作线程调用

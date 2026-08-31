@@ -23,6 +23,8 @@ interface MsdkKeyValueClient {
 
     fun loadCapability(): CameraCapability
 
+    fun loadAircraftName(): String? = null
+
     fun loadAircraftModel(): String?
 
     fun loadFlightLimit(): DjiFlightLimit
@@ -100,17 +102,21 @@ class RealMsdkKeyValueClient : MsdkKeyValueClient {
             ?.takeIf { it.isNotBlank() }
     }
 
+    override fun loadAircraftName(): String? {
+        return runCatching {
+            FlightControllerKey.KeyAircraftName.create().get("")
+        }.getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+    }
+
     private fun loadControllerModel(): String? {
         val value = runCatching {
             KeyManager.getInstance().getValue(
                 KeyTools.createKey(RemoteControllerKey.KeyRemoteControllerType),
             )?.toString()
         }.getOrNull()?.uppercase() ?: return null
-        return when (value) {
-            "DJI_RC_PLUS" -> "RC_PLUS"
-            "DJI_RC_PLUS_2" -> "RC_PLUS_2"
-            else -> value.takeIf { it != "NONE" && it != "UNKNOWN" }
-        }
+        return normalizeControllerModel(value)
     }
 
     private fun normalizeAircraftModel(value: String?): String? = when (
@@ -239,5 +245,15 @@ class RealMsdkKeyValueClient : MsdkKeyValueClient {
     companion object {
         private const val MSDK_IDENTITY_ACTION_TIMEOUT_MS = 1_500L
         private const val UNKNOWN_AIRCRAFT_PREFIX = "UNKNOWN-AIRCRAFT-"
+    }
+}
+
+internal fun normalizeControllerModel(value: String?): String? {
+    return when (val normalized = value?.uppercase()) {
+        "M300_RTK_RC", "SMART_CONTROLLER" -> "SMART_CONTROLLER_ENTERPRISE"
+        "DJI_RC_PLUS" -> "RC_PLUS"
+        "DJI_RC_PLUS_2" -> "RC_PLUS_2"
+        "NONE", "UNKNOWN", null -> null
+        else -> normalized
     }
 }

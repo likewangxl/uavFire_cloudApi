@@ -49,7 +49,7 @@ class OsdReporter(
     /**
      * Start periodic OSD push.
      *
-     * @param aircraftSn SN of the paired DJI aircraft (e.g. 1581F7K3D249E00AM3Q3).
+     * @param aircraftSn SN of the paired DJI aircraft.
      *   Backend subscribes to `thing/product/{aircraftSn}/osd`, so this must
      *   match the SN the workspace has bound. If unknown at boot time the
      *   caller should re-invoke [start] once it becomes available.

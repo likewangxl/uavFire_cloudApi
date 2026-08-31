@@ -9,6 +9,8 @@ class DjiSdkGatewayImpl(
 
     override suspend fun loadCapability(): CameraCapability = runtimeAdapter.loadCapability()
 
+    override suspend fun loadAircraftName(): String? = runtimeAdapter.loadAircraftName()
+
     override suspend fun loadAircraftModel(): String? = runtimeAdapter.loadAircraftModel()
 
     override suspend fun loadFlightLimit(): DjiFlightLimit = runtimeAdapter.loadFlightLimit()
@@ -25,6 +27,8 @@ private class StubDjiRuntimeAdapter : DjiRuntimeAdapter {
         visibleSupported = false,
         thermalSupported = false,
     )
+
+    override suspend fun loadAircraftName(): String? = null
 
     override suspend fun loadAircraftModel(): String? = null
 

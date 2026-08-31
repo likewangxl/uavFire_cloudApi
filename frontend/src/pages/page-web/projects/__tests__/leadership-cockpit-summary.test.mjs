@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildCockpitSummary,
+  isConnectedDeliveryTarget,
+  isConnectedMsdkDevice,
   sortFireEvents
 } from '../leadership-cockpit-summary.mjs'
 
@@ -49,11 +51,11 @@ test('builds cockpit metrics from connected backend data sources', () => {
   assert.equal(summary.metrics.find(item => item.key === 'highestFireLevel').value, 'HIGH')
   assert.equal(summary.metrics.find(item => item.key === 'aiEvents').note, '2 条风险记录')
   assert.equal(summary.metrics.find(item => item.key === 'liveOnline').value, '2')
-  assert.equal(summary.metrics.find(item => item.key === 'aircraftOnline').value, '2/3')
+  assert.equal(summary.metrics.find(item => item.key === 'aircraftOnline').value, '2/2')
   assert.equal(summary.metrics.find(item => item.key === 'deliveryTasks').value, '1')
   assert.equal(summary.metrics.find(item => item.key === 'minBattery').value, '46%')
   assert.equal(summary.metrics.find(item => item.key === 'geoQuality').note, '1/2 可生成航线')
-  assert.equal(summary.aircraftRows.length, 3)
+  assert.equal(summary.aircraftRows.length, 2)
   assert.equal(summary.taskRows[0].phase, 'DELIVERING')
 })
 
@@ -206,10 +208,32 @@ test('builds rich hover details for highlighted cockpit summary cards', () => {
   assert.match(aiDetails.rows[0].detail, /融合 92%/)
 
   const aircraftDetails = summary.metrics.find(item => item.key === 'aircraftOnline').detailPopover
-  assert.equal(aircraftDetails.stats.find(item => item.key === 'online').value, '1/2')
+  assert.equal(aircraftDetails.stats.find(item => item.key === 'online').value, '1/1')
   assert.match(aircraftDetails.rows.map(item => item.title).join(' / '), /DJI Matrice 4T/)
-  assert.match(aircraftDetails.rows.map(item => item.title).join(' / '), /DJI Flycart100/)
+  assert.doesNotMatch(aircraftDetails.rows.map(item => item.title).join(' / '), /DJI Flycart100/)
   assert.doesNotMatch(JSON.stringify(aircraftDetails), /0-122-0/)
+})
+
+test('shows only explicitly connected real devices in cockpit data', () => {
+  const summary = buildCockpitSummary({
+    msdkDevices: [
+      { aircraftSn: 'M300-ONLINE', online: true, batteryPercent: 63 },
+      { aircraftSn: 'M300-OFFLINE', online: false, batteryPercent: 90 }
+    ],
+    deliveryTargets: [
+      { deviceSn: 'FC100_REAL_ONLINE', online: true, streamStatus: 'running', batteryPercent: 80 },
+      { deviceSn: 'FC100_REAL_OFFLINE', online: false, streamStatus: 'offline', batteryPercent: 95 },
+      { deviceSn: 'FC100_MOCK_001', online: true, streamStatus: 'running', batteryPercent: 85 }
+    ]
+  })
+
+  assert.equal(summary.metrics.find(item => item.key === 'aircraftOnline').value, '2/2')
+  assert.equal(summary.metrics.find(item => item.key === 'aircraftOnline').note, '监测 1 / 投放 1')
+  assert.equal(summary.metrics.find(item => item.key === 'liveOnline').value, '1')
+  assert.equal(summary.metrics.find(item => item.key === 'minBattery').value, '63%')
+  assert.deepEqual(summary.aircraftRows.map(item => item.sn), ['M300-ONLINE', 'FC100_REAL_ONLINE'])
+  assert.equal(isConnectedMsdkDevice({ aircraftSn: 'M300-OFFLINE', online: false }), false)
+  assert.equal(isConnectedDeliveryTarget({ deviceSn: 'FC100_MOCK_002', online: true }), false)
 })
 
 test('keeps backend interface urls out of highlighted summary popovers', () => {

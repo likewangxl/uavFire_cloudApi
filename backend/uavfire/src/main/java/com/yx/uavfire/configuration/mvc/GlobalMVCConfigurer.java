@@ -40,6 +40,8 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         String waylineAgentBase = "/" + waylineAgentPrefix + waylineAgentVersion;
+        String agentFireEventPath = "/" + managePrefix + manageVersion
+                + "/dual-stream/tasks/*/agent-fire-events";
 
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/token/refresh");
@@ -47,7 +49,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/demo-login");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/events");
-        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/agent-fire-events");
+        EXCLUDE_PATHS.add(agentFireEventPath);
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/fire-evidence/**");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/latest-visible-roi");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/state");
@@ -67,7 +69,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         registry.addInterceptor(waylineAgentAuthInterceptor)
                 .addPathPatterns(
                         waylineAgentBase + "/agents/**",
-                        "/" + managePrefix + manageVersion + "/dual-stream/tasks/*/agent-fire-events",
+                        agentFireEventPath,
                         "/" + managePrefix + manageVersion + "/dual-stream/agents/*/fire-evidence");
     }
 
