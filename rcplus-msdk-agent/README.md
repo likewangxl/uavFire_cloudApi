@@ -9,6 +9,7 @@
 - 通过 MSDK `LiveStreamManager` 向 ZLMediaKit 推 RTMP：`live/{effectiveSn}-0`。
 - 通过 MQTT 模拟 Cloud SDK OSD/events topic，为 backend 提供遥测数据。
 - 接收后端 wayline-agent 命令，下载 KMZ 并通过 MSDK WaypointMission API 执行。
+- 直接消费 MSDK RGBA 可见光帧，在 RC Plus 端通过 ONNX Runtime 执行 `fire/smoke` 识别。
 
 最新迁移范围见 `../docs/MSDK_MIGRATION_PLAN.md`。
 
@@ -58,6 +59,7 @@ agentMediaStreamApp=live
 agentMqttBrokerUrl=tcp://172.20.10.7:1883
 agentAircraftSn=1581F7K3D249E00AM3Q3
 agentGatewaySn=9N9CMA500100B8
+agentFireOnnxEnabled=true
 ```
 
 `agentAircraftSn` 为空时会禁用 OSD/HMS reporters；非空时 `DjiLiveStreamController` 也会优先用该 SN 生成 ZLM stream id。
@@ -71,11 +73,29 @@ agentPayloadPositionIndex=-1
 m300FireClosedLoopEnabled=false
 ```
 
+端侧模型位于 `app/src/main/assets/fire-detection/best.onnx`，固定输入为
+`1×3×416×416`，输出为 `1×6×3549`，模型 SHA-256 为
+`68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271`。
+Agent 最多同时执行一次推理，只保留最新待处理帧；同类目标需在 6 秒内连续命中两帧才上报，
+同一任务 10 秒内去重。后端将结果保存为 `UNLOCATED`、`MANUAL_CONFIRM` 的待确认候选，
+不会据此自动抵近、测距或投放。需要快速回退时将 `agentFireOnnxEnabled=false` 后重新构建 APK。
+
+识别结果不会直接从推理协程发 HTTP：Agent 先生成不超过 64 字符的稳定 `event_id`，写入
+本地 SQLite `fire_event_outbox`，再由单独工作线程调用
+`POST /manage/api/v1/dual-stream/tasks/{taskId}/agent-fire-events`。网络失败按
+`1/2/5/10/30/60` 秒退避并在 60 秒封顶；应用或遥控器重启后继续发送。后端只有在
+`fire_event` 事务完成后才返回 `accepted`，相同 `event_id` 返回 `duplicate`，两者都会让
+Agent 将本地记录标记为 `DELIVERED`。Outbox 待发送量、最老记录时间和最近失败原因随心跳上报。
+
+模型元数据声明了 Ultralytics AGPL-3.0。对外分发或商用部署前应确认训练模型及
+Ultralytics 运行链的许可证是否满足项目交付要求。
+
 ## 已实现模块
 
 - `api/`：backend Retrofit client、runtime loop、command poll/ack、status/capability 上报。
 - `sdk/`：MSDK runtime adapter、设备会话、能力读取、OSD/HMS reporter。
 - `stream/`：visible-first 绑定、RTMP 推流、focus-visible/focus-thermal 命令。
+- `firedetection/`：RGBA letterbox、ONNX Runtime 推理、YOLO 解码/NMS、连续帧确认、SQLite Outbox 和可靠上报。
 - `session/`：DualStream session state machine。
 - `wayline/`：wayline command router、KMZ downloader、MSDK waypoint executor、MQTT event publisher、probe。
 - `ui/`：RC Plus 本地验证控制台。
@@ -85,4 +105,4 @@ m300FireClosedLoopEnabled=false
 - 不承诺 M4T 能提供 visible + thermal 两路独立 raw stream；当前真机结论是不暴露两路独立 ComponentIndex。
 - 不承诺 thermal 第二路已经出画；当前应按降级或 composite slicing 方案继续。
 - 不承诺 OSD/HMS payload 字段已完成生产级验证；`mode_code` 和 `height` 语义仍需真机校准。
-- 不承诺生产级任务队列、鉴权、重连和监控。
+- 火情事件已具备本地持久化、幂等和重试；wayline 命令等其他链路仍不承诺生产级队列、鉴权和完整监控。

@@ -16,4 +16,10 @@ public class DualStreamAgentHeartbeatDTO {
     private String connectionState;
 
     private String sessionState;
+
+    private Integer fireEventOutboxPendingCount;
+
+    private Long fireEventOutboxOldestPendingAt;
+
+    private String fireEventOutboxLastError;
 }

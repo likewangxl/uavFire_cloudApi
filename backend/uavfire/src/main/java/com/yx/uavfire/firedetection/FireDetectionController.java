@@ -28,14 +28,10 @@ public class FireDetectionController {
         if (!StringUtils.hasText(droneSn)) {
             return HttpResultResponse.error("drone_sn required");
         }
-        // MSDK Migration Phase 1 (docs/MSDK_MIGRATION_PLAN.md):
-        // Default URL points at the MSDK Agent's RTMP push (ZLM stream-id
-        // "{drone_sn}-0", matching DjiLiveStreamController). When caller
-        // explicitly supplies a Cloud SDK video_id we honour it — this is
-        // the rollback rail for phase 1, removed in phase 2.
+        // video_id 仅为旧客户端兼容保留；Agent 直接消费 MSDK 可见光帧。
         String videoId = body.get("video_id");
         boolean ok = fireDetectionService.startForDrone(droneSn, videoId);
-        return ok ? HttpResultResponse.success() : HttpResultResponse.error("ai-service start failed");
+        return ok ? HttpResultResponse.success() : HttpResultResponse.error("agent fire inference start failed");
     }
 
     @GetMapping("/status")
@@ -56,6 +52,6 @@ public class FireDetectionController {
             return HttpResultResponse.error("drone_sn required");
         }
         boolean ok = fireDetectionService.stopForDrone(droneSn);
-        return ok ? HttpResultResponse.success() : HttpResultResponse.error("ai-service stop failed");
+        return ok ? HttpResultResponse.success() : HttpResultResponse.error("agent fire inference stop failed");
     }
 }

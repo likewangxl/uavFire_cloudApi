@@ -4,6 +4,7 @@ import com.yinxin.uavfir.api.AgentReporter
 import com.yinxin.uavfir.api.FireConfirmationRequest
 import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.api.VisibleFireLaserLocator
+import com.yinxin.uavfir.firedetection.VisibleAiControl
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiDeviceState
 import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 class DualStreamSessionManager(
     private val streamProvider: StreamProvider,
     visibleFireLaserLocator: VisibleFireLaserLocator? = null,
+    private val visibleAiControl: VisibleAiControl? = null,
     private val fireConfirmationRunner: (suspend (FireConfirmationRequest) -> FireConfirmationResult)? = null,
 ) : DualStreamCommandExecutor {
     @Volatile
@@ -338,6 +340,30 @@ class DualStreamSessionManager(
             thermalMonitoringEnabled = false
             thermalMonitoringPausedByVisibleFocus = false
             CommandExecutionResult(status = "applied", message = "thermal-monitoring-disabled")
+        }
+
+        "visible-ai-on" -> {
+            val result = visibleAiControl?.start(droneSn)
+            if (result == null) {
+                CommandExecutionResult(status = "failed", message = "visible-ai-control-not-wired")
+            } else {
+                CommandExecutionResult(
+                    status = if (result.applied) "applied" else "failed",
+                    message = result.message,
+                )
+            }
+        }
+
+        "visible-ai-off" -> {
+            val result = visibleAiControl?.stop(droneSn)
+            if (result == null) {
+                CommandExecutionResult(status = "failed", message = "visible-ai-control-not-wired")
+            } else {
+                CommandExecutionResult(
+                    status = if (result.applied) "applied" else "failed",
+                    message = result.message,
+                )
+            }
         }
 
         "focus-visible" -> runCatching {

@@ -1,6 +1,7 @@
 package com.yx.uavfire.manage.service;
 
 import com.yx.uavfire.manage.model.dto.DualStreamAgentCapabilityDTO;
+import com.yx.uavfire.manage.model.dto.AgentFireEventReceiptDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentHeartbeatDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentStatusDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
@@ -29,6 +30,7 @@ import java.util.Deque;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -87,6 +89,8 @@ class DualStreamServiceImplTest {
         assertTrue(service.issueCommand("DRONE-FIRE-CONFIRM", "fire-confirmation-mission").getUrgent());
         assertTrue(service.issueCommand("DRONE-VISIBLE-HOLD", "visible-fire-hold").getUrgent());
         assertTrue(service.issueCommand("DRONE-VISIBLE-LASER", "visible-fire-laser-measure").getUrgent());
+        assertTrue(service.issueCommand("DRONE-VISIBLE-AI-ON", "visible-ai-on").getUrgent());
+        assertTrue(service.issueCommand("DRONE-VISIBLE-AI-OFF", "visible-ai-off").getUrgent());
         assertNotEquals(Boolean.TRUE, service.issueCommand("DRONE-START", "start").getUrgent());
     }
 
@@ -230,7 +234,10 @@ class DualStreamServiceImplTest {
         service.acceptHeartbeat("DRONE-001", new DualStreamAgentHeartbeatDTO()
                 .setDroneSn("DRONE-001")
                 .setConnectionState("STREAMING")
-                .setSessionState("RUNNING"));
+                .setSessionState("RUNNING")
+                .setFireEventOutboxPendingCount(3)
+                .setFireEventOutboxOldestPendingAt(1788141600000L)
+                .setFireEventOutboxLastError("network-down"));
 
         DualStreamCommandDTO command = service.issueCommand("DRONE-001", "focus-visible");
         service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
@@ -249,6 +256,34 @@ class DualStreamServiceImplTest {
     }
 
     @Test
+    void visibleAiAck_updatesDetectionActivityFromAgentResult() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireDetectionActivityTracker tracker = new FireDetectionActivityTracker();
+        ReflectionTestUtils.setField(service, "fireDetectionActivityTracker", tracker);
+
+        DualStreamCommandDTO failed = service.issueCommand("DRONE-001", "visible-ai-on");
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(failed.getCommandId())
+                .setStatus("failed")
+                .setMessage("agent-fire-onnx-prepare-failed"));
+        assertFalse(tracker.isActive("DRONE-001"));
+
+        DualStreamCommandDTO started = service.issueCommand("DRONE-001", "visible-ai-on");
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(started.getCommandId())
+                .setStatus("applied")
+                .setMessage("agent-fire-onnx-enabled"));
+        assertTrue(tracker.isActive("DRONE-001"));
+
+        DualStreamCommandDTO stopped = service.issueCommand("DRONE-001", "visible-ai-off");
+        service.acknowledgeCommand("DRONE-001", new DualStreamCommandAckDTO()
+                .setCommandId(stopped.getCommandId())
+                .setStatus("applied")
+                .setMessage("agent-fire-onnx-disabled"));
+        assertFalse(tracker.isActive("DRONE-001"));
+    }
+
+    @Test
     void mergeAgentState_buildsLiveGroupSnapshot() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         ReflectionTestUtils.setField(service, "webrtcPlaybackHost", "172.20.10.7");
@@ -257,7 +292,10 @@ class DualStreamServiceImplTest {
         service.acceptHeartbeat("DRONE-001", new DualStreamAgentHeartbeatDTO()
                 .setDroneSn("DRONE-001")
                 .setConnectionState("STREAMING")
-                .setSessionState("RUNNING"));
+                .setSessionState("RUNNING")
+                .setFireEventOutboxPendingCount(3)
+                .setFireEventOutboxOldestPendingAt(1788141600000L)
+                .setFireEventOutboxLastError("network-down"));
         service.acceptStatus("DRONE-001", new DualStreamAgentStatusDTO()
                 .setDroneSn("DRONE-001")
                 .setLiveStatus("ONLINE")
@@ -290,6 +328,9 @@ class DualStreamServiceImplTest {
         assertNull(group.getThermalPlayUrl());
         assertTrue(group.getVisibleSupported());
         assertTrue(group.getThermalSupported());
+        assertEquals(3, group.getFireEventOutboxPendingCount());
+        assertEquals(1788141600000L, group.getFireEventOutboxOldestPendingAt());
+        assertEquals("network-down", group.getFireEventOutboxLastError());
     }
 
     @Test
@@ -2511,5 +2552,138 @@ class DualStreamServiceImplTest {
                 .setFusionScore(0.0));
 
         assertNull(service.pollCommand("DRONE-001"));
+    }
+
+    @Test
+    void agentVisibleOnnxEvent_createsManualPendingCandidateWithModelEvidence() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        service.acceptEvent("fire-DRONE-001", new DualStreamEventDTO()
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1788141600000L)
+                .setAnalysisChannel("agent-visible-onnx")
+                .setVisibleScore(0.82)
+                .setFusionScore(0.82)
+                .setRiskLevel("HIGH")
+                .setVisibleClass("fire")
+                .setModelVersion("best-20260808")
+                .setModelSha256("68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271")
+                .setInferenceMs(38L)
+                .setVisibleRoi(Map.of("x", 0.1, "y", 0.2, "width", 0.3, "height", 0.4)));
+
+        ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
+        verify(fireEventService).create(captor.capture());
+        FireEventCreateParam created = captor.getValue();
+        assertEquals("DJI_AGENT", created.getSource());
+        assertEquals("DRONE-001", created.getDeviceSn());
+        assertEquals("MANUAL_CONFIRM", created.getReleasePolicy());
+        assertEquals("OFFICIAL_HOOK_MANUAL", created.getReleaseExecutionMode());
+        assertEquals("UNLOCATED", created.getGeoQuality());
+        assertEquals(0, created.getConfidence().compareTo(new java.math.BigDecimal("0.82")));
+        assertEquals(0.3, created.getVisibleRoi().get("width"));
+    }
+
+    @Test
+    void agentVisibleOnnxEvent_rejectsInvalidRoiAndLowConfidence() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        service.acceptEvent("fire-DRONE-001", new DualStreamEventDTO()
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1788141600000L)
+                .setAnalysisChannel("agent-visible-onnx")
+                .setVisibleScore(0.10)
+                .setFusionScore(0.10)
+                .setRiskLevel("LOW")
+                .setVisibleRoi(Map.of("x", 0.9, "y", 0.9, "width", 0.3, "height", 0.3)));
+
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
+    }
+
+    @Test
+    void authoritativeAgentFireEvent_returnsAcceptedThenDuplicateForStableEventId() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+        String eventId = "agent-0123456789abcdef0123456789abcdef0123456789abcdef";
+        when(fireEventService.create(any(FireEventCreateParam.class)))
+                .thenReturn(new FireEventCreateResponse(
+                        1L, eventId, false, null, "CANDIDATE",
+                        true, false, true, "CREATED"))
+                .thenReturn(new FireEventCreateResponse(
+                        1L, eventId, false, null, "CANDIDATE",
+                        false, false, false, "EXISTING_EVENT_ID"));
+        DualStreamEventDTO event = new DualStreamEventDTO()
+                .setEventId(eventId)
+                .setTaskId("fire-DRONE-001")
+                .setDroneSn("DRONE-001")
+                .setSourceTs(1788141600000L)
+                .setAnalysisChannel("agent-visible-onnx")
+                .setVisibleScore(0.82)
+                .setThermalScore(0.0)
+                .setFusionScore(0.82)
+                .setRiskLevel("HIGH")
+                .setVisibleClass("fire")
+                .setModelVersion("best-20260808")
+                .setVisibleRoi(Map.of("x", 0.1, "y", 0.2, "width", 0.3, "height", 0.4));
+
+        AgentFireEventReceiptDTO accepted = service.acceptAgentFireEvent("fire-DRONE-001", event);
+        AgentFireEventReceiptDTO duplicate = service.acceptAgentFireEvent("fire-DRONE-001", event);
+
+        assertEquals(eventId, accepted.getEventId());
+        assertEquals("accepted", accepted.getStatus());
+        assertEquals(eventId, duplicate.getEventId());
+        assertEquals("duplicate", duplicate.getStatus());
+        assertEquals(1, service.listEvents("fire-DRONE-001").size());
+        ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
+        verify(fireEventService, org.mockito.Mockito.times(2)).create(captor.capture());
+        assertTrue(captor.getAllValues().stream().allMatch(param -> eventId.equals(param.getEventId())));
+    }
+
+    @Test
+    void authoritativeAgentFireEvent_rejectsInvalidEventIdWithoutDatabaseWrite() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        AgentFireEventReceiptDTO receipt = service.acceptAgentFireEvent(
+                "fire-DRONE-001",
+                new DualStreamEventDTO()
+                        .setEventId("contains spaces")
+                        .setTaskId("fire-DRONE-001")
+                        .setDroneSn("DRONE-001")
+                        .setAnalysisChannel("agent-visible-onnx"));
+
+        assertEquals("rejected", receipt.getStatus());
+        assertEquals("invalid-event-id", receipt.getReason());
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
+    }
+
+    @Test
+    void authoritativeAgentFireEvent_doesNotAcceptMissingDatabaseReceipt() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+        String eventId = "agent-abcdef0123456789abcdef0123456789abcdef0123456789";
+
+        AgentFireEventReceiptDTO receipt = service.acceptAgentFireEvent(
+                "fire-DRONE-001",
+                new DualStreamEventDTO()
+                        .setEventId(eventId)
+                        .setTaskId("fire-DRONE-001")
+                        .setDroneSn("DRONE-001")
+                        .setSourceTs(1788141600000L)
+                        .setAnalysisChannel("agent-visible-onnx")
+                        .setVisibleScore(0.82)
+                        .setFusionScore(0.82)
+                        .setRiskLevel("HIGH")
+                        .setVisibleRoi(Map.of("x", 0.1, "y", 0.2, "width", 0.3, "height", 0.4)));
+
+        assertEquals("retry", receipt.getStatus());
+        assertEquals("fire-event-receipt-missing", receipt.getReason());
+        assertTrue(service.listEvents("fire-DRONE-001").isEmpty());
     }
 }

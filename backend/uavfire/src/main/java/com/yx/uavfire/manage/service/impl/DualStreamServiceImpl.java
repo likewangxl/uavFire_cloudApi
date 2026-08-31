@@ -5,6 +5,7 @@ import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 import com.yx.uavfire.fc100.event.model.param.FireLaserLocationParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentCapabilityDTO;
+import com.yx.uavfire.manage.model.dto.AgentFireEventReceiptDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentHeartbeatDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentStatusDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
@@ -54,6 +55,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private static final double THERMAL_MEDIUM_TEMPERATURE_C = 60.0;
     private static final double THERMAL_HIGH_TEMPERATURE_C = 80.0;
     private static final long CONFIRMED_FIRE_EVENT_DEBOUNCE_MS = 60_000L;
+    private static final long AGENT_VISIBLE_EVENT_DEBOUNCE_MS = 10_000L;
     // 切换期间 group 报 DUAL 模式会骗过 shouldIssueFocus 去重，每帧补发 focus-visible
     // 会让 agent 反复 restartLiveStream；确认流程内按时间节流。
     private static final long VISIBLE_FOCUS_REISSUE_MIN_INTERVAL_MS = 10_000L;
@@ -71,12 +73,18 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private static final String REVIEW_STATUS_VISIBLE_CONFIRMED = "VISIBLE_CONFIRMED";
     private static final String REVIEW_STATUS_VISIBLE_REJECTED = "VISIBLE_REJECTED";
     private static final String REVIEW_STATUS_VISIBLE_SKIPPED_THERMAL_FIRST = "VISIBLE_SKIPPED_THERMAL_FIRST";
+    private static final String AGENT_EVENT_ACCEPTED = "accepted";
+    private static final String AGENT_EVENT_DUPLICATE = "duplicate";
+    private static final String AGENT_EVENT_REJECTED = "rejected";
+    private static final String AGENT_EVENT_RETRY = "retry";
 
     private static final String GROUP_KEY_PREFIX = "dual-stream:group:";
     private static final String TASK_EVENTS_KEY_PREFIX = "dual-stream:task-events:";
     private static final String DEFAULT_VISIBLE_STREAM_SUFFIX = "-0";
     private static final List<String> URGENT_ACTIONS = List.of(
             "thermal-monitor-on",
+            "visible-ai-on",
+            "visible-ai-off",
             "focus-thermal",
             "focus-visible",
             "measure-thermal-region",
@@ -91,6 +99,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
     private final Map<String, Deque<DualStreamCommandDTO>> commandQueueByDrone = new ConcurrentHashMap<>();
     private final Map<String, DualStreamEventDTO> visibleTriggerByTask = new ConcurrentHashMap<>();
     private final Map<String, Long> confirmedFireEventByTask = new ConcurrentHashMap<>();
+    private final Map<String, Long> agentVisibleFireEventByTask = new ConcurrentHashMap<>();
     private final Map<String, Long> lastThermalMeasurementCompletedAtByDrone = new ConcurrentHashMap<>();
     private final Map<String, Long> lastVisibleFocusIssuedAtByDrone = new ConcurrentHashMap<>();
     private final Map<String, DualStreamEventDTO> confirmedThermalEventByTask = new ConcurrentHashMap<>();
@@ -161,6 +170,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
         mergeGroup(resolvedDroneSn, group -> {
             group.setConnectionState(heartbeat.getConnectionState());
             group.setSessionState(heartbeat.getSessionState());
+            group.setFireEventOutboxPendingCount(heartbeat.getFireEventOutboxPendingCount());
+            group.setFireEventOutboxOldestPendingAt(heartbeat.getFireEventOutboxOldestPendingAt());
+            group.setFireEventOutboxLastError(heartbeat.getFireEventOutboxLastError());
         });
     }
 
@@ -221,33 +233,83 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     @Override
     public void acceptEvent(String taskId, DualStreamEventDTO event) {
+        acceptEventInternal(taskId, event, null, false);
+    }
+
+    @Override
+    public AgentFireEventReceiptDTO acceptAgentFireEvent(String taskId, DualStreamEventDTO event) {
+        String eventId = event == null ? null : event.getEventId();
+        if (!StringUtils.hasText(taskId)) {
+            return agentReceipt(eventId, AGENT_EVENT_REJECTED, "task-id-required");
+        }
+        if (event == null) {
+            return agentReceipt(eventId, AGENT_EVENT_REJECTED, "event-required");
+        }
+        if (!isValidAgentEventId(eventId)) {
+            return agentReceipt(eventId, AGENT_EVENT_REJECTED, "invalid-event-id");
+        }
+        if (StringUtils.hasText(event.getTaskId()) && !taskId.equals(event.getTaskId())) {
+            return agentReceipt(eventId, AGENT_EVENT_REJECTED, "task-id-mismatch");
+        }
+        if (!"agent-visible-onnx".equals(normalize(event.getAnalysisChannel()))) {
+            return agentReceipt(eventId, AGENT_EVENT_REJECTED, "invalid-analysis-channel");
+        }
+        AtomicReference<AgentFireEventReceiptDTO> receipt = new AtomicReference<>();
+        acceptEventInternal(taskId, event, receipt, true);
+        AgentFireEventReceiptDTO result = receipt.get();
+        return result != null
+                ? result
+                : agentReceipt(eventId, AGENT_EVENT_RETRY, "business-receipt-missing");
+    }
+
+    private void acceptEventInternal(
+            String taskId,
+            DualStreamEventDTO event,
+            AtomicReference<AgentFireEventReceiptDTO> receipt,
+            boolean authoritativeAgentEvent) {
         if (!StringUtils.hasText(taskId) || event == null) {
             return;
         }
-        recordLatestVisibleRoi(taskId, event);
+        if (!authoritativeAgentEvent) {
+            recordLatestVisibleRoi(taskId, event);
+        }
         taskEvents.compute(taskId, (key, existing) -> {
             List<DualStreamEventDTO> events = existing != null ? copyEvents(existing) : restoreEventsFromRedis(taskId);
             if (events == null) {
                 events = new CopyOnWriteArrayList<>();
             }
             expireTimedOutThermalMeasurements(taskId, events);
-            DualStreamEventDTO reviewedEvent = applySingleStreamReview(copyEvent(event).setTaskId(taskId), events);
-            events.add(reviewedEvent);
-            log.info(
-                    "dual-stream event accepted task={} drone={} ts={} channel={} visible={} thermal={} fusion={} risk={} review={}",
-                    taskId,
-                    reviewedEvent.getDroneSn(),
-                    reviewedEvent.getSourceTs(),
-                    reviewedEvent.getAnalysisChannel(),
-                    reviewedEvent.getVisibleScore(),
-                    reviewedEvent.getThermalScore(),
-                    reviewedEvent.getFusionScore(),
-                    reviewedEvent.getRiskLevel(),
-                    reviewedEvent.getReviewStatus());
-            persistEvents(taskId, events);
+            DualStreamEventDTO reviewedEvent = applySingleStreamReview(
+                    copyEvent(event).setTaskId(taskId), events, receipt);
+            AgentFireEventReceiptDTO businessReceipt = receipt == null ? null : receipt.get();
+            boolean accepted = !authoritativeAgentEvent
+                    || (businessReceipt != null && AGENT_EVENT_ACCEPTED.equals(businessReceipt.getStatus()));
+            if (accepted) {
+                events.add(reviewedEvent);
+                log.info(
+                        "dual-stream event accepted task={} eventId={} drone={} ts={} channel={} visible={} thermal={} fusion={} risk={} review={}",
+                        taskId,
+                        reviewedEvent.getEventId(),
+                        reviewedEvent.getDroneSn(),
+                        reviewedEvent.getSourceTs(),
+                        reviewedEvent.getAnalysisChannel(),
+                        reviewedEvent.getVisibleScore(),
+                        reviewedEvent.getThermalScore(),
+                        reviewedEvent.getFusionScore(),
+                        reviewedEvent.getRiskLevel(),
+                        reviewedEvent.getReviewStatus());
+                persistEvents(taskId, events);
+            }
             return events;
         });
-        dispatchLaserMeasureIfReady(taskId);
+        AgentFireEventReceiptDTO businessReceipt = receipt == null ? null : receipt.get();
+        boolean accepted = businessReceipt != null && AGENT_EVENT_ACCEPTED.equals(businessReceipt.getStatus());
+        if (authoritativeAgentEvent && accepted) {
+            recordLatestVisibleRoi(taskId, event);
+        }
+        if (!authoritativeAgentEvent || accepted) {
+            dispatchLaserMeasureIfReady(taskId);
+        }
     }
 
     @Override
@@ -403,6 +465,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
                     .setLastCommandStatus(existing.getStatus()));
             return existing;
         });
+        handleVisibleAiAck(matchedCommand.get(), ack);
         handleThermalMeasurementAck(matchedCommand.get(), ack);
         handleVisibleLaserAck(matchedCommand.get(), ack);
         if (matchedCommand.get() != null && isTerminalCommandStatus(ack.getStatus())) {
@@ -756,11 +819,15 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setLastCommandStatus(group.getLastCommandStatus())
                 .setVisibleSupported(group.getVisibleSupported())
                 .setThermalSupported(group.getThermalSupported())
-                .setThermalCenterTemperatureC(group.getThermalCenterTemperatureC());
+                .setThermalCenterTemperatureC(group.getThermalCenterTemperatureC())
+                .setFireEventOutboxPendingCount(group.getFireEventOutboxPendingCount())
+                .setFireEventOutboxOldestPendingAt(group.getFireEventOutboxOldestPendingAt())
+                .setFireEventOutboxLastError(group.getFireEventOutboxLastError());
     }
 
     private DualStreamEventDTO copyEvent(DualStreamEventDTO event) {
         return new DualStreamEventDTO()
+                .setEventId(event.getEventId())
                 .setTaskId(event.getTaskId())
                 .setDroneSn(event.getDroneSn())
                 .setSourceTs(event.getSourceTs())
@@ -776,6 +843,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setThermalTemperature(event.getThermalTemperature())
                 .setThermalMeasureRoi(event.getThermalMeasureRoi())
                 .setVisibleRoi(event.getVisibleRoi())
+                .setVisibleClass(event.getVisibleClass())
+                .setModelVersion(event.getModelVersion())
+                .setModelSha256(event.getModelSha256())
+                .setInferenceMs(event.getInferenceMs())
                 .setThermalMeasurements(event.getThermalMeasurements())
                 .setGeoSnapshot(event.getGeoSnapshot())
                 .setFireLat(event.getFireLat())
@@ -788,7 +859,8 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     private void recordLatestVisibleRoi(String taskId, DualStreamEventDTO event) {
         if (event.getSourceTs() == null
-                || !"visible".equals(normalize(event.getAnalysisChannel()))
+                || !("visible".equals(normalize(event.getAnalysisChannel()))
+                    || "agent-visible-onnx".equals(normalize(event.getAnalysisChannel())))
                 || !isValidVisibleRoi(event.getVisibleRoi())) {
             return;
         }
@@ -883,6 +955,22 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 ack.getSourceTs() != null ? ack.getSourceTs() : System.currentTimeMillis());
     }
 
+    private void handleVisibleAiAck(DualStreamCommandDTO command, DualStreamCommandAckDTO ack) {
+        if (command == null || ack == null || fireDetectionActivityTracker == null) {
+            return;
+        }
+        String action = normalize(command.getAction());
+        if ("visible-ai-on".equals(action) && isTerminalCommandStatus(ack.getStatus())) {
+            if ("applied".equals(normalize(ack.getStatus()))) {
+                fireDetectionActivityTracker.markActive(command.getDroneSn());
+            } else {
+                fireDetectionActivityTracker.markInactive(command.getDroneSn());
+            }
+        } else if ("visible-ai-off".equals(action) && isTerminalCommandStatus(ack.getStatus())) {
+            fireDetectionActivityTracker.markInactive(command.getDroneSn());
+        }
+    }
+
     private boolean validLaserAck(DualStreamCommandAckDTO ack) {
         return ack.getFireLat() != null
                 && ack.getFireLat() >= -90.0
@@ -974,7 +1062,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
         }
     }
 
-    private DualStreamEventDTO applySingleStreamReview(DualStreamEventDTO event, List<DualStreamEventDTO> priorEvents) {
+    private DualStreamEventDTO applySingleStreamReview(
+            DualStreamEventDTO event,
+            List<DualStreamEventDTO> priorEvents,
+            AtomicReference<AgentFireEventReceiptDTO> receipt) {
         DualStreamEventDTO reviewed = copyEvent(event);
         String droneSn = reviewed.getDroneSn();
         String channel = normalize(reviewed.getAnalysisChannel());
@@ -992,6 +1083,18 @@ public class DualStreamServiceImpl implements IDualStreamService {
             }
         }
         if (!StringUtils.hasText(droneSn) || !StringUtils.hasText(channel)) {
+            return reviewed;
+        }
+
+        if ("agent-visible-onnx".equals(channel)) {
+            reviewed.setReviewStatus("VISIBLE_CANDIDATE");
+            AgentFireEventReceiptDTO result = createAgentVisibleFireEvent(reviewed);
+            if (receipt != null) {
+                receipt.set(result);
+            }
+            if (AGENT_EVENT_ACCEPTED.equals(result.getStatus())) {
+                rememberVisibleTrigger(reviewed, droneSn);
+            }
             return reviewed;
         }
 
@@ -1038,7 +1141,7 @@ public class DualStreamServiceImpl implements IDualStreamService {
         }
 
         if ("visible".equals(channel)) {
-            // 纯可见光模式：火情事件由 ai-service 上报器直接创建，这里不再切红外做串行复核。
+            // 旧版纯可见光事件兼容路径；Agent ONNX 使用独立 agent-visible-onnx 通道。
             reviewed.setReviewStatus(REVIEW_STATUS_VISIBLE_SKIPPED_THERMAL_FIRST);
             rememberVisibleTrigger(reviewed, droneSn);
             return reviewed;
@@ -1318,6 +1421,88 @@ public class DualStreamServiceImpl implements IDualStreamService {
                             ? response.getEventId()
                             : param.getEventId());
         }
+    }
+
+    private AgentFireEventReceiptDTO createAgentVisibleFireEvent(DualStreamEventDTO event) {
+        String requestedEventId = event == null ? null : event.getEventId();
+        if (fireEventService == null) {
+            return agentReceipt(requestedEventId, AGENT_EVENT_RETRY, "fire-event-service-unavailable");
+        }
+        if (event == null
+                || !StringUtils.hasText(event.getTaskId())
+                || !StringUtils.hasText(event.getDroneSn())
+                || event.getSourceTs() == null
+                || event.getVisibleScore() == null
+                || clampConfidence(event.getVisibleScore()) < visibleConfirmFloor
+                || !isValidVisibleRoi(event.getVisibleRoi())) {
+            return agentReceipt(requestedEventId, AGENT_EVENT_REJECTED, "invalid-agent-fire-event");
+        }
+        boolean stableAgentEventId = isValidAgentEventId(requestedEventId);
+        if (!stableAgentEventId) {
+            Long lastSourceTs = agentVisibleFireEventByTask.get(event.getTaskId());
+            if (lastSourceTs != null && event.getSourceTs() - lastSourceTs < AGENT_VISIBLE_EVENT_DEBOUNCE_MS) {
+                return agentReceipt(requestedEventId, AGENT_EVENT_REJECTED, "legacy-event-debounced");
+            }
+        }
+        double confidence = clampConfidence(event.getVisibleScore());
+        FireEventCreateParam param = new FireEventCreateParam();
+        param.setEventId(stableAgentEventId
+                ? requestedEventId
+                : "agent-" + Integer.toUnsignedString(
+                        Objects.hash(event.getTaskId(), event.getSourceTs()), 36) + "-" + event.getSourceTs());
+        param.setSource("DJI_AGENT");
+        param.setDeviceSn(event.getDroneSn());
+        param.setConfidence(BigDecimal.valueOf(confidence));
+        param.setFireLevel(confidence >= 0.70 ? "HIGH" : confidence >= 0.40 ? "MEDIUM" : "LOW");
+        param.setVisibleRoi(new LinkedHashMap<>(event.getVisibleRoi()));
+        param.setVisibleImageUrl(event.getVisibleImageUrl());
+        // 视觉框没有火点坐标：UNLOCATED 会阻断事件服务的空间去重与自动抵近。
+        param.setGeoQuality("UNLOCATED");
+        param.setReleasePolicy("MANUAL_CONFIRM");
+        param.setReleaseExecutionMode("OFFICIAL_HOOK_MANUAL");
+        param.setTimestamp(Instant.ofEpochMilli(event.getSourceTs()).toString());
+        FireEventCreateResponse response = fireEventService.create(param);
+        if (response == null) {
+            return agentReceipt(param.getEventId(), AGENT_EVENT_RETRY, "fire-event-receipt-missing");
+        }
+        boolean duplicate = response != null
+                && Boolean.FALSE.equals(response.getCreated())
+                && "EXISTING_EVENT_ID".equals(response.getNotificationReason());
+        boolean persisted = Boolean.TRUE.equals(response.getCreated()) || Boolean.TRUE.equals(response.getMerged());
+        String status = duplicate
+                ? AGENT_EVENT_DUPLICATE
+                : persisted ? AGENT_EVENT_ACCEPTED : AGENT_EVENT_RETRY;
+        if (AGENT_EVENT_RETRY.equals(status)) {
+            return agentReceipt(param.getEventId(), status, "unexpected-fire-event-receipt");
+        }
+        agentVisibleFireEventByTask.put(event.getTaskId(), event.getSourceTs());
+        log.info(
+                "agent visible ONNX candidate persisted task={} eventId={} status={} drone={} class={} confidence={} model={} inferenceMs={}",
+                event.getTaskId(),
+                param.getEventId(),
+                status,
+                event.getDroneSn(),
+                event.getVisibleClass(),
+                confidence,
+                event.getModelVersion(),
+                event.getInferenceMs());
+        return agentReceipt(
+                param.getEventId(),
+                status,
+                response.getNotificationReason());
+    }
+
+    private boolean isValidAgentEventId(String eventId) {
+        return StringUtils.hasText(eventId)
+                && eventId.length() <= 64
+                && eventId.matches("[A-Za-z0-9._:-]+");
+    }
+
+    private AgentFireEventReceiptDTO agentReceipt(String eventId, String status, String reason) {
+        return new AgentFireEventReceiptDTO()
+                .setEventId(eventId)
+                .setStatus(status)
+                .setReason(reason);
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.yx.uavfire.manage.controller;
 
 import com.yx.uavfire.manage.model.dto.DualStreamAgentCapabilityDTO;
+import com.yx.uavfire.manage.model.dto.AgentFireEventReceiptDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentHeartbeatDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentStatusDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
@@ -61,6 +62,13 @@ public class DualStreamController {
                                           @RequestBody DualStreamEventDTO body) {
         dualStreamService.acceptEvent(taskId, body);
         return HttpResultResponse.success();
+    }
+
+    @PostMapping("/tasks/{task_id}/agent-fire-events")
+    public HttpResultResponse<AgentFireEventReceiptDTO> agentFireEvent(
+            @PathVariable("task_id") String taskId,
+            @RequestBody DualStreamEventDTO body) {
+        return HttpResultResponse.success(dualStreamService.acceptAgentFireEvent(taskId, body));
     }
 
     @GetMapping("/tasks/{task_id}/events")

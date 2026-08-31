@@ -44,4 +44,10 @@ public class DualStreamLiveGroupDTO {
     private Boolean thermalSupported;
 
     private Double thermalCenterTemperatureC;
+
+    private Integer fireEventOutboxPendingCount;
+
+    private Long fireEventOutboxOldestPendingAt;
+
+    private String fireEventOutboxLastError;
 }

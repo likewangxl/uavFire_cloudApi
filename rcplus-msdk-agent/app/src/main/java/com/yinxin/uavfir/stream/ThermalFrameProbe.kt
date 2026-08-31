@@ -3,6 +3,7 @@ package com.yinxin.uavfir.stream
 import android.graphics.Bitmap
 import android.util.Log
 import com.yinxin.uavfir.AppContextHolder
+import com.yinxin.uavfir.firedetection.VisibleFrameConsumer
 import dji.sdk.keyvalue.key.CameraKey
 import dji.sdk.keyvalue.key.KeyTools
 import dji.sdk.keyvalue.value.camera.CameraVideoStreamSourceType
@@ -32,6 +33,7 @@ class ThermalFrameProbe(
     private val cameraStreamManager: ICameraStreamManager = MediaDataCenter.getInstance().cameraStreamManager,
     private val hotspotDetector: ThermalHotspotFrameDetector = ThermalHotspotFrameDetector(),
     private val hotspotCandidateListener: ThermalHotspotCandidateListener = ThermalHotspotCandidateListener.NO_OP,
+    private val visibleFrameConsumer: VisibleFrameConsumer = VisibleFrameConsumer.NO_OP,
 ) {
     private val running = AtomicBoolean(false)
     private val saveExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
@@ -187,6 +189,15 @@ class ThermalFrameProbe(
         }
         if (source == CameraVideoStreamSourceType.INFRARED_CAMERA) {
             maybeDetectHotspot(frameData, offset, expectedLength, width, height, now)
+        } else {
+            visibleFrameConsumer.onVisibleRgbaFrame(
+                data = frameData,
+                offset = offset,
+                length = expectedLength,
+                width = width,
+                height = height,
+                timestampMs = now,
+            )
         }
         val kind = if (source == CameraVideoStreamSourceType.INFRARED_CAMERA) "thermal" else "visible"
         val immediateVisibleSnapshot = kind == "visible" && consumeImmediateVisibleSnapshotRequest(now)

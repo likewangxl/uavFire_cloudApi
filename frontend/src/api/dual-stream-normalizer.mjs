@@ -30,6 +30,9 @@ export const normalizeDualStreamGroup = (group) => {
     lastCommandStatus: pick(group, 'lastCommandStatus', 'last_command_status'),
     visibleSupported: pick(group, 'visibleSupported', 'visible_supported'),
     thermalSupported: pick(group, 'thermalSupported', 'thermal_supported'),
-    thermalCenterTemperatureC: pick(group, 'thermalCenterTemperatureC', 'thermal_center_temperature_c')
+    thermalCenterTemperatureC: pick(group, 'thermalCenterTemperatureC', 'thermal_center_temperature_c'),
+    fireEventOutboxPendingCount: pick(group, 'fireEventOutboxPendingCount', 'fire_event_outbox_pending_count'),
+    fireEventOutboxOldestPendingAt: pick(group, 'fireEventOutboxOldestPendingAt', 'fire_event_outbox_oldest_pending_at'),
+    fireEventOutboxLastError: pick(group, 'fireEventOutboxLastError', 'fire_event_outbox_last_error')
   }
 }

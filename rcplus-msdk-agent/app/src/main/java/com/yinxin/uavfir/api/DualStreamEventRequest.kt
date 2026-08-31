@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.api
 
 data class DualStreamEventRequest(
+    val eventId: String? = null,
     val taskId: String? = null,
     val droneSn: String,
     val sourceTs: Long,
@@ -15,7 +16,12 @@ data class DualStreamEventRequest(
     val thermalSourceEventId: String? = null,
     val thermalTemperature: Double? = null,
     val thermalMeasureRoi: Map<String, Double>? = null,
+    val visibleRoi: Map<String, Double>? = null,
     val thermalMeasurements: List<ThermalMeasurementPayload> = emptyList(),
+    val visibleClass: String? = null,
+    val modelVersion: String? = null,
+    val modelSha256: String? = null,
+    val inferenceMs: Long? = null,
     val geoSnapshot: GeoSnapshot? = null,
     val fireLat: Double? = null,
     val fireLng: Double? = null,

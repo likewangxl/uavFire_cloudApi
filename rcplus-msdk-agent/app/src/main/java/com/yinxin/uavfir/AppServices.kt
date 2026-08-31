@@ -22,6 +22,12 @@ import com.yinxin.uavfir.api.BackendVisibleTargetAimer
 import com.yinxin.uavfir.api.DjiLaserRangefinderClient
 import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
+import com.yinxin.uavfir.firedetection.OnDeviceFireDetectionCoordinator
+import com.yinxin.uavfir.firedetection.VisibleDetectionReporter
+import com.yinxin.uavfir.firedetection.outbox.AndroidFireEventOutboxStore
+import com.yinxin.uavfir.firedetection.outbox.FireEventIngestApi
+import com.yinxin.uavfir.firedetection.outbox.FireEventOutboxCoordinator
+import com.yinxin.uavfir.firedetection.outbox.RetrofitFireEventSender
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSession
 import com.yinxin.uavfir.sdk.DjiSdkGatewayImpl
@@ -60,14 +66,34 @@ class AppServices(
     private val kmzCacheDir = File(application.getExternalFilesDir(null), "wayline-kmz")
     private val localKmzDir = File(application.filesDir, "wayline-local")
     private val api = AgentBackendApiFactory.create()
-    private val backendClient = AgentBackendClient(api)
+    private val fireEventOutboxStore = AndroidFireEventOutboxStore(application)
+    private val fireEventIngestApi = AgentBackendApiFactory.create(FireEventIngestApi::class.java)
+    private val fireEventOutbox = FireEventOutboxCoordinator(
+        scope = appScope,
+        store = fireEventOutboxStore,
+        sender = RetrofitFireEventSender(fireEventIngestApi),
+    )
+    private val backendClient = AgentBackendClient(
+        api = api,
+        outboxHealthProvider = fireEventOutbox::health,
+    )
     private val reporter = AgentReporter(backendClient)
     private val deviceSession = DjiDeviceSession(DjiSdkGatewayImpl())
     private val thermalHotspotTriggerBridge = ThermalHotspotTriggerBridge()
     private val fireConfirmationRunnerBridge = FireConfirmationRunnerBridge()
+    private val onDeviceFireDetectionCoordinator = OnDeviceFireDetectionCoordinator(
+        context = application,
+        scope = appScope,
+        enabled = BuildConfig.AGENT_FIRE_ONNX_ENABLED,
+        reporter = VisibleDetectionReporter(fireEventOutbox::enqueue),
+    )
     private val sessionManager = DualStreamSessionManager(
-        RealMsdkStreamProvider(hotspotCandidateListener = thermalHotspotTriggerBridge),
+        RealMsdkStreamProvider(
+            hotspotCandidateListener = thermalHotspotTriggerBridge,
+            visibleFrameConsumer = onDeviceFireDetectionCoordinator,
+        ),
         fireConfirmationRunner = fireConfirmationRunnerBridge::run,
+        visibleAiControl = onDeviceFireDetectionCoordinator,
     )
     private val flightControlClient = DjiFlightControlActionClient()
     private val msdkCommandExecutor = DualStreamMsdkCommandExecutor(
@@ -199,6 +225,7 @@ class AppServices(
                 thermalHotspotMonitor.onFrameHotspotCandidate(droneSn)
             }
         }
+        fireEventOutbox.start()
         Log.i(TAG, "initialized backend=${AgentBackendConfig.DEFAULT_BASE_URL}")
         waypointExecutor.attach()
     }
@@ -295,6 +322,8 @@ class AppServices(
         hmsReporter.stop()
         waypointExecutor.detach()
         runtimeLoop.stop()
+        onDeviceFireDetectionCoordinator.close()
+        fireEventOutbox.close()
         mqttPublisher.disconnect()
         appScope.cancel()
     }

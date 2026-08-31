@@ -19,6 +19,7 @@ val agentAircraftSn = providers.gradleProperty("agentAircraftSn").orElse("")
 val agentGatewaySn = providers.gradleProperty("agentGatewaySn").orElse("")
 val m300FireClosedLoopEnabled = providers.gradleProperty("m300FireClosedLoopEnabled").orElse("false")
 val agentPayloadPositionIndex = providers.gradleProperty("agentPayloadPositionIndex").orElse("-1")
+val agentFireOnnxEnabled = providers.gradleProperty("agentFireOnnxEnabled").orElse("true")
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -53,6 +54,7 @@ android {
         buildConfigField("String", "AGENT_GATEWAY_SN", "\"${agentGatewaySn.get()}\"")
         buildConfigField("boolean", "M300_FIRE_CLOSED_LOOP_ENABLED", m300FireClosedLoopEnabled.get())
         buildConfigField("int", "AGENT_PAYLOAD_POSITION_INDEX", agentPayloadPositionIndex.get())
+        buildConfigField("boolean", "AGENT_FIRE_ONNX_ENABLED", agentFireOnnxEnabled.get())
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -124,6 +126,7 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("com.squareup.retrofit2:converter-gson:2.11.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
     compileOnly("com.dji:dji-sdk-v5-aircraft-provided:${djiMsdkVersion.get()}")
     implementation("com.dji:dji-sdk-v5-aircraft:${djiMsdkVersion.get()}")

@@ -69,6 +69,7 @@ public class FireEventServiceImpl implements FireEventService {
     private static final String GEO_QUALITY_PRECISE = "PRECISE";
     private static final String GEO_QUALITY_LASER_LOCATING = "LASER_LOCATING";
     private static final String GEO_QUALITY_LASER_FAILED = "LASER_FAILED";
+    private static final String GEO_QUALITY_UNLOCATED = "UNLOCATED";
     private static final String DEDUP_LOCK_PREFIX = "fire_event_dedup:";
     private static final int DEDUP_LOCK_TIMEOUT_SECONDS = 3;
 
@@ -573,7 +574,8 @@ public class FireEventServiceImpl implements FireEventService {
 
     private boolean isUnresolvedLaserQuality(String quality) {
         return GEO_QUALITY_LASER_LOCATING.equalsIgnoreCase(quality)
-            || GEO_QUALITY_LASER_FAILED.equalsIgnoreCase(quality);
+            || GEO_QUALITY_LASER_FAILED.equalsIgnoreCase(quality)
+            || GEO_QUALITY_UNLOCATED.equalsIgnoreCase(quality);
     }
 
     @Override

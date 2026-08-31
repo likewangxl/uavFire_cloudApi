@@ -39,6 +39,7 @@ class GlobalMVCConfigurerTest {
 
         assertTrue(excludePaths.contains("/manage/api/v1/dual-stream/agents/**"));
         assertTrue(excludePaths.contains("/manage/api/v1/dual-stream/tasks/*/events"));
+        assertTrue(excludePaths.contains("/manage/api/v1/dual-stream/tasks/*/agent-fire-events"));
         assertTrue(excludePaths.contains("/manage/api/v1/dual-stream/tasks/*/latest-visible-roi"));
         assertFalse(excludePaths.contains("/manage/api/v1/dual-stream/**"));
     }

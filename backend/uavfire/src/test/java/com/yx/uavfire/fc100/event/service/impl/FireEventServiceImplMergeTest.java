@@ -849,6 +849,27 @@ class FireEventServiceImplMergeTest {
     }
 
     @Test
+    void unlocatedAgentCandidate_skipsSpatialDedupAndAutoApproach() {
+        FireApproachDispatcher approach = mock(FireApproachDispatcher.class);
+        FireEventCreateParam unlocated = param(
+            "agent-visible-unlocated", 34.9607, 109.3163, "HIGH", "0.81", 1779163440000L);
+        unlocated.setGeoQuality("UNLOCATED");
+        unlocated.setReleasePolicy("MANUAL_CONFIRM");
+        unlocated.setReleaseExecutionMode("OFFICIAL_HOOK_MANUAL");
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(10L);
+            return 1;
+        });
+
+        buildWithApproachDispatcher(approach).create(unlocated);
+
+        verify(events, never()).selectList(any(QueryWrapper.class));
+        verify(approach, never()).dispatchIfEligible(any(FireEventEntity.class));
+    }
+
+    @Test
     void thermal_event_without_geo_uses_existing_resolution() {
         FireGeoLocationService geoService = mock(FireGeoLocationService.class);
         FireGeoSnapshotDTO snapshot = new FireGeoSnapshotDTO().setSourceTs(1779163439000L);

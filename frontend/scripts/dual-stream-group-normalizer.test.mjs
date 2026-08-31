@@ -14,7 +14,10 @@ test('normalizeDualStreamGroup maps snake_case backend fields to camelCase front
     visible_play_url: 'webrtc://172.20.10.7:58925/live/RC_PLUS_LOCAL-0',
     thermal_play_url: null,
     visible_supported: true,
-    thermal_supported: true
+    thermal_supported: true,
+    fire_event_outbox_pending_count: 2,
+    fire_event_outbox_oldest_pending_at: 1788141600000,
+    fire_event_outbox_last_error: 'network-down'
   })
 
   assert.equal(normalized.droneSn, 'RC_PLUS_LOCAL')
@@ -27,4 +30,7 @@ test('normalizeDualStreamGroup maps snake_case backend fields to camelCase front
   assert.equal(normalized.thermalPlayUrl, null)
   assert.equal(normalized.visibleSupported, true)
   assert.equal(normalized.thermalSupported, true)
+  assert.equal(normalized.fireEventOutboxPendingCount, 2)
+  assert.equal(normalized.fireEventOutboxOldestPendingAt, 1788141600000)
+  assert.equal(normalized.fireEventOutboxLastError, 'network-down')
 })

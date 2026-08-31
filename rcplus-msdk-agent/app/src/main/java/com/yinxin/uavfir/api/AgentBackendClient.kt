@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.sdk.CameraCapability
+import com.yinxin.uavfir.firedetection.outbox.FireEventOutboxHealth
 import com.yinxin.uavfir.session.AgentConnectionState
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
 import com.yinxin.uavfir.session.DualStreamSessionState
@@ -8,6 +9,7 @@ import java.util.Locale
 
 class AgentBackendClient(
     private val api: DualStreamApi,
+    private val outboxHealthProvider: () -> FireEventOutboxHealth = { FireEventOutboxHealth.EMPTY },
 ) {
     suspend fun sendHeartbeat(
         droneSn: String,
@@ -23,11 +25,17 @@ class AgentBackendClient(
         droneSn: String,
         connectionState: AgentConnectionState,
         sessionState: DualStreamSessionState,
-    ): AgentHeartbeatRequest = AgentHeartbeatRequest(
-        droneSn = droneSn,
-        connectionState = connectionState.name,
-        sessionState = sessionState.name,
-    )
+    ): AgentHeartbeatRequest {
+        val outboxHealth = outboxHealthProvider()
+        return AgentHeartbeatRequest(
+            droneSn = droneSn,
+            connectionState = connectionState.name,
+            sessionState = sessionState.name,
+            fireEventOutboxPendingCount = outboxHealth.pendingCount,
+            fireEventOutboxOldestPendingAt = outboxHealth.oldestPendingAt,
+            fireEventOutboxLastError = outboxHealth.lastError,
+        )
+    }
 
     suspend fun sendStatus(
         droneSn: String,

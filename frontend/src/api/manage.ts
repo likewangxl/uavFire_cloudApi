@@ -110,6 +110,9 @@ export interface DualStreamGroup {
   visibleSupported?: boolean
   thermalSupported?: boolean
   thermalCenterTemperatureC?: number
+  fireEventOutboxPendingCount?: number
+  fireEventOutboxOldestPendingAt?: number
+  fireEventOutboxLastError?: string
 }
 
 export interface DualStreamEvent {

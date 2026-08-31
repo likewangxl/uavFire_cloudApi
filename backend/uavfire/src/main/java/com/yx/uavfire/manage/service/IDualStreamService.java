@@ -1,6 +1,7 @@
 package com.yx.uavfire.manage.service;
 
 import com.yx.uavfire.manage.model.dto.DualStreamAgentCapabilityDTO;
+import com.yx.uavfire.manage.model.dto.AgentFireEventReceiptDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentHeartbeatDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamAgentStatusDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
@@ -21,6 +22,8 @@ public interface IDualStreamService {
     void acceptCapability(String droneSn, DualStreamAgentCapabilityDTO capability);
 
     void acceptEvent(String taskId, DualStreamEventDTO event);
+
+    AgentFireEventReceiptDTO acceptAgentFireEvent(String taskId, DualStreamEventDTO event);
 
     void startVisibleLaserLocalization(
             String eventId,

@@ -1,6 +1,7 @@
 package com.yx.uavfire.manage.controller;
 
 import com.yx.uavfire.manage.model.dto.DualStreamCommandAckDTO;
+import com.yx.uavfire.manage.model.dto.AgentFireEventReceiptDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
@@ -194,6 +195,31 @@ class DualStreamControllerTest {
                 .setDroneSn("DRONE-001")
                 .setFusionScore(0.712)
                 .setRiskLevel("HIGH"));
+    }
+
+    @Test
+    void agentFireEventEndpoint_returnsBusinessReceipt() throws Exception {
+        String eventId = "agent-0123456789abcdef0123456789abcdef0123456789abcdef";
+        when(dualStreamService.acceptAgentFireEvent(
+                org.mockito.ArgumentMatchers.eq("fire-DRONE-001"),
+                org.mockito.ArgumentMatchers.any(DualStreamEventDTO.class)))
+                .thenReturn(new AgentFireEventReceiptDTO()
+                        .setEventId(eventId)
+                        .setStatus("accepted")
+                        .setReason("CREATED"));
+
+        mockMvc.perform(post("/manage/api/v1/dual-stream/tasks/fire-DRONE-001/agent-fire-events")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"eventId\":\"" + eventId + "\","
+                                + "\"taskId\":\"fire-DRONE-001\","
+                                + "\"droneSn\":\"DRONE-001\","
+                                + "\"sourceTs\":1788141600000,"
+                                + "\"analysisChannel\":\"agent-visible-onnx\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.eventId").value(eventId))
+                .andExpect(jsonPath("$.data.status").value("accepted"))
+                .andExpect(jsonPath("$.data.reason").value("CREATED"));
     }
 
     @Test

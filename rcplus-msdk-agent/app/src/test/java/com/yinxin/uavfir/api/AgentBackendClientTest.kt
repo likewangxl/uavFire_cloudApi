@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.api
 
 import com.yinxin.uavfir.sdk.CameraCapability
+import com.yinxin.uavfir.firedetection.outbox.FireEventOutboxHealth
 import com.yinxin.uavfir.session.AgentConnectionState
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
 import com.yinxin.uavfir.session.DualStreamSessionState
@@ -38,6 +39,30 @@ class AgentBackendClientTest {
         assertEquals("DRONE-002", payload.droneSn)
         assertEquals("CAPABILITY_READY", payload.connectionState)
         assertEquals("STARTING", payload.sessionState)
+    }
+
+    @Test
+    fun buildHeartbeatRequest_includesFireEventOutboxHealth() {
+        val client = AgentBackendClient(
+            api = RecordingDualStreamApi(),
+            outboxHealthProvider = {
+                FireEventOutboxHealth(
+                    pendingCount = 3,
+                    oldestPendingAt = 12_345L,
+                    lastError = "network-down",
+                )
+            },
+        )
+
+        val payload = client.buildHeartbeatRequest(
+            droneSn = "DRONE-OUTBOX",
+            connectionState = AgentConnectionState.STREAMING,
+            sessionState = DualStreamSessionState.RUNNING,
+        )
+
+        assertEquals(3, payload.fireEventOutboxPendingCount)
+        assertEquals(12_345L, payload.fireEventOutboxOldestPendingAt)
+        assertEquals("network-down", payload.fireEventOutboxLastError)
     }
 
     @Test

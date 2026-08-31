@@ -3,7 +3,6 @@ package com.yx.uavfire.firedetection;
 import com.yx.uavfire.manage.service.IDualStreamService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import com.yx.uavfire.msdk.model.MsdkDeviceStateDTO;
@@ -13,7 +12,6 @@ import com.yx.uavfire.msdk.service.MsdkDeviceStateService;
 @RequiredArgsConstructor
 public class FireDetectionService {
 
-    private final AiServiceClient aiServiceClient;
     private final FireDetectionActivityTracker activityTracker;
 
     // 通过 dual-stream 命令通道告诉 RC Plus agent 开/关红外热区探测。
@@ -24,12 +22,6 @@ public class FireDetectionService {
     @Autowired(required = false)
     private MsdkDeviceStateService msdkDeviceStateService;
 
-    @Value("${ai-service.zlm-rtsp-host:127.0.0.1}")
-    private String zlmRtspHost;
-
-    @Value("${ai-service.zlm-rtsp-port:8554}")
-    private int zlmRtspPort;
-
     public boolean startForDrone(String droneSn) {
         return startForDrone(droneSn, null);
     }
@@ -38,37 +30,22 @@ public class FireDetectionService {
         if (!StringUtils.hasText(droneSn)) {
             return false;
         }
-        String url = StringUtils.hasText(videoId)
-                ? AiServiceClient.rtspUrlForVideoId(videoId, zlmRtspHost, zlmRtspPort)
-                : rtspUrlForDrone(droneSn);
-        String payloadModelKey = null;
         if (msdkDeviceStateService != null) {
             MsdkDeviceStateDTO state = msdkDeviceStateService.get(droneSn).orElse(null);
             if (state != null && isM300(state)) {
-                if (!Boolean.TRUE.equals(state.getFireClosedLoopReady())) {
-                    return false;
-                }
-                payloadModelKey = selectedPayloadModel(state);
-                if (!StringUtils.hasText(payloadModelKey)) {
+                if (!selectedPayloadSupportsVisibleInference(state)) {
                     return false;
                 }
             }
         }
-        boolean ok = StringUtils.hasText(payloadModelKey)
-                ? aiServiceClient.startDetection(
-                        aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, url, "", payloadModelKey)
-                : aiServiceClient.startDetection(
-                        aiServiceClient.fireTaskIdForDrone(droneSn), droneSn, url, "");
+        // videoId 保留在 API 中用于兼容旧前端，但端侧推理直接消费 MSDK RGBA 帧，不再拉取 RTSP。
+        issueDualStreamCommand(droneSn, "thermal-monitor-off");
+        if (isThermalFocusActive(droneSn)) {
+            issueDualStreamCommand(droneSn, "focus-visible");
+        }
+        boolean ok = issueDualStreamCommand(droneSn, "visible-ai-on");
         if (ok) {
             activityTracker.markActive(droneSn);
-            // 纯可见光模式必须显式清掉 agent 进程中可能遗留的红外探针开关。
-            // 仅仅“不再发送 thermal-monitor-on”无法把旧会话留下的 true 恢复为 false。
-            issueDualStreamCommand(droneSn, "thermal-monitor-off");
-            // 纯可见光识别：仅当镜头真在红外时才切回可见光——
-            // agent 收到镜头命令会重建推流，无操作切换也会让直播卡顿。
-            if (isThermalFocusActive(droneSn)) {
-                issueDualStreamCommand(droneSn, "focus-visible");
-            }
         }
         return ok;
     }
@@ -81,14 +58,14 @@ public class FireDetectionService {
         if (!StringUtils.hasText(droneSn)) {
             return false;
         }
-        // 用户意图是停止监测：无论 ai-service 停止是否成功，都不再允许自动切红外。
+        // 用户意图是停止监测：先清活动状态，再关闭 agent 推理并恢复可见光。
         activityTracker.markInactive(droneSn);
-        // 停掉 agent 端探测；镜头在红外时切回可见光，确保空闲时主画面是可见光。
+        boolean stopped = issueDualStreamCommand(droneSn, "visible-ai-off");
         issueDualStreamCommand(droneSn, "thermal-monitor-off");
         if (isThermalFocusActive(droneSn)) {
             issueDualStreamCommand(droneSn, "focus-visible");
         }
-        return aiServiceClient.stopDetection(aiServiceClient.fireTaskIdForDrone(droneSn));
+        return stopped;
     }
 
     private boolean isThermalFocusActive(String droneSn) {
@@ -114,27 +91,22 @@ public class FireDetectionService {
                 || "MATRICE300RTK".equals(normalized);
     }
 
-    private String selectedPayloadModel(MsdkDeviceStateDTO state) {
-        if (state.getPayloads() == null || state.getSelectedPayloadPositionIndex() == null) return null;
+    private boolean selectedPayloadSupportsVisibleInference(MsdkDeviceStateDTO state) {
+        if (state.getPayloads() == null || state.getSelectedPayloadPositionIndex() == null) return false;
         return state.getPayloads().stream()
                 .filter(payload -> state.getSelectedPayloadPositionIndex().equals(payload.getPayloadPositionIndex()))
-                .map(com.yx.uavfire.msdk.model.PayloadCapabilityDTO::getPayloadModelKey)
-                .findFirst()
-                .orElse(null);
+                .anyMatch(payload -> Boolean.TRUE.equals(payload.getVisibleSupported())
+                        && !Boolean.FALSE.equals(payload.getLiveStreamSupported()));
     }
 
-    private void issueDualStreamCommand(String droneSn, String action) {
+    private boolean issueDualStreamCommand(String droneSn, String action) {
         if (dualStreamService == null) {
-            return;
+            return false;
         }
         try {
-            dualStreamService.issueCommand(droneSn, action);
+            return dualStreamService.issueCommand(droneSn, action) != null;
         } catch (RuntimeException ex) {
-            // 命令通道异常不应阻断火情监测启停主流程。
+            return false;
         }
-    }
-
-    private String rtspUrlForDrone(String droneSn) {
-        return "rtsp://" + zlmRtspHost + ":" + zlmRtspPort + "/live/" + droneSn + "-0";
     }
 }

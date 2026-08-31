@@ -17,6 +17,8 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class DualStreamEventDTO {
 
+    private String eventId;
+
     private String taskId;
 
     private String droneSn;
@@ -52,6 +54,14 @@ public class DualStreamEventDTO {
     @JsonProperty("visible_roi")
     @JsonAlias("visibleRoi")
     private Map<String, Double> visibleRoi;
+
+    private String visibleClass;
+
+    private String modelVersion;
+
+    private String modelSha256;
+
+    private Long inferenceMs;
 
     private List<Map<String, Object>> thermalMeasurements;
 
