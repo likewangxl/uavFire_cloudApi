@@ -16,7 +16,11 @@ class AndroidFireEventOutboxStore(context: Context) :
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
-        db.execSQL("PRAGMA busy_timeout=5000")
+        // busy_timeout returns a result row on the RC Plus SQLite build, so
+        // execSQL() rejects it as a query. Consume the row explicitly instead.
+        db.rawQuery("PRAGMA busy_timeout=5000", null).use { cursor ->
+            cursor.moveToFirst()
+        }
     }
 
     override fun onCreate(db: SQLiteDatabase) {
