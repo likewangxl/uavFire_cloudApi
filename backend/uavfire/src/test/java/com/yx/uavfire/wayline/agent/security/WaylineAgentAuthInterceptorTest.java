@@ -172,9 +172,11 @@ class WaylineAgentAuthInterceptorTest {
     @Test
     void preHandle_acceptsAgentFireEventWhenTaskDroneMatchesClaim() throws Exception {
         String token = JwtUtil.createToken(Map.of("role", WaylineAgentClaim.ROLE, "droneSn", "SN-A"));
-        MockHttpServletRequest req = new MockHttpServletRequest(
-                "POST", "/manage/api/v1/dual-stream/tasks/fire-SN-A/agent-fire-events");
-        req.addHeader(WaylineAgentAuthInterceptor.HEADER_AGENT_TOKEN, token);
+        MockHttpServletRequest req = fireRequest(
+                "/manage/api/v1/dual-stream/tasks/fire-SN-A/agent-fire-events",
+                token,
+                "nonce-task-match",
+                System.currentTimeMillis());
         MockHttpServletResponse resp = new MockHttpServletResponse();
 
         assertTrue(interceptor.preHandle(req, resp, new Object()));
