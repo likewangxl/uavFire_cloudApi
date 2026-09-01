@@ -1,5 +1,8 @@
 server:
   port: 6789
+  # Keep forwarded headers disabled unless a trusted reverse proxy overwrites them
+  # and the application port is not reachable directly.
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
   tomcat:
     accesslog:
       enabled: true
@@ -100,6 +103,13 @@ wayline-agent:
   shared-secret: change-me-in-production
   token-ttl-seconds: 86400
   server-url: http://192.168.50.10:6789
+  # Production must terminate TLS at this process or at a trusted reverse proxy.
+  # Local HTTP-only development requires the explicit env override to false.
+  fire-event-require-https: ${WAYLINE_AGENT_FIRE_EVENT_REQUIRE_HTTPS:true}
+  fire-event-max-clock-skew-ms: ${WAYLINE_AGENT_FIRE_EVENT_MAX_CLOCK_SKEW_MS:300000}
+  fire-evidence:
+    storage-dir: ${WAYLINE_AGENT_FIRE_EVIDENCE_DIR:data/agent-fire-evidence}
+    public-base-url: ${WAYLINE_AGENT_FIRE_EVIDENCE_PUBLIC_BASE_URL:}
   mqtt:
     event-topic: uavfire/agent/+/events/#
   storage:

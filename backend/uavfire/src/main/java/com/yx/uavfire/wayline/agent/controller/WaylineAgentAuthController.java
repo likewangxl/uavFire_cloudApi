@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import javax.servlet.http.HttpServletRequest;
+
 import java.util.Map;
 
 @Slf4j
@@ -27,8 +29,16 @@ public class WaylineAgentAuthController {
     @Value("${wayline-agent.token-ttl-seconds:86400}")
     private long tokenTtlSeconds;
 
+    @Value("${wayline-agent.fire-event-require-https:true}")
+    private boolean requireHttps;
+
     @PostMapping("/token")
-    public ResponseEntity<HttpResultResponse<WaylineAgentTokenResponseDTO>> issueToken(@RequestBody WaylineAgentTokenRequestDTO body) {
+    public ResponseEntity<HttpResultResponse<WaylineAgentTokenResponseDTO>> issueToken(
+            @RequestBody WaylineAgentTokenRequestDTO body,
+            HttpServletRequest request) {
+        if (requireHttps && !isSecure(request)) {
+            return ResponseEntity.status(426).body(HttpResultResponse.error("HTTPS required"));
+        }
         if (!StringUtils.hasText(body.getDroneSn()) || !StringUtils.hasText(body.getSharedSecret())) {
             return ResponseEntity.badRequest().body(HttpResultResponse.error("droneSn and sharedSecret required"));
         }
@@ -45,5 +55,9 @@ public class WaylineAgentAuthController {
                 .setToken(token)
                 .setExpiresIn(tokenTtlSeconds);
         return ResponseEntity.ok(HttpResultResponse.success(data));
+    }
+
+    private boolean isSecure(HttpServletRequest request) {
+        return request.isSecure();
     }
 }

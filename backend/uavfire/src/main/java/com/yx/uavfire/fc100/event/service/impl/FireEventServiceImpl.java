@@ -882,6 +882,9 @@ public class FireEventServiceImpl implements FireEventService {
             ? param.getTemperatureUnit() : parent.getTemperatureUnit());
         history.setThermalImageUrl(param.getThermalImageUrl());
         history.setVisibleImageUrl(param.getVisibleImageUrl());
+        history.setEvidenceSha256(param.getEvidenceSha256());
+        history.setEvidenceCapturedAt(param.getEvidenceCapturedAt());
+        history.setModelSha256(param.getModelSha256());
         history.setEventTimestamp(eventTs);
         history.setAction(action);
         history.setCreateTime(now);
@@ -915,6 +918,9 @@ public class FireEventServiceImpl implements FireEventService {
         snapshot.setTemperatureUnit(event.getTemperatureUnit());
         snapshot.setThermalImageUrl(event.getThermalImageUrl());
         snapshot.setVisibleImageUrl(event.getVisibleImageUrl());
+        snapshot.setEvidenceSha256(event.getEvidenceSha256());
+        snapshot.setEvidenceCapturedAt(event.getEvidenceCapturedAt());
+        snapshot.setModelSha256(event.getModelSha256());
         insertHistory(event, snapshot, sourceTs, clock.now(), action);
     }
 

@@ -82,6 +82,14 @@ public class FireEventCreateParam {
 
     private String visibleImageUrl;
 
+    @Pattern(regexp = "[0-9a-fA-F]{64}")
+    private String evidenceSha256;
+
+    private Long evidenceCapturedAt;
+
+    @Pattern(regexp = "[0-9a-fA-F]{64}")
+    private String modelSha256;
+
     @Pattern(regexp = "MANUAL_CONFIRM|DRY_RUN|CONTROLLED_TEST_AUTO")
     private String releasePolicy;
 

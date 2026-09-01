@@ -47,6 +47,9 @@ class FireEventOutboxCoordinator(
                     eventId = eventId,
                     taskId = report.taskId,
                     payloadJson = gson.toJson(request),
+                    evidenceJpeg = report.evidenceJpeg,
+                    evidenceSha256 = report.evidenceSha256,
+                    evidenceCapturedAt = report.evidenceCapturedAt,
                     nextAttemptAt = now,
                     createdAt = now,
                 ),
@@ -61,6 +64,11 @@ class FireEventOutboxCoordinator(
         val completedAt = clock()
         withContext(Dispatchers.IO) {
             when (result) {
+                is FireEventDeliveryResult.EvidenceUploaded -> store.markEvidenceUploaded(
+                    entry.eventId,
+                    result.visibleImageUrl,
+                    completedAt,
+                )
                 is FireEventDeliveryResult.Delivered -> store.markDelivered(entry.eventId, completedAt)
                 is FireEventDeliveryResult.Retryable -> {
                     val attempts = entry.attemptCount + 1

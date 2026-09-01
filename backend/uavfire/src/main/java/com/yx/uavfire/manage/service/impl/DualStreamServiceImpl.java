@@ -233,6 +233,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     @Override
     public void acceptEvent(String taskId, DualStreamEventDTO event) {
+        if (event != null && "agent-visible-onnx".equals(normalize(event.getAnalysisChannel()))) {
+            log.warn("unauthenticated agent-visible-onnx event ignored task={} eventId={}", taskId, event.getEventId());
+            return;
+        }
         acceptEventInternal(taskId, event, null, false);
     }
 
@@ -250,6 +254,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
         }
         if (StringUtils.hasText(event.getTaskId()) && !taskId.equals(event.getTaskId())) {
             return agentReceipt(eventId, AGENT_EVENT_REJECTED, "task-id-mismatch");
+        }
+        if (!StringUtils.hasText(event.getDroneSn())
+                || !("fire-" + event.getDroneSn()).equals(taskId)) {
+            return agentReceipt(eventId, AGENT_EVENT_REJECTED, "task-device-mismatch");
         }
         if (!"agent-visible-onnx".equals(normalize(event.getAnalysisChannel()))) {
             return agentReceipt(eventId, AGENT_EVENT_REJECTED, "invalid-analysis-channel");
@@ -846,6 +854,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 .setVisibleClass(event.getVisibleClass())
                 .setModelVersion(event.getModelVersion())
                 .setModelSha256(event.getModelSha256())
+                .setEvidenceSha256(event.getEvidenceSha256())
+                .setEvidenceCapturedAt(event.getEvidenceCapturedAt())
+                .setEvidenceStatus(event.getEvidenceStatus())
                 .setInferenceMs(event.getInferenceMs())
                 .setThermalMeasurements(event.getThermalMeasurements())
                 .setGeoSnapshot(event.getGeoSnapshot())
@@ -1434,7 +1445,13 @@ public class DualStreamServiceImpl implements IDualStreamService {
                 || event.getSourceTs() == null
                 || event.getVisibleScore() == null
                 || clampConfidence(event.getVisibleScore()) < visibleConfirmFloor
-                || !isValidVisibleRoi(event.getVisibleRoi())) {
+                || !isValidVisibleRoi(event.getVisibleRoi())
+                || !"VERIFIED".equals(event.getEvidenceStatus())
+                || !StringUtils.hasText(event.getVisibleImageUrl())
+                || !isSha256(event.getEvidenceSha256())
+                || !isSha256(event.getModelSha256())
+                || event.getEvidenceCapturedAt() == null
+                || Math.abs(event.getEvidenceCapturedAt() - event.getSourceTs()) > 5_000L) {
             return agentReceipt(requestedEventId, AGENT_EVENT_REJECTED, "invalid-agent-fire-event");
         }
         boolean stableAgentEventId = isValidAgentEventId(requestedEventId);
@@ -1456,6 +1473,9 @@ public class DualStreamServiceImpl implements IDualStreamService {
         param.setFireLevel(confidence >= 0.70 ? "HIGH" : confidence >= 0.40 ? "MEDIUM" : "LOW");
         param.setVisibleRoi(new LinkedHashMap<>(event.getVisibleRoi()));
         param.setVisibleImageUrl(event.getVisibleImageUrl());
+        param.setEvidenceSha256(event.getEvidenceSha256());
+        param.setEvidenceCapturedAt(event.getEvidenceCapturedAt());
+        param.setModelSha256(event.getModelSha256());
         // 视觉框没有火点坐标：UNLOCATED 会阻断事件服务的空间去重与自动抵近。
         param.setGeoQuality("UNLOCATED");
         param.setReleasePolicy("MANUAL_CONFIRM");
@@ -2054,6 +2074,10 @@ public class DualStreamServiceImpl implements IDualStreamService {
 
     private String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim().toLowerCase() : "";
+    }
+
+    private boolean isSha256(String value) {
+        return StringUtils.hasText(value) && value.matches("[0-9a-fA-F]{64}");
     }
 
     private boolean isUrgentAction(String action) {

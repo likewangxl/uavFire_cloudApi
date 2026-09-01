@@ -32,6 +32,9 @@ public class FireEventDTO {
     private String temperatureUnit;
     private String thermalImageUrl;
     private String visibleImageUrl;
+    private String evidenceSha256;
+    private Long evidenceCapturedAt;
+    private String modelSha256;
     private Long eventTimestamp;
     private Long lastSeenTime;
     private Integer reportCount;

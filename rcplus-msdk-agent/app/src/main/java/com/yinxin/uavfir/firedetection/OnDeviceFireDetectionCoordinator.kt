@@ -13,6 +13,7 @@ class OnDeviceFireDetectionCoordinator(
     private val enabled: Boolean,
     private val reporter: VisibleDetectionReporter,
     private val engineFactory: () -> VisibleFireDetectionEngine = { OnnxVisibleFireDetector(context.applicationContext) },
+    private val calibrationSink: FireCalibrationSink = FireCalibrationRecorder(context.applicationContext),
     private val inferenceIntervalMs: Long = 400L,
 ) : VisibleFrameConsumer, VisibleAiControl, AutoCloseable {
     private data class Session(val droneSn: String, val taskId: String, val generation: Long)
@@ -134,12 +135,23 @@ class OnDeviceFireDetectionCoordinator(
         }.onFailure {
             Log.e(TAG, "agent ONNX inference failed", it)
         }.getOrNull() ?: return
-        val confirmed = tracker.accept(result.detections, frame.timestampMs) ?: return
+        val confirmed = tracker.accept(result.detections, frame.timestampMs)
+        calibrationSink.record(
+            frame.session.droneSn,
+            frame.session.taskId,
+            frame.timestampMs,
+            result,
+            confirmed,
+        )
+        confirmed ?: return
         val stillActive = synchronized(lock) {
             activeSession?.generation == frame.session.generation
         }
         if (!stillActive) return
         runCatching {
+            val evidence = withContext(Dispatchers.Default) {
+                FireEvidenceEncoder.encodeRgba(frame.data, frame.width, frame.height)
+            }
             reporter.report(
                 VisibleDetectionReport(
                     taskId = frame.session.taskId,
@@ -149,6 +161,9 @@ class OnDeviceFireDetectionCoordinator(
                     inferenceMs = result.inferenceMs,
                     modelVersion = AgentFireModelSpec.MODEL_VERSION,
                     modelSha256 = AgentFireModelSpec.MODEL_SHA256,
+                    evidenceJpeg = evidence.jpeg,
+                    evidenceSha256 = evidence.sha256,
+                    evidenceCapturedAt = frame.timestampMs,
                 ),
             )
             tracker.markReported(frame.timestampMs)

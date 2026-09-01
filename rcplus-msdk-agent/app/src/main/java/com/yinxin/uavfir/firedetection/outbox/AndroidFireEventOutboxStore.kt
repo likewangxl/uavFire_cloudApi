@@ -26,6 +26,10 @@ class AndroidFireEventOutboxStore(context: Context) :
                 event_id TEXT PRIMARY KEY NOT NULL,
                 task_id TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
+                evidence_jpeg BLOB,
+                evidence_sha256 TEXT NOT NULL,
+                evidence_captured_at INTEGER NOT NULL,
+                evidence_url TEXT,
                 state TEXT NOT NULL,
                 attempt_count INTEGER NOT NULL DEFAULT 0,
                 next_attempt_at INTEGER NOT NULL,
@@ -42,7 +46,23 @@ class AndroidFireEventOutboxStore(context: Context) :
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN evidence_jpeg BLOB")
+            db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN evidence_sha256 TEXT")
+            db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN evidence_captured_at INTEGER")
+            db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN evidence_url TEXT")
+            // Version-1 rows did not carry verifiable evidence and must never create tasks.
+            db.execSQL(
+                "UPDATE $TABLE_NAME SET state = ?, last_error = ? WHERE state = ?",
+                arrayOf(
+                    FireEventOutboxEntry.STATE_FAILED,
+                    "legacy-event-missing-evidence",
+                    FireEventOutboxEntry.STATE_PENDING,
+                ),
+            )
+        }
+    }
 
     @Synchronized
     override fun enqueue(entry: FireEventOutboxEntry): Boolean {
@@ -50,6 +70,10 @@ class AndroidFireEventOutboxStore(context: Context) :
             put("event_id", entry.eventId)
             put("task_id", entry.taskId)
             put("payload_json", entry.payloadJson)
+            put("evidence_jpeg", entry.evidenceJpeg)
+            put("evidence_sha256", entry.evidenceSha256)
+            put("evidence_captured_at", entry.evidenceCapturedAt)
+            put("evidence_url", entry.evidenceUrl)
             put("state", FireEventOutboxEntry.STATE_PENDING)
             put("attempt_count", 0)
             put("next_attempt_at", entry.nextAttemptAt)
@@ -88,6 +112,22 @@ class AndroidFireEventOutboxStore(context: Context) :
                 put("state", FireEventOutboxEntry.STATE_DELIVERED)
                 put("updated_at", deliveredAtMs)
                 put("delivered_at", deliveredAtMs)
+                putNull("evidence_jpeg")
+            },
+            "event_id = ?",
+            arrayOf(eventId),
+        )
+    }
+
+    @Synchronized
+    override fun markEvidenceUploaded(eventId: String, evidenceUrl: String, uploadedAtMs: Long) {
+        writableDatabase.update(
+            TABLE_NAME,
+            ContentValues().apply {
+                put("evidence_url", evidenceUrl)
+                put("next_attempt_at", uploadedAtMs)
+                put("updated_at", uploadedAtMs)
+                putNull("last_error")
             },
             "event_id = ?",
             arrayOf(eventId),
@@ -167,6 +207,10 @@ class AndroidFireEventOutboxStore(context: Context) :
         eventId = getString(getColumnIndexOrThrow("event_id")),
         taskId = getString(getColumnIndexOrThrow("task_id")),
         payloadJson = getString(getColumnIndexOrThrow("payload_json")),
+        evidenceJpeg = getColumnIndexOrThrow("evidence_jpeg").let { if (isNull(it)) null else getBlob(it) },
+        evidenceSha256 = getString(getColumnIndexOrThrow("evidence_sha256")),
+        evidenceCapturedAt = getLong(getColumnIndexOrThrow("evidence_captured_at")),
+        evidenceUrl = getColumnIndexOrThrow("evidence_url").let { if (isNull(it)) null else getString(it) },
         state = getString(getColumnIndexOrThrow("state")),
         attemptCount = getInt(getColumnIndexOrThrow("attempt_count")),
         nextAttemptAt = getLong(getColumnIndexOrThrow("next_attempt_at")),
@@ -176,13 +220,17 @@ class AndroidFireEventOutboxStore(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "fire-event-outbox.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
         private const val TABLE_NAME = "fire_event_outbox"
         private const val MAX_ERROR_LENGTH = 500
         private val ENTRY_COLUMNS = arrayOf(
             "event_id",
             "task_id",
             "payload_json",
+            "evidence_jpeg",
+            "evidence_sha256",
+            "evidence_captured_at",
+            "evidence_url",
             "state",
             "attempt_count",
             "next_attempt_at",

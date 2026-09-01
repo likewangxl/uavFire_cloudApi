@@ -47,6 +47,24 @@ class FireEventOutboxCoordinatorTest {
     }
 
     @Test
+    fun evidenceUploadReceipt_isPersistedBeforeEventDelivery() = runTest {
+        val store = InMemoryOutboxStore()
+        val results = ArrayDeque<FireEventDeliveryResult>().apply {
+            add(FireEventDeliveryResult.EvidenceUploaded("/evidence/agent.jpg"))
+            add(FireEventDeliveryResult.Delivered("accepted"))
+        }
+        val coordinator = coordinator(store, results, nowProvider = { 6_000L })
+        coordinator.enqueue(report(sourceTs = 15L))
+
+        assertTrue(coordinator.deliverDueOnce())
+        assertEquals("/evidence/agent.jpg", store.entries.values.single().evidenceUrl)
+        assertEquals(1, store.health().pendingCount)
+
+        assertTrue(coordinator.deliverDueOnce())
+        assertEquals(0, store.health().pendingCount)
+    }
+
+    @Test
     fun retryableFailure_usesSpecifiedBackoffAndReportsHealth() = runTest {
         var now = 10_000L
         val store = InMemoryOutboxStore()
@@ -141,7 +159,10 @@ class FireEventOutboxCoordinatorTest {
         ),
         inferenceMs = 25,
         modelVersion = "best-test",
-        modelSha256 = "abc123",
+        modelSha256 = "a".repeat(64),
+        evidenceJpeg = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte()),
+        evidenceSha256 = "b".repeat(64),
+        evidenceCapturedAt = sourceTs,
     )
 
     private class InMemoryOutboxStore : FireEventOutboxStore {
@@ -160,6 +181,15 @@ class FireEventOutboxCoordinatorTest {
 
         override fun markDelivered(eventId: String, deliveredAtMs: Long) {
             entries[eventId]?.let { entries[eventId] = it.copy(state = FireEventOutboxEntry.STATE_DELIVERED) }
+        }
+
+        override fun markEvidenceUploaded(eventId: String, evidenceUrl: String, uploadedAtMs: Long) {
+            entries[eventId]?.let {
+                entries[eventId] = it.copy(
+                    evidenceUrl = evidenceUrl,
+                    nextAttemptAt = uploadedAtMs,
+                )
+            }
         }
 
         override fun markRetry(

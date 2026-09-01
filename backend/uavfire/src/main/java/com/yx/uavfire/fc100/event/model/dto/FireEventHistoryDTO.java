@@ -34,6 +34,9 @@ public class FireEventHistoryDTO {
     private String temperatureUnit;
     private String thermalImageUrl;
     private String visibleImageUrl;
+    private String evidenceSha256;
+    private Long evidenceCapturedAt;
+    private String modelSha256;
     private Long eventTimestamp;
     private String action;
     private Long createTime;

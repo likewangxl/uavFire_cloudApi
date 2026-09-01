@@ -66,12 +66,17 @@ class AppServices(
     private val kmzCacheDir = File(application.getExternalFilesDir(null), "wayline-kmz")
     private val localKmzDir = File(application.filesDir, "wayline-local")
     private val api = AgentBackendApiFactory.create()
+    private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
+    private val waylineClient = WaylineAgentClient(
+        api = waylineApi,
+        sharedSecret = BuildConfig.AGENT_WAYLINE_SHARED_SECRET,
+    )
     private val fireEventOutboxStore = AndroidFireEventOutboxStore(application)
     private val fireEventIngestApi = AgentBackendApiFactory.create(FireEventIngestApi::class.java)
     private val fireEventOutbox = FireEventOutboxCoordinator(
         scope = appScope,
         store = fireEventOutboxStore,
-        sender = RetrofitFireEventSender(fireEventIngestApi),
+        sender = RetrofitFireEventSender(fireEventIngestApi, waylineClient),
     )
     private val backendClient = AgentBackendClient(
         api = api,
@@ -116,11 +121,6 @@ class AppServices(
         commandExecutionDeduplicator = legacyCommandDeduplicator,
     )
     // Wayline-agent control plane (HTTP) + event plane (MQTT).
-    private val waylineApi = AgentBackendApiFactory.create(WaylineAgentApi::class.java)
-    private val waylineClient = WaylineAgentClient(
-        api = waylineApi,
-        sharedSecret = BuildConfig.AGENT_WAYLINE_SHARED_SECRET,
-    )
     private val mqttPublisher = WaylineMqttPublisher(
         brokerUrl = BuildConfig.AGENT_MQTT_BROKER_URL,
         clientIdPrefix = "wayline-agent",

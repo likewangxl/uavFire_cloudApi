@@ -48,6 +48,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/events");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/agent-fire-events");
+        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/fire-evidence/**");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/latest-visible-roi");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/state");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/*/commands/poll");
@@ -64,7 +65,10 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         registry.addInterceptor(authInterceptor).addPathPatterns("/**").excludePathPatterns(EXCLUDE_PATHS);
 
         registry.addInterceptor(waylineAgentAuthInterceptor)
-                .addPathPatterns(waylineAgentBase + "/agents/**");
+                .addPathPatterns(
+                        waylineAgentBase + "/agents/**",
+                        "/" + managePrefix + manageVersion + "/dual-stream/tasks/*/agent-fire-events",
+                        "/" + managePrefix + manageVersion + "/dual-stream/agents/*/fire-evidence");
     }
 
     @Override

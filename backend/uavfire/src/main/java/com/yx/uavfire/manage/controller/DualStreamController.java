@@ -9,13 +9,27 @@ import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
 import com.yx.uavfire.manage.model.dto.VisibleRoiSnapshotDTO;
+import com.yx.uavfire.manage.model.dto.AgentFireEvidenceReceiptDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
+import com.yx.uavfire.manage.service.AgentFireEvidenceService;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentClaim;
 import com.dji.sdk.common.HttpResultResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
+import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import javax.servlet.http.HttpServletRequest;
+import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("${url.manage.prefix}${url.manage.version}/dual-stream")
@@ -23,6 +37,9 @@ public class DualStreamController {
 
     @Autowired
     private IDualStreamService dualStreamService;
+
+    @Autowired
+    private AgentFireEvidenceService agentFireEvidenceService;
 
     @PostMapping("/agents/{drone_sn}/heartbeat")
     public HttpResultResponse<Void> heartbeat(@PathVariable("drone_sn") String droneSn,
@@ -67,8 +84,70 @@ public class DualStreamController {
     @PostMapping("/tasks/{task_id}/agent-fire-events")
     public HttpResultResponse<AgentFireEventReceiptDTO> agentFireEvent(
             @PathVariable("task_id") String taskId,
-            @RequestBody DualStreamEventDTO body) {
+            @RequestBody DualStreamEventDTO body,
+            HttpServletRequest request) {
+        WaylineAgentClaim claim = requireAgentClaim(request);
+        if (body == null
+                || !claim.getDroneSn().equals(body.getDroneSn())
+                || !("fire-" + claim.getDroneSn()).equals(taskId)
+                || !taskId.equals(body.getTaskId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "agent task/device mismatch");
+        }
+        if (!agentFireEvidenceService.verify(
+                body.getDroneSn(),
+                body.getEventId(),
+                body.getVisibleImageUrl(),
+                body.getEvidenceSha256(),
+                body.getEvidenceCapturedAt())) {
+            return HttpResultResponse.success(new AgentFireEventReceiptDTO()
+                    .setEventId(body.getEventId())
+                    .setStatus("rejected")
+                    .setReason("evidence-not-verified"));
+        }
+        body.setEvidenceStatus("VERIFIED");
         return HttpResultResponse.success(dualStreamService.acceptAgentFireEvent(taskId, body));
+    }
+
+    @PostMapping(value = "/agents/{drone_sn}/fire-evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public HttpResultResponse<AgentFireEvidenceReceiptDTO> uploadFireEvidence(
+            @PathVariable("drone_sn") String droneSn,
+            @RequestParam("event_id") String eventId,
+            @RequestParam("sha256") String sha256,
+            @RequestParam("captured_at") long capturedAt,
+            @RequestPart("file") MultipartFile file,
+            HttpServletRequest request) throws IOException {
+        WaylineAgentClaim claim = requireAgentClaim(request);
+        if (!claim.getDroneSn().equals(droneSn)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "agent device mismatch");
+        }
+        try {
+            return HttpResultResponse.success(
+                    agentFireEvidenceService.store(droneSn, eventId, sha256, capturedAt, file));
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, invalid.getMessage());
+        }
+    }
+
+    @GetMapping(value = "/fire-evidence/{drone_sn}/{filename:.+}", produces = MediaType.IMAGE_JPEG_VALUE)
+    public ResponseEntity<Resource> fireEvidence(
+            @PathVariable("drone_sn") String droneSn,
+            @PathVariable("filename") String filename) throws IOException {
+        try {
+            return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).cachePublic())
+                    .contentType(MediaType.IMAGE_JPEG)
+                    .body(agentFireEvidenceService.load(droneSn, filename));
+        } catch (IllegalArgumentException missing) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "evidence not found");
+        }
+    }
+
+    private WaylineAgentClaim requireAgentClaim(HttpServletRequest request) {
+        Object claim = request.getAttribute(WaylineAgentAuthInterceptor.ATTR_CLAIM);
+        if (!(claim instanceof WaylineAgentClaim)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "agent claim missing");
+        }
+        return (WaylineAgentClaim) claim;
     }
 
     @GetMapping("/tasks/{task_id}/events")

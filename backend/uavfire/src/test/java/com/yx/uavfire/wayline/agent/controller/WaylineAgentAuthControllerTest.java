@@ -23,6 +23,7 @@ class WaylineAgentAuthControllerTest {
     private static final String SHARED_SECRET = "shared-secret-value";
 
     private MockMvc mockMvc;
+    private WaylineAgentAuthController controller;
     private final ObjectMapper json = new ObjectMapper();
 
     @BeforeAll
@@ -33,14 +34,43 @@ class WaylineAgentAuthControllerTest {
 
     @BeforeEach
     void setUp() {
-        WaylineAgentAuthController controller = new WaylineAgentAuthController();
+        controller = new WaylineAgentAuthController();
         ReflectionTestUtils.setField(controller, "sharedSecret", SHARED_SECRET);
         ReflectionTestUtils.setField(controller, "tokenTtlSeconds", 3600L);
+        ReflectionTestUtils.setField(controller, "requireHttps", false);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(new ObjectMapper()))
                 .addPlaceholderValue("url.wayline-agent.prefix", "wayline-agent")
                 .addPlaceholderValue("url.wayline-agent.version", "/api/v1")
                 .build();
+    }
+
+    @Test
+    void issueToken_requiresHttpsWhenProductionProtectionEnabled() throws Exception {
+        ReflectionTestUtils.setField(controller, "requireHttps", true);
+        WaylineAgentTokenRequestDTO body = new WaylineAgentTokenRequestDTO();
+        body.setDroneSn("SN-A");
+        body.setSharedSecret(SHARED_SECRET);
+
+        mockMvc.perform(post("/wayline-agent/api/v1/auth/token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(body)))
+                .andExpect(status().isUpgradeRequired());
+    }
+
+    @Test
+    void issueToken_acceptsContainerVerifiedHttps() throws Exception {
+        ReflectionTestUtils.setField(controller, "requireHttps", true);
+        WaylineAgentTokenRequestDTO body = new WaylineAgentTokenRequestDTO();
+        body.setDroneSn("SN-A");
+        body.setSharedSecret(SHARED_SECRET);
+
+        mockMvc.perform(post("/wayline-agent/api/v1/auth/token")
+                        .secure(true)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.token").isNotEmpty());
     }
 
     @Test

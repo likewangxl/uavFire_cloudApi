@@ -6,6 +6,9 @@ import com.yx.uavfire.manage.model.dto.DualStreamEventDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamCommandDTO;
 import com.yx.uavfire.manage.model.dto.DualStreamLiveGroupDTO;
 import com.yx.uavfire.manage.service.IDualStreamService;
+import com.yx.uavfire.manage.service.AgentFireEvidenceService;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
+import com.yx.uavfire.wayline.agent.security.WaylineAgentClaim;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,12 +31,15 @@ class DualStreamControllerTest {
     private MockMvc mockMvc;
 
     private IDualStreamService dualStreamService;
+    private AgentFireEvidenceService evidenceService;
 
     @BeforeEach
     void setUp() {
         DualStreamController controller = new DualStreamController();
         dualStreamService = mock(IDualStreamService.class);
         ReflectionTestUtils.setField(controller, "dualStreamService", dualStreamService);
+        evidenceService = mock(AgentFireEvidenceService.class);
+        ReflectionTestUtils.setField(controller, "agentFireEvidenceService", evidenceService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(new ObjectMapper()))
                 .addPlaceholderValue("url.manage.prefix", "/manage/api")
@@ -207,14 +213,25 @@ class DualStreamControllerTest {
                         .setEventId(eventId)
                         .setStatus("accepted")
                         .setReason("CREATED"));
+        when(evidenceService.verify(
+                "DRONE-001",
+                eventId,
+                "/evidence/agent.jpg",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                1788141600000L)).thenReturn(true);
 
         mockMvc.perform(post("/manage/api/v1/dual-stream/tasks/fire-DRONE-001/agent-fire-events")
+                        .requestAttr(WaylineAgentAuthInterceptor.ATTR_CLAIM,
+                                new WaylineAgentClaim("DRONE-001", WaylineAgentClaim.ROLE))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"eventId\":\"" + eventId + "\","
                                 + "\"taskId\":\"fire-DRONE-001\","
                                 + "\"droneSn\":\"DRONE-001\","
                                 + "\"sourceTs\":1788141600000,"
-                                + "\"analysisChannel\":\"agent-visible-onnx\"}"))
+                                + "\"analysisChannel\":\"agent-visible-onnx\","
+                                + "\"visible_image_url\":\"/evidence/agent.jpg\","
+                                + "\"evidence_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+                                + "\"evidence_captured_at\":1788141600000}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.eventId").value(eventId))

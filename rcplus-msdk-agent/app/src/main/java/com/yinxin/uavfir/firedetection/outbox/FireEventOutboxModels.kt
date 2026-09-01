@@ -4,6 +4,10 @@ data class FireEventOutboxEntry(
     val eventId: String,
     val taskId: String,
     val payloadJson: String,
+    val evidenceJpeg: ByteArray?,
+    val evidenceSha256: String,
+    val evidenceCapturedAt: Long,
+    val evidenceUrl: String? = null,
     val state: String = STATE_PENDING,
     val attemptCount: Int = 0,
     val nextAttemptAt: Long,
@@ -31,6 +35,7 @@ interface FireEventOutboxStore : AutoCloseable {
     fun enqueue(entry: FireEventOutboxEntry): Boolean
     fun nextDue(nowMs: Long): FireEventOutboxEntry?
     fun markDelivered(eventId: String, deliveredAtMs: Long)
+    fun markEvidenceUploaded(eventId: String, evidenceUrl: String, uploadedAtMs: Long)
     fun markRetry(eventId: String, attemptCount: Int, nextAttemptAtMs: Long, error: String, failedAtMs: Long)
     fun markRejected(eventId: String, attemptCount: Int, error: String, failedAtMs: Long)
     fun health(): FireEventOutboxHealth
@@ -38,9 +43,15 @@ interface FireEventOutboxStore : AutoCloseable {
 }
 
 sealed class FireEventDeliveryResult {
+    data class EvidenceUploaded(val visibleImageUrl: String) : FireEventDeliveryResult()
     data class Delivered(val status: String) : FireEventDeliveryResult()
     data class Retryable(val error: String) : FireEventDeliveryResult()
     data class Rejected(val error: String) : FireEventDeliveryResult()
+}
+
+interface FireEventAuthProvider {
+    suspend fun token(droneSn: String): String
+    fun invalidate(droneSn: String)
 }
 
 fun interface FireEventSender {

@@ -3,6 +3,7 @@ package com.yinxin.uavfir.wayline
 import android.util.Log
 import retrofit2.HttpException
 import java.util.concurrent.ConcurrentHashMap
+import com.yinxin.uavfir.firedetection.outbox.FireEventAuthProvider
 
 /**
  * Thin wrapper around [WaylineAgentApi]. The agent serves a single physical
@@ -16,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 class WaylineAgentClient(
     private val api: WaylineAgentApi,
     private val sharedSecret: String,
-) {
+) : FireEventAuthProvider {
     private val tokenByDrone = ConcurrentHashMap<String, String>()
 
     /**
@@ -30,6 +31,12 @@ class WaylineAgentClient(
         val fresh = resp.data?.token ?: throw IllegalStateException("token endpoint returned empty body")
         tokenByDrone[droneSn] = fresh
         return fresh
+    }
+
+    override suspend fun token(droneSn: String): String = ensureToken(droneSn)
+
+    override fun invalidate(droneSn: String) {
+        tokenByDrone.remove(droneSn)
     }
 
     suspend fun pollCommand(droneSn: String): WaylineAgentCommand? {

@@ -61,6 +61,21 @@ public class DualStreamEventDTO {
 
     private String modelSha256;
 
+    /** SHA-256 of the exact JPEG persisted by the agent for this inference. */
+    @JsonProperty("evidence_sha256")
+    @JsonAlias("evidenceSha256")
+    private String evidenceSha256;
+
+    /** Capture time of the persisted evidence frame (epoch milliseconds). */
+    @JsonProperty("evidence_captured_at")
+    @JsonAlias("evidenceCapturedAt")
+    private Long evidenceCapturedAt;
+
+    /** Set to VERIFIED only after the backend has matched URL, hash and capture time. */
+    @JsonProperty("evidence_status")
+    @JsonAlias("evidenceStatus")
+    private String evidenceStatus;
+
     private Long inferenceMs;
 
     private List<Map<String, Object>> thermalMeasurements;

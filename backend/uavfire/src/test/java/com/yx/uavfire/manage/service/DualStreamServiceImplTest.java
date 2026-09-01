@@ -2555,7 +2555,7 @@ class DualStreamServiceImplTest {
     }
 
     @Test
-    void agentVisibleOnnxEvent_createsManualPendingCandidateWithModelEvidence() {
+    void unauthenticatedAgentVisibleOnnxEvent_cannotCreateCandidate() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
         ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
@@ -2573,16 +2573,7 @@ class DualStreamServiceImplTest {
                 .setInferenceMs(38L)
                 .setVisibleRoi(Map.of("x", 0.1, "y", 0.2, "width", 0.3, "height", 0.4)));
 
-        ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
-        verify(fireEventService).create(captor.capture());
-        FireEventCreateParam created = captor.getValue();
-        assertEquals("DJI_AGENT", created.getSource());
-        assertEquals("DRONE-001", created.getDeviceSn());
-        assertEquals("MANUAL_CONFIRM", created.getReleasePolicy());
-        assertEquals("OFFICIAL_HOOK_MANUAL", created.getReleaseExecutionMode());
-        assertEquals("UNLOCATED", created.getGeoQuality());
-        assertEquals(0, created.getConfidence().compareTo(new java.math.BigDecimal("0.82")));
-        assertEquals(0.3, created.getVisibleRoi().get("width"));
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
     }
 
     @Test
@@ -2628,6 +2619,11 @@ class DualStreamServiceImplTest {
                 .setRiskLevel("HIGH")
                 .setVisibleClass("fire")
                 .setModelVersion("best-20260808")
+                .setModelSha256("68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271")
+                .setVisibleImageUrl("/manage/api/v1/dual-stream/fire-evidence/DRONE-001/evidence.jpg")
+                .setEvidenceSha256("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .setEvidenceCapturedAt(1788141600000L)
+                .setEvidenceStatus("VERIFIED")
                 .setVisibleRoi(Map.of("x", 0.1, "y", 0.2, "width", 0.3, "height", 0.4));
 
         AgentFireEventReceiptDTO accepted = service.acceptAgentFireEvent("fire-DRONE-001", event);
@@ -2641,6 +2637,8 @@ class DualStreamServiceImplTest {
         ArgumentCaptor<FireEventCreateParam> captor = ArgumentCaptor.forClass(FireEventCreateParam.class);
         verify(fireEventService, org.mockito.Mockito.times(2)).create(captor.capture());
         assertTrue(captor.getAllValues().stream().allMatch(param -> eventId.equals(param.getEventId())));
+        assertTrue(captor.getAllValues().stream().allMatch(param ->
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".equals(param.getEvidenceSha256())));
     }
 
     @Test
@@ -2663,6 +2661,29 @@ class DualStreamServiceImplTest {
     }
 
     @Test
+    void authoritativeAgentFireEvent_withoutVerifiedEvidenceCannotCreateTaskCandidate() {
+        DualStreamServiceImpl service = new DualStreamServiceImpl();
+        FireEventService fireEventService = mock(FireEventService.class);
+        ReflectionTestUtils.setField(service, "fireEventService", fireEventService);
+
+        AgentFireEventReceiptDTO receipt = service.acceptAgentFireEvent(
+                "fire-DRONE-001",
+                new DualStreamEventDTO()
+                        .setEventId("agent-0123456789abcdef0123456789abcdef0123456789abcdef")
+                        .setTaskId("fire-DRONE-001")
+                        .setDroneSn("DRONE-001")
+                        .setSourceTs(1788141600000L)
+                        .setAnalysisChannel("agent-visible-onnx")
+                        .setVisibleScore(0.82)
+                        .setModelSha256("68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271")
+                        .setVisibleRoi(Map.of("x", 0.1, "y", 0.2, "width", 0.3, "height", 0.4)));
+
+        assertEquals("rejected", receipt.getStatus());
+        assertEquals("invalid-agent-fire-event", receipt.getReason());
+        verify(fireEventService, never()).create(any(FireEventCreateParam.class));
+    }
+
+    @Test
     void authoritativeAgentFireEvent_doesNotAcceptMissingDatabaseReceipt() {
         DualStreamServiceImpl service = new DualStreamServiceImpl();
         FireEventService fireEventService = mock(FireEventService.class);
@@ -2680,6 +2701,11 @@ class DualStreamServiceImplTest {
                         .setVisibleScore(0.82)
                         .setFusionScore(0.82)
                         .setRiskLevel("HIGH")
+                        .setModelSha256("68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271")
+                        .setVisibleImageUrl("/manage/api/v1/dual-stream/fire-evidence/DRONE-001/evidence.jpg")
+                        .setEvidenceSha256("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                        .setEvidenceCapturedAt(1788141600000L)
+                        .setEvidenceStatus("VERIFIED")
                         .setVisibleRoi(Map.of("x", 0.1, "y", 0.2, "width", 0.3, "height", 0.4)));
 
         assertEquals("retry", receipt.getStatus());

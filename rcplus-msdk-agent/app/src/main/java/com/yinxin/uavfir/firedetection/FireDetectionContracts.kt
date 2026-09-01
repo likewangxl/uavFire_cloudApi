@@ -55,6 +55,9 @@ data class VisibleDetectionReport(
     val inferenceMs: Long,
     val modelVersion: String,
     val modelSha256: String,
+    val evidenceJpeg: ByteArray,
+    val evidenceSha256: String,
+    val evidenceCapturedAt: Long,
 )
 
 fun interface VisibleDetectionReporter {
