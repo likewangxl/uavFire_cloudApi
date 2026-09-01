@@ -9,6 +9,7 @@
  */
 import request from '/@/api/http/request'
 import type { AxiosRequestConfig } from 'axios'
+import { normalizeFireSnapshotUrls } from './snapshot-url.mjs'
 
 const camelToSnake = (s: string): string =>
   s.replace(/[A-Z]/g, (m) => '_' + m.toLowerCase())
@@ -41,7 +42,7 @@ const client = {
     const cfg: AxiosRequestConfig = { ...(config || {}) }
     if (cfg.params) cfg.params = deepConvert(cfg.params, camelToSnake)
     return request.get<T>(url, cfg).then((r) => {
-      r.data = deepConvert(r.data, snakeToCamel)
+      r.data = normalizeFireSnapshotUrls(deepConvert(r.data, snakeToCamel))
       return r
     })
   },
@@ -50,7 +51,7 @@ const client = {
     cfg.headers = { ...(cfg.headers || {}), 'X-Idempotency-Key': idempotencyKey() }
     const payload = body !== undefined ? deepConvert(body, camelToSnake) : body
     return request.post<T>(url, payload, cfg).then((r) => {
-      r.data = deepConvert(r.data, snakeToCamel)
+      r.data = normalizeFireSnapshotUrls(deepConvert(r.data, snakeToCamel))
       return r
     })
   },

@@ -1,5 +1,6 @@
 import vue from '@vitejs/plugin-vue'
 // config alias
+import fs from 'fs'
 import path from 'path'
 import { ConfigEnv, defineConfig, UserConfigExport } from 'vite'
 import ViteComponents, { AntDesignVueResolver } from 'vite-plugin-components'
@@ -9,6 +10,9 @@ import OptimizationPersist from 'vite-plugin-optimize-persist'
 import PkgConfig from 'vite-plugin-package-config'
 import viteSvgIcons from 'vite-plugin-svg-icons'
 import { viteVConsole } from 'vite-plugin-vconsole'
+
+const frontendRoot = path.resolve(process.cwd())
+const frontendNodeModules = fs.realpathSync(path.resolve(frontendRoot, 'node_modules'))
 
 function manualChunks (id: string) {
   if (!id.includes('node_modules')) {
@@ -105,6 +109,12 @@ export default ({ command, mode }: ConfigEnv): UserConfigExport => defineConfig(
     open: true,
     host: '0.0.0.0',
     port: 8080,
+    fs: {
+      // Worktrees reuse the main checkout's node_modules through a symlink.
+      // Vite compares canonical paths, so explicitly allow that resolved
+      // dependency directory instead of embedding a machine-specific path.
+      allow: [frontendRoot, frontendNodeModules]
+    },
     proxy: {
       // 火情快照图 URL 是相对路径(/api/v1/snapshots/...)，生产由 nginx 反代到 ai-service，dev 同样转发
       '/api/v1/snapshots': {
