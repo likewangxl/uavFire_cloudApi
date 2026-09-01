@@ -14,6 +14,7 @@ class OnDeviceFireDetectionCoordinator(
     private val reporter: VisibleDetectionReporter,
     private val engineFactory: () -> VisibleFireDetectionEngine = { OnnxVisibleFireDetector(context.applicationContext) },
     private val calibrationSink: FireCalibrationSink = FireCalibrationRecorder(context.applicationContext),
+    private val observationSink: FireDetectionObservationSink = FireDetectionObservationBus,
     private val inferenceIntervalMs: Long = 400L,
 ) : VisibleFrameConsumer, VisibleAiControl, AutoCloseable {
     private data class Session(val droneSn: String, val taskId: String, val generation: Long)
@@ -34,9 +35,19 @@ class OnDeviceFireDetectionCoordinator(
     private var lastAcceptedAtMs = Long.MIN_VALUE
     private var engine: VisibleFireDetectionEngine? = null
 
+    init {
+        publishObservation(active = false)
+    }
+
     override suspend fun start(droneSn: String): VisibleAiControlResult {
-        if (!enabled) return VisibleAiControlResult(false, "agent-fire-onnx-disabled")
-        if (droneSn.isBlank()) return VisibleAiControlResult(false, "drone-sn-required")
+        if (!enabled) {
+            publishObservation(active = false, failureMessage = "agent-fire-onnx-disabled")
+            return VisibleAiControlResult(false, "agent-fire-onnx-disabled")
+        }
+        if (droneSn.isBlank()) {
+            publishObservation(active = false, failureMessage = "drone-sn-required")
+            return VisibleAiControlResult(false, "drone-sn-required")
+        }
         val prepared = runCatching {
             withContext(Dispatchers.Default) {
                 ensureEngine().prepare()
@@ -45,6 +56,7 @@ class OnDeviceFireDetectionCoordinator(
             Log.e(TAG, "agent ONNX initialization failed", it)
         }
         if (prepared.isFailure) {
+            publishObservation(active = false, failureMessage = "agent-fire-onnx-prepare-failed")
             return VisibleAiControlResult(false, "agent-fire-onnx-prepare-failed")
         }
         synchronized(lock) {
@@ -54,6 +66,7 @@ class OnDeviceFireDetectionCoordinator(
             lastAcceptedAtMs = Long.MIN_VALUE
             tracker.reset()
         }
+        publishObservation(active = true)
         return VisibleAiControlResult(true, "agent-fire-onnx-enabled")
     }
 
@@ -67,6 +80,7 @@ class OnDeviceFireDetectionCoordinator(
                 tracker.reset()
             }
         }
+        publishObservation(active = false)
         return VisibleAiControlResult(true, "agent-fire-onnx-disabled")
     }
 
@@ -112,6 +126,7 @@ class OnDeviceFireDetectionCoordinator(
         }
         runCatching { engine?.close() }
         engine = null
+        publishObservation(active = false)
     }
 
     private suspend fun drainFrames(first: OwnedFrame) {
@@ -134,7 +149,22 @@ class OnDeviceFireDetectionCoordinator(
             }
         }.onFailure {
             Log.e(TAG, "agent ONNX inference failed", it)
+            publishObservation(
+                active = true,
+                sourceWidth = frame.width,
+                sourceHeight = frame.height,
+                sourceTs = frame.timestampMs,
+                failureMessage = it.message ?: "agent-onnx-inference-failed",
+            )
         }.getOrNull() ?: return
+        publishObservation(
+            active = true,
+            sourceWidth = frame.width,
+            sourceHeight = frame.height,
+            sourceTs = frame.timestampMs,
+            inferenceMs = result.inferenceMs,
+            detections = result.detections,
+        )
         val confirmed = tracker.accept(result.detections, frame.timestampMs)
         calibrationSink.record(
             frame.session.droneSn,
@@ -174,6 +204,29 @@ class OnDeviceFireDetectionCoordinator(
 
     private fun ensureEngine(): VisibleFireDetectionEngine = synchronized(lock) {
         engine ?: engineFactory().also { engine = it }
+    }
+
+    private fun publishObservation(
+        active: Boolean,
+        sourceWidth: Int = 0,
+        sourceHeight: Int = 0,
+        sourceTs: Long = 0L,
+        inferenceMs: Long? = null,
+        detections: List<VisibleDetection> = emptyList(),
+        failureMessage: String? = null,
+    ) {
+        observationSink.publish(
+            FireDetectionObservation(
+                enabled = enabled,
+                active = active,
+                sourceWidth = sourceWidth,
+                sourceHeight = sourceHeight,
+                sourceTs = sourceTs,
+                inferenceMs = inferenceMs,
+                detections = detections,
+                failureMessage = failureMessage,
+            ),
+        )
     }
 
     private companion object {

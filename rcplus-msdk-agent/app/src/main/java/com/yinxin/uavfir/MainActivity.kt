@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         openSampleToolsButton.setOnClickListener {
-            startActivity(Intent(this, dji.v5.ux.sample.showcase.defaultlayout.DefaultLayoutActivity::class.java))
+            startActivity(Intent(this, AgentFlightActivity::class.java))
         }
 
         startHomeStatusRefresh()

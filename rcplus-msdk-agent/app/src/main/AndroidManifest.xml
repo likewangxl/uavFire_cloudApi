@@ -50,6 +50,13 @@
             android:theme="@style/full_screen_theme" />
 
         <activity
+            android:name=".AgentFlightActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/full_screen_theme" />
+
+        <activity
             android:name="dji.v5.ux.sample.showcase.widgetlist.WidgetsActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
