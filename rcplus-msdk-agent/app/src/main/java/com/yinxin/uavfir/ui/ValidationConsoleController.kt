@@ -77,10 +77,10 @@ class ValidationConsoleController(
 
             val limit = deviceState.flightLimit
             val height = limit.heightLimitMeters?.let { "限高${it}m" } ?: "限高--"
-            val distance = if (limit.distanceLimitEnabled == true) {
-                limit.distanceLimitMeters?.let { "限距${it}m" } ?: "限距--"
-            } else {
-                "未限距"
+            val distance = when (limit.distanceLimitEnabled) {
+                true -> limit.distanceLimitMeters?.let { "限距${it}m" } ?: "限距--"
+                false -> "未限距"
+                null -> "限距--"
             }
             return "飞行限制\n$height / $distance"
         }
@@ -99,15 +99,18 @@ class ValidationConsoleController(
                 aircraftName = deviceState.aircraftName,
                 aircraftModel = deviceState.aircraftModel,
             )
-            val status = when (deviceState.connectionState) {
-                AgentConnectionState.CAPABILITY_READY -> "已连接"
-                AgentConnectionState.SDK_READY -> "未连接"
-                AgentConnectionState.AIRCRAFT_CONNECTED -> "已连接"
-                AgentConnectionState.STREAMING -> "已连接"
-                AgentConnectionState.DEGRADED -> "已连接"
-                AgentConnectionState.IDLE -> "未连接"
-                AgentConnectionState.ERROR -> "异常"
+            val hasAircraftLink = when (deviceState.connectionState) {
+                AgentConnectionState.AIRCRAFT_CONNECTED,
+                AgentConnectionState.CAPABILITY_READY,
+                AgentConnectionState.STREAMING,
+                AgentConnectionState.DEGRADED,
+                -> true
+                AgentConnectionState.IDLE,
+                AgentConnectionState.SDK_READY,
+                AgentConnectionState.ERROR,
+                -> false
             }
+            val status = if (hasAircraftLink && deviceName != UNKNOWN_AIRCRAFT_NAME) "已连接" else "未连接"
             return "当前飞行器\n$deviceName    $status"
         }
 
@@ -120,7 +123,7 @@ class ValidationConsoleController(
 
             val value = aircraftModel?.trim().orEmpty()
             return when {
-                isUnknownDeviceValue(value) -> "未获取设备名称"
+                isUnknownDeviceValue(value) -> UNKNOWN_AIRCRAFT_NAME
                 value.equals("M300_RTK", ignoreCase = true) -> "DJI M300 RTK"
                 value.equals("M350_RTK", ignoreCase = true) -> "DJI M350 RTK"
                 value.contains("MATRICE_4T", ignoreCase = true) -> "MATRICE 4T"
@@ -139,5 +142,7 @@ class ValidationConsoleController(
         private fun formatGb(bytes: Long): String {
             return String.format(Locale.US, "%.1fGB", bytes / 1_000_000_000.0)
         }
+
+        private const val UNKNOWN_AIRCRAFT_NAME = "UNKNOWN"
     }
 }

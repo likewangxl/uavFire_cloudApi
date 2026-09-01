@@ -56,10 +56,38 @@ class ValidationConsoleControllerTest {
             DjiHomeStatus(
                 flightLimitText = "飞行限制\n未连接",
                 taskSpaceText = "任务空间\n读取中",
-                aircraftStatusText = "当前飞行器\n未获取设备名称    未连接",
+                aircraftStatusText = "当前飞行器\nUNKNOWN    未连接",
             ),
             homeStatus,
         )
+    }
+
+    @Test
+    fun buildHomeStatus_doesNotReportUnknownDistanceLimitAsUnlimited() {
+        val homeStatus = ValidationConsoleController.buildHomeStatus(
+            deviceState = DjiDeviceState(
+                connectionState = AgentConnectionState.CAPABILITY_READY,
+                aircraftModel = "M300_RTK",
+                flightLimit = DjiFlightLimit(),
+            ),
+            storageStatus = DjiStorageStatus(freeBytes = 1L, totalBytes = 2L),
+        )
+
+        assertEquals("飞行限制\n限高-- / 限距--", homeStatus.flightLimitText)
+    }
+
+    @Test
+    fun buildHomeStatus_doesNotClaimConnectedWhenAircraftIdentityIsUnknown() {
+        val homeStatus = ValidationConsoleController.buildHomeStatus(
+            deviceState = DjiDeviceState(
+                connectionState = AgentConnectionState.CAPABILITY_READY,
+                aircraftName = "UNKNOWN",
+                aircraftModel = "UNRECOGNIZED",
+            ),
+            storageStatus = DjiStorageStatus(freeBytes = 1L, totalBytes = 2L),
+        )
+
+        assertEquals("当前飞行器\nUNKNOWN    未连接", homeStatus.aircraftStatusText)
     }
 
     @Test

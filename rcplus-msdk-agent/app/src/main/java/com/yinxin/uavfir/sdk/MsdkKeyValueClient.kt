@@ -34,9 +34,9 @@ interface MsdkKeyValueClient {
 
 class RealMsdkKeyValueClient : MsdkKeyValueClient {
     override fun isAircraftConnected(): Boolean {
-        return KeyManager.getInstance().getValue(
-            KeyTools.createKey(ProductKey.KeyConnection),
-        ) == true
+        return runCatching {
+            FlightControllerKey.KeyConnection.create().get(false)
+        }.getOrDefault(false)
     }
 
     override fun loadCapability(): CameraCapability {
@@ -140,13 +140,13 @@ class RealMsdkKeyValueClient : MsdkKeyValueClient {
 
     override fun loadFlightLimit(): DjiFlightLimit {
         val heightLimit = runCatching {
-            FlightControllerKey.KeyHeightLimit.create().get(0)
+            KeyManager.getInstance().getValue(KeyTools.createKey(FlightControllerKey.KeyHeightLimit))
         }.getOrNull()?.takeIf { it > 0 }
         val distanceEnabled = runCatching {
-            FlightControllerKey.KeyDistanceLimitEnabled.create().get(false)
+            KeyManager.getInstance().getValue(KeyTools.createKey(FlightControllerKey.KeyDistanceLimitEnabled))
         }.getOrNull()
         val distanceLimit = runCatching {
-            FlightControllerKey.KeyDistanceLimit.create().get(0)
+            KeyManager.getInstance().getValue(KeyTools.createKey(FlightControllerKey.KeyDistanceLimit))
         }.getOrNull()?.takeIf { it > 0 }
 
         return DjiFlightLimit(

@@ -8,6 +8,7 @@
     <string name="app_status_error">执行失败: %1$s\n原因: %2$s</string>
     <string name="action_refresh_device_status">读取设备状态</string>
     <string name="action_start_dual_stream">启动双流</string>
-    <string name="action_probe_waypoint">探针:推 KMZ 到 M4T</string>
+    <string name="action_probe_waypoint">探针:推送 KMZ</string>
+    <string name="home_feature_kmz_subtitle">航线包下发</string>
     <string name="action_open_sample_tools">打开飞行界面</string>
 </resources>
