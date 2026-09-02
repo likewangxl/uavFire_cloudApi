@@ -61,6 +61,7 @@ agentWaylineSharedSecret=
 agentAircraftSn=
 agentGatewaySn=
 agentFireOnnxEnabled=false
+agentFireModelProfile=legacy416
 ```
 
 `agentWaylineSharedSecret` 必须与后端环境变量 `WAYLINE_AGENT_SHARED_SECRET` 一致；两端默认均为空，
@@ -77,9 +78,17 @@ agentPayloadPositionIndex=-1
 m300FireClosedLoopEnabled=false
 ```
 
-端侧模型位于 `app/src/main/assets/fire-detection/best.onnx`，固定输入为
-`1×3×416×416`，输出为 `1×6×3549`，模型 SHA-256 为
-`68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271`。
+端侧同时保留两套 `fire/smoke` 模型，通过 `agentFireModelProfile` 在构建时选择：
+
+- `legacy416`（默认）：`best.onnx`，固定输入 `1×3×416×416`，SHA-256
+  `68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271`。
+- `visible960`（观察版）：`best-fire-smoke-960.onnx`，固定输入 `1×3×960×960`，SHA-256
+  `24563198eb66e797ac3f32123dfe78410aeeb6ef766b936e825c3146686137a6`。该文件是把训练元数据
+  `imgsz=640` 的 checkpoint 导出为 960 推理尺寸，并不是用 960 重新训练，效果和耗时仍需真机验证。
+
+960 观察版构建参数为
+`-PagentFireOnnxEnabled=true -PagentFireModelProfile=visible960 -Pm300FireClosedLoopEnabled=false`；
+回退旧模型只需将 profile 改回 `legacy416` 后重新构建。
 Agent 最多同时执行一次推理，只保留最新待处理帧；同类目标需在 6 秒内连续命中两帧才上报，
 同一任务 10 秒内去重。后端将结果保存为 `UNLOCATED`、`MANUAL_CONFIRM` 的待确认候选，
 不会据此自动抵近、测距或投放。RC Plus 真机完成 RGBA、RTMP、ONNX 推理和 UXSDK 页面共存验收前，

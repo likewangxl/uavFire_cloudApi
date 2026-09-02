@@ -63,17 +63,31 @@ class FireModelPipelineTest {
     }
 
     @Test
-    fun bundledModelAndManifestMatchPinnedSha256() {
-        val model = Paths.get("src/main/assets", AgentFireModelSpec.ASSET_PATH)
-        val manifest = Paths.get("src/main/assets", AgentFireModelSpec.MANIFEST_PATH)
+    fun bundledModelsAndManifestsMatchPinnedSha256() {
+        listOf(AgentFireModelProfiles.LEGACY_416, AgentFireModelProfiles.VISIBLE_960).forEach { profile ->
+            assertBundledProfile(profile)
+        }
+    }
+
+    @Test
+    fun modelProfilesResolveExplicitlyAndRejectUnknownNames() {
+        assertEquals(416, AgentFireModelProfiles.resolve("legacy416").inputSize)
+        assertEquals(960, AgentFireModelProfiles.resolve("VISIBLE960").inputSize)
+        val failure = runCatching { AgentFireModelProfiles.resolve("unknown") }.exceptionOrNull()
+        assertTrue(failure is IllegalStateException)
+    }
+
+    private fun assertBundledProfile(profile: AgentFireModelProfile) {
+        val model = Paths.get("src/main/assets", profile.assetPath)
+        val manifest = Paths.get("src/main/assets", profile.manifestPath)
         val sha = MessageDigest.getInstance("SHA-256")
             .digest(Files.readAllBytes(model))
             .joinToString("") { "%02x".format(it) }
         val manifestText = String(Files.readAllBytes(manifest), StandardCharsets.UTF_8)
 
-        assertEquals(AgentFireModelSpec.MODEL_SHA256, sha)
-        assertTrue(manifestText.contains(AgentFireModelSpec.MODEL_SHA256))
-        assertTrue(manifestText.contains("\"shape\": [1, 3, 416, 416]"))
+        assertEquals(profile.modelSha256, sha)
+        assertTrue(manifestText.contains(profile.modelSha256))
+        assertTrue(manifestText.contains("\"shape\": [1, 3, ${profile.inputSize}, ${profile.inputSize}]"))
         assertTrue(manifestText.contains("\"classes\": [\"fire\", \"smoke\"]"))
     }
 

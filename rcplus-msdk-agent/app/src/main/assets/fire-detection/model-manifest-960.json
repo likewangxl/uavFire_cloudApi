@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "modelVersion": "best-fire-smoke-960-20260902",
+  "assetPath": "fire-detection/best-fire-smoke-960.onnx",
+  "sha256": "24563198eb66e797ac3f32123dfe78410aeeb6ef766b936e825c3146686137a6",
+  "sourceSha256": "ac0a10257b2bc1f20c9d957f8adeeb61dd6140322fc19d0b4a116cb491776d16",
+  "sourceTrainingImageSize": 640,
+  "runtime": "onnxruntime-android-1.26.0",
+  "exporter": "ultralytics-8.4.42",
+  "opset": 17,
+  "input": {
+    "name": "images",
+    "shape": [1, 3, 960, 960],
+    "format": "RGB_CHW_FLOAT32_0_1"
+  },
+  "output": {
+    "name": "output0",
+    "shape": [1, 6, 18900],
+    "nmsIncluded": false
+  },
+  "classes": ["fire", "smoke"],
+  "confidenceThreshold": 0.25,
+  "iouThreshold": 0.70,
+  "enabledByDefault": false,
+  "notes": "Fixed 960 inference export; source checkpoint training metadata image size is 640. Real RC Plus accuracy and latency require device validation."
+}

@@ -63,15 +63,16 @@ class FireDetectionOverlayView(context: Context) : View(context) {
 
     private fun drawStatus(canvas: Canvas, snapshot: FireDetectionObservation) {
         val status = when {
-            !snapshot.enabled -> "AI观察：构建未启用"
-            snapshot.failureMessage != null -> "AI观察：异常 ${snapshot.failureMessage}"
-            !snapshot.active -> "AI观察：待启动"
-            snapshot.inferenceMs == null -> "AI观察：等待可见光帧"
-            isStale(snapshot) -> "AI观察：视频帧已中断"
+            !snapshot.enabled -> "AI观察：构建未启用  ${snapshot.modelInputSize}"
+            snapshot.failureMessage != null -> "AI观察：异常 ${snapshot.failureMessage}  ${snapshot.modelInputSize}"
+            !snapshot.active -> "AI观察：待启动  ${snapshot.modelInputSize}"
+            snapshot.inferenceMs == null -> "AI观察：等待可见光帧  ${snapshot.modelInputSize}"
+            isStale(snapshot) -> "AI观察：视频帧已中断  ${snapshot.modelInputSize}"
             else -> String.format(
                 Locale.US,
-                "AI观察：运行中  %d ms  %dx%d  目标 %d",
+                "AI观察：运行中  %d ms  %d输入  %dx%d  目标 %d",
                 snapshot.inferenceMs,
+                snapshot.modelInputSize,
                 snapshot.sourceWidth,
                 snapshot.sourceHeight,
                 snapshot.detections.size,

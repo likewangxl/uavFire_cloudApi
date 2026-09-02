@@ -20,6 +20,7 @@ val agentGatewaySn = providers.gradleProperty("agentGatewaySn").orElse("")
 val m300FireClosedLoopEnabled = providers.gradleProperty("m300FireClosedLoopEnabled").orElse("false")
 val agentPayloadPositionIndex = providers.gradleProperty("agentPayloadPositionIndex").orElse("-1")
 val agentFireOnnxEnabled = providers.gradleProperty("agentFireOnnxEnabled").orElse("false")
+val agentFireModelProfile = providers.gradleProperty("agentFireModelProfile").orElse("legacy416")
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -55,6 +56,7 @@ android {
         buildConfigField("boolean", "M300_FIRE_CLOSED_LOOP_ENABLED", m300FireClosedLoopEnabled.get())
         buildConfigField("int", "AGENT_PAYLOAD_POSITION_INDEX", agentPayloadPositionIndex.get())
         buildConfigField("boolean", "AGENT_FIRE_ONNX_ENABLED", agentFireOnnxEnabled.get())
+        buildConfigField("String", "AGENT_FIRE_MODEL_PROFILE", "\"${agentFireModelProfile.get()}\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

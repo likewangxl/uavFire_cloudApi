@@ -5,6 +5,8 @@ import java.util.concurrent.CopyOnWriteArraySet
 data class FireDetectionObservation(
     val enabled: Boolean,
     val active: Boolean,
+    val modelVersion: String = AgentFireModelSpec.MODEL_VERSION,
+    val modelInputSize: Int = AgentFireModelSpec.INPUT_SIZE,
     val sourceWidth: Int = 0,
     val sourceHeight: Int = 0,
     val sourceTs: Long = 0L,

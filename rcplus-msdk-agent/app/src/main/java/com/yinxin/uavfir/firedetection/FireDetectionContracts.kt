@@ -1,5 +1,8 @@
 package com.yinxin.uavfir.firedetection
 
+import com.yinxin.uavfir.BuildConfig
+import java.util.Locale
+
 fun interface VisibleFrameConsumer {
     fun onVisibleRgbaFrame(
         data: ByteArray,
@@ -70,12 +73,47 @@ interface VisibleFireDetectionEngine : AutoCloseable {
     override fun close() = Unit
 }
 
+data class AgentFireModelProfile(
+    val name: String,
+    val assetPath: String,
+    val manifestPath: String,
+    val modelVersion: String,
+    val modelSha256: String,
+    val inputSize: Int,
+)
+
+object AgentFireModelProfiles {
+    val LEGACY_416 = AgentFireModelProfile(
+        name = "legacy416",
+        assetPath = "fire-detection/best.onnx",
+        manifestPath = "fire-detection/model-manifest.json",
+        modelVersion = "best-20260808",
+        modelSha256 = "68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271",
+        inputSize = 416,
+    )
+    val VISIBLE_960 = AgentFireModelProfile(
+        name = "visible960",
+        assetPath = "fire-detection/best-fire-smoke-960.onnx",
+        manifestPath = "fire-detection/model-manifest-960.json",
+        modelVersion = "best-fire-smoke-960-20260902",
+        modelSha256 = "24563198eb66e797ac3f32123dfe78410aeeb6ef766b936e825c3146686137a6",
+        inputSize = 960,
+    )
+
+    fun resolve(name: String): AgentFireModelProfile = when (name.trim().lowercase(Locale.US)) {
+        LEGACY_416.name.lowercase(Locale.US) -> LEGACY_416
+        VISIBLE_960.name.lowercase(Locale.US) -> VISIBLE_960
+        else -> error("unsupported-agent-fire-model-profile:$name")
+    }
+}
+
 object AgentFireModelSpec {
-    const val ASSET_PATH = "fire-detection/best.onnx"
-    const val MANIFEST_PATH = "fire-detection/model-manifest.json"
-    const val MODEL_VERSION = "best-20260808"
-    const val MODEL_SHA256 = "68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271"
-    const val INPUT_SIZE = 416
+    val activeProfile: AgentFireModelProfile = AgentFireModelProfiles.resolve(BuildConfig.AGENT_FIRE_MODEL_PROFILE)
+    val ASSET_PATH: String get() = activeProfile.assetPath
+    val MANIFEST_PATH: String get() = activeProfile.manifestPath
+    val MODEL_VERSION: String get() = activeProfile.modelVersion
+    val MODEL_SHA256: String get() = activeProfile.modelSha256
+    val INPUT_SIZE: Int get() = activeProfile.inputSize
     const val CONFIDENCE_THRESHOLD = 0.25
     const val IOU_THRESHOLD = 0.70
     val CLASS_NAMES = arrayOf("fire", "smoke")
