@@ -4,7 +4,7 @@ DROP PROCEDURE IF EXISTS add_planned_wayline_payload_column_if_missing;
 
 DELIMITER $$
 CREATE PROCEDURE add_planned_wayline_payload_column_if_missing(
-  IN column_name varchar(64),
+  IN target_column_name varchar(64),
   IN column_definition text
 )
 BEGIN
@@ -12,7 +12,7 @@ BEGIN
     SELECT 1 FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = 'planned_wayline'
-      AND COLUMN_NAME = column_name
+      AND COLUMN_NAME = target_column_name
   ) THEN
     SET @ddl = CONCAT('ALTER TABLE `planned_wayline` ADD COLUMN ', column_definition);
     PREPARE stmt FROM @ddl;
