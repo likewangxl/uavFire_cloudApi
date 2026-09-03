@@ -123,23 +123,39 @@ class WaypointMissionExecutor(
         )
     }
 
-    fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
-        activeMissionId.set(missionId)
-        activeMissionFileName.set(missionFileName)
+    /**
+     * Submits a mission only when the aircraft confirms at least one available wayline ID.
+     * Returns null when submitted, otherwise a stable fail-closed rejection reason.
+     */
+    fun startMission(
+        missionId: String,
+        missionFileName: String,
+        waylineIds: List<Int>?,
+        diagnosticKmzPath: String,
+    ): String? {
+        val aircraftAvailableIds = diagnostics.availableWaylineIds(diagnosticKmzPath)
         Log.i(
             TAG,
             WaypointMissionDiagnosticFormatter.formatAvailableWaylineIds(
                 missionId,
                 missionFileName,
-                diagnostics.availableWaylineIds(missionFileName),
+                aircraftAvailableIds,
             ),
         )
-        val callback = simpleCallback(missionId, "startMission")
-        if (waylineIds.isNullOrEmpty()) {
-            WaypointMissionManager.getInstance().startMission(missionFileName, callback)
-        } else {
-            WaypointMissionManager.getInstance().startMission(missionFileName, waylineIds, callback)
+        val selection = WaypointMissionStartGuard.selectWaylineIds(aircraftAvailableIds, waylineIds)
+        if (!selection.canStart) {
+            activeMissionId.set(null)
+            activeMissionFileName.set(null)
+            val reason = selection.rejectionReason ?: "wayline-start-not-ready"
+            Log.e(TAG, "startMission rejected missionId=$missionId file=$missionFileName reason=$reason")
+            return reason
         }
+
+        activeMissionId.set(missionId)
+        activeMissionFileName.set(missionFileName)
+        val callback = simpleCallback(missionId, "startMission")
+        WaypointMissionManager.getInstance().startMission(missionFileName, selection.waylineIds, callback)
+        return null
     }
 
     fun pauseMission() {

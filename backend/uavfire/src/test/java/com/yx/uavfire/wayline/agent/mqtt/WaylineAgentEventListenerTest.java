@@ -134,31 +134,52 @@ class WaylineAgentEventListenerTest {
         Map<String, Object> params = captor.getValue().getParamNameValuePairs();
         assertTrue(params.containsValue(2));
         assertTrue(params.containsValue(5));
-        assertTrue(params.containsValue(60));
-        assertTrue(params.containsValue("executing"));
+        assertTrue(params.containsValue(40));
+        assertFalse(params.containsValue("executing"));
     }
 
     @Test
-    void onEvent_autoStartsFireDetectionWhenWaylineReachesFirstWaypoint() throws Exception {
+    void onEvent_autoStartsFireDetectionAtFirstWaypointOnlyAfterExecutingState() throws Exception {
         FireDetectionService fireDetectionService = mock(FireDetectionService.class);
         setField(listener, "fireDetectionService", fireDetectionService);
+        String executing = "{\"method\":\"wayline_state_change\",\"timestamp\":1900,"
+                + "\"data\":{\"mission_id\":\"m-first\",\"msdk_state\":\"EXECUTING\","
+                + "\"previous_msdk_state\":\"ENTER_WAYLINE\"}}";
         String payload = "{\"method\":\"wayline_progress\",\"timestamp\":2000,"
                 + "\"data\":{\"mission_id\":\"m-first\",\"mission_file_name\":\"f.kmz\",\"wayline_id\":0,"
                 + "\"current_waypoint_index\":0,\"total_waypoints\":5}}";
 
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", executing));
         listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
 
         verify(fireDetectionService).startForDrone(eq("SN-A"));
     }
 
     @Test
+    void onEvent_doesNotAutoStartFireDetectionForEnterWaylineProgress() throws Exception {
+        FireDetectionService fireDetectionService = mock(FireDetectionService.class);
+        setField(listener, "fireDetectionService", fireDetectionService);
+        String payload = "{\"method\":\"wayline_progress\",\"timestamp\":2000,"
+                + "\"data\":{\"mission_id\":\"m-entering\",\"mission_file_name\":\"f.kmz\",\"wayline_id\":0,"
+                + "\"current_waypoint_index\":0,\"total_waypoints\":5}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
+
+        verify(fireDetectionService, never()).startForDrone(any());
+    }
+
+    @Test
     void onEvent_autoStartsFireDetectionOnlyOnceForSameMissionAndDrone() throws Exception {
         FireDetectionService fireDetectionService = mock(FireDetectionService.class);
         setField(listener, "fireDetectionService", fireDetectionService);
+        String executing = "{\"method\":\"wayline_state_change\",\"timestamp\":1900,"
+                + "\"data\":{\"mission_id\":\"m-repeat\",\"msdk_state\":\"EXECUTING\","
+                + "\"previous_msdk_state\":\"ENTER_WAYLINE\"}}";
         String payload = "{\"method\":\"wayline_progress\",\"timestamp\":2000,"
                 + "\"data\":{\"mission_id\":\"m-repeat\",\"mission_file_name\":\"f.kmz\",\"wayline_id\":0,"
                 + "\"current_waypoint_index\":0,\"total_waypoints\":5}}";
 
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", executing));
         listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
         listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", payload));
 
@@ -257,6 +278,34 @@ class WaylineAgentEventListenerTest {
         assertTrue(params.containsValue("failed"));
         assertTrue(params.containsValue(WaylineAgentEventListener.NO_EXECUTE_FINISH_REASON));
         assertFalse(params.containsValue("finished"));
+    }
+
+    @Test
+    void onEvent_progressAtWaypointZeroDoesNotTurnEnterWaylineFinishedIntoSuccess() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        setField(listener, "plannedWaylineMapper", mapper);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new Configuration(), ""), PlannedWaylineEntity.class);
+        when(mapper.selectOne(any())).thenReturn(PlannedWaylineEntity.builder()
+                .flightId("m-incident").taskProgress(33).currentWaypointIndex(0).totalWaypoints(3).build());
+        String progress = "{\"method\":\"wayline_progress\",\"timestamp\":900,"
+                + "\"data\":{\"mission_id\":\"m-incident\",\"current_waypoint_index\":0,"
+                + "\"total_waypoints\":3}}";
+        String finished = "{\"method\":\"wayline_state_change\",\"timestamp\":1000,"
+                + "\"data\":{\"mission_id\":\"m-incident\",\"msdk_state\":\"FINISHED\","
+                + "\"previous_msdk_state\":\"ENTER_WAYLINE\"}}";
+
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_progress", progress));
+        listener.onEvent(messageFor("uavfire/agent/SN-A/events/wayline_state_change", finished));
+
+        ArgumentCaptor<LambdaUpdateWrapper<PlannedWaylineEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper, org.mockito.Mockito.times(2)).update(isNull(), captor.capture());
+        Map<String, Object> progressParams = captor.getAllValues().get(0).getParamNameValuePairs();
+        Map<String, Object> terminalParams = captor.getAllValues().get(1).getParamNameValuePairs();
+        assertTrue(progressParams.containsValue(0));
+        assertFalse(progressParams.containsValue(33));
+        assertTrue(terminalParams.containsValue("failed"));
+        assertTrue(terminalParams.containsValue(WaylineAgentEventListener.NO_EXECUTE_FINISH_REASON));
+        assertFalse(terminalParams.containsValue("finished"));
     }
 
     @Test

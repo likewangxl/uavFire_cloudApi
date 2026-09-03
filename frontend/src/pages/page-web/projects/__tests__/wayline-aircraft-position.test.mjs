@@ -79,18 +79,18 @@ test('delivery tab hides monitor aircraft position marker and track', () => {
   assert.doesNotMatch(overlaysSource, /飞机位置\/轨迹跨页签常显/)
 })
 
-test('entering the wayline page recenters the map on the aircraft (one-shot, deferred until position arrives)', () => {
+test('entering the wayline page keeps the browser-location viewport until the operator locates an aircraft', () => {
   const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
   const gmapSource = readSource('src/components/GMap.vue')
   const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
   const planningSource = readSource('src/hooks/use-wayline-planning.ts')
 
-  // hook 暴露一次性居中信号
+  // 保留显式定位飞机的能力，但进入页面时不再自动覆盖访问端电脑的位置。
   assert.match(planningSource, /recenterAircraftToken:\s*0/)
   assert.match(planningSource, /export function requestAircraftRecenter \(\)/)
-  // wayline 进入页面时触发
-  assert.match(waylineSource, /requestAircraftRecenter\(\)/)
-  // GMap 监听 token：有位置立即居中，否则挂起等位置到达后居中一次
+  assert.doesNotMatch(waylineSource, /requestAircraftRecenter/)
+  assert.match(gmapSource, /@click="locateAircraftPosition"/)
+  // 显式请求时仍支持有位置立即居中，或等待下一次飞机位置后居中一次。
   assert.match(overlaysSource, /watch\(\(\) => planningState\.recenterAircraftToken/)
   assert.match(overlaysSource, /pendingAircraftRecenter = true/)
   assert.match(overlaysSource, /if \(pendingAircraftRecenter\) \{[\s\S]*pendingAircraftRecenter = false[\s\S]*setAircraftView\(position\)/)

@@ -8,6 +8,10 @@ import android.util.Log
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
+import com.yinxin.uavfir.firedetection.FireDetectionObservation
+import com.yinxin.uavfir.firedetection.FireDetectionObservationBus
+import com.yinxin.uavfir.firedetection.FireDetectionObservationListener
 import com.yinxin.uavfir.sdk.DjiStorageStatus
 import com.yinxin.uavfir.ui.ValidationConsoleController
 import kotlinx.coroutines.CoroutineScope
@@ -17,18 +21,21 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), FireDetectionObservationListener {
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private lateinit var statusText: TextView
     private lateinit var flightLimitText: TextView
     private lateinit var taskSpaceText: TextView
     private lateinit var aircraftStatusText: TextView
+    private lateinit var aiDetectionSwitch: SwitchCompat
+    private lateinit var aiDetectionStatusText: TextView
     private lateinit var fireTaskButton: View
     private lateinit var refreshButton: View
     private lateinit var probeWaypointButton: View
     private lateinit var deviceStatusButton: View
     private lateinit var executeLocalKmzButton: View
     private lateinit var openSampleToolsButton: View
+    private var aiDetectionToggleBusy = false
     private val controller: ValidationConsoleController
         get() = (application as App).services.validationController
     private val waypointProbe: com.yinxin.uavfir.wayline.WaypointProbeController
@@ -52,6 +59,8 @@ class MainActivity : AppCompatActivity() {
         flightLimitText = findViewById(R.id.flightLimitText)
         taskSpaceText = findViewById(R.id.taskSpaceText)
         aircraftStatusText = findViewById(R.id.aircraftStatusText)
+        aiDetectionSwitch = findViewById(R.id.aiDetectionSwitch)
+        aiDetectionStatusText = findViewById(R.id.aiDetectionStatusText)
         fireTaskButton = findViewById(R.id.leftRoot)
         refreshButton = findViewById(R.id.refreshButton)
         probeWaypointButton = findViewById(R.id.probeWaypointButton)
@@ -81,8 +90,29 @@ class MainActivity : AppCompatActivity() {
         openSampleToolsButton.setOnClickListener {
             startActivity(Intent(this, AgentFlightActivity::class.java))
         }
+        aiDetectionSwitch.setOnClickListener {
+            setManualFireDetectionEnabled(aiDetectionSwitch.isChecked)
+        }
 
         startHomeStatusRefresh()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        FireDetectionObservationBus.addListener(this)
+    }
+
+    override fun onStop() {
+        FireDetectionObservationBus.removeListener(this)
+        super.onStop()
+    }
+
+    override fun onObservation(observation: FireDetectionObservation) {
+        runOnUiThread {
+            aiDetectionSwitch.isChecked = observation.active
+            aiDetectionSwitch.isEnabled = observation.enabled && !aiDetectionToggleBusy
+            aiDetectionStatusText.text = describeFireDetectionObservation(observation)
+        }
     }
 
     private fun ensureRuntimePermissions() {
@@ -143,6 +173,62 @@ class MainActivity : AppCompatActivity() {
             executeLocalKmzButton.isEnabled = true
             openSampleToolsButton.isEnabled = true
         }
+    }
+
+    private fun setManualFireDetectionEnabled(enabled: Boolean) {
+        if (aiDetectionToggleBusy) return
+        aiDetectionToggleBusy = true
+        aiDetectionSwitch.isEnabled = false
+        aiDetectionStatusText.text = getString(
+            if (enabled) R.string.ai_detection_status_starting else R.string.ai_detection_status_stopping,
+        )
+        uiScope.launch {
+            val result = runCatching {
+                (application as App).services.setManualFireDetectionEnabled(enabled)
+            }.getOrElse { throwable ->
+                Log.e(TAG, "manual fire detection toggle failed", throwable)
+                com.yinxin.uavfir.firedetection.VisibleAiControlResult(
+                    applied = false,
+                    message = throwable.message ?: "visible-ai-command-failed",
+                )
+            }
+            aiDetectionToggleBusy = false
+            aiDetectionSwitch.isEnabled = BuildConfig.AGENT_FIRE_ONNX_ENABLED
+            if (!result.applied) {
+                aiDetectionSwitch.isChecked = false
+                aiDetectionStatusText.text = describeFireDetectionFailure(result.message)
+            }
+            Log.i(TAG, "manual-fire-detection enabled=$enabled applied=${result.applied} message=${result.message}")
+        }
+    }
+
+    private fun describeFireDetectionObservation(observation: FireDetectionObservation): String {
+        observation.failureMessage?.let { return describeFireDetectionFailure(it) }
+        if (!observation.enabled) return getString(R.string.ai_detection_status_unavailable)
+        if (!observation.active) return getString(
+            R.string.ai_detection_status_off,
+            observation.modelInputSize,
+            observation.modelInputSize,
+        )
+        if (observation.sourceTs <= 0L) return getString(R.string.ai_detection_status_waiting_frame)
+        val inferenceMs = observation.inferenceMs ?: 0L
+        return if (observation.detections.isEmpty()) {
+            getString(R.string.ai_detection_status_running, inferenceMs)
+        } else {
+            getString(R.string.ai_detection_status_detected, observation.detections.size, inferenceMs)
+        }
+    }
+
+    private fun describeFireDetectionFailure(message: String): String = when {
+        message == "aircraft-not-connected" || message == "drone-sn-required" ->
+            getString(R.string.ai_detection_error_aircraft)
+        message == "agent-fire-onnx-disabled" ->
+            getString(R.string.ai_detection_status_unavailable)
+        message == "agent-fire-onnx-prepare-failed" ->
+            getString(R.string.ai_detection_error_model)
+        message.contains("stream", ignoreCase = true) ->
+            getString(R.string.ai_detection_error_stream)
+        else -> getString(R.string.ai_detection_error_generic, message)
     }
 
     private fun startHomeStatusRefresh() {

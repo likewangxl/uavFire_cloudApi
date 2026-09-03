@@ -1,5 +1,7 @@
 package com.yinxin.uavfir.session
 
+import com.yinxin.uavfir.firedetection.VisibleAiControl
+import com.yinxin.uavfir.firedetection.VisibleAiControlResult
 import com.yinxin.uavfir.stream.MockStreamProvider
 import com.yinxin.uavfir.stream.BoundStreamState
 import com.yinxin.uavfir.stream.StreamProvider
@@ -11,6 +13,52 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DualStreamSessionManagerTest {
+    @Test
+    fun executeCommand_visibleAiOn_delegatesToAgentDetector() = runTest {
+        var startedFor: String? = null
+        val manager = DualStreamSessionManager(
+            streamProvider = MockStreamProvider(),
+            visibleAiControl = object : VisibleAiControl {
+                override suspend fun start(droneSn: String): VisibleAiControlResult {
+                    startedFor = droneSn
+                    return VisibleAiControlResult(true, "agent-fire-onnx-enabled")
+                }
+
+                override suspend fun stop(droneSn: String) =
+                    VisibleAiControlResult(true, "agent-fire-onnx-disabled")
+            },
+        )
+
+        val result = manager.executeCommand("M300-001", "visible-ai-on")
+
+        assertEquals("applied", result.status)
+        assertEquals("agent-fire-onnx-enabled", result.message)
+        assertEquals("M300-001", startedFor)
+    }
+
+    @Test
+    fun executeCommand_visibleAiOff_delegatesToAgentDetector() = runTest {
+        var stoppedFor: String? = null
+        val manager = DualStreamSessionManager(
+            streamProvider = MockStreamProvider(),
+            visibleAiControl = object : VisibleAiControl {
+                override suspend fun start(droneSn: String) =
+                    VisibleAiControlResult(true, "agent-fire-onnx-enabled")
+
+                override suspend fun stop(droneSn: String): VisibleAiControlResult {
+                    stoppedFor = droneSn
+                    return VisibleAiControlResult(true, "agent-fire-onnx-disabled")
+                }
+            },
+        )
+
+        val result = manager.executeCommand("M300-001", "visible-ai-off")
+
+        assertEquals("applied", result.status)
+        assertEquals("agent-fire-onnx-disabled", result.message)
+        assertEquals("M300-001", stoppedFor)
+    }
+
     @Test
     fun startSession_movesFromInitToRunning() = runTest {
         val manager = DualStreamSessionManager(MockStreamProvider())

@@ -1,6 +1,7 @@
 package com.yx.uavfire.wayline;
 
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.yx.uavfire.wayline.dao.IPlannedWaylineMapper;
 import com.yx.uavfire.component.oss.model.OssConfiguration;
 import com.yx.uavfire.msdk.model.MsdkDeviceStateDTO;
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -53,8 +55,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
@@ -959,6 +963,49 @@ class PlannedWaylineServiceTest {
                 () -> assertEquals("publishing", updateCaptor.getValue().getStatus()),
                 () -> assertEquals("publishing", updateCaptor.getValue().getTaskStatus()),
                 () -> assertNotNull(updateCaptor.getValue().getFlightId()));
+    }
+
+    @Test
+    void prepareCompletedTaskShouldCreateNewFlightAndResetPreviousExecutionState() {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(2)
+                .plannedWaylineId("pw-repeat")
+                .workspaceId("workspace-001")
+                .status("completed")
+                .publishedWaylineId("wayline-repeat")
+                .flightId("flight-old")
+                .taskStatus("completed")
+                .taskProgress(100)
+                .waylineMissionState(9)
+                .currentWaypointIndex(4)
+                .totalWaypoints(5)
+                .mediaCount(7)
+                .breakPointJson("{\"waypoint_index\":4}")
+                .lastProgressTime(1234L)
+                .executedTime(1200L)
+                .build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, new ObjectMapper(), mock(IWaylineFileService.class));
+
+        PlannedWaylineDTO prepared = service.prepareTask(
+                "workspace-001", "pw-repeat", "alice", new PreparePlannedWaylineTaskParam());
+
+        assertAll(
+                () -> assertEquals("publishing", prepared.getStatus()),
+                () -> assertEquals("publishing", prepared.getTaskStatus()),
+                () -> assertNotEquals("flight-old", prepared.getFlightId()),
+                () -> assertEquals(0, prepared.getTaskProgress()),
+                () -> assertNull(prepared.getWaylineMissionState()),
+                () -> assertNull(prepared.getCurrentWaypointIndex()),
+                () -> assertNull(prepared.getTotalWaypoints()),
+                () -> assertEquals(0, prepared.getMediaCount()),
+                () -> assertNull(prepared.getBreakPointJson()),
+                () -> assertNull(prepared.getLastProgressTime()),
+                () -> assertNull(prepared.getExecutedTime()));
+        verify(mapper, times(2)).update(isNull(), any(LambdaUpdateWrapper.class));
     }
 
     @Test

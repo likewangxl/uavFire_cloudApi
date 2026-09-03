@@ -48,6 +48,7 @@ public class WaylineAgentEventListener {
     private final WaylineEventStore eventStore;
     private final Set<String> fireDetectionTriggeredMissions = ConcurrentHashMap.newKeySet();
     private final Set<String> fireDetectionStoppedMissions = ConcurrentHashMap.newKeySet();
+    private final Set<String> missionsObservedExecuting = ConcurrentHashMap.newKeySet();
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private IPlannedWaylineMapper plannedWaylineMapper;
@@ -125,6 +126,10 @@ public class WaylineAgentEventListener {
         eventStore.append(record);
         log.debug("wayline-agent event stored drone={} method={} mission={}", droneSn, method, missionId);
 
+        if (decoded instanceof WaylineStateChangeDTO && StringUtils.hasText(missionId)) {
+            trackExecutionState(missionId, (WaylineStateChangeDTO) decoded);
+        }
+
         // P2.b: 把 progress / state_change 事件同步持久化到 planned_wayline (flightId = missionId)
         if (plannedWaylineMapper != null && missionId != null && !missionId.isEmpty()) {
             try {
@@ -142,7 +147,9 @@ public class WaylineAgentEventListener {
         if (decoded instanceof WaylineProgressDTO) {
             autoStartFireDetectionAtFirstWaypoint(droneSn, missionId, (WaylineProgressDTO) decoded);
         } else if (decoded instanceof WaylineStateChangeDTO) {
-            autoStopFireDetectionOnTerminal(droneSn, missionId, (WaylineStateChangeDTO) decoded);
+            WaylineStateChangeDTO stateChange = (WaylineStateChangeDTO) decoded;
+            autoStopFireDetectionOnTerminal(droneSn, missionId, stateChange);
+            clearExecutionStateOnTerminal(missionId, stateChange);
         }
     }
 
@@ -150,6 +157,7 @@ public class WaylineAgentEventListener {
         if (fireDetectionService == null
                 || !StringUtils.hasText(droneSn)
                 || !StringUtils.hasText(missionId)
+                || !missionsObservedExecuting.contains(missionId)
                 || progress.getCurrentWaypointIndex() == null
                 || progress.getCurrentWaypointIndex() != 0) {
             return;
@@ -207,6 +215,27 @@ public class WaylineAgentEventListener {
         }
     }
 
+    private void trackExecutionState(String missionId, WaylineStateChangeDTO stateChange) {
+        if ("EXECUTING".equalsIgnoreCase(stateChange.getMsdkState())) {
+            missionsObservedExecuting.add(missionId);
+        }
+    }
+
+    private void clearExecutionStateOnTerminal(String missionId, WaylineStateChangeDTO stateChange) {
+        if (!StringUtils.hasText(missionId)) {
+            return;
+        }
+        String status = mapBusinessState(stateChange.getBusinessState());
+        if (status == null) {
+            status = mapMsdkState(stateChange.getMsdkState(), stateChange.getPreviousMsdkState());
+        }
+        if (isTerminalStatus(status)) {
+            // persistStateChange has already consumed this evidence; terminal missions must no
+            // longer qualify future progress callbacks as genuinely executing.
+            missionsObservedExecuting.remove(missionId);
+        }
+    }
+
     private void persistProgress(String missionId, WaylineProgressDTO pr) {
         Optional<PlannedWaylineEntity> existing = findPlannedWaylineByFlightId(missionId);
         Integer totalWaypoints = firstPositive(pr.getTotalWaypoints(),
@@ -229,7 +258,8 @@ public class WaylineAgentEventListener {
         if (totalWaypoints != null) {
             update.set(PlannedWaylineEntity::getTotalWaypoints, totalWaypoints);
         }
-        if (!isTerminalStatus(existing.map(PlannedWaylineEntity::getTaskStatus).orElse(null))) {
+        if (missionsObservedExecuting.contains(missionId)
+                && !isTerminalStatus(existing.map(PlannedWaylineEntity::getTaskStatus).orElse(null))) {
             update.set(PlannedWaylineEntity::getStatus, "executing");
             update.set(PlannedWaylineEntity::getTaskStatus, "executing");
         }
@@ -357,11 +387,13 @@ public class WaylineAgentEventListener {
         }
     }
 
-    /** 该任务此前是否落过执行进度（taskProgress>0 或越过首航点）→ 说明飞机确实飞过。 */
+    /** 只有实际收到 EXECUTING，或数据库已越过首航点，才说明航线确实执行过。 */
     private boolean hasEverExecuted(String missionId) {
+        if (missionsObservedExecuting.contains(missionId)) {
+            return true;
+        }
         return findPlannedWaylineByFlightId(missionId)
-                .map(e -> (e.getTaskProgress() != null && e.getTaskProgress() > 0)
-                        || (e.getCurrentWaypointIndex() != null && e.getCurrentWaypointIndex() > 0))
+                .map(e -> e.getCurrentWaypointIndex() != null && e.getCurrentWaypointIndex() > 0)
                 .orElse(false);
     }
 
@@ -369,7 +401,9 @@ public class WaylineAgentEventListener {
         if (currentWaypointIndex == null || totalWaypoints == null || totalWaypoints <= 0) {
             return null;
         }
-        int completed = Math.max(0, currentWaypointIndex + 1);
+        // DJI reports the waypoint currently being executed. Index 0 therefore means the
+        // aircraft is still approaching/executing the first waypoint, not that 1/N is done.
+        int completed = Math.max(0, currentWaypointIndex);
         int percent = (int) Math.round(Math.min(completed, totalWaypoints) * 100.0 / totalWaypoints);
         return Math.max(0, Math.min(100, percent));
     }

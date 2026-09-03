@@ -7,7 +7,41 @@ import java.util.zip.ZipFile
 
 interface WaypointMissionDiagnostics {
     fun validationErrors(kmzPath: String): List<String>
-    fun availableWaylineIds(missionFileName: String): List<Int>?
+    fun availableWaylineIds(kmzPath: String): List<Int>?
+}
+
+data class WaypointMissionStartSelection(
+    val waylineIds: List<Int> = emptyList(),
+    val rejectionReason: String? = null,
+) {
+    val canStart: Boolean
+        get() = rejectionReason == null && waylineIds.isNotEmpty()
+}
+
+object WaypointMissionStartGuard {
+    fun selectWaylineIds(
+        aircraftAvailableIds: List<Int>?,
+        requestedIds: List<Int>?,
+    ): WaypointMissionStartSelection {
+        if (aircraftAvailableIds == null) {
+            return WaypointMissionStartSelection(rejectionReason = "available-wayline-ids-unavailable")
+        }
+        val available = aircraftAvailableIds.distinct()
+        if (available.isEmpty()) {
+            return WaypointMissionStartSelection(rejectionReason = "no-available-wayline-ids-on-aircraft")
+        }
+        val requested = requestedIds?.distinct().orEmpty()
+        if (requested.isNotEmpty()) {
+            val unavailable = requested.filterNot(available::contains)
+            if (unavailable.isNotEmpty()) {
+                return WaypointMissionStartSelection(
+                    rejectionReason = "requested-wayline-ids-unavailable:${unavailable.joinToString(",")}",
+                )
+            }
+            return WaypointMissionStartSelection(waylineIds = requested)
+        }
+        return WaypointMissionStartSelection(waylineIds = available)
+    }
 }
 
 class DjiWaypointMissionDiagnostics : WaypointMissionDiagnostics {
@@ -22,9 +56,9 @@ class DjiWaypointMissionDiagnostics : WaypointMissionDiagnostics {
             listOf("diagnostic_exception:${error.javaClass.simpleName}:${error.message.orEmpty()}")
         }
 
-    override fun availableWaylineIds(missionFileName: String): List<Int>? =
+    override fun availableWaylineIds(kmzPath: String): List<Int>? =
         runCatching {
-            WaypointMissionManager.getInstance().getAvailableWaylineIDs(missionFileName)
+            WaypointMissionManager.getInstance().getAvailableWaylineIDs(kmzPath)
         }.getOrElse { null }
 }
 

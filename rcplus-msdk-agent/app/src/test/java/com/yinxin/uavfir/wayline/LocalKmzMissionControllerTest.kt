@@ -75,6 +75,19 @@ class LocalKmzMissionControllerTest {
         assertEquals(1, executor.startedMissions.size)
         assertEquals("Kmz2", executor.startedMissions.single().missionFileName)
         assertEquals(null, executor.startedMissions.single().waylineIds)
+        assertEquals(File(stagingDir, "Kmz2.kmz").absolutePath, executor.startedMissions.single().diagnosticKmzPath)
+    }
+
+    @Test
+    fun executeLocalKmz_reportsStartGuardRejection() = runTest {
+        val kmz = tempKmz("Kmz2.kmz")
+        val executor = FakeLocalKmzExecutor(startRejection = "no-available-wayline-ids-on-aircraft")
+        val controller = LocalKmzMissionController(executor)
+
+        val result = controller.executeLocalKmz(kmz)
+
+        assertFalse(result.ok)
+        assertEquals("startMission rejected: no-available-wayline-ids-on-aircraft", result.message)
     }
 
     @Test
@@ -98,6 +111,7 @@ class LocalKmzMissionControllerTest {
 
     private class FakeLocalKmzExecutor(
         private val pushResult: LocalKmzPushResult = LocalKmzPushResult(true, null),
+        private val startRejection: String? = null,
     ) : LocalKmzExecutor {
         val pushedPaths = mutableListOf<String>()
         val startedMissions = mutableListOf<StartedMission>()
@@ -107,8 +121,14 @@ class LocalKmzMissionControllerTest {
             onComplete(pushResult)
         }
 
-        override fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
-            startedMissions += StartedMission(missionId, missionFileName, waylineIds)
+        override fun startMission(
+            missionId: String,
+            missionFileName: String,
+            waylineIds: List<Int>?,
+            diagnosticKmzPath: String,
+        ): String? {
+            startedMissions += StartedMission(missionId, missionFileName, waylineIds, diagnosticKmzPath)
+            return startRejection
         }
     }
 
@@ -116,5 +136,6 @@ class LocalKmzMissionControllerTest {
         val missionId: String,
         val missionFileName: String,
         val waylineIds: List<Int>?,
+        val diagnosticKmzPath: String,
     )
 }

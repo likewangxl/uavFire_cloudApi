@@ -113,7 +113,22 @@ class WaylineAgentCommandRouter(
                     Log.i(TAG, "kmz pushed mission=$missionId path=${downloadResult.file.absolutePath}")
                     // Per contract §7.2 the agent should auto-start so the aircraft flies the
                     // KMZ that was just pushed; a manual UI gate can be added later if needed.
-                    executor.startMission(missionId, WaypointMissionFileNames.startMissionName(basename), resolvedWaylineIds)
+                    val startRejection = executor.startMission(
+                        missionId,
+                        WaypointMissionFileNames.startMissionName(basename),
+                        resolvedWaylineIds,
+                        downloadResult.file.absolutePath,
+                    )
+                    if (startRejection != null) {
+                        Log.e(TAG, "startMission rejected mission=$missionId reason=$startRejection")
+                        forwarder.publishDispatchResult(
+                            missionId,
+                            RESULT_START_REJECTED,
+                            "startMission:$startRejection",
+                            basename,
+                        )
+                        return@pushKmz
+                    }
                     forwarder.publishDispatchResult(missionId, RESULT_OK, "kmz-md5:${downloadResult.md5}", basename)
                 }
                 // ACK = command accepted; outcome via wayline_dispatch_result above.
@@ -129,5 +144,6 @@ class WaylineAgentCommandRouter(
         private const val RESULT_UNKNOWN_METHOD = 2002
         private const val RESULT_DOWNLOAD_FAILED = 2003
         private const val RESULT_PUSH_FAILED = 2004
+        private const val RESULT_START_REJECTED = 2005
     }
 }

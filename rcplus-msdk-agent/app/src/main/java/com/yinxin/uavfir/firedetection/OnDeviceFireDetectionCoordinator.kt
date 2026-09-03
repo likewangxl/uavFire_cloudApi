@@ -7,16 +7,51 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class OnDeviceFireDetectionCoordinator(
-    context: Context,
+class OnDeviceFireDetectionCoordinator private constructor(
     private val scope: CoroutineScope,
     private val enabled: Boolean,
     private val reporter: VisibleDetectionReporter,
-    private val engineFactory: () -> VisibleFireDetectionEngine = { OnnxVisibleFireDetector(context.applicationContext) },
-    private val calibrationSink: FireCalibrationSink = FireCalibrationRecorder(context.applicationContext),
-    private val observationSink: FireDetectionObservationSink = FireDetectionObservationBus,
-    private val inferenceIntervalMs: Long = 400L,
+    private val engineFactory: () -> VisibleFireDetectionEngine,
+    private val calibrationSink: FireCalibrationSink,
+    private val observationSink: FireDetectionObservationSink,
+    private val inferenceIntervalMs: Long,
+    @Suppress("UNUSED_PARAMETER") constructionMarker: Unit,
 ) : VisibleFrameConsumer, VisibleAiControl, AutoCloseable {
+    constructor(
+        context: Context,
+        scope: CoroutineScope,
+        enabled: Boolean,
+        reporter: VisibleDetectionReporter,
+    ) : this(
+        scope = scope,
+        enabled = enabled,
+        reporter = reporter,
+        engineFactory = { OnnxVisibleFireDetector(context.applicationContext) },
+        calibrationSink = FireCalibrationRecorder(context.applicationContext),
+        observationSink = FireDetectionObservationBus,
+        inferenceIntervalMs = 400L,
+        constructionMarker = Unit,
+    )
+
+    internal constructor(
+        scope: CoroutineScope,
+        enabled: Boolean,
+        reporter: VisibleDetectionReporter,
+        engineFactory: () -> VisibleFireDetectionEngine,
+        calibrationSink: FireCalibrationSink,
+        observationSink: FireDetectionObservationSink = FireDetectionObservationBus,
+        inferenceIntervalMs: Long = 400L,
+    ) : this(
+        scope = scope,
+        enabled = enabled,
+        reporter = reporter,
+        engineFactory = engineFactory,
+        calibrationSink = calibrationSink,
+        observationSink = observationSink,
+        inferenceIntervalMs = inferenceIntervalMs,
+        constructionMarker = Unit,
+    )
+
     private data class Session(val droneSn: String, val taskId: String, val generation: Long)
     private data class OwnedFrame(
         val data: ByteArray,
@@ -34,6 +69,7 @@ class OnDeviceFireDetectionCoordinator(
     private var pendingFrame: OwnedFrame? = null
     private var lastAcceptedAtMs = Long.MIN_VALUE
     private var engine: VisibleFireDetectionEngine? = null
+    private val reusableFrameBuffers = ArrayList<ByteArray>(MAX_REUSABLE_FRAME_BUFFERS)
 
     init {
         publishObservation(active = false)
@@ -62,6 +98,7 @@ class OnDeviceFireDetectionCoordinator(
         synchronized(lock) {
             generation += 1
             activeSession = Session(droneSn, "fire-$droneSn", generation)
+            pendingFrame?.let { recycleFrameBufferLocked(it.data) }
             pendingFrame = null
             lastAcceptedAtMs = Long.MIN_VALUE
             tracker.reset()
@@ -76,6 +113,7 @@ class OnDeviceFireDetectionCoordinator(
             if (current != null && (droneSn.isBlank() || current.droneSn == droneSn)) {
                 generation += 1
                 activeSession = null
+                pendingFrame?.let { recycleFrameBufferLocked(it.data) }
                 pendingFrame = null
                 tracker.reset()
             }
@@ -100,8 +138,16 @@ class OnDeviceFireDetectionCoordinator(
             val session = activeSession ?: return
             if (lastAcceptedAtMs != Long.MIN_VALUE && timestampMs - lastAcceptedAtMs < inferenceIntervalMs) return
             lastAcceptedAtMs = timestampMs
+            val replaceablePending = pendingFrame.takeIf { inferenceRunning }
+            val frameBuffer = if (replaceablePending?.data?.size == expectedLength) {
+                replaceablePending.data
+            } else {
+                replaceablePending?.let { recycleFrameBufferLocked(it.data) }
+                takeFrameBufferLocked(expectedLength)
+            }
+            System.arraycopy(data, offset, frameBuffer, 0, expectedLength)
             val owned = OwnedFrame(
-                data = data.copyOfRange(offset, offset + expectedLength),
+                data = frameBuffer,
                 width = width,
                 height = height,
                 timestampMs = timestampMs,
@@ -121,7 +167,9 @@ class OnDeviceFireDetectionCoordinator(
         synchronized(lock) {
             generation += 1
             activeSession = null
+            pendingFrame?.let { recycleFrameBufferLocked(it.data) }
             pendingFrame = null
+            reusableFrameBuffers.clear()
             tracker.reset()
         }
         runCatching { engine?.close() }
@@ -132,13 +180,29 @@ class OnDeviceFireDetectionCoordinator(
     private suspend fun drainFrames(first: OwnedFrame) {
         var current: OwnedFrame? = first
         while (current != null) {
-            processFrame(current)
-            current = synchronized(lock) {
-                pendingFrame.also {
-                    pendingFrame = null
-                    if (it == null) inferenceRunning = false
+            val processed = current
+            try {
+                processFrame(processed)
+            } finally {
+                current = synchronized(lock) {
+                    recycleFrameBufferLocked(processed.data)
+                    pendingFrame.also {
+                        pendingFrame = null
+                        if (it == null) inferenceRunning = false
+                    }
                 }
             }
+        }
+    }
+
+    private fun takeFrameBufferLocked(requiredSize: Int): ByteArray {
+        val reusableIndex = reusableFrameBuffers.indexOfFirst { it.size == requiredSize }
+        return if (reusableIndex >= 0) reusableFrameBuffers.removeAt(reusableIndex) else ByteArray(requiredSize)
+    }
+
+    private fun recycleFrameBufferLocked(buffer: ByteArray) {
+        if (reusableFrameBuffers.size < MAX_REUSABLE_FRAME_BUFFERS && reusableFrameBuffers.none { it === buffer }) {
+            reusableFrameBuffers += buffer
         }
     }
 
@@ -149,14 +213,17 @@ class OnDeviceFireDetectionCoordinator(
             }
         }.onFailure {
             Log.e(TAG, "agent ONNX inference failed", it)
-            publishObservation(
-                active = true,
-                sourceWidth = frame.width,
-                sourceHeight = frame.height,
-                sourceTs = frame.timestampMs,
-                failureMessage = it.message ?: "agent-onnx-inference-failed",
-            )
+            if (isSessionActive(frame.session)) {
+                publishObservation(
+                    active = true,
+                    sourceWidth = frame.width,
+                    sourceHeight = frame.height,
+                    sourceTs = frame.timestampMs,
+                    failureMessage = it.message ?: "agent-onnx-inference-failed",
+                )
+            }
         }.getOrNull() ?: return
+        if (!isSessionActive(frame.session)) return
         publishObservation(
             active = true,
             sourceWidth = frame.width,
@@ -174,13 +241,15 @@ class OnDeviceFireDetectionCoordinator(
             confirmed,
         )
         confirmed ?: return
-        val stillActive = synchronized(lock) {
-            activeSession?.generation == frame.session.generation
-        }
-        if (!stillActive) return
+        if (!isSessionActive(frame.session)) return
         runCatching {
             val evidence = withContext(Dispatchers.Default) {
-                FireEvidenceEncoder.encodeRgba(frame.data, frame.width, frame.height)
+                FireEvidenceEncoder.encodeRgba(
+                    rgba = frame.data,
+                    width = frame.width,
+                    height = frame.height,
+                    detections = listOf(confirmed),
+                )
             }
             reporter.report(
                 VisibleDetectionReport(
@@ -204,6 +273,10 @@ class OnDeviceFireDetectionCoordinator(
 
     private fun ensureEngine(): VisibleFireDetectionEngine = synchronized(lock) {
         engine ?: engineFactory().also { engine = it }
+    }
+
+    private fun isSessionActive(session: Session): Boolean = synchronized(lock) {
+        activeSession?.generation == session.generation
     }
 
     private fun publishObservation(
@@ -231,5 +304,6 @@ class OnDeviceFireDetectionCoordinator(
 
     private companion object {
         const val TAG = "OnDeviceFireDetection"
+        const val MAX_REUSABLE_FRAME_BUFFERS = 2
     }
 }

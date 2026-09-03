@@ -21,6 +21,8 @@ val m300FireClosedLoopEnabled = providers.gradleProperty("m300FireClosedLoopEnab
 val agentPayloadPositionIndex = providers.gradleProperty("agentPayloadPositionIndex").orElse("-1")
 val agentFireOnnxEnabled = providers.gradleProperty("agentFireOnnxEnabled").orElse("false")
 val agentFireModelProfile = providers.gradleProperty("agentFireModelProfile").orElse("legacy416")
+val agentFireIntraOpThreads = providers.gradleProperty("agentFireIntraOpThreads").orElse("4")
+val agentFireInterOpThreads = providers.gradleProperty("agentFireInterOpThreads").orElse("1")
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -36,8 +38,8 @@ android {
         applicationId = "com.yinxin.uavfir"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 17
+        versionName = "0.1.16"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["DJI_API_KEY"] = djiApiKey.get()
@@ -57,6 +59,8 @@ android {
         buildConfigField("int", "AGENT_PAYLOAD_POSITION_INDEX", agentPayloadPositionIndex.get())
         buildConfigField("boolean", "AGENT_FIRE_ONNX_ENABLED", agentFireOnnxEnabled.get())
         buildConfigField("String", "AGENT_FIRE_MODEL_PROFILE", "\"${agentFireModelProfile.get()}\"")
+        buildConfigField("int", "AGENT_FIRE_INTRA_OP_THREADS", agentFireIntraOpThreads.get())
+        buildConfigField("int", "AGENT_FIRE_INTER_OP_THREADS", agentFireInterOpThreads.get())
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

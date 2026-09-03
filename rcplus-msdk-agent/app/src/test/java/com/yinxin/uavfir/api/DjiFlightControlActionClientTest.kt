@@ -1,6 +1,7 @@
 package com.yinxin.uavfir.api
 
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.io.File
 
@@ -61,6 +62,69 @@ class DjiFlightControlActionClientTest {
             "Outer MSDK command timeout must exceed the longest TSA virtual-stick displacement plus DJI action overhead.",
             timeout != null && timeout >= 180_000L,
         )
+    }
+
+    @Test
+    fun virtualStickAlwaysReturnsAuthorityToPhysicalRemoteController() {
+        val source = File("src/main/java/com/yinxin/uavfir/api/MsdkCommandExecutor.kt").readText()
+        val commandBody = source.substringAfter("override suspend fun sendVirtualStick(")
+            .substringBefore("override suspend fun flyToPoint(")
+
+        val finallyIndex = commandBody.indexOf("finally")
+        val neutralIndex = commandBody.indexOf("buildVirtualStickParam(\"hover\")")
+        val advancedOffIndex = commandBody.indexOf("setVirtualStickAdvancedModeEnabled(false)")
+        val disableIndex = commandBody.indexOf("disableVirtualStick()")
+
+        assertTrue("virtual-stick cleanup must run even on timeout/cancellation", finallyIndex >= 0)
+        assertTrue("cleanup must send a neutral command", neutralIndex > finallyIndex)
+        assertTrue("advanced virtual-stick mode must be disabled", advancedOffIndex > neutralIndex)
+        assertTrue("flight authority must be returned to the physical RC", disableIndex > advancedOffIndex)
+    }
+
+    @Test
+    fun startupCleanupOnlyReleasesGroundedVirtualStickAuthority() {
+        assertTrue(
+            StartupVirtualStickReleaseGuard.shouldRelease(
+                motorsOn = false,
+                isFlying = false,
+                flightModeName = "VIRTUAL_STICK",
+            ),
+        )
+        assertTrue(
+            StartupVirtualStickReleaseGuard.shouldRelease(
+                motorsOn = false,
+                isFlying = false,
+                flightModeName = "GPS_NORMAL",
+                virtualStickControlEnabled = true,
+            ),
+        )
+        assertFalse(StartupVirtualStickReleaseGuard.shouldRelease(true, false, "VIRTUAL_STICK"))
+        assertFalse(StartupVirtualStickReleaseGuard.shouldRelease(false, true, "VIRTUAL_STICK"))
+        assertFalse(StartupVirtualStickReleaseGuard.shouldRelease(null, false, "VIRTUAL_STICK"))
+        assertFalse(StartupVirtualStickReleaseGuard.shouldRelease(false, null, "VIRTUAL_STICK"))
+        assertFalse(StartupVirtualStickReleaseGuard.shouldRelease(false, false, "GPS_NORMAL"))
+        assertFalse(StartupVirtualStickReleaseGuard.shouldRelease(false, false, "GPS_NORMAL", false))
+        assertFalse(StartupVirtualStickReleaseGuard.shouldRelease(false, false, null))
+    }
+
+    @Test
+    fun startupCleanupWaitsForResolvedRcGatewayIdentity() {
+        assertFalse(StartupAuthorityReconciliationGuard.hasResolvedGateway(""))
+        assertFalse(StartupAuthorityReconciliationGuard.hasResolvedGateway("unknown"))
+        assertFalse(StartupAuthorityReconciliationGuard.hasResolvedGateway("UNKNOWN"))
+        assertFalse(StartupAuthorityReconciliationGuard.hasResolvedGateway("RC_PLUS_LOCAL"))
+        assertTrue(StartupAuthorityReconciliationGuard.hasResolvedGateway("4LGZKCH00701BX"))
+    }
+
+    @Test
+    fun appStartupReconcilesHistoricalVirtualStickAuthority() {
+        val source = File("src/main/java/com/yinxin/uavfir/AppServices.kt").readText()
+        val activationBody = source.substringAfter("private fun activateDynamicIdentity")
+            .substringBefore("private fun activeThermalDroneSn")
+
+        assertTrue(activationBody.contains("reconcileStartupFlightControlAuthority(identity)"))
+        assertTrue(activationBody.contains("StartupAuthorityReconciliationGuard.hasResolvedGateway(identity.gatewaySn)"))
+        assertTrue(activationBody.contains("releaseStaleVirtualStickAuthorityIfGrounded()"))
     }
 
     @Test

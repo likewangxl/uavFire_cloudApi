@@ -12,7 +12,12 @@ data class LocalKmzPushResult(val ok: Boolean, val message: String?)
 interface LocalKmzExecutor {
     fun pushKmz(missionId: String, kmzPath: String, onComplete: (LocalKmzPushResult) -> Unit)
 
-    fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?)
+    fun startMission(
+        missionId: String,
+        missionFileName: String,
+        waylineIds: List<Int>?,
+        diagnosticKmzPath: String,
+    ): String?
 }
 
 class WaypointLocalKmzExecutor(
@@ -30,9 +35,12 @@ class WaypointLocalKmzExecutor(
         }
     }
 
-    override fun startMission(missionId: String, missionFileName: String, waylineIds: List<Int>?) {
-        waypointExecutor.startMission(missionId, missionFileName, waylineIds)
-    }
+    override fun startMission(
+        missionId: String,
+        missionFileName: String,
+        waylineIds: List<Int>?,
+        diagnosticKmzPath: String,
+    ): String? = waypointExecutor.startMission(missionId, missionFileName, waylineIds, diagnosticKmzPath)
 }
 
 class LocalKmzMissionController(
@@ -62,7 +70,16 @@ class LocalKmzMissionController(
                     }
 
                     val startMissionName = WaypointMissionFileNames.startMissionName(missionFile.name)
-                    executor.startMission(missionId, startMissionName, null)
+                    val rejection = executor.startMission(
+                        missionId,
+                        startMissionName,
+                        null,
+                        missionFile.absolutePath,
+                    )
+                    if (rejection != null) {
+                        cont.resume(LocalKmzMissionResult(false, "startMission rejected: $rejection"))
+                        return@pushKmz
+                    }
                     cont.resume(LocalKmzMissionResult(true, "push SUCCESS; startMission fired for $startMissionName"))
                 }
             }

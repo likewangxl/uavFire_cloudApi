@@ -80,7 +80,15 @@ data class AgentFireModelProfile(
     val modelVersion: String,
     val modelSha256: String,
     val inputSize: Int,
-)
+    val fireConfidenceThreshold: Double,
+    val smokeConfidenceThreshold: Double,
+) {
+    fun confidenceThresholdFor(classId: Int): Double = when (classId) {
+        0 -> fireConfidenceThreshold
+        1 -> smokeConfidenceThreshold
+        else -> error("unsupported-agent-fire-class-id:$classId")
+    }
+}
 
 object AgentFireModelProfiles {
     val LEGACY_416 = AgentFireModelProfile(
@@ -90,6 +98,8 @@ object AgentFireModelProfiles {
         modelVersion = "best-20260808",
         modelSha256 = "68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271",
         inputSize = 416,
+        fireConfidenceThreshold = 0.25,
+        smokeConfidenceThreshold = 0.25,
     )
     val VISIBLE_960 = AgentFireModelProfile(
         name = "visible960",
@@ -98,11 +108,24 @@ object AgentFireModelProfiles {
         modelVersion = "best-fire-smoke-960-20260902",
         modelSha256 = "24563198eb66e797ac3f32123dfe78410aeeb6ef766b936e825c3146686137a6",
         inputSize = 960,
+        fireConfidenceThreshold = 0.45,
+        smokeConfidenceThreshold = 0.55,
+    )
+    val VISIBLE_1088 = AgentFireModelProfile(
+        name = "visible1088",
+        assetPath = "fire-detection/best-fire-smoke-1088.onnx",
+        manifestPath = "fire-detection/model-manifest-1088.json",
+        modelVersion = "best-fire-smoke-1088-20260902",
+        modelSha256 = "ea55d1d386b04dff9e4ff93ac621536cebd6364f23ccbd3eb7f27603331f39e1",
+        inputSize = 1088,
+        fireConfidenceThreshold = 0.45,
+        smokeConfidenceThreshold = 0.55,
     )
 
     fun resolve(name: String): AgentFireModelProfile = when (name.trim().lowercase(Locale.US)) {
         LEGACY_416.name.lowercase(Locale.US) -> LEGACY_416
         VISIBLE_960.name.lowercase(Locale.US) -> VISIBLE_960
+        VISIBLE_1088.name.lowercase(Locale.US) -> VISIBLE_1088
         else -> error("unsupported-agent-fire-model-profile:$name")
     }
 }
@@ -114,7 +137,8 @@ object AgentFireModelSpec {
     val MODEL_VERSION: String get() = activeProfile.modelVersion
     val MODEL_SHA256: String get() = activeProfile.modelSha256
     val INPUT_SIZE: Int get() = activeProfile.inputSize
-    const val CONFIDENCE_THRESHOLD = 0.25
     const val IOU_THRESHOLD = 0.70
     val CLASS_NAMES = arrayOf("fire", "smoke")
+
+    fun confidenceThresholdFor(classId: Int): Double = activeProfile.confidenceThresholdFor(classId)
 }

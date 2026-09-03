@@ -6,7 +6,7 @@
         :class="{ active: viewMode === '2d' }"
         @click="activateFlatMode"
       >
-        天地图影像
+        高清卫星影像
       </button>
       <button
         type="button"

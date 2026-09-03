@@ -82,17 +82,23 @@ export function useGMapManage () {
     }
     map.on('moveend', persist)
 
-    // 没有缓存则用浏览器 HTML5 定位一次（navigator 给的就是 WGS84，正好对齐天地图）
-    if (!cached && navigator.geolocation) {
+    // 每次整页启动都优先尝试访问端电脑的浏览器定位；历史中心仅用于定位返回前或失败时兜底。
+    // navigator 给出 WGS84，正好与 MapLibre + 天地图坐标系一致。
+    if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const p: [number, number] = [pos.coords.longitude, pos.coords.latitude]
           map.jumpTo({ center: p, zoom: DEFAULT_ZOOM })
           saveMapCenter(p, DEFAULT_ZOOM)
         },
-        () => { /* 拒绝/失败忽略 */ },
-        { enableHighAccuracy: true, timeout: 6000 }
+        (error) => {
+          console.warn('[map] 浏览器定位失败，继续使用历史中心或西安兜底中心。', error.message)
+        },
+        // 桌面电脑通常依赖 Wi-Fi/系统定位，允许短期系统缓存并留足首次定位时间。
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }
       )
+    } else {
+      console.warn('[map] 当前访问环境不支持浏览器定位；请使用 HTTPS 或 localhost 访问。')
     }
 
     // 挂到全局（$aMap=maplibregl 命名空间，$map=Map 实例）

@@ -259,6 +259,7 @@ test('map tab renders real geographic situation layers with optional Tellux mode
   const cockpitSource = readSource('src/pages/page-web/projects/leadership-cockpit.vue')
   const situationMapSource = readSource('src/pages/page-web/projects/CockpitSituationMap.vue')
   const situationSource = readSource('src/pages/page-web/projects/leadership-cockpit-situation.mjs')
+  const baseMapSource = readSource('src/hooks/tianditu.ts')
 
   assert.match(
     cockpitSource,
@@ -278,17 +279,27 @@ test('map tab renders real geographic situation layers with optional Tellux mode
   assert.match(
     situationMapSource,
     /import \{ buildTiandituStyle \} from '\/@\/hooks\/tianditu'/,
-    'situation map should reuse the shared Tianditu style builder'
+    'situation map should reuse the shared base-map style builder'
   )
   assert.match(
     situationMapSource,
     /buildTiandituStyle\('satellite'\)/,
-    'situation map should default to Tianditu imagery view'
+    'situation map should default to the satellite imagery view'
   )
   assert.match(
     situationMapSource,
-    />\s*天地图影像\s*<\/button>/,
-    'flat map toggle should be labelled as Tianditu imagery'
+    />\s*高清卫星影像\s*<\/button>/,
+    'flat map toggle should identify the trial satellite imagery'
+  )
+  assert.match(
+    baseMapSource,
+    /mt3\.googlecnapps\.club\/maps\/vt\?lyrs=s&x=\{x\}&y=\{y\}&z=\{z\}&src=app&scale=2&from=app/,
+    'satellite mode should use the configured trial XYZ tile source'
+  )
+  assert.match(
+    baseMapSource,
+    /tiles:\s*\[SATELLITE_TILE_URL\][\s\S]*?tileSize:\s*256[\s\S]*?maxzoom:\s*20/,
+    'the 2x satellite image should retain a 256px logical XYZ tile size through zoom 20'
   )
   assert.match(
     situationMapSource,

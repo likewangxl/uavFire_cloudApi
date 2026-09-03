@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RC Plus Agent</string>
+    <string name="app_name">火情智巡平台</string>
+    <string name="agent_app_name">火情智巡平台</string>
     <string name="app_title">UAV Fire RC Plus MSDK Agent</string>
     <string name="app_subtitle">Android execution shell for the dual-stream PoC.</string>
     <string name="app_status_placeholder">MSDK 控制通道待刷新。</string>
@@ -11,4 +12,17 @@
     <string name="action_probe_waypoint">探针:推送 KMZ</string>
     <string name="home_feature_kmz_subtitle">航线包下发</string>
     <string name="action_open_sample_tools">打开飞行界面</string>
+    <string name="ai_detection_title">AI 火情监测</string>
+    <string name="ai_detection_status_initializing">正在读取检测状态</string>
+    <string name="ai_detection_status_starting">正在加载 AI 模型…</string>
+    <string name="ai_detection_status_stopping">正在关闭火情监测…</string>
+    <string name="ai_detection_status_off">已关闭 · %1$d×%2$d</string>
+    <string name="ai_detection_status_waiting_frame">已开启 · 等待可见光画面</string>
+    <string name="ai_detection_status_running">检测中 · %1$d ms</string>
+    <string name="ai_detection_status_detected">发现 %1$d 个疑似目标 · %2$d ms</string>
+    <string name="ai_detection_status_unavailable">当前安装包未启用 AI 模型</string>
+    <string name="ai_detection_error_aircraft">开启失败：飞行器未连接</string>
+    <string name="ai_detection_error_model">开启失败：AI 模型加载失败</string>
+    <string name="ai_detection_error_stream">开启失败：可见光画面未就绪</string>
+    <string name="ai_detection_error_generic">开启失败：%1$s</string>
 </resources>

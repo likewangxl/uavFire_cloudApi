@@ -47,6 +47,7 @@ class WaylineAgentClient(
                 Log.w(TAG, "token rejected for $droneSn, clearing for retry")
                 tokenByDrone.remove(droneSn)
             }
+            Log.e(TAG, "wayline command poll failed drone=$droneSn http=${e.code()}", e)
             null
         }
     }

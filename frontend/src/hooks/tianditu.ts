@@ -6,6 +6,7 @@ import { CURRENT_CONFIG } from '/@/api/http/config'
 
 const TK = (CURRENT_CONFIG as any).tiandituKey as string
 const SUBDOMAINS = ['0', '1', '2', '3', '4', '5', '6', '7']
+const SATELLITE_TILE_URL = 'https://mt3.googlecnapps.club/maps/vt?lyrs=s&x={x}&y={y}&z={z}&src=app&scale=2&from=app'
 
 export type TiandituLayer = 'img' | 'cia' | 'vec' | 'cva'
 
@@ -17,11 +18,24 @@ function tileUrls (layer: TiandituLayer): string[] {
 }
 
 function rasterSource (layer: TiandituLayer) {
+  // 试用高清卫星图源：scale=2 返回 512px 图像，但仍覆盖标准 XYZ 256px 瓦片范围，
+  // 因此 MapLibre 的逻辑 tileSize 保持 256。标准图和中文注记继续使用天地图。
+  if (layer === 'img') {
+    return {
+      type: 'raster' as const,
+      tiles: [SATELLITE_TILE_URL],
+      tileSize: 256,
+      minzoom: 0,
+      maxzoom: 20,
+      attribution: 'Satellite imagery © Google',
+    }
+  }
+
   // 天地图瓦片本身是 256px。
-  // 影像/矢量底图(img/vec)：用 tileSize:128 → MapLibre 请求深一级更精细瓦片，高分屏(2x)上更清晰(高清模型)。
+  // 矢量底图(vec)：用 tileSize:128 → MapLibre 请求深一级更精细瓦片，高分屏(2x)上更清晰(高清模型)。
   // 注记层(cia/cva)：保持 256 → 文字按当前缩放正常字号与密度渲染(对标司空2「高清路网和标注」)；
   //   若也设 128，注记会被请求成深一级、渲染成半尺寸 → 字小且稀，反而看不清(CDP 实测)。
-  const tileSize = (layer === 'img' || layer === 'vec') ? 128 : 256
+  const tileSize = layer === 'vec' ? 128 : 256
   return { type: 'raster' as const, tiles: tileUrls(layer), tileSize, minzoom: 1, maxzoom: 18 }
 }
 

@@ -89,4 +89,37 @@ class WaypointMissionDiagnosticsTest {
 
         assertEquals(emptyList<Int>(), WaypointMissionKmzInspector.extractWaylineIds(kmz))
     }
+
+    @Test
+    fun startGuardRejectsUnavailableAircraftDiagnostics() {
+        val selection = WaypointMissionStartGuard.selectWaylineIds(null, listOf(0))
+
+        assertEquals(false, selection.canStart)
+        assertEquals("available-wayline-ids-unavailable", selection.rejectionReason)
+    }
+
+    @Test
+    fun startGuardRejectsEmptyAircraftWaylineIds() {
+        val selection = WaypointMissionStartGuard.selectWaylineIds(emptyList(), listOf(0))
+
+        assertEquals(false, selection.canStart)
+        assertEquals("no-available-wayline-ids-on-aircraft", selection.rejectionReason)
+    }
+
+    @Test
+    fun startGuardRejectsRequestedIdThatAircraftDoesNotExpose() {
+        val selection = WaypointMissionStartGuard.selectWaylineIds(listOf(0), listOf(2))
+
+        assertEquals(false, selection.canStart)
+        assertEquals("requested-wayline-ids-unavailable:2", selection.rejectionReason)
+    }
+
+    @Test
+    fun startGuardUsesAircraftConfirmedWaylineIds() {
+        val selection = WaypointMissionStartGuard.selectWaylineIds(listOf(0), null)
+
+        assertEquals(true, selection.canStart)
+        assertEquals(listOf(0), selection.waylineIds)
+        assertEquals(null, selection.rejectionReason)
+    }
 }

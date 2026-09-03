@@ -282,6 +282,16 @@ test('wayline page renders saved planned-wayline management and calls planned AP
   assert.match(source, /当前状态的规划航线不能直接覆盖/)
 })
 
+test('completed monitoring waylines can be executed again without duplicating the route plan', () => {
+  const source = readFileSync(waylinePagePath, 'utf8')
+  const monitor = readFileSync(waylineMissionMonitorPath, 'utf8')
+
+  assert.match(source, /status === PlannedWaylineStatus\.COMPLETED \|\| status === PlannedWaylineStatus\.FINISHED/)
+  assert.match(source, /key:\s*'execute-again'[\s\S]*label:\s*'再次执行'[\s\S]*handler:\s*onExecutePlannedWaylineTask/)
+  assert.match(monitor, /\['ready', 'file_generated', 'publishing', 'finished', 'completed'\]\.includes\(taskStatus\.value\)/)
+  assert.match(monitor, /executeLabel[\s\S]*'再次执行'/)
+})
+
 test('wayline page clears editable waypoint list after save and previews saved cards on map', () => {
   const source = readFileSync(waylinePagePath, 'utf8')
   const hook = readFileSync(planningHookPath, 'utf8')

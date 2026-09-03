@@ -12,7 +12,6 @@ import type {
 } from '/@/types/wayline'
 
 const HTTP_PREFIX = '/wayline/api/v1'
-const DEFAULT_PLANNED_WAYLINE_MODEL = 'M4T'
 const DEFAULT_PLANNED_WAYLINE_HEIGHT = 30
 const DEFAULT_PLANNED_WAYLINE_SPEED = 5
 
@@ -63,7 +62,11 @@ function validatePlannedWaylineBody<T extends CreatePlannedWaylineBody | UpdateP
     message.error('规划航线参数不完整，请确认航线名称和航点。')
     throw new Error('planned wayline payload incomplete')
   }
-  const aircraftModelKey = body.aircraftModelKey || DEFAULT_PLANNED_WAYLINE_MODEL
+  const aircraftModelKey = body.aircraftModelKey?.trim()
+  if (!aircraftModelKey) {
+    message.error('无法读取当前飞行器机型，请重新连接设备后再保存航线。')
+    throw new Error('planned wayline aircraft model is required')
+  }
   if (aircraftModelKey === 'M300') {
     const supportedPayloads = ['H20', 'H20T', 'H30', 'H30T']
     if (!body.payloadModelKey || !supportedPayloads.includes(body.payloadModelKey) ||

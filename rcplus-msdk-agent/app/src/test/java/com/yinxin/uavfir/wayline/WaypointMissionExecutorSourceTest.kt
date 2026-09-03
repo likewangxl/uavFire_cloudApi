@@ -43,4 +43,30 @@ class WaypointMissionExecutorSourceTest {
             source.contains("NADIR_GIMBAL_PITCH_DEGREES: Double = -45.0"),
         )
     }
+
+    @Test
+    fun startMissionFailsClosedBeforeCallingMsdkWhenAircraftHasNoWaylineIds() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaypointMissionExecutor.kt").readText()
+        val body = source.substringAfter("fun startMission(").substringBefore("fun pauseMission()")
+
+        val guardIndex = body.indexOf("WaypointMissionStartGuard.selectWaylineIds")
+        val rejectIndex = body.indexOf("if (!selection.canStart)")
+        val msdkStartIndex = body.indexOf("WaypointMissionManager.getInstance().startMission")
+
+        assertTrue("aircraft-confirmed IDs must be checked", guardIndex >= 0)
+        assertTrue("unavailable missions must be rejected", rejectIndex > guardIndex)
+        assertTrue("the guard must run before MSDK startMission", msdkStartIndex > rejectIndex)
+    }
+
+    @Test
+    fun productionRouterUsesDownloadedKmzPathForAvailableWaylineDiagnostics() {
+        val source = File("src/main/java/com/yinxin/uavfir/wayline/WaylineAgentCommandRouter.kt").readText()
+        val startCall = source.substringAfter("val startRejection = executor.startMission(")
+            .substringBefore("if (startRejection != null)")
+
+        assertTrue(
+            "getAvailableWaylineIDs must receive the downloaded KMZ path, while startMission receives the basename",
+            startCall.contains("downloadResult.file.absolutePath"),
+        )
+    }
 }

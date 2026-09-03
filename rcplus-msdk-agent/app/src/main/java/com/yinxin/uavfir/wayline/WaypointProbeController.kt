@@ -50,7 +50,16 @@ class WaypointProbeController(
                     // Diagnostic: also call startMission to isolate whether MSDK accepts the KMZ
                     // for execution. WaypointMissionExecutor.startMission is fire-and-forget,
                     // so we synthesize a result via a side-channel listener attached at construction.
-                    executor.startMission(missionId, "m4t_probe.kmz", null)
+                    val rejection = executor.startMission(
+                        missionId,
+                        WaypointMissionFileNames.startMissionName(file.name),
+                        null,
+                        file.absolutePath,
+                    )
+                    if (rejection != null) {
+                        cont.resume(ProbeResult(false, "startMission rejected: $rejection"))
+                        return@pushKmz
+                    }
                     cont.resume(ProbeResult(true, "push SUCCESS; startMission fired — watch logcat for WaylineEventForwarder"))
                 }
             }

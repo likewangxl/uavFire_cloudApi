@@ -643,7 +643,6 @@ import {
   setRouteKind,
   setFlightPositionFromRecord,
   setFlightPositionFromWgs,
-  requestAircraftRecenter,
   setTrackedAircraft,
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
@@ -764,7 +763,7 @@ const executeTargetOptions = computed<AircraftSummary[]>(() => {
         sn: device.aircraftSn,
         callsign: device.model || device.aircraftSn,
         gatewaySn: device.gatewaySn || device.aircraftSn,
-        aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
+        aircraftModelKey: normalizeAircraftModelKey(device.aircraftModelKey || device.model),
         source: 'msdk-agent',
         lastSeen: device.updatedAt || Date.now(),
       })
@@ -825,7 +824,6 @@ const AIRCRAFT_MODEL_NAME_ORDER = ['M3TD', 'M30T', 'M4T', 'M3T', 'M350', 'M300',
 const PLANNED_WAYLINE_MODEL_OPTIONS = ['M4T', 'M4E', 'M30T', 'M30', 'M3T', 'M3E', 'M3TD', 'M3D', 'M350', 'M300']
 const M300_PAYLOAD_OPTIONS = ['H20', 'H20T', 'H30', 'H30T']
 const formatPayloadPosition = (value?: number) => ({ 0: '左/主云台', 1: '右云台', 2: '上云台' } as Record<number, string>)[Number(value)] || '-'
-const DEFAULT_PLANNED_WAYLINE_MODEL = 'M4T'
 
 watch(
   () => selectedAircraftSn.value,
@@ -879,7 +877,7 @@ function inferAircraftModelKey (child: any): string {
 
 function normalizePlannedWaylineModel (model: string): string {
   const normalized = normalizeAircraftModelKey(model)
-  return PLANNED_WAYLINE_MODEL_OPTIONS.includes(normalized) ? normalized : DEFAULT_PLANNED_WAYLINE_MODEL
+  return PLANNED_WAYLINE_MODEL_OPTIONS.includes(normalized) ? normalized : ''
 }
 
 function pickDeviceField (source: any, camelKey: string, snakeKey: string) {
@@ -931,7 +929,7 @@ function syncManagedTopoAircrafts (devices: any[], seen: Set<string>) {
           pickDeviceField(child, 'deviceName', 'device_name') ||
           childSn,
         gatewaySn: pickDeviceField(gateway, 'deviceSn', 'device_sn') || pickDeviceField(child, 'parentSn', 'parent_sn') || '',
-        aircraftModelKey: inferAircraftModelKey(child) || DEFAULT_PLANNED_WAYLINE_MODEL,
+        aircraftModelKey: inferAircraftModelKey(child),
         source: 'cloud-topology',
         lastSeen: Date.now(),
       })
@@ -951,7 +949,7 @@ function syncMsdkOnlineAircrafts (devices: MsdkDeviceState[], seen: Set<string>)
       sn: device.aircraftSn,
       callsign: device.model || device.aircraftSn,
       gatewaySn: device.gatewaySn || device.aircraftSn,
-      aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
+      aircraftModelKey: normalizeAircraftModelKey(device.aircraftModelKey || device.model),
       source: 'msdk-agent',
       lastSeen: device.updatedAt || Date.now(),
     })
@@ -1008,7 +1006,7 @@ function getMsdkAircraftSummary (sn: string): AircraftSummary | null {
     sn: device.aircraftSn,
     callsign: device.model || device.aircraftSn,
     gatewaySn: device.gatewaySn || device.aircraftSn,
-    aircraftModelKey: normalizeAircraftModelKey(device.model) || DEFAULT_PLANNED_WAYLINE_MODEL,
+    aircraftModelKey: normalizeAircraftModelKey(device.aircraftModelKey || device.model),
     source: 'msdk-agent',
     lastSeen: device.updatedAt || Date.now(),
   }
@@ -1221,7 +1219,7 @@ function validatePlannedWaylineSave (): AircraftSummary {
     message.warning('请至少添加一个航点。')
     throw new Error('waypoints required')
   }
-  const fallbackModel = normalizePlannedWaylineModel(savePlannedWaylineModal.aircraftModelKey || (planningState as any).aircraftModelKey || DEFAULT_PLANNED_WAYLINE_MODEL)
+  const fallbackModel = normalizePlannedWaylineModel(savePlannedWaylineModal.aircraftModelKey || (planningState as any).aircraftModelKey)
   const target = summary || {
     sn: planningState.aircraftSn || '',
     callsign: planningState.aircraftSn || '',
@@ -1705,6 +1703,16 @@ function getPlannedWaylineActions (record: PlannedWaylineRecord) {
   if (status === PlannedWaylineStatus.PUBLISHING || status === PlannedWaylineStatus.EXECUTING) {
     return [{ key: 'cancel', label: '取消任务', primary: false, danger: true, handler: onCancelPlannedWaylineTask }]
   }
+  if (status === PlannedWaylineStatus.COMPLETED || status === PlannedWaylineStatus.FINISHED) {
+    return [{
+      key: 'execute-again',
+      label: '再次执行',
+      primary: true,
+      danger: false,
+      wrap: true,
+      handler: onExecutePlannedWaylineTask,
+    }]
+  }
   if (status === PlannedWaylineStatus.FAILED || status === PlannedWaylineStatus.CANCELED) {
     return [{
       key: record.publishedWaylineId ? 'prepare' : 'generate',
@@ -1764,8 +1772,6 @@ onMounted(() => {
     refreshOnlineAircrafts()
     topoTimer = window.setInterval(refreshOnlineAircrafts, 5000)
   }
-  // 每次进入航线页面：请求地图以飞机当前位置为中心（飞机位置就绪后由 GMap 居中一次）。
-  requestAircraftRecenter()
 })
 
 onUnmounted(() => {

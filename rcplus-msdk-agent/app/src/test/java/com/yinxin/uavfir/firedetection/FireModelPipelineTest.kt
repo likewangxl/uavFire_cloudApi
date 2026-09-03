@@ -7,6 +7,8 @@ import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.charset.StandardCharsets
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.MessageDigest
 
 class FireModelPipelineTest {
@@ -23,6 +25,22 @@ class FireModelPipelineTest {
         assertEquals(0.0, output.padY, 0.0)
         assertEquals(1f, output.tensor[0], 0.0001f)
         assertEquals(1f, output.tensor[4 + 1], 0.0001f)
+    }
+
+    @Test
+    fun preprocessorReusesCallerOwnedTensor() {
+        val tensor = FloatArray(12)
+        val rgba = byteArrayOf(
+            255.toByte(), 0, 0, 255.toByte(),
+            0, 255.toByte(), 0, 255.toByte(),
+        )
+
+        val first = RgbaLetterboxPreprocessor.preprocess(rgba, 2, 1, 2, tensor)
+        val second = RgbaLetterboxPreprocessor.preprocess(rgba, 2, 1, 2, tensor)
+
+        assertTrue(first.tensor === tensor)
+        assertTrue(second.tensor === tensor)
+        assertEquals(1f, tensor[0], 0.0001f)
     }
 
     @Test
@@ -49,6 +67,40 @@ class FireModelPipelineTest {
     }
 
     @Test
+    fun postprocessorDecodesReusableFlatOutputBuffer() {
+        val candidateCount = 2
+        val output = ByteBuffer.allocateDirect(6 * candidateCount * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        output.put(0, 208f)
+        output.put(candidateCount, 208f)
+        output.put(candidateCount * 2, 208f)
+        output.put(candidateCount * 3, 208f)
+        output.put(candidateCount * 4, 0.9f)
+        output.put(1, 210f)
+        output.put(candidateCount + 1, 210f)
+        output.put(candidateCount * 2 + 1, 208f)
+        output.put(candidateCount * 3 + 1, 208f)
+        output.put(candidateCount * 4 + 1, 0.8f)
+        val letterbox = LetterboxResult(FloatArray(0), 416, 416, 416, 416, 1.0, 0.0, 0.0)
+
+        val detections = YoloV8Postprocessor.decode(output, candidateCount, letterbox)
+
+        assertEquals(1, detections.size)
+        assertEquals("fire", detections.single().label)
+    }
+
+    @Test
+    fun visibleModelsUseRequestedPerClassConfidenceThresholds() {
+        assertEquals(0.45, AgentFireModelProfiles.VISIBLE_960.confidenceThresholdFor(0), 0.0)
+        assertEquals(0.55, AgentFireModelProfiles.VISIBLE_960.confidenceThresholdFor(1), 0.0)
+        assertEquals(0.45, AgentFireModelProfiles.VISIBLE_1088.confidenceThresholdFor(0), 0.0)
+        assertEquals(0.55, AgentFireModelProfiles.VISIBLE_1088.confidenceThresholdFor(1), 0.0)
+        assertEquals(0.25, AgentFireModelProfiles.LEGACY_416.confidenceThresholdFor(0), 0.0)
+        assertEquals(0.25, AgentFireModelProfiles.LEGACY_416.confidenceThresholdFor(1), 0.0)
+    }
+
+    @Test
     fun trackerRequiresTwoNearbyFramesAndDebouncesReports() {
         val tracker = VisibleDetectionTracker()
         val first = detection(0.8, 0.10)
@@ -64,7 +116,11 @@ class FireModelPipelineTest {
 
     @Test
     fun bundledModelsAndManifestsMatchPinnedSha256() {
-        listOf(AgentFireModelProfiles.LEGACY_416, AgentFireModelProfiles.VISIBLE_960).forEach { profile ->
+        listOf(
+            AgentFireModelProfiles.LEGACY_416,
+            AgentFireModelProfiles.VISIBLE_960,
+            AgentFireModelProfiles.VISIBLE_1088,
+        ).forEach { profile ->
             assertBundledProfile(profile)
         }
     }
@@ -73,6 +129,7 @@ class FireModelPipelineTest {
     fun modelProfilesResolveExplicitlyAndRejectUnknownNames() {
         assertEquals(416, AgentFireModelProfiles.resolve("legacy416").inputSize)
         assertEquals(960, AgentFireModelProfiles.resolve("VISIBLE960").inputSize)
+        assertEquals(1088, AgentFireModelProfiles.resolve("VISIBLE1088").inputSize)
         val failure = runCatching { AgentFireModelProfiles.resolve("unknown") }.exceptionOrNull()
         assertTrue(failure is IllegalStateException)
     }

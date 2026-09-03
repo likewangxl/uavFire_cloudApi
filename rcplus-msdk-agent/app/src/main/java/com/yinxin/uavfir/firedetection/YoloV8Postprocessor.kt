@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.firedetection
 
+import java.nio.FloatBuffer
 import kotlin.math.max
 import kotlin.math.min
 
@@ -7,7 +8,7 @@ object YoloV8Postprocessor {
     fun decode(
         channels: Array<FloatArray>,
         letterbox: LetterboxResult,
-        confidenceThreshold: Double = AgentFireModelSpec.CONFIDENCE_THRESHOLD,
+        confidenceThreshold: Double? = null,
         iouThreshold: Double = AgentFireModelSpec.IOU_THRESHOLD,
     ): List<VisibleDetection> {
         require(channels.size == 4 + AgentFireModelSpec.CLASS_NAMES.size) { "unexpected-output-channels=${channels.size}" }
@@ -24,11 +25,65 @@ object YoloV8Postprocessor {
                     classId = candidateClass
                 }
             }
-            if (!score.isFinite() || score < confidenceThreshold) continue
+            val requiredConfidence = confidenceThreshold ?: AgentFireModelSpec.confidenceThresholdFor(classId)
+            if (!score.isFinite() || score < requiredConfidence) continue
             val centerX = channels[0][index].toDouble()
             val centerY = channels[1][index].toDouble()
             val boxWidth = channels[2][index].toDouble()
             val boxHeight = channels[3][index].toDouble()
+            val left = ((centerX - boxWidth / 2.0) - letterbox.padX) / letterbox.scale
+            val top = ((centerY - boxHeight / 2.0) - letterbox.padY) / letterbox.scale
+            val right = ((centerX + boxWidth / 2.0) - letterbox.padX) / letterbox.scale
+            val bottom = ((centerY + boxHeight / 2.0) - letterbox.padY) / letterbox.scale
+            val x1 = left.coerceIn(0.0, letterbox.originalWidth.toDouble())
+            val y1 = top.coerceIn(0.0, letterbox.originalHeight.toDouble())
+            val x2 = right.coerceIn(0.0, letterbox.originalWidth.toDouble())
+            val y2 = bottom.coerceIn(0.0, letterbox.originalHeight.toDouble())
+            if (x2 <= x1 || y2 <= y1) continue
+            candidates += VisibleDetection(
+                classId = classId,
+                label = AgentFireModelSpec.CLASS_NAMES[classId],
+                confidence = score.coerceIn(0.0, 1.0),
+                roi = NormalizedRoi(
+                    x = x1 / letterbox.originalWidth,
+                    y = y1 / letterbox.originalHeight,
+                    width = (x2 - x1) / letterbox.originalWidth,
+                    height = (y2 - y1) / letterbox.originalHeight,
+                ),
+            )
+        }
+        return classAwareNms(candidates, iouThreshold)
+    }
+
+    fun decode(
+        channels: FloatBuffer,
+        candidateCount: Int,
+        letterbox: LetterboxResult,
+        confidenceThreshold: Double? = null,
+        iouThreshold: Double = AgentFireModelSpec.IOU_THRESHOLD,
+    ): List<VisibleDetection> {
+        val channelCount = 4 + AgentFireModelSpec.CLASS_NAMES.size
+        require(candidateCount >= 0) { "candidate-count-invalid=$candidateCount" }
+        require(channels.capacity() >= channelCount * candidateCount) {
+            "output-buffer-too-small expected=${channelCount * candidateCount} actual=${channels.capacity()}"
+        }
+        val candidates = ArrayList<VisibleDetection>()
+        for (index in 0 until candidateCount) {
+            var classId = 0
+            var score = channels.get(4 * candidateCount + index).toDouble()
+            for (candidateClass in 1 until AgentFireModelSpec.CLASS_NAMES.size) {
+                val candidateScore = channels.get((4 + candidateClass) * candidateCount + index).toDouble()
+                if (candidateScore > score) {
+                    score = candidateScore
+                    classId = candidateClass
+                }
+            }
+            val requiredConfidence = confidenceThreshold ?: AgentFireModelSpec.confidenceThresholdFor(classId)
+            if (!score.isFinite() || score < requiredConfidence) continue
+            val centerX = channels.get(index).toDouble()
+            val centerY = channels.get(candidateCount + index).toDouble()
+            val boxWidth = channels.get(candidateCount * 2 + index).toDouble()
+            val boxHeight = channels.get(candidateCount * 3 + index).toDouble()
             val left = ((centerX - boxWidth / 2.0) - letterbox.padX) / letterbox.scale
             val top = ((centerY - boxHeight / 2.0) - letterbox.padY) / letterbox.scale
             val right = ((centerX + boxWidth / 2.0) - letterbox.padX) / letterbox.scale

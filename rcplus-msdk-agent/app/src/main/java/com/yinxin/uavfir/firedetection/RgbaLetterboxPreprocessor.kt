@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.firedetection
 
+import java.util.Arrays
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -22,6 +23,7 @@ object RgbaLetterboxPreprocessor {
         width: Int,
         height: Int,
         inputSize: Int = AgentFireModelSpec.INPUT_SIZE,
+        reusableTensor: FloatArray? = null,
     ): LetterboxResult {
         require(width > 0 && height > 0) { "frame-size-invalid" }
         require(rgba.size >= width * height * 4) { "rgba-frame-too-small" }
@@ -31,7 +33,10 @@ object RgbaLetterboxPreprocessor {
         val padX = (inputSize - resizedWidth) / 2
         val padY = (inputSize - resizedHeight) / 2
         val planeSize = inputSize * inputSize
-        val tensor = FloatArray(planeSize * 3) { PAD_VALUE }
+        val tensorSize = planeSize * 3
+        val tensor = reusableTensor ?: FloatArray(tensorSize)
+        require(tensor.size == tensorSize) { "tensor-size-invalid expected=$tensorSize actual=${tensor.size}" }
+        Arrays.fill(tensor, PAD_VALUE)
 
         for (dy in 0 until resizedHeight) {
             val sourceY = ((dy + 0.5) / scale - 0.5).roundToInt().coerceIn(0, height - 1)

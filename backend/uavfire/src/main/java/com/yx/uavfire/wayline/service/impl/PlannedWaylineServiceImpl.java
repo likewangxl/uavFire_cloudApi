@@ -525,6 +525,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
 
         long now = System.currentTimeMillis();
+        resetExecutionRuntimeState(existing);
         existing.setStatus(STATUS_PUBLISHING);
         existing.setTaskStatus(STATUS_PUBLISHING);
         existing.setTaskStatusReason(null);
@@ -547,7 +548,30 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         // Agent 路径无需发命令:用户在前端点 "执行" 时会触发 WAYLINE_DISPATCH (executeTask)
 
         updateTaskFields(existing);
+        clearNullableExecutionRuntimeFields(existing);
         return entity2Dto(existing);
+    }
+
+    private void resetExecutionRuntimeState(PlannedWaylineEntity existing) {
+        existing.setTaskProgress(0);
+        existing.setWaylineMissionState(null);
+        existing.setCurrentWaypointIndex(null);
+        existing.setTotalWaypoints(null);
+        existing.setMediaCount(0);
+        existing.setBreakPointJson(null);
+        existing.setLastProgressTime(null);
+        existing.setExecutedTime(null);
+    }
+
+    private void clearNullableExecutionRuntimeFields(PlannedWaylineEntity existing) {
+        mapper.update(null, new LambdaUpdateWrapper<PlannedWaylineEntity>()
+                .eq(PlannedWaylineEntity::getId, existing.getId())
+                .set(PlannedWaylineEntity::getWaylineMissionState, null)
+                .set(PlannedWaylineEntity::getCurrentWaypointIndex, null)
+                .set(PlannedWaylineEntity::getTotalWaypoints, null)
+                .set(PlannedWaylineEntity::getBreakPointJson, null)
+                .set(PlannedWaylineEntity::getLastProgressTime, null)
+                .set(PlannedWaylineEntity::getExecutedTime, null));
     }
 
     @Override

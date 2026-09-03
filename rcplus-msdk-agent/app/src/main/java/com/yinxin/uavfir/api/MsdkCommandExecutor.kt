@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.api
 
+import android.util.Log
 import com.yinxin.uavfir.session.DualStreamCommandExecutor
 import com.yinxin.uavfir.sdk.PayloadSelectionRegistry
 import dji.sdk.keyvalue.key.CameraKey
@@ -16,6 +17,7 @@ import dji.sdk.keyvalue.value.common.ComponentIndexType
 import dji.sdk.keyvalue.value.common.EmptyMsg
 import dji.sdk.keyvalue.value.common.LocationCoordinate3D
 import dji.sdk.keyvalue.value.flightcontroller.FlightCoordinateSystem
+import dji.sdk.keyvalue.value.flightcontroller.FlightMode
 import dji.sdk.keyvalue.value.flightcontroller.FlyToMode
 import dji.sdk.keyvalue.value.flightcontroller.FlyToOperationType
 import dji.sdk.keyvalue.value.flightcontroller.FlyToPointInfo
@@ -32,10 +34,13 @@ import dji.sdk.keyvalue.value.gimbal.GimbalSpeedRotation
 import dji.v5.common.callback.CommonCallbacks
 import dji.v5.common.error.IDJIError
 import dji.v5.et.create
+import dji.v5.et.get
 import dji.v5.manager.aircraft.virtualstick.VirtualStickManager
 import dji.v5.manager.KeyManager
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -45,6 +50,33 @@ data class MsdkCommandExecutionResult(
     val status: String,
     val message: String? = null,
 )
+
+enum class StartupVirtualStickReleaseOutcome {
+    RELEASED,
+    NOT_NEEDED,
+    DEFERRED,
+    FAILED,
+}
+
+internal object StartupVirtualStickReleaseGuard {
+    fun shouldRelease(
+        motorsOn: Boolean?,
+        isFlying: Boolean?,
+        flightModeName: String?,
+        virtualStickControlEnabled: Boolean? = null,
+    ): Boolean = motorsOn == false &&
+        isFlying == false &&
+        (virtualStickControlEnabled == true || flightModeName == FlightMode.VIRTUAL_STICK.name)
+}
+
+internal object StartupAuthorityReconciliationGuard {
+    fun hasResolvedGateway(gatewaySn: String): Boolean {
+        val normalized = gatewaySn.trim()
+        return normalized.isNotEmpty() &&
+            !normalized.equals("unknown", ignoreCase = true) &&
+            !normalized.equals("RC_PLUS_LOCAL", ignoreCase = true)
+    }
+}
 
 interface MsdkCommandExecutor {
     suspend fun execute(
@@ -162,14 +194,122 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
         val param = buildVirtualStickParam(key)
         val safeDurationMs = durationMs.coerceIn(MIN_VIRTUAL_STICK_DURATION_MS, MAX_VIRTUAL_STICK_DURATION_MS)
         withTimeout(safeDurationMs + MSDK_ACTION_TIMEOUT_MS) {
-            enableVirtualStick()
-            VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(true)
-            val startedAt = System.currentTimeMillis()
-            while (System.currentTimeMillis() - startedAt < safeDurationMs) {
-                VirtualStickManager.getInstance().sendVirtualStickAdvancedParam(param)
-                delay(VIRTUAL_STICK_SEND_INTERVAL_MS)
+            var virtualStickEnabled = false
+            try {
+                enableVirtualStick()
+                virtualStickEnabled = true
+                VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(true)
+                val startedAt = System.currentTimeMillis()
+                while (System.currentTimeMillis() - startedAt < safeDurationMs) {
+                    VirtualStickManager.getInstance().sendVirtualStickAdvancedParam(param)
+                    delay(VIRTUAL_STICK_SEND_INTERVAL_MS)
+                }
+            } finally {
+                if (virtualStickEnabled) {
+                    // Always neutralize the aircraft before releasing authority. Without this
+                    // hand-back MSDK keeps the aircraft in VIRTUAL_STICK and the physical RC
+                    // can appear unresponsive after an Agent joystick command.
+                    runCatching {
+                        VirtualStickManager.getInstance()
+                            .sendVirtualStickAdvancedParam(buildVirtualStickParam("hover"))
+                    }.onFailure { error ->
+                        Log.w(TAG, "virtual-stick neutral command failed: ${error.message}")
+                    }
+                    VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(false)
+                    withContext(NonCancellable) {
+                        runCatching { disableVirtualStick() }
+                            .onFailure { error ->
+                                Log.e(TAG, "virtual-stick authority release failed", error)
+                            }
+                    }
+                }
             }
-            VirtualStickManager.getInstance().sendVirtualStickAdvancedParam(buildVirtualStickParam("hover"))
+        }
+    }
+
+    /**
+     * Releases virtual-stick authority left behind by an older Agent process.
+     *
+     * DJI keeps this authority on the aircraft side, so reinstalling or killing the
+     * app does not necessarily return control to the physical RC. Cleanup is allowed
+     * only when MSDK positively reports motors off, not flying, and either the
+     * virtual-stick control flag is enabled or the flight mode is VIRTUAL_STICK.
+     * Unknown or airborne state is deliberately deferred.
+     */
+    suspend fun releaseStaleVirtualStickAuthorityIfGrounded(): StartupVirtualStickReleaseOutcome {
+        val motorsOn = runCatching {
+            FlightControllerKey.KeyAreMotorsOn.create().get()
+        }.onFailure { error ->
+            Log.w(TAG, "startup authority check could not read motors state", error)
+        }.getOrNull()
+        val isFlying = runCatching {
+            FlightControllerKey.KeyIsFlying.create().get()
+        }.onFailure { error ->
+            Log.w(TAG, "startup authority check could not read flying state", error)
+        }.getOrNull()
+        val flightMode = runCatching {
+            FlightControllerKey.KeyFlightMode.create().get()
+        }.onFailure { error ->
+            Log.w(TAG, "startup authority check could not read flight mode", error)
+        }.getOrNull()
+        val virtualStickControlEnabled = runCatching {
+            FlightControllerKey.KeyVirtualStickControlModeEnabled.create().get()
+        }.onFailure { error ->
+            Log.w(TAG, "startup authority check could not read virtual-stick control flag", error)
+        }.getOrNull()
+
+        val hasReliableControlState = virtualStickControlEnabled != null ||
+            (flightMode != null && flightMode != FlightMode.UNKNOWN)
+        if (motorsOn == null || isFlying == null || !hasReliableControlState) {
+            Log.w(
+                TAG,
+                "startup authority cleanup deferred: motorsOn=$motorsOn isFlying=$isFlying " +
+                    "mode=$flightMode virtualStickEnabled=$virtualStickControlEnabled",
+            )
+            return StartupVirtualStickReleaseOutcome.DEFERRED
+        }
+        if (motorsOn || isFlying) {
+            Log.w(
+                TAG,
+                "startup authority cleanup blocked while aircraft active: motorsOn=$motorsOn isFlying=$isFlying " +
+                    "mode=$flightMode virtualStickEnabled=$virtualStickControlEnabled",
+            )
+            return StartupVirtualStickReleaseOutcome.DEFERRED
+        }
+        if (!StartupVirtualStickReleaseGuard.shouldRelease(
+                motorsOn,
+                isFlying,
+                flightMode?.name,
+                virtualStickControlEnabled,
+            )
+        ) {
+            Log.i(
+                TAG,
+                "startup authority cleanup not needed: mode=$flightMode " +
+                    "virtualStickEnabled=$virtualStickControlEnabled",
+            )
+            return StartupVirtualStickReleaseOutcome.NOT_NEEDED
+        }
+
+        return runCatching {
+            VirtualStickManager.getInstance().setVirtualStickAdvancedModeEnabled(false)
+            withTimeout(MSDK_ACTION_TIMEOUT_MS) {
+                disableVirtualStick()
+            }
+            repeat(VIRTUAL_STICK_RELEASE_VERIFY_ATTEMPTS) {
+                delay(VIRTUAL_STICK_RELEASE_VERIFY_DELAY_MS)
+                val enabledAfterRelease = runCatching {
+                    FlightControllerKey.KeyVirtualStickControlModeEnabled.create().get()
+                }.getOrNull()
+                if (enabledAfterRelease != true) {
+                    Log.i(TAG, "startup stale virtual-stick authority released to physical RC")
+                    return@runCatching StartupVirtualStickReleaseOutcome.RELEASED
+                }
+            }
+            error("virtual-stick control flag remained enabled after release timeout")
+        }.getOrElse { error ->
+            Log.e(TAG, "startup stale virtual-stick authority release failed", error)
+            StartupVirtualStickReleaseOutcome.FAILED
         }
     }
 
@@ -446,8 +586,25 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
     }
 
     private suspend fun enableVirtualStick() {
+        Log.w(TAG, "Agent explicitly requesting virtual-stick authority")
         suspendCancellableCoroutine<Unit> { continuation ->
             VirtualStickManager.getInstance().enableVirtualStick(object : CommonCallbacks.CompletionCallback {
+                override fun onSuccess() {
+                    continuation.takeIf { it.isActive }?.resume(Unit)
+                }
+
+                override fun onFailure(error: IDJIError) {
+                    continuation.takeIf { it.isActive }
+                        ?.resumeWithException(IllegalStateException(error.description()))
+                }
+            })
+        }
+    }
+
+    private suspend fun disableVirtualStick() {
+        Log.i(TAG, "Agent releasing virtual-stick authority")
+        suspendCancellableCoroutine<Unit> { continuation ->
+            VirtualStickManager.getInstance().disableVirtualStick(object : CommonCallbacks.CompletionCallback {
                 override fun onSuccess() {
                     continuation.takeIf { it.isActive }?.resume(Unit)
                 }
@@ -493,10 +650,13 @@ class DjiFlightControlActionClient : FlightControlActionClient, GimbalActionClie
     }
 
     companion object {
+        private const val TAG = "DjiFlightControl"
         private const val MSDK_ACTION_TIMEOUT_MS: Long = 8_000
         private const val MIN_VIRTUAL_STICK_DURATION_MS: Long = 100
         private const val MAX_VIRTUAL_STICK_DURATION_MS: Long = 160_000
         private const val VIRTUAL_STICK_SEND_INTERVAL_MS: Long = 100
+        private const val VIRTUAL_STICK_RELEASE_VERIFY_DELAY_MS: Long = 250
+        private const val VIRTUAL_STICK_RELEASE_VERIFY_ATTEMPTS: Int = 8
         private const val MIN_FLY_TO_SPEED_MPS: Double = 1.0
         private const val MAX_FLY_TO_SPEED_MPS: Double = 15.0
         private const val GIMBAL_NADIR_ROTATION_DURATION_SEC: Double = 2.0

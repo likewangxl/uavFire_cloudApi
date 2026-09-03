@@ -105,6 +105,57 @@
                 android:textStyle="bold"
                 android:singleLine="true" />
         </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/aiDetectionPanel"
+            android:layout_width="260dp"
+            android:layout_height="76dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="18dp"
+            android:layout_marginEnd="18dp"
+            android:background="@drawable/home_card_panel"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="30dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/ai_detection_title"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/aiDetectionSwitch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:contentDescription="@string/ai_detection_title"
+                    android:saveEnabled="false"
+                    android:showText="false"
+                    app:thumbTint="@color/ai_detection_switch_thumb"
+                    app:trackTint="@color/ai_detection_switch_track" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/aiDetectionStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/ai_detection_status_initializing"
+                android:textColor="#FF72D9FF"
+                android:textSize="11sp" />
+        </LinearLayout>
     </FrameLayout>
 
     <androidx.constraintlayout.widget.ConstraintLayout

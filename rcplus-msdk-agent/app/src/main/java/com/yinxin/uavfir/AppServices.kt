@@ -17,12 +17,15 @@ import com.yinxin.uavfir.api.FireConfirmationRequest
 import com.yinxin.uavfir.api.FireConfirmationResult
 import com.yinxin.uavfir.api.LegacyCommandDeduplicator
 import com.yinxin.uavfir.api.MissionHoldControl
+import com.yinxin.uavfir.api.StartupAuthorityReconciliationGuard
+import com.yinxin.uavfir.api.StartupVirtualStickReleaseOutcome
 import com.yinxin.uavfir.api.VisibleFireLaserLocator
 import com.yinxin.uavfir.api.BackendVisibleTargetAimer
 import com.yinxin.uavfir.api.DjiLaserRangefinderClient
 import com.yinxin.uavfir.api.DjiTapZoomClient
 import com.yinxin.uavfir.api.ThermalHotspotMonitor
 import com.yinxin.uavfir.firedetection.OnDeviceFireDetectionCoordinator
+import com.yinxin.uavfir.firedetection.VisibleAiControlResult
 import com.yinxin.uavfir.firedetection.VisibleDetectionReporter
 import com.yinxin.uavfir.firedetection.outbox.AndroidFireEventOutboxStore
 import com.yinxin.uavfir.firedetection.outbox.FireEventIngestApi
@@ -51,6 +54,7 @@ import com.yinxin.uavfir.wayline.LocalKmzMissionController
 import com.yinxin.uavfir.wayline.WaypointLocalKmzExecutor
 import okhttp3.OkHttpClient
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -194,9 +198,17 @@ class AppServices(
         defaultKmzFile = File(localKmzDir, "Kmz2.kmz"),
     )
 
-    private val commandPoller = CompositeCommandPoller(listOf(thermalHotspotMonitor, dualStreamPoller, waylineRouter))
+    private val commandPoller = CompositeCommandPoller(
+        listOf(thermalHotspotMonitor, dualStreamPoller, waylineRouter),
+        onFailure = { poller, error ->
+            Log.e(TAG, "command poll failed poller=${poller.javaClass.simpleName}", error)
+        },
+    )
+    @Volatile
     private var activeReporterIdentity: DjiDeviceIdentity? = null
     private val autoStartedStreamAircraft = mutableSetOf<String>()
+    private val authorityReconciliationInFlight = ConcurrentHashMap.newKeySet<String>()
+    private val authorityReconciledAircraft = ConcurrentHashMap.newKeySet<String>()
 
     val validationController = ValidationConsoleController(
         deviceSession = deviceSession,
@@ -254,6 +266,7 @@ class AppServices(
             waypointExecutor.reattach()
             activeReporterIdentity = identity
         }
+        reconcileStartupFlightControlAuthority(identity)
         if (identity.isPlaceholderAircraft()) {
             // 占位身份（飞机未上线）不起流：流名会挂 UNKNOWN-AIRCRAFT 前缀，
             // 前端按真机 SN 取流永远取不到——2026-07-25 飞机关机重启实测踩坑。
@@ -272,6 +285,53 @@ class AppServices(
                 "restarting dual-stream for identity change ${sessionManager.activeStreamDroneSn} -> ${identity.aircraftSn}",
             )
             startDualStreamOnBoot(identity.aircraftSn)
+        }
+    }
+
+    private fun reconcileStartupFlightControlAuthority(identity: DjiDeviceIdentity) {
+        val aircraftSn = identity.aircraftSn
+        if (!StartupAuthorityReconciliationGuard.hasResolvedGateway(identity.gatewaySn)) {
+            Log.i(
+                TAG,
+                "startup flight-control authority reconciliation deferred until RC gateway resolves " +
+                    "aircraft=$aircraftSn gateway=${identity.gatewaySn}",
+            )
+            return
+        }
+        if (authorityReconciledAircraft.contains(aircraftSn) ||
+            !authorityReconciliationInFlight.add(aircraftSn)
+        ) {
+            return
+        }
+        appScope.launch {
+            try {
+                // The first identity callback may precede RC authority synchronization.
+                // Wait briefly after the real gateway appears before accepting GPS_NORMAL
+                // or releasing an aircraft-side VIRTUAL_STICK owner left by an older run.
+                delay(AUTHORITY_RECONCILIATION_SETTLE_MS)
+                if (waypointExecutor.activeMissionId() != null) {
+                    Log.w(
+                        TAG,
+                        "startup flight-control authority reconciliation deferred while mission active " +
+                            "aircraft=$aircraftSn mission=${waypointExecutor.activeMissionId()}",
+                    )
+                    return@launch
+                }
+                when (val outcome = flightControlClient.releaseStaleVirtualStickAuthorityIfGrounded()) {
+                    StartupVirtualStickReleaseOutcome.RELEASED,
+                    StartupVirtualStickReleaseOutcome.NOT_NEEDED -> {
+                        authorityReconciledAircraft.add(aircraftSn)
+                        Log.i(TAG, "startup flight-control authority reconciled aircraft=$aircraftSn outcome=$outcome")
+                    }
+                    StartupVirtualStickReleaseOutcome.DEFERRED,
+                    StartupVirtualStickReleaseOutcome.FAILED -> Log.w(
+                        TAG,
+                        "startup flight-control authority reconciliation will retry aircraft=$aircraftSn outcome=$outcome",
+                    )
+                }
+            } finally {
+                authorityReconciliationInFlight.remove(aircraftSn)
+            }
         }
     }
 
@@ -317,6 +377,30 @@ class AppServices(
         }
     }
 
+    /**
+     * Manual, operator-controlled switch for Agent-side visible-light fire detection.
+     * This only controls ONNX observation. It never enables the M300 flight/fire closed loop.
+     */
+    suspend fun setManualFireDetectionEnabled(enabled: Boolean): VisibleAiControlResult {
+        val droneSn = activeThermalDroneSn().orEmpty()
+        if (!enabled) {
+            return sessionManager.executeCommand(droneSn, "visible-ai-off").toVisibleAiControlResult()
+        }
+        if (droneSn.isBlank()) {
+            return VisibleAiControlResult(false, "aircraft-not-connected")
+        }
+        if (sessionManager.sessionState != DualStreamSessionState.RUNNING) {
+            val streamResult = sessionManager.executeCommand(droneSn, "start")
+            if (streamResult.status != "applied") {
+                return VisibleAiControlResult(
+                    applied = false,
+                    message = streamResult.message ?: "visible-stream-not-ready",
+                )
+            }
+        }
+        return sessionManager.executeCommand(droneSn, "visible-ai-on").toVisibleAiControlResult()
+    }
+
     fun shutdown() {
         osdReporter.stop()
         hmsReporter.stop()
@@ -331,8 +415,15 @@ class AppServices(
     companion object {
         private const val TAG = "AppServices"
         private const val AUTO_START_DELAY_MS: Long = 6_000
+        private const val AUTHORITY_RECONCILIATION_SETTLE_MS: Long = 250
     }
 }
+
+private fun DualStreamSessionManager.CommandExecutionResult.toVisibleAiControlResult() =
+    VisibleAiControlResult(
+        applied = status == "applied",
+        message = message ?: if (status == "applied") "applied" else "visible-ai-command-failed",
+    )
 
 private class ThermalHotspotTriggerBridge : ThermalHotspotCandidateListener {
     @Volatile

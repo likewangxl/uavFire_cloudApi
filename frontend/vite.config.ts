@@ -116,6 +116,12 @@ export default ({ command, mode }: ConfigEnv): UserConfigExport => defineConfig(
       allow: [frontendRoot, frontendNodeModules]
     },
     proxy: {
+      // Agent 火情证据图使用后端返回的同源相对路径。开发环境也必须转发该路径，
+      // 否则浏览器会向 Vite 请求图片并得到 404。
+      '/manage/api/v1/dual-stream/fire-evidence': {
+        target: 'http://127.0.0.1:6789',
+        changeOrigin: true
+      },
       // 火情快照图 URL 是相对路径(/api/v1/snapshots/...)，生产由 nginx 反代到 ai-service，dev 同样转发
       '/api/v1/snapshots': {
         target: 'http://127.0.0.1:9000',

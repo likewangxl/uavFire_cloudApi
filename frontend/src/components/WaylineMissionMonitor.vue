@@ -25,7 +25,7 @@
         type="primary"
         :loading="busy"
         @click="onExecute">
-        执行
+        {{ executeLabel }}
       </a-button>
       <a-button
         v-if="canPause"
@@ -91,7 +91,8 @@ let pollTimer: number | null = null
 
 const taskStatus = computed(() => (props.record.taskStatus || props.record.status || '').toLowerCase())
 
-const canExecute = computed(() => ['ready', 'file_generated', 'publishing'].includes(taskStatus.value))
+const canExecute = computed(() => ['ready', 'file_generated', 'publishing', 'finished', 'completed'].includes(taskStatus.value))
+const executeLabel = computed(() => ['finished', 'completed'].includes(taskStatus.value) ? '再次执行' : '执行')
 const canPause = computed(() => taskStatus.value === 'executing')
 const canRecovery = computed(() => ['paused', 'broken', 'stopped'].includes(taskStatus.value))
 const canStop = computed(() => ['executing', 'paused'].includes(taskStatus.value))
