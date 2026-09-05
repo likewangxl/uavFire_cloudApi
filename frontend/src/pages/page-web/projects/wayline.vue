@@ -248,11 +248,11 @@
               <a-input :value="String(savePlannedWaylineModal.waypointCount)" disabled />
             </div>
           </div>
-          <div v-if="savePlannedWaylineModal.aircraftModelKey === 'M300'" class="planning-row planning-two-col">
+          <div v-if="usesZenmusePayloadSelection(savePlannedWaylineModal.aircraftModelKey)" class="planning-row planning-two-col">
             <div>
               <span class="planning-label">云台负载</span>
               <a-select size="small" style="width: 100%;" v-model:value="savePlannedWaylineModal.payloadModelKey">
-                <a-select-option v-for="payload in M300_PAYLOAD_OPTIONS" :key="payload" :value="payload">{{ payload }}</a-select-option>
+                <a-select-option v-for="payload in ZENMUSE_PAYLOAD_OPTIONS" :key="payload" :value="payload">{{ payload }}</a-select-option>
               </a-select>
             </div>
             <div>
@@ -828,7 +828,8 @@ const AIRCRAFT_MODEL_KEY_MAP: Record<string, string> = {
 
 const AIRCRAFT_MODEL_NAME_ORDER = ['M3TD', 'M30T', 'M4T', 'M3T', 'M350', 'M300', 'M30', 'M3E', 'M3D', 'M4E']
 const PLANNED_WAYLINE_MODEL_OPTIONS = ['M4T', 'M4E', 'M30T', 'M30', 'M3T', 'M3E', 'M3TD', 'M3D', 'M350', 'M300']
-const M300_PAYLOAD_OPTIONS = ['H20', 'H20T', 'H30', 'H30T']
+const ZENMUSE_PAYLOAD_OPTIONS = ['H20', 'H20T', 'H30', 'H30T']
+const usesZenmusePayloadSelection = (model?: string) => ['M300', 'M350'].includes(String(model || '').toUpperCase())
 const formatPayloadPosition = (value?: number) => ({ 0: '左/主云台', 1: '右云台', 2: '上云台' } as Record<number, string>)[Number(value)] || '-'
 
 watch(
@@ -1136,8 +1137,8 @@ function buildPagePlannedWaylineBody (name: string, aircraftModelKey: string): C
   return {
     name,
     aircraftModelKey: normalizedAircraftModelKey,
-    payloadModelKey: normalizedAircraftModelKey === 'M300' ? savePlannedWaylineModal.payloadModelKey : undefined,
-    payloadPositionIndex: normalizedAircraftModelKey === 'M300' ? savePlannedWaylineModal.payloadPositionIndex : undefined,
+    payloadModelKey: usesZenmusePayloadSelection(normalizedAircraftModelKey) ? savePlannedWaylineModal.payloadModelKey : undefined,
+    payloadPositionIndex: usesZenmusePayloadSelection(normalizedAircraftModelKey) ? savePlannedWaylineModal.payloadPositionIndex : undefined,
     gatewaySn: planningState.gatewaySn || '',
     aircraftSn: planningState.aircraftSn || '',
     defaultHeight,

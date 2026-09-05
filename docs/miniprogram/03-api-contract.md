@@ -438,8 +438,12 @@ Idempotency-Key: 4ba5ad1b-d70e-4bd0-89c3-889d97a966e1
   "version": 18,
   "progressPercent": 42,
   "wayline": {"waylineId": "pwl-001", "name": "东山网格 A"},
-  "aircraft": {"deviceSnMasked": "1581****AEK3P", "model": "M300_RTK"},
-  "payload": {"model": "H20T", "positionIndex": 0},
+  "aircraft": {
+    "deviceSnMasked": "1581****AEK3P",
+    "modelKey": "M3T",
+    "aircraftFamily": "MAVIC_3_ENTERPRISE"
+  },
+  "payload": {"model": "M3T_CAMERA", "positionIndex": 0},
   "currentWaypointIndex": 5,
   "totalWaypoints": 12,
   "batteryPercent": 63,
@@ -548,12 +552,14 @@ Idempotency-Key: 4ba5ad1b-d70e-4bd0-89c3-889d97a966e1
     "taskVersion": 8,
     "action": "EXECUTE",
     "riskLevel": "MEDIUM",
-    "summary": "将由 M300 RTK/H20T 执行 12 个航点，完成后返航",
+    "summary": "将由 M350 RTK/H30T 执行 12 个航点，完成后返航",
     "checks": [
       {"code": "TASK_APPROVED", "status": "PASS", "message": "任务已审批"},
       {"code": "AGENT_ONLINE", "status": "PASS", "message": "Agent 状态 2 秒前更新"},
-      {"code": "AIRCRAFT_MATCH", "status": "PASS", "message": "M300_RTK 匹配"},
-      {"code": "PAYLOAD_MATCH", "status": "PASS", "message": "H20T/0 匹配"},
+      {"code": "AIRCRAFT_MATCH", "status": "PASS", "message": "M350_RTK 匹配"},
+      {"code": "COMPATIBILITY_VERIFIED", "status": "PASS", "message": "飞机/RC/负载/固件组合已验收"},
+      {"code": "WAYLINE_CAPABILITY", "status": "PASS", "message": "Agent 已显式上报航线执行能力"},
+      {"code": "PAYLOAD_MATCH", "status": "PASS", "message": "H30T/0 匹配"},
       {"code": "BATTERY", "status": "PASS", "message": "电量 86%"},
       {"code": "RTK", "status": "WARN", "message": "当前 FLOAT，现场飞手需确认"}
     ],
@@ -791,7 +797,48 @@ Idempotency-Key: 96955fd1-4797-4a5c-b8b4-b4f6745211b1
 
 若文件哈希或报告版本变化，返回 `409 REPORT_VERSION_CHANGED`。
 
-### 5.22 创建直播会话
+### 5.22 设备摘要与兼容能力
+
+`GET /devices`、`GET /devices/{deviceSn}`
+
+设备对象不得只返回展示名称；必须同时返回规范机型族、真实上报能力、验收状态和
+最终操作策略：
+
+```json
+{
+  "deviceSnMasked": "1581****AEK3P",
+  "model": "Matrice 4T",
+  "modelKey": "M4T",
+  "aircraftFamily": "MATRICE_4_ENTERPRISE",
+  "compatibilityStatus": "PARTIAL",
+  "operationPolicy": "READ_ONLY",
+  "online": true,
+  "batteryPercent": 82,
+  "capabilityProfile": {
+    "combinationKey": "M4T|RCPLUS2ENTERPRISE|M4T_CAMERA|0",
+    "knownModel": true,
+    "acceptanceVerified": false,
+    "telemetryReadable": true,
+    "visibleStreamReported": true,
+    "thermalReported": true,
+    "laserReported": true,
+    "waylineControlReported": false,
+    "flightControlEligible": false,
+    "blockingReasons": ["WAYLINE_CAPABILITY_NOT_REPORTED", "COMBINATION_NOT_VERIFIED"]
+  },
+  "dataStatus": "FRESH",
+  "updatedAt": "2026-09-03T07:30:00.123Z"
+}
+```
+
+`compatibilityStatus` 表示证据级别，不等同于 SDK 厂商支持清单：
+
+- `VERIFIED`：当前飞机、控制端、负载、固件和适配器组合已完成项目验收。
+- `PARTIAL`：只验证部分能力，例如遥测和直播，未验证飞行控制。
+- `UNVERIFIED`：已有适配代码或枚举，但没有当前组合的设备/飞行证据。
+- `UNKNOWN`：无法规范识别型号或控制拓扑。
+
+### 5.23 创建直播会话
 
 `POST /live-sessions`
 
@@ -820,7 +867,7 @@ Idempotency-Key: 96955fd1-4797-4a5c-b8b4-b4f6745211b1
 
 播放 URL 不得写日志或用于分享。若微信类目/组件权限未开通，返回 `MEDIA_LIVE_PLAYER_NOT_ENABLED` 并提供快照。
 
-### 5.23 登记微信订阅授权
+### 5.24 登记微信订阅授权
 
 `POST /notification-subscriptions`
 
@@ -836,7 +883,7 @@ Idempotency-Key: 96955fd1-4797-4a5c-b8b4-b4f6745211b1
 
 该接口只登记客户端 `wx.requestSubscribeMessage` 的结果；不能代替微信授权动作。
 
-### 5.24 创建实时连接 Ticket
+### 5.25 创建实时连接 Ticket
 
 `POST /realtime-tickets`
 
@@ -932,13 +979,14 @@ LIVE_SESSION.STATUS_CHANGED
 | 429 | `RATE_LIMITED` | 请求过频 |
 | 500 | `INTERNAL_ERROR` | 未分类服务端错误 |
 | 503 | `SERVICE_UNAVAILABLE` | 服务暂不可用 |
+| 503 | `MINIAPP_DISABLED` | 当前环境未启用小程序 API |
 
 ### 7.2 微信身份
 
 | HTTP | code | 说明 |
 | --- | --- | --- |
 | 400 | `WECHAT_CODE_INVALID` | 登录 code 无效/已使用 |
-| 502 | `WECHAT_API_UNAVAILABLE` | 微信接口异常 |
+| 502/503 | `WECHAT_API_UNAVAILABLE` | 微信接口异常或服务端适配器未配置 |
 | 401 | `BINDING_TICKET_INVALID` | 绑定票据无效 |
 | 409 | `WECHAT_ALREADY_BOUND` | 微信身份已绑定其他账号 |
 | 403 | `USER_BINDING_DISABLED` | 绑定已禁用 |
@@ -959,6 +1007,9 @@ LIVE_SESSION.STATUS_CHANGED
 | 422 | `AGENT_OFFLINE` | Agent 不在线或状态陈旧 |
 | 422 | `AIRCRAFT_NOT_READY` | 飞机状态不满足执行条件 |
 | 422 | `AIRCRAFT_MODEL_MISMATCH` | 实际机型与航线不匹配 |
+| 422 | `AIRCRAFT_MODEL_UNKNOWN` | 型号无法规范识别，仅允许只读 |
+| 422 | `AIRCRAFT_COMBINATION_NOT_VERIFIED` | 当前飞机、控制端、负载和固件组合未验收 |
+| 422 | `WAYLINE_CAPABILITY_NOT_REPORTED` | 运行端未显式上报航线控制能力 |
 | 422 | `PAYLOAD_MODEL_MISMATCH` | 载荷型号或位置不匹配 |
 | 403 | `FLIGHT_CONTROL_DISABLED` | 系统/workspace/用户灰度未开放 |
 | 504 | `COMMAND_ACK_TIMEOUT` | Agent 未在时限内 ACK |

@@ -54,6 +54,22 @@ jwt:
   secret: CloudApiSample
   age: 86400
 
+# Leadership WeChat Mini Program BFF. Every capability is fail-closed by default.
+miniapp:
+  enabled: ${MINIAPP_ENABLED:false}
+  wechat:
+    enabled: ${MINIAPP_WECHAT_ENABLED:false}
+    app-id: ${MINIAPP_WECHAT_APP_ID:}
+    # Server-side only. Never place this value in Mini Program source or project config.
+    app-secret: ${MINIAPP_WECHAT_APP_SECRET:}
+  flight-control:
+    enabled: ${MINIAPP_FLIGHT_CONTROL_ENABLED:false}
+    # Exact MODEL|CONTROLLER_OR_DOCK|PAYLOAD|POSITION tuples from signed acceptance records.
+    verified-combination-keys: ${MINIAPP_FLIGHT_CONTROL_VERIFIED_COMBINATION_KEYS:}
+  dashboard:
+    # Enable only after device state is constrained to the authenticated workspace.
+    live-device-summary-enabled: ${MINIAPP_DASHBOARD_LIVE_DEVICE_SUMMARY_ENABLED:false}
+
 mqtt:
   # @see com.yx.uavfire.component.mqtt.model.MqttUseEnum
   # BASIC parameters are required.

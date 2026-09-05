@@ -233,7 +233,22 @@ if ($stopScript.Contains('-P$($settings.mysqlPort)')) {
 if (-not $stopScript.Contains('"--port=$($settings.mysqlPort)"')) {
     throw 'MySQL shutdown does not use an explicit long port argument.'
 }
-if ($stopScript -notmatch '(?s)try\s*\{.*?-s quit.*?\}\s*catch\s*\{') {
+# Inspect the guarded process call, not the obsolete native-command spelling
+# "-s quit". The current implementation deliberately uses an argument array.
+$stopTokens = $null
+$stopErrors = $null
+$stopAst = [System.Management.Automation.Language.Parser]::ParseInput($stopScript, [ref]$stopTokens, [ref]$stopErrors)
+$guardedNginxStops = @($stopAst.FindAll({ param($node)
+    if ($node -isnot [System.Management.Automation.Language.TryStatementAst] -or $node.CatchClauses.Count -eq 0) { return $false }
+    $calls = @($node.Body.FindAll({ param($command)
+        $command -is [System.Management.Automation.Language.CommandAst] -and
+        $command.GetCommandName() -eq 'Start-Process' -and
+        $command.Extent.Text -match '-FilePath\s+\$nginx\b' -and
+        $command.Extent.Text -match "'-s',\s*'quit'"
+    }, $true))
+    return $calls.Count -gt 0
+}, $true))
+if ($stopErrors.Count -gt 0 -or $guardedNginxStops.Count -ne 1 -or -not $stopScript.Contains("Stop-UavfireProcess 'nginx'")) {
     throw 'A stale Nginx Windows PID can still abort stop and repair workflows.'
 }
 

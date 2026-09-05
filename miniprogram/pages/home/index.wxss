@@ -1,0 +1,161 @@
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24rpx;
+  padding: 10rpx 2rpx 30rpx;
+}
+
+.eyebrow,
+.panel-kicker {
+  color: #45ddff;
+  font-size: 20rpx;
+  letter-spacing: 3rpx;
+}
+
+.product-title {
+  margin-top: 8rpx;
+  color: #f4f8ff;
+  font-size: 42rpx;
+  font-weight: 700;
+  letter-spacing: 1rpx;
+}
+
+.workspace-name {
+  margin-top: 8rpx;
+  color: #8fa6c1;
+  font-size: 24rpx;
+}
+
+.situation-panel {
+  padding: 30rpx;
+}
+
+.headline {
+  margin-top: 16rpx;
+  color: #e9fbff;
+  font-size: 36rpx;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14rpx;
+  margin-top: 28rpx;
+}
+
+.metric-item {
+  min-width: 0;
+  padding: 22rpx 16rpx;
+  border: 1rpx solid rgba(103, 184, 255, 0.16);
+  border-radius: 14rpx;
+  background: rgba(103, 184, 255, 0.07);
+}
+
+.metric-item.risk {
+  border-color: rgba(255, 97, 114, 0.16);
+  background: rgba(255, 97, 114, 0.07);
+}
+
+.metric-label,
+.metric-value {
+  display: block;
+}
+
+.metric-label {
+  overflow: hidden;
+  color: #8fa6c1;
+  font-size: 21rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-value {
+  margin-top: 10rpx;
+  color: #dff6ff;
+  font-size: 38rpx;
+  font-weight: 700;
+}
+
+.risk .metric-value {
+  color: #ffb3a3;
+}
+
+.data-warning {
+  margin-top: 22rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid rgba(255, 191, 77, 0.14);
+  color: #ffd38a;
+  font-size: 22rpx;
+  line-height: 1.65;
+}
+
+.entry-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16rpx;
+}
+
+.entry-card {
+  min-height: 218rpx;
+  margin: 0;
+  padding: 24rpx;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.entry-card.full {
+  grid-column: 1 / -1;
+  min-height: 164rpx;
+}
+
+.entry-index,
+.entry-title,
+.entry-note {
+  display: block;
+}
+
+.entry-index {
+  color: #45ddff;
+  font-size: 20rpx;
+  letter-spacing: 2rpx;
+}
+
+.entry-title {
+  margin-top: 18rpx;
+  color: #f4f8ff;
+  font-size: 30rpx;
+  font-weight: 650;
+}
+
+.entry-note {
+  margin-top: 10rpx;
+  color: #8fa6c1;
+  font-size: 22rpx;
+  line-height: 1.6;
+}
+
+.safety-panel {
+  margin-top: 30rpx;
+  padding: 26rpx;
+  border-color: rgba(255, 191, 77, 0.2);
+}
+
+.safety-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #f4f8ff;
+  font-size: 28rpx;
+  font-weight: 650;
+}
+
+.safety-copy {
+  display: block;
+  margin-top: 18rpx;
+  color: #9fb4ca;
+  font-size: 23rpx;
+  line-height: 1.7;
+}

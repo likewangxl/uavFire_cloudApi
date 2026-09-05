@@ -1,10 +1,15 @@
 package com.yx.uavfire.configuration.mvc;
 
 import com.yx.uavfire.component.AuthInterceptor;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yx.uavfire.miniapp.configuration.MiniAppProperties;
+import com.yx.uavfire.miniapp.security.MiniAppAuthInterceptor;
 import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.filter.CommonsRequestLoggingFilter;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 
 import java.util.List;
@@ -21,6 +26,8 @@ class GlobalMVCConfigurerTest {
         configurer = new GlobalMVCConfigurer();
         ReflectionTestUtils.setField(configurer, "authInterceptor", new AuthInterceptor());
         ReflectionTestUtils.setField(configurer, "waylineAgentAuthInterceptor", new WaylineAgentAuthInterceptor());
+        ReflectionTestUtils.setField(configurer, "miniAppAuthInterceptor",
+                new MiniAppAuthInterceptor(new MiniAppProperties(), new ObjectMapper()));
         ReflectionTestUtils.setField(configurer, "managePrefix", "manage/api");
         ReflectionTestUtils.setField(configurer, "manageVersion", "/v1");
         ReflectionTestUtils.setField(configurer, "waylineAgentPrefix", "wayline-agent");
@@ -66,5 +73,26 @@ class GlobalMVCConfigurerTest {
         List<String> excludePaths = (List<String>) ReflectionTestUtils.getField(GlobalMVCConfigurer.class, "EXCLUDE_PATHS");
 
         assertTrue(excludePaths.contains("/wayline-agent/api/v1/**"));
+    }
+
+    @Test
+    void addInterceptors_delegatesMiniAppPathsToDedicatedBearerAuth() {
+        configurer.addInterceptors(new InterceptorRegistry());
+
+        @SuppressWarnings("unchecked")
+        List<String> excludePaths = (List<String>) ReflectionTestUtils.getField(GlobalMVCConfigurer.class, "EXCLUDE_PATHS");
+
+        assertTrue(excludePaths.contains("/miniapp/api/v1/**"));
+    }
+
+    @Test
+    void requestLoggingFilter_skipsMiniAppAuthenticationPayloads() {
+        CommonsRequestLoggingFilter filter = configurer.requestLoggingFilter();
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST", "/miniapp/api/v1/auth/wechat/login");
+
+        Boolean skipped = ReflectionTestUtils.invokeMethod(filter, "shouldNotFilter", request);
+
+        assertTrue(Boolean.TRUE.equals(skipped));
     }
 }

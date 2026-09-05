@@ -1,0 +1,8 @@
+<view class="page-shell">
+  <view class="panel state-card">
+    <text class="state-code">TASK READ MODEL</text>
+    <view class="state-title">巡检任务列表即将接入</view>
+    <text class="state-copy">本阶段已经完成统一 API、身份鉴权和首页数据链路。下一阶段接入已发布航线、巡检任务和执行进度。</text>
+    <view class="status-pill warning">飞行操作默认关闭</view>
+  </view>
+</view>

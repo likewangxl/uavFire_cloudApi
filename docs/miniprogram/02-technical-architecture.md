@@ -2,7 +2,10 @@
 
 ## 1. 设计目标
 
-本方案在现有 uavFire 后端、M300/RC Plus Agent、AI 服务、ZLMediaKit 和 PC 驾驶舱基础上增加微信小程序移动入口。核心原则：
+本方案在现有 uavFire 后端、多机型 MSDK/Cloud 适配器、AI 服务、
+ZLMediaKit 和 PC 驾驶舱基础上增加微信小程序移动入口。当前 M300 分支
+只是代码基线，运行架构覆盖 M3 行业系列、M30、M300/M350、M3D、M4、
+M400 及后续经适配的行业机型。核心原则：
 
 1. **单一事实源**：航线、任务、设备、火情和处置状态仍由现有后端领域模型维护。
 2. **移动端聚合**：新增 Mini Program BFF，向小程序提供稳定、低往返、面向页面的接口。
@@ -37,7 +40,7 @@
 - 当前没有通用巡检报告聚合、版本化和异步生成领域。
 - 当前没有微信订阅授权和消息送达记录。
 - 驾驶舱对系统链路健康主要依据最近接口请求，缺少统一健康汇总接口。
-- M300 火情闭环和媒体共存仍需实机/实飞验收，小程序上线不能扩大未验证能力的暴露面。
+- 多个 Agent 路径仍存在 M300 专用判断或非 M300 默认拓扑；在逐机型整改和实机/实飞验收前，小程序不得扩大未验证能力的暴露面。
 
 ## 3. 总体架构
 
@@ -66,8 +69,8 @@ flowchart TB
   end
 
   subgraph Runtime[飞行与识别运行层]
-    AGENT[RC Plus Agent]
-    M300[M300 RTK + 载荷]
+    AGENT[MSDK Agent / Cloud Adapter]
+    FLEET[行业机队: M3/M30/M300/M350/M4/M400]
     AI[AI Service]
     ZLM[ZLMediaKit]
   end
@@ -100,7 +103,7 @@ flowchart TB
   AGENT -->|HTTP poll/ACK| DOMAIN
   AGENT -->|MQTT events| MQTT
   MQTT --> DOMAIN
-  AGENT --> M300
+  AGENT --> FLEET
   AGENT --> ZLM
   ZLM --> AI
   ZLM --> MEDIA
@@ -650,7 +653,10 @@ miniapp:
 4. 是否接入短信/语音电话作为高等级火情的备用通道。
 5. 报告签阅是否属于内部确认，是否需要 CA/电子签章。
 6. 现场允许小程序执行的动作清单，尤其是直接返航、降落和载荷操作。
-7. M300、载荷、RC Plus、固件组合和现场飞行验收计划。
+7. 首批飞机、控制端/机场、载荷、固件组合清单和逐组合现场飞行验收计划。
+
+多机型身份、能力分层、适配器注册表、当前代码差距和验收模板详见
+[06-多机型兼容与验收](06-multi-aircraft-compatibility.md)。
 
 ## 13. 微信官方能力参考
 

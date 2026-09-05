@@ -1462,6 +1462,35 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void m350RtkAliasShouldRequireAndEncodeExplicitZenmusePayload() throws IOException {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService fileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity entity = PlannedWaylineEntity.builder()
+                .id(1).plannedWaylineId("m350-h30t")
+                .workspaceId("workspace-001").name("M350 payload contract")
+                .aircraftModelKey("MATRICE_350_RTK")
+                .payloadModelKey("H30T").payloadPositionIndex(1)
+                .defaultHeight(30.0).maxSpeed(5.0)
+                .waypointsJson("[{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}]")
+                .status("draft").createTime(1000L).updateTime(1000L).build();
+        when(mapper.selectOne(any())).thenReturn(entity);
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        when(fileService.createPublishedWayline(eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("published-m350").name("m350").objectKey("m350.kmz").build());
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper(), fileService);
+
+        service.publish("workspace-001", entity.getPlannedWaylineId(), "tester");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> captor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(fileService).createPublishedWayline(eq("workspace-001"), captor.capture());
+        String template = readZipEntry(captor.getValue().getContent(), "wpmz/template.kml");
+        assertTrue(template.contains("<wpml:droneEnumValue>89</wpml:droneEnumValue>"));
+        assertTrue(template.contains("<wpml:payloadEnumValue>83</wpml:payloadEnumValue>"));
+        assertTrue(template.contains("<wpml:payloadPositionIndex>1</wpml:payloadPositionIndex>"));
+    }
+
+    @Test
     void m4tKmzHasPilot2EnumValues() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);

@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: UAVFire WeChat Mini Program API
-  version: 1.0.0
+  version: 1.1.0
   license:
     name: Proprietary
   description: |
-    无人机火情智巡微信小程序 v1 目标契约。
+    无人机火情智巡微信小程序 v1 目标契约。接口按机型族与运行时能力建模，
+    不以 M300 分支名称限制产品范围，也不以机型名称代替真机验收。
     异步接口返回 202 仅表示请求已受理，设备最终结果需查询命令或接收实时事件。
 servers:
   - url: /miniapp/api/v1
@@ -71,6 +72,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '502':
           $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /auth/bindings:
     post:
       tags: [Auth]
@@ -136,6 +139,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /me/workspaces:
     get:
       tags: [Me]
@@ -200,6 +207,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardSummaryResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /dashboard/situation:
     get:
       tags: [Dashboard]
@@ -1930,16 +1941,46 @@ components:
         fileSha256: {type: string, pattern: '^[a-fA-F0-9]{64}$'}
     DeviceSummary:
       type: object
-      required: [deviceSnMasked, model, online, dataStatus]
+      required: [deviceSnMasked, model, modelKey, aircraftFamily, compatibilityStatus, operationPolicy, online, capabilityProfile, dataStatus]
       properties:
         deviceSnMasked: {type: string}
         model: {type: string}
+        modelKey: {type: string, example: M3T}
+        aircraftFamily:
+          type: string
+          enum: [MAVIC_3_ENTERPRISE, MATRICE_30, MATRICE_300, MATRICE_350, MATRICE_3_DOCK, MATRICE_4_ENTERPRISE, MATRICE_4_DOCK, MATRICE_400, UNKNOWN]
+        compatibilityStatus:
+          type: string
+          enum: [VERIFIED, PARTIAL, UNVERIFIED, UNKNOWN]
+        operationPolicy:
+          type: string
+          enum: [READ_ONLY, PREVIEW_ONLY, CONTROL_ALLOWED]
         online: {type: boolean}
         batteryPercent: {type: number, nullable: true}
         payloads: {type: array, items: {type: object, additionalProperties: true}}
+        capabilityProfile: {$ref: '#/components/schemas/AircraftCapabilityProfile'}
         taskId: {type: string, nullable: true}
         dataStatus: {$ref: '#/components/schemas/DataStatus'}
         updatedAt: {type: string, format: date-time}
+    AircraftCapabilityProfile:
+      type: object
+      required: [combinationKey, knownModel, acceptanceVerified, telemetryReadable, visibleStreamReported, thermalReported, laserReported, waylineControlReported, flightControlEligible, blockingReasons]
+      properties:
+        combinationKey:
+          type: string
+          description: 规范化 MODEL|CONTROLLER_OR_DOCK|PAYLOAD|POSITION 组合键
+          example: M300|RCPLUS|H30T|0
+        knownModel: {type: boolean}
+        acceptanceVerified: {type: boolean}
+        telemetryReadable: {type: boolean}
+        visibleStreamReported: {type: boolean}
+        thermalReported: {type: boolean}
+        laserReported: {type: boolean}
+        waylineControlReported: {type: boolean}
+        flightControlEligible: {type: boolean}
+        blockingReasons:
+          type: array
+          items: {type: string}
     DevicePageResponse:
       allOf:
         - $ref: '#/components/schemas/GenericSuccessResponse'

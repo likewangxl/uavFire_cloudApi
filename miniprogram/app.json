@@ -1,0 +1,17 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/tasks/index",
+    "pages/reports/index",
+    "pages/mine/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "无人机火情智巡",
+    "navigationBarBackgroundColor": "#06111f",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#02070d",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

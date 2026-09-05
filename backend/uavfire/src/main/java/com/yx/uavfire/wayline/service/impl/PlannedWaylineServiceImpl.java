@@ -874,17 +874,20 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     private void validateAgentPayloadMatch(PlannedWaylineEntity entity, String droneSn) {
-        if (!"M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))) {
+        String plannedModel = normalizeAircraftModelKey(entity.getAircraftModelKey());
+        if (!usesZenmusePayloadSelection(plannedModel)) {
             return;
         }
         if (msdkDeviceStateService == null) {
-            throw new IllegalStateException("M300 Agent state service is unavailable; dispatch blocked.");
+            throw new IllegalStateException("Aircraft Agent state service is unavailable; dispatch blocked.");
         }
         MsdkDeviceStateDTO state = msdkDeviceStateService.listOnline().stream()
                 .filter(item -> droneSn.equals(item.getAircraftSn()))
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("M300 Agent is offline or stale; dispatch blocked."));
-        if (!"M300".equals(normalizeAircraftModelKey(state.getAircraftModelKey()))) {
+                .orElseThrow(() -> new IllegalStateException("Aircraft Agent is offline or stale; dispatch blocked."));
+        String onlineModel = StringUtils.hasText(state.getAircraftModelKey())
+                ? state.getAircraftModelKey() : state.getModel();
+        if (!Objects.equals(plannedModel, normalizeAircraftModelKey(onlineModel))) {
             throw new IllegalStateException("Online aircraft model does not match the wayline; dispatch blocked.");
         }
         if (state.getSelectedPayloadPositionIndex() == null
@@ -1172,12 +1175,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!StringUtils.hasText(aircraftModelKey)) {
             throw new IllegalArgumentException("Planned wayline aircraft model key is required.");
         }
-        if ("M300".equals(normalizeAircraftModelKey(aircraftModelKey))) {
-            if (!isM300FirePayload(payloadModelKey)) {
-                throw new IllegalArgumentException("M300 planned wayline requires payload model H20, H20T, H30, or H30T.");
+        if (usesZenmusePayloadSelection(aircraftModelKey)) {
+            if (!isSupportedZenmusePayload(payloadModelKey)) {
+                throw new IllegalArgumentException("M300/M350 planned wayline requires payload model H20, H20T, H30, or H30T.");
             }
             if (payloadPositionIndex == null || payloadPositionIndex < 0 || payloadPositionIndex > 2) {
-                throw new IllegalArgumentException("M300 planned wayline requires payload position index 0, 1, or 2.");
+                throw new IllegalArgumentException("M300/M350 planned wayline requires payload position index 0, 1, or 2.");
             }
         }
         if (!isFinite(defaultHeight)) {
@@ -1275,6 +1278,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 || "MATRICE_300_RTK".equals(normalized)) {
             return "M300";
         }
+        if ("M350RTK".equals(normalized) || "MATRICE350RTK".equals(normalized)
+                || "MATRICE_350_RTK".equals(normalized)) {
+            return "M350";
+        }
         return normalized;
     }
 
@@ -1282,10 +1289,15 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return StringUtils.hasText(raw) ? raw.trim().toUpperCase(Locale.ROOT) : null;
     }
 
-    private boolean isM300FirePayload(String payloadModelKey) {
+    private boolean isSupportedZenmusePayload(String payloadModelKey) {
         String normalized = normalizePayloadModelKey(payloadModelKey);
         return "H20".equals(normalized) || "H20T".equals(normalized)
                 || "H30".equals(normalized) || "H30T".equals(normalized);
+    }
+
+    private boolean usesZenmusePayloadSelection(String aircraftModelKey) {
+        String normalized = normalizeAircraftModelKey(aircraftModelKey);
+        return "M300".equals(normalized) || "M350".equals(normalized);
     }
 
     private boolean isFinite(Double value) {
@@ -1293,13 +1305,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     private void validatePublishableRecord(PlannedWaylineEntity entity) {
-        if ("M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))) {
-            if (!isM300FirePayload(entity.getPayloadModelKey())
+        if (usesZenmusePayloadSelection(entity.getAircraftModelKey())) {
+            if (!isSupportedZenmusePayload(entity.getPayloadModelKey())
                     || entity.getPayloadPositionIndex() == null
                     || entity.getPayloadPositionIndex() < 0
                     || entity.getPayloadPositionIndex() > 2) {
                 throw new IllegalArgumentException(
-                        "M300 wayline must confirm payload H20/H20T/H30/H30T and position 0/1/2 before publishing.");
+                        "M300/M350 wayline must confirm payload H20/H20T/H30/H30T and position 0/1/2 before publishing.");
             }
         }
         if (!isFinite(entity.getDefaultHeight()) || entity.getDefaultHeight() <= 0) {
@@ -2308,11 +2320,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .name(entity.getName())
                 .aircraftModelKey(entity.getAircraftModelKey())
                 .payloadModelKey(
-                        "M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))
+                        usesZenmusePayloadSelection(entity.getAircraftModelKey())
                                 && !StringUtils.hasText(entity.getPayloadModelKey())
                                 ? "H20T" : entity.getPayloadModelKey())
                 .payloadPositionIndex(
-                        "M300".equals(normalizeAircraftModelKey(entity.getAircraftModelKey()))
+                        usesZenmusePayloadSelection(entity.getAircraftModelKey())
                                 && entity.getPayloadPositionIndex() == null
                                 ? Integer.valueOf(0) : entity.getPayloadPositionIndex())
                 .gatewaySn(entity.getGatewaySn())

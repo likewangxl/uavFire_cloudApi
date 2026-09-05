@@ -1,0 +1,61 @@
+<view class="page-shell home-page">
+  <view class="topbar">
+    <view>
+      <text class="eyebrow">UAVFIRE MOBILE COMMAND</text>
+      <view class="product-title">无人机火情智巡</view>
+      <view class="workspace-name">{{workspaceName}}</view>
+    </view>
+    <text class="status-pill {{configured ? '' : 'warning'}}">{{statusLabel}}</text>
+  </view>
+
+  <view class="panel situation-panel">
+    <text class="panel-kicker">今日态势</text>
+    <view class="headline">{{headline}}</view>
+    <view class="metric-grid">
+      <view class="metric-item">
+        <text class="metric-label">在线航空器</text>
+        <text class="metric-value">{{onlineAircraft}}</text>
+      </view>
+      <view class="metric-item">
+        <text class="metric-label">今日任务</text>
+        <text class="metric-value">{{todayTasks}}</text>
+      </view>
+      <view class="metric-item risk">
+        <text class="metric-label">紧急事件</text>
+        <text class="metric-value">{{urgentEvents}}</text>
+      </view>
+    </view>
+    <view wx:if="{{warning}}" class="data-warning">{{warning}}</view>
+  </view>
+
+  <view class="section-title">工作入口</view>
+  <view class="entry-grid">
+    <button class="panel entry-card" bindtap="openTasks">
+      <text class="entry-index">01</text>
+      <text class="entry-title">巡检任务</text>
+      <text class="entry-note">查看航线、任务状态与执行进度</text>
+    </button>
+    <button class="panel entry-card" bindtap="openReports">
+      <text class="entry-index">02</text>
+      <text class="entry-title">巡检报告</text>
+      <text class="entry-note">查看生成状态、签阅与归档结果</text>
+    </button>
+    <button class="panel entry-card full" bindtap="openMine">
+      <text class="entry-index">03</text>
+      <text class="entry-title">账号与系统</text>
+      <text class="entry-note">查看账号绑定、服务状态和版本信息</text>
+    </button>
+  </view>
+
+  <view class="panel safety-panel">
+    <view class="safety-head">
+      <text>飞行操作安全状态</text>
+      <text class="status-pill warning">{{flightControlEnabled ? '受控开放' : '默认关闭'}}</text>
+    </view>
+    <text class="safety-copy">首阶段仅提供只读态势。航线执行必须完成持久化指令、二次确认、飞手现场确认，并通过对应飞机、控制端、负载和固件组合的真机实飞验收后才能灰度开放。</text>
+  </view>
+
+  <button wx:if="{{!authenticated}}" class="primary-action" disabled="{{!configured || loading}}" loading="{{loading}}" bindtap="handleLogin">
+    微信登录并进入
+  </button>
+</view>

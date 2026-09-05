@@ -55,6 +55,7 @@ vite-*.out.log
 /1.txt
 /package-lock.json
 /.worktrees/
+miniprogram/project.private.config.json
 
 # Vendored DJI MSDK V5 sample (cloned for local exploration, not part of uavfire)
 Mobile-SDK-Android-V5/
