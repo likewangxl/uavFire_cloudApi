@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">燧巡天眼</string>
+    <string name="agent_app_name">燧巡天眼</string>
+    <string name="app_title">UAV Fire RC Plus MSDK Agent</string>
+    <string name="app_subtitle">Android execution shell for the dual-stream PoC.</string>
+    <string name="app_status_placeholder">MSDK 控制通道待刷新。</string>
+    <string name="app_status_running">执行中: %1$s</string>
+    <string name="app_status_error">执行失败: %1$s\n原因: %2$s</string>
+    <string name="action_refresh_device_status">读取设备状态</string>
+    <string name="action_start_dual_stream">启动双流</string>
+    <string name="action_probe_waypoint">探针:推 KMZ 到 M4T</string>
+    <string name="action_open_sample_tools">打开飞行界面</string>
+</resources>

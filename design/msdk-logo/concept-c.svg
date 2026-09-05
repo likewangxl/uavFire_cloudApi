@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bgC" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#ff9a1f"/>
+      <stop offset="0.55" stop-color="#ff5a1a"/>
+      <stop offset="1" stop-color="#d4141a"/>
+    </linearGradient>
+    <linearGradient id="flameC" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff5a1a"/>
+      <stop offset="0.5" stop-color="#ffb22e"/>
+      <stop offset="1" stop-color="#fff3b0"/>
+    </linearGradient>
+    <g id="motorC">
+      <circle r="92" fill="none" stroke="#ffffff" stroke-width="17"/>
+      <g opacity="0.5" fill="#ffffff">
+        <ellipse rx="78" ry="15" transform="rotate(35)"/>
+        <ellipse rx="78" ry="15" transform="rotate(-35)"/>
+      </g>
+      <circle r="18" fill="#ffffff"/>
+    </g>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="232" fill="url(#bgC)"/>
+
+  <!-- arms -->
+  <g stroke="#ffffff" stroke-width="36" stroke-linecap="round">
+    <line x1="512" y1="512" x2="305" y2="305"/>
+    <line x1="512" y1="512" x2="719" y2="305"/>
+    <line x1="512" y1="512" x2="305" y2="719"/>
+    <line x1="512" y1="512" x2="719" y2="719"/>
+  </g>
+
+  <use href="#motorC" transform="translate(305,305)"/>
+  <use href="#motorC" transform="translate(719,305)"/>
+  <use href="#motorC" transform="translate(305,719)"/>
+  <use href="#motorC" transform="translate(719,719)"/>
+
+  <!-- central body -->
+  <circle cx="512" cy="512" r="132" fill="#ffffff"/>
+
+  <!-- flame core -->
+  <path fill="url(#flameC)" d="M512 626
+    C 452 596 446 512 488 456
+    C 496 488 516 492 516 466
+    C 516 420 552 408 566 452
+    C 590 502 582 596 512 626 Z"/>
+</svg>

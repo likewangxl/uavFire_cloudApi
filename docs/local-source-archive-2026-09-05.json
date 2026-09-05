@@ -1,0 +1,395 @@
+{
+  "archived_on": "2026-09-05",
+  "main_base": "3bfd546875d63c7ef7f01841cf9229b6dd989fce",
+  "old_worktree_base": "b47042b9f62ea1e1d82ba85baa9d2efe48fdb42a",
+  "note": "File-preserving source and documentation archive; no runtime branding or deployment changes. Hashes describe the archived snapshot at this commit.",
+  "files": [
+    {
+      "path": "design/msdk-logo/concept-a.svg",
+      "source_path": "design/msdk-logo/concept-a.svg",
+      "kind": "design source",
+      "bytes": 2356,
+      "sha256": "5f8b6d55cc0c2cfc53b106394f8ea8401af924271e0a21dab6c12c07afd5ee09"
+    },
+    {
+      "path": "design/msdk-logo/concept-b.svg",
+      "source_path": "design/msdk-logo/concept-b.svg",
+      "kind": "design source",
+      "bytes": 1610,
+      "sha256": "52e6e90b67df07ea618e9c1fc907d9e5bdf72e3870eaa8ff1f20a410d67fed09"
+    },
+    {
+      "path": "design/msdk-logo/concept-c.svg",
+      "source_path": "design/msdk-logo/concept-c.svg",
+      "kind": "design source",
+      "bytes": 1711,
+      "sha256": "278038bdeb334c2ce524663891c0e3b9df56adb5ca32f5dfe5b2d583381539a6"
+    },
+    {
+      "path": "docs/promo/make_promo_ppt.py",
+      "source_path": "docs/promo/make_promo_ppt.py",
+      "kind": "historical promotional source or editable document",
+      "bytes": 22223,
+      "sha256": "935f153f7ee3a0a7b26898a0798c499b9c38f7d7ce7e1c3bc4663a5aa1f9ebc4"
+    },
+    {
+      "path": "docs/promo/prep_images.py",
+      "source_path": "docs/promo/prep_images.py",
+      "kind": "historical promotional source or editable document",
+      "bytes": 2289,
+      "sha256": "a320c4bed2de1a41d3076c2c4343cc00ce5ab7ce06660688782236c3bc50ebd8"
+    },
+    {
+      "path": "docs/promo/make_leader_scene_ppt.py",
+      "source_path": "docs/promo/make_leader_scene_ppt.py",
+      "kind": "historical promotional source or editable document",
+      "bytes": 35403,
+      "sha256": "66955df9b5a2046b3428828e22d5d19d38fad93ce609dce2df4e3f119f9743a2"
+    },
+    {
+      "path": "docs/promo/智能集群大载重无人机灭火系统-宣传视频文案母稿.md",
+      "source_path": "docs/promo/智能集群大载重无人机灭火系统-宣传视频文案母稿.md",
+      "kind": "historical promotional source or editable document",
+      "bytes": 18578,
+      "sha256": "9745cabb4d8a4a98df6b5ab7c059192a61b6e96cd3974b1d8db8d9119c9dc383"
+    },
+    {
+      "path": "docs/promo/智能无人机森林防火灭火系统-推广.pptx",
+      "source_path": "docs/promo/智能无人机森林防火灭火系统-推广.pptx",
+      "kind": "historical promotional source or editable document",
+      "bytes": 125176,
+      "sha256": "ee1651e7648d605d66d46e4ce5665171e8a3013c8bc5d70cbd741531d8355d96"
+    },
+    {
+      "path": "docs/promo/智能集群大载重无人机灭火系统-推广.pptx",
+      "source_path": "docs/promo/智能集群大载重无人机灭火系统-推广.pptx",
+      "kind": "historical promotional source or editable document",
+      "bytes": 4256187,
+      "sha256": "9e3550b3798d9140caf9ae7bb2bcf0348498a09170c956ad116a6a6849e1c832"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-login.jpg",
+      "source_path": "docs/promo/assets/shots/f-login.jpg",
+      "kind": "required presentation input image",
+      "bytes": 722819,
+      "sha256": "a2e75476e03e079be60b5bea06c0af7d2c2fa25fc8cd3c1bba67cd69646ad873"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-cockpit.jpg",
+      "source_path": "docs/promo/assets/shots/f-cockpit.jpg",
+      "kind": "required presentation input image",
+      "bytes": 755781,
+      "sha256": "013622860ce7a1ec9e51710b9a803672a00b0c1e25a7cf9fd3824917d262b6ec"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-wayline.jpg",
+      "source_path": "docs/promo/assets/shots/f-wayline.jpg",
+      "kind": "required presentation input image",
+      "bytes": 617374,
+      "sha256": "fe5b5c6e4dd32574e9f8b28ea1a29c531071eb660d7b4f9db5e8495eab38f39c"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-cockpit-ir.jpg",
+      "source_path": "docs/promo/assets/shots/f-cockpit-ir.jpg",
+      "kind": "required presentation input image",
+      "bytes": 831793,
+      "sha256": "aa6afa6836a6d57081ee1f3e55f5ca95884a1c348834141e90421b8a0dbe739c"
+    },
+    {
+      "path": "docs/promo/assets/shots/video-001-30s.jpg",
+      "source_path": "docs/promo/assets/shots/video-001-30s.jpg",
+      "kind": "required presentation input image",
+      "bytes": 541917,
+      "sha256": "5ce30bed94de29047ddef1cf02cb76a4cf59d47bb4bb911f652db2dc219f19f6"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-ir-try-48.jpg",
+      "source_path": "docs/promo/assets/shots/f-ir-try-48.jpg",
+      "kind": "required presentation input image",
+      "bytes": 398782,
+      "sha256": "31f1cde03167ac2bdfc2f1264a485b45a9dcdcef8063ce96b5ea745404f1c133"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-night.jpg",
+      "source_path": "docs/promo/assets/shots/f-night.jpg",
+      "kind": "required presentation input image",
+      "bytes": 598134,
+      "sha256": "5d0f3bae3c3838f70e4b0bbfaab44397bffd6e7396314b30d9b28eb7688a8399"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-drone-truck.jpg",
+      "source_path": "docs/promo/assets/shots/f-drone-truck.jpg",
+      "kind": "required presentation input image",
+      "bytes": 701657,
+      "sha256": "bef40d94c0e8d4bd497a2c8adba3a7b0c7eb9ef10ed2abde7cd4a6d177ae4796"
+    },
+    {
+      "path": "docs/promo/assets/shots/f-firecand-5.jpg",
+      "source_path": "docs/promo/assets/shots/f-firecand-5.jpg",
+      "kind": "required presentation input image",
+      "bytes": 276495,
+      "sha256": "6aa7c1d6face1d94604e7e75cff373111becb75b9c4f62a2207a0e1cf54113f9"
+    },
+    {
+      "path": "docs/promo/assets/shots/msdk-home.png",
+      "source_path": "docs/promo/assets/shots/msdk-home.png",
+      "kind": "required presentation input image",
+      "bytes": 871579,
+      "sha256": "dcc5369852c60faaf104a8e17037085a2c8c7f1dd49f90e6de27a92170467f0c"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/cockpit.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/cockpit.jpg",
+      "kind": "required presentation input image",
+      "bytes": 291072,
+      "sha256": "e5920c7e859ad0736cbe6c5ac7ac68e88ce40a1afe019f73502cd30a7163d1cc"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/visible.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/visible.jpg",
+      "kind": "required presentation input image",
+      "bytes": 302062,
+      "sha256": "7953b83efa1d6b0df5eb699b6cd9e578e52bebd1b824be1eb98be33d0e115c44"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/thermal.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/thermal.jpg",
+      "kind": "required presentation input image",
+      "bytes": 166040,
+      "sha256": "9d67206091024763dd0dfd8d03d9fcd42ccac0c4565cef9ed93ff83754342778"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/thermal_night.png",
+      "source_path": "docs/promo/assets/leader_20260711/thermal_night.png",
+      "kind": "required presentation input image",
+      "bytes": 992773,
+      "sha256": "ff329d982bc0993c593dd5181c341b02da51ad1eb0edf0d6b520ea4a9a170616"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/incident_map.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/incident_map.jpg",
+      "kind": "required presentation input image",
+      "bytes": 174999,
+      "sha256": "8327d7a7f043e0f5ad566982db87f71c60a3555230f2c993498ea5863c3dfe8f"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/event_list.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/event_list.jpg",
+      "kind": "required presentation input image",
+      "bytes": 94741,
+      "sha256": "cb18b0ee148ef7acee42656908f322cfc9151dfab257b3c5613652784a5643f6"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/task_create.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/task_create.jpg",
+      "kind": "required presentation input image",
+      "bytes": 174295,
+      "sha256": "2db71a74a8813dcd94de0c6dcbdf65d7c5e0c6df3d02b956e030fb43eed1aa90"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/plan_nfz.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/plan_nfz.jpg",
+      "kind": "required presentation input image",
+      "bytes": 279566,
+      "sha256": "ae869f599ebd8a245e2484ca4b2a6649ddd98c47639ad65ba9e06156386b2ce8"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/save_block.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/save_block.jpg",
+      "kind": "required presentation input image",
+      "bytes": 147345,
+      "sha256": "61b4442ca27c75bf3dd21fcb1004ddc8188a6bac0c6a196ff4d239e9f803710c"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/dual_cockpit.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/dual_cockpit.jpg",
+      "kind": "required presentation input image",
+      "bytes": 229842,
+      "sha256": "2ec279be05acf57677eb80099bd47a8cb5207258f5c0e400fc9dd1de16588266"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/fc100_payload.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/fc100_payload.jpg",
+      "kind": "required presentation input image",
+      "bytes": 241985,
+      "sha256": "4d9911f9cdb249dc5c6e56fdccc5de85411a6cda80e63872c42d3dc7303f67cd"
+    },
+    {
+      "path": "docs/promo/assets/leader_20260711/suppression.jpg",
+      "source_path": "docs/promo/assets/leader_20260711/suppression.jpg",
+      "kind": "required presentation input image",
+      "bytes": 225463,
+      "sha256": "a4f660b434516241480d190712e9ae0a050c97428a2bbd01c910157fb73af55b"
+    },
+    {
+      "path": "docs/promo/history/2026-06-10/uavfire-firefighting-sales-introduction.pptx",
+      "source_path": "outputs/manual-20260610-uavfire-sales/presentations/uavfire-fire-sales/output/uavfire-firefighting-sales-introduction.pptx",
+      "kind": "historical editable presentation",
+      "bytes": 9939162,
+      "sha256": "c200a8d28fdad47c37887b4ada843a6360295ec76f24f87f5b91fa1a018c5b5c"
+    },
+    {
+      "path": "docs/promo/history/2026-06-10/uavfire-firefighting-sales-introduction-v2.pptx",
+      "source_path": "outputs/manual-20260610-uavfire-sales-v2/presentations/uavfire-fire-sales-v2/output/uavfire-firefighting-sales-introduction-v2.pptx",
+      "kind": "historical editable presentation",
+      "bytes": 12040372,
+      "sha256": "de94651f044501f3db96fa235e4fffaf9ae5821c7f630d086df9712033501c60"
+    },
+    {
+      "path": "docs/promo/history/2026-06-10/uavfire-firefighting-sales-visual-v3.pptx",
+      "source_path": "outputs/manual-20260610-uavfire-sales-v3/presentations/uavfire-fire-sales-v3/output/uavfire-firefighting-sales-visual-v3.pptx",
+      "kind": "historical editable presentation",
+      "bytes": 23148483,
+      "sha256": "ff3867f1bae256887c3ec6182da0e6623873f2134f979acecc7c0b81c30b8bf3"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/AndroidManifest.xml",
+      "source_path": "rcplus-msdk-agent/app/src/main/AndroidManifest.xml",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 3400,
+      "sha256": "1f119672b89367b8bb32b3767a20ee8d371a97b1346858152e5bf188a0bca44a"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-hdpi/ic_launcher.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-hdpi/ic_launcher.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 4889,
+      "sha256": "05d35f2bc5ecd66b4669cb6075ca5d9e1677b241fb5cb7aa598498b141b6263f"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-hdpi/ic_launcher_foreground.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 7928,
+      "sha256": "34059e179143af65d984acd5c3b19ab48d551567581f02a32e7272777f262c2c"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 4889,
+      "sha256": "05d35f2bc5ecd66b4669cb6075ca5d9e1677b241fb5cb7aa598498b141b6263f"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-mdpi/ic_launcher.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-mdpi/ic_launcher.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 3002,
+      "sha256": "52bfe52106b0ac80caffc59ad9f3b63bcf892985e83fb7b70dcb24c16dba4a1f"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-mdpi/ic_launcher_foreground.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 5104,
+      "sha256": "0c16a71d81975b81e25a492c492b122dd21868025f85cd4d67e813eaf2c61434"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 3002,
+      "sha256": "52bfe52106b0ac80caffc59ad9f3b63bcf892985e83fb7b70dcb24c16dba4a1f"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 6692,
+      "sha256": "0e8797d20434392c85bf0085b604da93ac6d988998913eda3cd4be271afafe23"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xhdpi/ic_launcher_foreground.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 10883,
+      "sha256": "08588a97a18662c246b24f929af32fae4f09572f2369ea8ff7b4369808bd4ade"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 6692,
+      "sha256": "0e8797d20434392c85bf0085b604da93ac6d988998913eda3cd4be271afafe23"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 10323,
+      "sha256": "1e318a53f622e36fa46a2ee1ff8ca6353e30841195eabb1e5be7572d08b139de"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xxhdpi/ic_launcher_foreground.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 16452,
+      "sha256": "002ac0bb2253714fef4f9258b2cb3e0b956a970fac9f7a076ff97a98e8600f41"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 10323,
+      "sha256": "1e318a53f622e36fa46a2ee1ff8ca6353e30841195eabb1e5be7572d08b139de"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 13840,
+      "sha256": "e1d502ab30682d3a46bd41b3b2c1ad9f600a9df475fbb2c96317d5ceb6efc206"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 22199,
+      "sha256": "c19ac9cf9f18d3e4b2b7c93fc45f058e68bb0ccc965c4d560adb3ccb1ec57232"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 13840,
+      "sha256": "e1d502ab30682d3a46bd41b3b2c1ad9f600a9df475fbb2c96317d5ceb6efc206"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/values/ic_launcher_background.xml",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/values/ic_launcher_background.xml",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 121,
+      "sha256": "dc60c018e74517eafb429c7eae0b8452b019551690062e6dfddec375ace7617e"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/app/src/main/res/values/strings.xml",
+      "source_path": "rcplus-msdk-agent/app/src/main/res/values/strings.xml",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 835,
+      "sha256": "d19b6d29d72a3d1be261d8651e90bbff67276e6969eee2606418bc87ed302913"
+    },
+    {
+      "path": "rcplus-msdk-agent/design/app-icon/variants/suixun-tianyan/source/design/app-icon/uav-fire-monitor-master.png",
+      "source_path": "rcplus-msdk-agent/design/app-icon/uav-fire-monitor-master.png",
+      "kind": "uncommitted alternative branding snapshot",
+      "bytes": 11688,
+      "sha256": "e9a255a9bd627a9c2fa6d8840ed4b49e3187442dcc29aa4c9591094e3490800e"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-07-10-uav-fire-promotion-deck-refresh.md",
+      "source_ref": "49f1b89738ef9f0e0efb9eaaa60de1c9f8051dd8",
+      "source_path": "docs/superpowers/plans/2026-07-10-uav-fire-promotion-deck-refresh.md",
+      "kind": "historical promotion plan",
+      "bytes": 14533,
+      "sha256": "5a275515977ddcebbb46a3dd5c4111924b420ce532f84c79ecdcf1334629a785"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-07-10-uav-fire-promotion-deck-refresh-design.md",
+      "source_ref": "49f1b89738ef9f0e0efb9eaaa60de1c9f8051dd8",
+      "source_path": "docs/superpowers/specs/2026-07-10-uav-fire-promotion-deck-refresh-design.md",
+      "kind": "historical promotion plan",
+      "bytes": 8026,
+      "sha256": "18063d5741db117a1c0ec53a4bd86d79b61c8355b2a319581c006288bca29836"
+    }
+  ]
+}

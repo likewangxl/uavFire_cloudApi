@@ -1,0 +1,36 @@
+diff --git a/rcplus-msdk-agent/app/src/main/AndroidManifest.xml b/rcplus-msdk-agent/app/src/main/AndroidManifest.xml
+index 36df02d..ceff38d 100644
+--- a/rcplus-msdk-agent/app/src/main/AndroidManifest.xml
++++ b/rcplus-msdk-agent/app/src/main/AndroidManifest.xml
+@@ -26,7 +26,7 @@
+         android:name=".App"
+         android:allowBackup="false"
+         android:icon="@mipmap/ic_launcher"
+-        android:label="@string/app_name"
++        android:label="@string/agent_app_name"
+         android:requestLegacyExternalStorage="true"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:usesCleartextTraffic="true"
+diff --git a/rcplus-msdk-agent/app/src/main/res/values/ic_launcher_background.xml b/rcplus-msdk-agent/app/src/main/res/values/ic_launcher_background.xml
+index 99657a0..3f802ba 100644
+--- a/rcplus-msdk-agent/app/src/main/res/values/ic_launcher_background.xml
++++ b/rcplus-msdk-agent/app/src/main/res/values/ic_launcher_background.xml
+@@ -1,4 +1,4 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <color name="ic_launcher_background">#19070A</color>
++    <color name="ic_launcher_background">#031A4D</color>
+ </resources>
+diff --git a/rcplus-msdk-agent/app/src/main/res/values/strings.xml b/rcplus-msdk-agent/app/src/main/res/values/strings.xml
+index f02f3a9..d95e4dc 100644
+--- a/rcplus-msdk-agent/app/src/main/res/values/strings.xml
++++ b/rcplus-msdk-agent/app/src/main/res/values/strings.xml
+@@ -1,6 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name">RC Plus Agent</string>
++    <string name="app_name">燧巡天眼</string>
++    <string name="agent_app_name">燧巡天眼</string>
+     <string name="app_title">UAV Fire RC Plus MSDK Agent</string>
+     <string name="app_subtitle">Android execution shell for the dual-stream PoC.</string>
+     <string name="app_status_placeholder">MSDK 控制通道待刷新。</string>

@@ -15,9 +15,13 @@ backend/uavfire/src/main/resources/application-fc100-local.yml
 
 # Android / Kotlin agent
 .gradle/
+.kotlin/
 **/build/
 local.properties
 .cxx/
+*.apk
+*.aab
+*.apks
 
 # IDE / OS
 .idea/
@@ -34,12 +38,15 @@ exported-kmz/
 kmz/
 msdk_assets_pack/
 **/__pycache__/
+.pytest_cache/
 *.py[cod]
 *.pid
 *.rdb
 .env
 ai-service/data/
 ai-service/.env
+/ai-service/weights/*.pt
+/ai-service/weights/*.pth
 sample-run*.out.log
 sample-run*.err.log
 vite-*.out.log
@@ -60,13 +67,19 @@ miniprogram/project.private.config.json
 # Vendored DJI MSDK V5 sample (cloned for local exploration, not part of uavfire)
 Mobile-SDK-Android-V5/
 
-# Generated assets / promo materials / tooling (large binaries, not source)
+# Local tooling and generated output
 /.codex/
-/design/
-/docs/promo/
 /outputs/
 /artifacts/apks/
 /videos/
+
+# Keep editable designs, documents, scripts, and required input artwork in Git.
+# These presentation images are reproducible outputs of the archived scripts.
+/design/msdk-logo/*.svg.png
+/docs/promo/assets/final/
+/docs/promo/assets/bg_cover.jpg
+/docs/promo/assets/bg_page.jpg
+/docs/promo/assets/leader_20260711/_build/
 
 # Local delivery packages are retained in the private cleanup archive, not Git.
 /releases/
