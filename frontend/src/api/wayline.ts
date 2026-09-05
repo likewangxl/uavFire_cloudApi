@@ -67,12 +67,12 @@ function validatePlannedWaylineBody<T extends CreatePlannedWaylineBody | UpdateP
     message.error('无法读取当前飞行器机型，请重新连接设备后再保存航线。')
     throw new Error('planned wayline aircraft model is required')
   }
-  if (aircraftModelKey === 'M300') {
+  if (['M300', 'M350'].includes(aircraftModelKey)) {
     const supportedPayloads = ['H20', 'H20T', 'H30', 'H30T']
     if (!body.payloadModelKey || !supportedPayloads.includes(body.payloadModelKey) ||
       ![0, 1, 2].includes(Number(body.payloadPositionIndex))) {
-      message.error('M300 航线必须选择 H20/H20T/H30/H30T 负载和云台安装位。')
-      throw new Error('M300 payload model and position are required')
+      message.error('M300/M350 航线必须选择 H20/H20T/H30/H30T 负载和云台安装位。')
+      throw new Error('M300/M350 payload model and position are required')
     }
   }
   return {

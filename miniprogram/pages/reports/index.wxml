@@ -1,0 +1,8 @@
+<view class="page-shell">
+  <view class="panel state-card">
+    <text class="state-code">REPORT CENTER</text>
+    <view class="state-title">报告中心即将接入</view>
+    <text class="state-copy">后续将展示自动生成状态、报告版本、签阅意见、整改复检和归档结果。未生成的数据不会以演示值替代。</text>
+    <view class="status-pill">只读能力优先</view>
+  </view>
+</view>

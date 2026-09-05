@@ -1,0 +1,9 @@
+{
+  "desc": "UAVFire leadership mini program",
+  "rules": [
+    {
+      "action": "disallow",
+      "page": "*"
+    }
+  ]
+}

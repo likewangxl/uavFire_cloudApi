@@ -1,6 +1,7 @@
 package com.yx.uavfire.configuration.mvc;
 
 import com.yx.uavfire.component.AuthInterceptor;
+import com.yx.uavfire.miniapp.security.MiniAppAuthInterceptor;
 import com.yx.uavfire.wayline.agent.security.WaylineAgentAuthInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +14,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.ArrayList;
 import java.util.List;
+import javax.servlet.http.HttpServletRequest;
 
 @Configuration
 public class GlobalMVCConfigurer implements WebMvcConfigurer {
@@ -22,6 +24,9 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
 
     @Autowired
     private WaylineAgentAuthInterceptor waylineAgentAuthInterceptor;
+
+    @Autowired
+    private MiniAppAuthInterceptor miniAppAuthInterceptor;
 
     private static final List<String> EXCLUDE_PATHS = new ArrayList<>();
 
@@ -56,6 +61,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/*/commands/poll");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/msdk/devices/*/commands/ack");
         EXCLUDE_PATHS.add(waylineAgentBase + "/**");
+        EXCLUDE_PATHS.add("/miniapp/api/v1/**");
         EXCLUDE_PATHS.add("/");
         EXCLUDE_PATHS.add("/index.html");
         EXCLUDE_PATHS.add("/favicon.ico");
@@ -71,6 +77,13 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
                         waylineAgentBase + "/agents/**",
                         agentFireEventPath,
                         "/" + managePrefix + manageVersion + "/dual-stream/agents/*/fire-evidence");
+
+        registry.addInterceptor(miniAppAuthInterceptor)
+                .addPathPatterns("/miniapp/api/v1/**")
+                .excludePathPatterns(
+                        "/miniapp/api/v1/auth/wechat/login",
+                        "/miniapp/api/v1/auth/refresh",
+                        "/miniapp/api/v1/auth/bindings");
     }
 
     @Override
@@ -87,7 +100,13 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
 
     @Bean
     public CommonsRequestLoggingFilter requestLoggingFilter() {
-        CommonsRequestLoggingFilter filter = new CommonsRequestLoggingFilter();
+        CommonsRequestLoggingFilter filter = new CommonsRequestLoggingFilter() {
+            @Override
+            protected boolean shouldNotFilter(HttpServletRequest request) {
+                // Login codes, binding credentials and refresh tokens must never be copied to logs.
+                return request.getRequestURI().startsWith("/miniapp/api/v1/auth/");
+            }
+        };
         filter.setIncludeClientInfo(true);
         filter.setIncludeQueryString(true);
         filter.setIncludePayload(true);
