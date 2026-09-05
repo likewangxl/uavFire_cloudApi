@@ -2811,3 +2811,16 @@ TC.3 完成以下收紧：
 - 根工作区的自动生成 `AGENTS.md` 记忆变动未提交；原工作区文件保持原样，旧标识修改已有上述源码快照。
 - 本次只归档和补充版本管理规则，没有重新构建、打包、部署或开展实机验证。历史资料的使用范围与生成方法见 [宣传资料说明](docs/promo/README.md)。
 - 校验通过：55 个原始文件 SHA-256 一致，5 份 PPT 的 ZIP 与内部 XML 完整，3 个 Python 脚本语法有效，22 张输入图齐全；SVG/XML 可解析，忽略规则符合归档范围。
+
+## 36. 2026-09-05 剩余分支归档，统一保留 Main
+
+用户确认后，将旧火情分支和 NCNN 替代分支转为远端归档标签，再删除远端分支名；本地旧火情分支及遗留的 `deploy/current` 引用同步退役。现在 GitHub 和本地均只有 `main` 分支。上文第 34 节的 3 个远端/2 个本地分支是第一阶段的历史状态。
+
+- `archive/20260905/feature/fire-precision-and-realtime-detection` → `b47042b`，已全部被 main 包含。
+- `archive/20260905/feature/agent-visible-fire-closed-loop` → `228b167`，完整保存 69 个独有提交的 NCNN 方案。
+- `archive/20260905/deploy/current` → `49f1b89`，保存遗留引用历史；其中两份独有文档已补入 main。
+- 三个归档标签均核对远端对象和目标提交；远端删除采用原子操作，并以预期提交校验分支没有被其他人更新。
+- 根目录在原提交上转为 detached HEAD，仅解除旧分支绑定。25 个改动/未跟踪文件的 SHA-256 与操作前一致，原始补丁不变，依赖、模型、安装包和其他原文件保留。
+- main 仍位于 `.worktrees/m300-model-adaptation`，目录名为历史命名。本次不修改业务代码、不重新打包或部署。
+
+恢复方法见 [最终分支状态](docs/main-integration-and-m4t-compatibility-2026-09-05.md#最终分支状态)。本机证据位于 `/Users/likewang/uavfire-branch-audit-20260905/final-branch-retirement/`。

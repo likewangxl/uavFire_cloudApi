@@ -8,12 +8,35 @@
 - 原来未推送的 4 个提交现已进入 GitHub `main`：`1ff9ba6`、`ce1e522`、`334f04b`、`2ee80d7`，包含 Windows 交付、航线修复、试用控制、小程序和 M350 补充。
 - 同步并核对远端 M300 后，将已完成合入的 M300 分支转为归档标签并删除分支名。
 - 当前开发分支为 `main`，工作目录仍是 `/Users/likewang/uavfire/.worktrees/m300-model-adaptation`。目录名为历史命名，不代表仍在 M300 分支。
-- 项目根目录 `/Users/likewang/uavfire` 保持原分支及未提交现场；不在该目录强制切换或清理文件。
+- 项目根目录 `/Users/likewang/uavfire` 保留原提交 `b47042b` 及未提交现场；最终清理时仅在同一提交上转为 detached HEAD，没有强制切换到新版本或清理文件。
 - 本次保留原有试用授权规则与已知前端失败，没有将主线合并描述为现场交付验收通过。
 
 本文件及交接入口更新作为后续纯文档提交进入 `main`，不会改变上述已经测试的业务代码。
 
-## 分支清理结果
+## 最终分支状态
+
+用户在源码和设计资料补齐后，同意将剩余两条分支转为归档。**本地与 GitHub 均只保留 `main` 分支**，远端默认分支仍为 `main`。
+
+| 已退役分支或引用 | 保留的提交 | 归档标签 |
+| --- | --- | --- |
+| `feature/fire-precision-and-realtime-detection` | `b47042b` | `archive/20260905/feature/fire-precision-and-realtime-detection` |
+| `feature/agent-visible-fire-closed-loop` | `228b167` | `archive/20260905/feature/agent-visible-fire-closed-loop` |
+| 本地遗留引用 `deploy/current` | `49f1b89` | `archive/20260905/deploy/current` |
+
+三个 annotated tag 均已推送并核对远端标签对象与解引用提交后，才删除分支或引用。旧火情基线是 main 的祖先，没有独有提交；NCNN 方案的 69 个独有提交继续由标签保留，未合入当前 ONNX 主线。`deploy/current` 不属于当前 GitHub 分支，其两份独有文档已在 `38abf2e` 补入 main。
+
+根工作区仍保留原有 25 个改动/未跟踪文件；在同一提交解除分支绑定后逐文件核对 SHA-256，内容均未变化。标识源文件另已收录在 main 的独立设计方案中。根工作区用于保留旧现场，新开发继续使用 `/Users/likewang/uavfire/.worktrees/m300-model-adaptation`。
+
+需要恢复 NCNN 方案时，可在独立目录从标签创建新分支：
+
+```bash
+git fetch origin tag archive/20260905/feature/agent-visible-fire-closed-loop
+git worktree add -b recover/agent-ncnn ../uavfire-agent-ncnn archive/20260905/feature/agent-visible-fire-closed-loop
+```
+
+最终清理证据保存在本机 `/Users/likewang/uavfire-branch-audit-20260905/final-branch-retirement/`。本阶段只整理 Git 引用并更新说明，没有改动业务代码、打包或部署。
+
+## 第一阶段分支清理（历史记录）
 
 GitHub 分支从 6 个减至 3 个，删除：
 
@@ -33,7 +56,7 @@ GitHub 分支从 6 个减至 3 个，删除：
 
 ## 可恢复记录
 
-本轮新增的 10 个 annotated tag 已推送到原私有 GitHub 仓库，并逐项核对标签解引用后的 commit：
+第一阶段的 10 个 annotated tag 已推送到原私有 GitHub 仓库，并逐项核对标签解引用后的 commit；最终清理另推送了上文的 3 个归档标签：
 
 | 标签（共同前缀 `archive/20260905/`） | 提交 |
 | --- | --- |
