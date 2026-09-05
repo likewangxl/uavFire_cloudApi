@@ -6,6 +6,9 @@
 >
 > 工作树：`/Users/likewang/uavfire/.worktrees/m300-miniapp-foundation`
 
+> 2026-09-05 更新：以上为历史开发位置，现已合入 `feature/m300-model-adaptation`，旧工作树已归档。
+> 后续使用 `/Users/likewang/uavfire/.worktrees/m300-model-adaptation`；详见 `docs/worktree-consolidation-2026-09-05.md`。
+
 ## 1. 本批交付
 
 ### 1.1 后端 Mini Program BFF
