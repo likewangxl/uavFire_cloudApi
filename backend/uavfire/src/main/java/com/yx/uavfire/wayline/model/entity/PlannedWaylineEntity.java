@@ -52,6 +52,24 @@ public class PlannedWaylineEntity implements Serializable {
     @TableField("max_speed")
     private Double maxSpeed;
 
+    @TableField("route_kind")
+    private String routeKind;
+
+    @TableField("area_polygon_json")
+    private String areaPolygonJson;
+
+    @TableField("area_camera_key")
+    private String areaCameraKey;
+
+    @TableField("area_front_overlap")
+    private Integer areaFrontOverlap;
+
+    @TableField("area_side_overlap")
+    private Integer areaSideOverlap;
+
+    @TableField("area_heading_deg")
+    private Double areaHeadingDeg;
+
     // ---- L1 全局 mission 配置(KMZ <wpml:missionConfig>) ----
     @TableField("finish_action")
     private String finishAction;

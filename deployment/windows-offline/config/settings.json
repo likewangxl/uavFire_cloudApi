@@ -1,0 +1,16 @@
+{
+  "publicHost": "192.168.1.2",
+  "webPort": 81,
+  "backendPort": 6790,
+  "mysqlPort": 3306,
+  "redisPort": 6379,
+  "mqttPort": 1883,
+  "mqttWebSocketPort": 8083,
+  "zlmRtmpPort": 8089,
+  "zlmHttpPort": 8099,
+  "zlmRtspPort": 8554,
+  "zlmRtcPort": 19586,
+  "aiPort": 9002,
+  "minioApiPort": 9100,
+  "minioConsolePort": 9101
+}

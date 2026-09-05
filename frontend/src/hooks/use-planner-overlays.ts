@@ -24,6 +24,8 @@ import { getFlightAreaComplianceRaw, flightAreaCompliance } from '/@/hooks/use-f
 import { buildSimulationTimeline, haversineMeters, positionAtTime } from '/@/components/wayline-planner/planner-utils.mjs'
 // @ts-ignore .mjs 纯计算模块
 import { looksLikeAreaSweep, convexHull } from '/@/components/wayline-planner/area-utils.mjs'
+// @ts-ignore .mjs 纯计算策略
+import { isSameTrackPoint } from '/@/components/wayline-planner/flight-track-policy.mjs'
 import { gcj02towgs84, wgs84togcj02 } from '/@/vendors/coordtransform'
 
 /** 低于该缩放级别时收起信息牌/距离标签，防止覆盖物拥挤 */
@@ -98,7 +100,9 @@ export function usePlannerOverlays (
   let zoomListenerBound = false
   let layersReady = false
   let flightTrackAircraftSn = ''
+  let flightTrackSessionId = ''
   const flightTrackPath: LngLat[] = []
+  let flightHomePosition: LngLat | null = null
   let planningClickBound = false
   let pendingAircraftRecenter = false
 
@@ -137,10 +141,11 @@ export function usePlannerOverlays (
       map.addLayer({ id: 'plan-area-line', type: 'line', source: SRC.area, paint: { 'line-color': '#1668dc', 'line-width': 2, 'line-opacity': 0.9 } })
       map.addSource(SRC.home, { type: 'geojson', data: EMPTY_FC })
       map.addLayer({ id: 'plan-home-line', type: 'line', source: SRC.home, paint: { 'line-color': '#8a93a3', 'line-width': 2, 'line-opacity': 0.9, 'line-dasharray': [2, 2] } })
-      map.addSource(SRC.track, { type: 'geojson', data: EMPTY_FC })
-      map.addLayer({ id: 'plan-track-line', type: 'line', source: SRC.track, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#13c2c2', 'line-width': 4, 'line-opacity': 0.85 } })
       map.addSource(SRC.route, { type: 'geojson', data: EMPTY_FC })
       map.addLayer({ id: 'plan-route-line', type: 'line', source: SRC.route, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#43d675', 'line-width': 6, 'line-opacity': 0.92 } })
+      // 实际轨迹必须压在规划航线上方；两者重合正是“按航线飞”，不能被绿色航线遮住。
+      map.addSource(SRC.track, { type: 'geojson', data: EMPTY_FC })
+      map.addLayer({ id: 'plan-track-line', type: 'line', source: SRC.track, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#13c2c2', 'line-width': 4, 'line-opacity': 0.95 } })
       // 违规航段高亮（橙）：压在航线之上，最显眼。
       map.addSource(SRC.faBad, { type: 'geojson', data: EMPTY_FC })
       map.addLayer({ id: 'plan-fa-bad-line', type: 'line', source: SRC.faBad, layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#ff7a00', 'line-width': 8, 'line-opacity': 0.95 } })
@@ -195,12 +200,33 @@ export function usePlannerOverlays (
     setData(map, SRC.fa, { type: 'FeatureCollection', features })
   }
 
+  function clearFlightPositionMarker () {
+    if (flightMarker) { flightMarker.remove(); flightMarker = null }
+  }
+
   function clearFlightPositionOverlay () {
     const map = getMap()
-    if (flightMarker) { flightMarker.remove(); flightMarker = null }
+    clearFlightPositionMarker()
+    if (map && layersReady) setData(map, SRC.track, EMPTY_FC)
+    flightTrackAircraftSn = ''
+    flightTrackSessionId = ''
+    flightTrackPath.length = 0
+    flightHomePosition = null
+  }
+
+  function clearFlightTrackPath () {
+    const map = getMap()
     if (map && layersReady) setData(map, SRC.track, EMPTY_FC)
     flightTrackAircraftSn = ''
     flightTrackPath.length = 0
+  }
+
+  function resetFlightSessionOverlay () {
+    const map = getMap()
+    clearFlightTrackPath()
+    flightHomePosition = null
+    if (homeMarker) { homeMarker.remove(); homeMarker = null }
+    if (map && layersReady) setData(map, SRC.home, EMPTY_FC)
   }
 
   function clearFc100PositionOverlay () {
@@ -210,7 +236,8 @@ export function usePlannerOverlays (
   // S2 信息常显风格：序号圆点 + 信息牌
   function waypointMarkerContent (idx: number, wp: PlannedWaypoint, bad = false) {
     const isSelected = planningState.selectedWaypointId === wp.id
-    const speed = wp.speed || planningState.maxSpeed
+    const previewSpeed = planningState.previewWaypoints.length > 0 ? planningState.previewMaxSpeed : undefined
+    const speed = wp.speed || previewSpeed || planningState.maxSpeed
     const acts = (wp.actions || []).map(a => WAYPOINT_ACTION_LABELS[a.actuatorFunc] || a.actuatorFunc).join('·')
     const info = `${wp.height}m · ${speed}m/s${acts ? ' · ' + acts : ''}`
     const classes = ['planner-wp-marker', isSelected ? 'planner-wp-marker--selected' : '', labelsVisible ? '' : 'planner-wp-marker--mini'].filter(Boolean).join(' ')
@@ -270,7 +297,8 @@ export function usePlannerOverlays (
     if (plannerUi.activeTab !== 'monitor') return
     const pos = planningState.flightPosition
     if (!pos || waypoints.length === 0) return
-    const home = posLngLat(pos)
+    const home = flightHomePosition || posLngLat(pos)
+    if (planningState.flightTrackRecording && !flightHomePosition) flightHomePosition = home
     homeMarker = makeMarker('<div class="planner-home-marker">H</div>', home, { anchor: 'center', zIndex: 108 })
     setData(map, SRC.home, lineFeature([home, wpLngLat(waypoints[0])]))
   }
@@ -486,16 +514,21 @@ export function usePlannerOverlays (
     if (!shouldRenderFlightPositionOverlay()) { clearFlightPositionOverlay(); return }
     const map = getMap()
     const position = planningState.flightPosition
-    if (!position) { clearFlightPositionOverlay(); return }
+    // 遥测短暂掉点只移除飞机图标，保留本次已采集轨迹；新任务由 revision 显式清轨迹。
+    if (!position) { clearFlightPositionMarker(); return }
     if (!map || !ensureLayers(map)) return
     const lngLat = posLngLat(position)
-    const last = flightTrackPath[flightTrackPath.length - 1]
-    const jumpLng = last ? Math.abs(last[0] - lngLat[0]) : 0
-    const jumpLat = last ? Math.abs(last[1] - lngLat[1]) : 0
-    if (flightTrackAircraftSn !== position.aircraftSn || jumpLng > 0.003 || jumpLat > 0.003) {
+    const sessionId = planningState.flightTrackSessionId || (planningState.executing ? 'manual' : '')
+    if (flightTrackSessionId !== sessionId) {
+      clearFlightTrackPath()
+      flightTrackSessionId = sessionId
+    }
+    let last = flightTrackPath[flightTrackPath.length - 1]
+    if (flightTrackAircraftSn !== position.aircraftSn) {
       flightTrackPath.length = 0
       flightTrackAircraftSn = position.aircraftSn
       setData(map, SRC.track, EMPTY_FC)
+      last = undefined
     }
     const label = position.currentWaypointIndex != null && position.totalWaypoints != null
       ? `${position.currentWaypointIndex + 1}/${position.totalWaypoints}`
@@ -506,15 +539,18 @@ export function usePlannerOverlays (
       flightMarker.setLngLat(lngLat)
       flightMarker.getElement().innerHTML = flightPositionContent(label)
     }
-    flightTrackPath.push(lngLat)
-    if (flightTrackPath.length > 600) flightTrackPath.shift()
-    setData(map, SRC.track, lineFeature(flightTrackPath))
-    // H 随飞机移动
-    if (homeMarker) {
-      homeMarker.setLngLat(lngLat)
+    if (planningState.flightTrackRecording && !isSameTrackPoint(last, lngLat)) {
+      flightTrackPath.push(lngLat)
+      if (flightTrackPath.length > 600) flightTrackPath.shift()
+      setData(map, SRC.track, lineFeature(flightTrackPath))
+    }
+    // H 固定在本次任务首次有效位置，不能跟着飞机移动。
+    if (planningState.flightTrackRecording && !flightHomePosition) {
+      flightHomePosition = lngLat
       const wps = renderPlanningWaypoints.value
-      if (wps.length > 0) setData(map, SRC.home, lineFeature([lngLat, wpLngLat(wps[0] as PlannedWaypoint)]))
-    } else if (plannerUi.activeTab === 'monitor' && renderPlanningWaypoints.value.length > 0) {
+      if (homeMarker) { homeMarker.remove(); homeMarker = null }
+      if (wps.length > 0) rebuildHomeMarker(map, wps as PlannedWaypoint[])
+    } else if (!homeMarker && plannerUi.activeTab === 'monitor' && renderPlanningWaypoints.value.length > 0) {
       rebuildHomeMarker(map, renderPlanningWaypoints.value as PlannedWaypoint[])
     }
     if (pendingAircraftRecenter) { pendingAircraftRecenter = false; setAircraftView(position) }
@@ -574,6 +610,12 @@ export function usePlannerOverlays (
       : '',
     () => { updateFlightPositionOverlay(); updateFc100PositionOverlay() }
   )
+
+  watch(() => planningState.flightTrackRevision, () => {
+    resetFlightSessionOverlay()
+    flightTrackSessionId = planningState.flightTrackSessionId
+    updateFlightPositionOverlay()
+  })
 
   watch(
     () => `${fc100PositionState.selectedDeviceSn}:${fc100PositionState.selectedDeviceProps?.longitude}:${fc100PositionState.selectedDeviceProps?.latitude}:${fc100PositionState.selectedDeviceProps?.osdTimestamp}`,

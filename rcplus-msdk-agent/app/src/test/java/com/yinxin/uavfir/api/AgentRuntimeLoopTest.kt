@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.api
 
+import com.yinxin.uavfir.BuildConfig
 import com.yinxin.uavfir.sdk.CameraCapability
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSessionAdapter
@@ -73,6 +74,10 @@ class AgentRuntimeLoopTest {
         assertEquals(3.2, api.lastMsdkDeviceState?.horizontalSpeed)
         assertEquals(-0.4, api.lastMsdkDeviceState?.verticalSpeed)
         assertEquals(86, api.lastMsdkDeviceState?.batteryPercent)
+        assertEquals(BuildConfig.VERSION_NAME, api.lastMsdkDeviceState?.agentVersionName)
+        assertEquals(BuildConfig.VERSION_CODE.toLong(), api.lastMsdkDeviceState?.agentVersionCode)
+        assertEquals(true, api.lastMsdkDeviceState?.waylineCommandSupported)
+        assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("wayline"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("visibleStream"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("thermalFocus"))
         assertEquals(true, api.lastMsdkDeviceState?.capabilities?.get("takeoff"))
@@ -210,7 +215,6 @@ class AgentRuntimeLoopTest {
             sessionManager = FakeCommandExecutor(DualStreamSessionState.INIT),
             scope = backgroundScope,
             dispatcher = StandardTestDispatcher(testScheduler),
-            intervalMs = 1_000,
         )
 
         loop.start("DRONE-LOOP")
@@ -250,6 +254,30 @@ class AgentRuntimeLoopTest {
         assertEquals(1, api.heartbeatCount)
         assertEquals(1, regularPoller.pollCount)
         assertTrue(urgentPoller.pollCount >= 3)
+    }
+
+    @Test
+    fun tickOnce_doesNotReportOrPollAfterTrialExpiration() = runTest {
+        val api = RecordingDualStreamApi()
+        val poller = RecordingCommandPoller()
+        var expirationCallbacks = 0
+        val loop = AgentRuntimeLoop(
+            deviceSession = FakeDeviceSession(
+                DjiDeviceState(connectionState = AgentConnectionState.CAPABILITY_READY),
+            ),
+            reporter = AgentReporter(AgentBackendClient(api)),
+            commandPoller = poller,
+            sessionManager = FakeCommandExecutor(DualStreamSessionState.RUNNING),
+            scope = backgroundScope,
+            trialExpired = { true },
+            onTrialExpired = { expirationCallbacks += 1 },
+        )
+
+        loop.tickOnce("DRONE-EXPIRED")
+
+        assertEquals(0, api.heartbeatCount)
+        assertEquals(0, poller.pollCount)
+        assertEquals(1, expirationCallbacks)
     }
 
     @Test

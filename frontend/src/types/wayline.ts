@@ -71,6 +71,13 @@ export interface PlannedWaypoint {
   actions?: WaypointAction[]
 }
 
+export interface PlannedAreaVertex {
+  gcjLng: number
+  gcjLat: number
+  wgsLng: number
+  wgsLat: number
+}
+
 export enum PlannedWaylineStatus {
   DRAFT = 'draft',
   FILE_GENERATED = 'file_generated',
@@ -98,6 +105,12 @@ export interface PlannedWaylineRecord {
   aircraftSn: string
   defaultHeight: number
   maxSpeed: number
+  routeKind?: 'waypoint' | 'patrol' | 'area'
+  areaPolygon?: PlannedAreaVertex[]
+  areaCameraKey?: string
+  areaFrontOverlap?: number
+  areaSideOverlap?: number
+  areaHeadingDeg?: number
   // L1 mission 配置
   finishAction?: string
   exitOnRcLost?: string
@@ -162,6 +175,12 @@ interface PlannedWaylineBodyShared {
   aircraftSn: string
   defaultHeight: number
   maxSpeed: number
+  routeKind: 'waypoint' | 'patrol' | 'area'
+  areaPolygon?: PlannedAreaVertex[]
+  areaCameraKey?: string
+  areaFrontOverlap?: number
+  areaSideOverlap?: number
+  areaHeadingDeg?: number
   finishAction?: string
   exitOnRcLost?: string
   rcLostAction?: string

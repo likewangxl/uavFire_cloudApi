@@ -1,0 +1,81 @@
+server:
+  address: 127.0.0.1
+  port: {{BACKEND_PORT}}
+  tomcat:
+    accesslog:
+      directory: "{{ROOT_FORWARD}}/data/logs"
+
+spring:
+  datasource:
+    druid:
+      url: jdbc:mysql://127.0.0.1:{{MYSQL_PORT}}/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      username: uavfire
+      password: "{{MYSQL_APP_PASSWORD}}"
+  redis:
+    host: 127.0.0.1
+    port: {{REDIS_PORT}}
+
+mqtt:
+  BASIC:
+    protocol: MQTT
+    host: 127.0.0.1
+    port: {{MQTT_PORT}}
+    username: JavaServer
+    password: "{{MQTT_PASSWORD}}"
+  DRC:
+    protocol: WS
+    host: 127.0.0.1
+    port: {{MQTT_WS_PORT}}
+    path: /mqtt
+    username: JavaServer
+    password: "{{MQTT_PASSWORD}}"
+
+url:
+  server-url: http://{{PUBLIC_HOST}}:{{WEB_PORT}}
+
+pilot2:
+  web-entry: http://{{PUBLIC_HOST}}:{{WEB_PORT}}/pilot-login
+
+oss:
+  enable: true
+  provider: minio
+  endpoint: http://127.0.0.1:{{MINIO_API_PORT}}
+  access-key: "{{MINIO_USER}}"
+  secret-key: "{{MINIO_PASSWORD}}"
+  expire: 3600
+  region: us-east-1
+  bucket: cloud-bucket
+  object-dir-prefix: wayline
+
+wayline-agent:
+  shared-secret: "{{WAYLINE_AGENT_SHARED_SECRET}}"
+  server-url: http://{{PUBLIC_HOST}}:{{WEB_PORT}}
+  fire-event-require-https: false
+  fire-evidence:
+    storage-dir: "{{ROOT_FORWARD}}/data/agent-fire-evidence"
+    public-base-url: http://{{PUBLIC_HOST}}:{{WEB_PORT}}
+
+livestream:
+  playback:
+    webrtc-host: {{PUBLIC_HOST}}
+    webrtc-port: {{WEB_PORT}}
+  url:
+    rtmp:
+      url: rtmp://{{PUBLIC_HOST}}:{{ZLM_RTMP_PORT}}/live/
+    rtsp:
+      port: {{ZLM_RTSP_PORT}}
+
+minio:
+  endpoint: http://127.0.0.1:{{MINIO_API_PORT}}
+  access-key: "{{MINIO_USER}}"
+  secret-key: "{{MINIO_PASSWORD}}"
+  bucket: fc100-routes
+
+ai-service:
+  base-url: http://127.0.0.1:{{AI_PORT}}
+  zlm-rtsp-host: 127.0.0.1
+  zlm-rtsp-port: {{ZLM_RTSP_PORT}}
+
+logging:
+  file:
+    name: "{{ROOT_FORWARD}}/data/logs/backend.log"

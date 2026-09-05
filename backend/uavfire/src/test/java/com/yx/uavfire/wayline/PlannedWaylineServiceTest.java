@@ -8,6 +8,7 @@ import com.yx.uavfire.msdk.model.MsdkDeviceStateDTO;
 import com.yx.uavfire.msdk.service.MsdkDeviceStateService;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineFileDTO;
+import com.yx.uavfire.wayline.model.dto.PlannedAreaVertexDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaylineDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaypointDTO;
 import com.yx.uavfire.wayline.model.entity.PlannedWaylineEntity;
@@ -18,6 +19,7 @@ import com.yx.uavfire.wayline.model.param.UpdatePlannedWaylineParam;
 import com.yx.uavfire.wayline.service.impl.PlannedWaylineServiceImpl;
 import com.yx.uavfire.wayline.service.IWaylineFileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategy;
 import com.dji.sdk.cloudapi.device.DeviceEnum;
 import com.dji.sdk.cloudapi.wayline.GetWaylineListResponse;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -54,6 +56,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
@@ -1009,6 +1013,65 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void prepareCompletedAreaTaskShouldRegenerateLegacyTurningAndPhotoKmz() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService fileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3).plannedWaylineId("area-repeat").workspaceId("workspace-001")
+                .name("Area repeat").aircraftModelKey("M300")
+                .payloadModelKey("H20T").payloadPositionIndex(0)
+                .gatewaySn("RC-001").aircraftSn("M300-001")
+                .defaultHeight(60.0).maxSpeed(5.0).routeKind("area")
+                .areaCameraKey("H20T").areaFrontOverlap(80).areaSideOverlap(70).areaHeadingDeg(0.0)
+                .areaPolygonJson("["
+                        + "{\"gcjLng\":108.101,\"gcjLat\":34.266,\"wgsLng\":108.0986,\"wgsLat\":34.2647},"
+                        + "{\"gcjLng\":108.102,\"gcjLat\":34.266,\"wgsLng\":108.0996,\"wgsLat\":34.2647},"
+                        + "{\"gcjLng\":108.102,\"gcjLat\":34.265,\"wgsLng\":108.0996,\"wgsLat\":34.2637},"
+                        + "{\"gcjLng\":108.101,\"gcjLat\":34.265,\"wgsLng\":108.0986,\"wgsLat\":34.2637}]")
+                .waypointsJson("["
+                        + "{\"order\":1,\"gcjLng\":108.101,\"gcjLat\":34.265,\"wgsLng\":108.0986,\"wgsLat\":34.2637,\"height\":60.0},"
+                        + "{\"order\":2,\"gcjLng\":108.101,\"gcjLat\":34.266,\"wgsLng\":108.0986,\"wgsLat\":34.2647,\"height\":60.0}]")
+                .status("finished").taskStatus("finished")
+                .publishedWaylineId("legacy-area-file")
+                .creator("alice").createTime(1000L).updateTime(1000L).build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(fileService.getWaylineByWaylineId("workspace-001", "legacy-area-file"))
+                .thenReturn(java.util.Optional.of(new GetWaylineListResponse()
+                        .setId("legacy-area-file").setName("Area repeat").setObjectKey("wayline/legacy.kmz")));
+        when(fileService.downloadWaylineContent("workspace-001", "legacy-area-file"))
+                .thenReturn(buildLegacyAreaKmz());
+        when(fileService.deleteByWaylineId("workspace-001", "legacy-area-file")).thenReturn(true);
+        when(fileService.createPublishedWayline(eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder()
+                        .waylineId("safe-area-file").name("Area repeat").objectKey("wayline/safe.kmz").build());
+        when(fileService.getWaylineByWaylineId("workspace-001", "safe-area-file"))
+                .thenReturn(java.util.Optional.of(new GetWaylineListResponse()
+                        .setId("safe-area-file").setName("Area repeat")
+                        .setObjectKey("wayline/safe.kmz").setSign("safe-md5")));
+        when(fileService.getObjectUrl("workspace-001", "safe-area-file"))
+                .thenReturn(new URL("http://example.test/wayline/safe.kmz"));
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, new ObjectMapper(), fileService);
+
+        PlannedWaylineDTO prepared = service.prepareTask(
+                "workspace-001", "area-repeat", "alice", new PreparePlannedWaylineTaskParam());
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> createCaptor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(fileService).deleteByWaylineId("workspace-001", "legacy-area-file");
+        verify(fileService).createPublishedWayline(eq("workspace-001"), createCaptor.capture());
+        String regenerated = readZipEntry(createCaptor.getValue().getContent(), "wpmz/waylines.wpml");
+        assertAll(
+                () -> assertEquals("publishing", prepared.getStatus()),
+                () -> assertEquals("safe-area-file", prepared.getPublishedWaylineId()),
+                () -> assertFalse(regenerated.contains("coordinateTurn")),
+                () -> assertFalse(regenerated.contains("takePhoto")),
+                () -> assertFalse(regenerated.contains("<wpml:actionGroup>")),
+                () -> assertEquals(2, regenerated.split(Pattern.quote(
+                        "<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"), -1).length - 1));
+    }
+
+    @Test
     void publishFailureShouldKeepOriginalDraftState() {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
@@ -1327,7 +1390,7 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(template.contains("<wpml:index>2</wpml:index>"), "third waypoint index"),
                 () -> assertTrue(template.contains("<wpml:ellipsoidHeight>30.0</wpml:ellipsoidHeight>"), "ellipsoidHeight per waypoint"),
                 () -> assertTrue(template.contains("<wpml:height>30.0</wpml:height>"), "height per waypoint"),
-                () -> assertTrue(template.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "per-waypoint turn mode"),
+                () -> assertTrue(template.contains("<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"), "default waypoint must stop at the point"),
                 () -> assertTrue(template.contains("<wpml:useGlobalSpeed>1</wpml:useGlobalSpeed>"), "useGlobalSpeed"),
                 () -> assertTrue(template.contains("<wpml:useGlobalHeadingParam>1</wpml:useGlobalHeadingParam>"), "useGlobalHeadingParam"),
                 () -> assertTrue(template.contains("<wpml:useStraightLine>1</wpml:useStraightLine>"), "useStraightLine"),
@@ -1352,8 +1415,8 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(waylines.contains("<wpml:waypointHeadingAngleEnable>0</wpml:waypointHeadingAngleEnable>"), "waypointHeadingAngleEnable"),
                 () -> assertTrue(waylines.contains("<wpml:waypointHeadingPoiIndex>0</wpml:waypointHeadingPoiIndex>"), "waypointHeadingPoiIndex"),
                 () -> assertFalse(waylines.contains("waypointHeadingPathMode"), "no waypointHeadingPathMode (Pilot 2 omits)"),
-                () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "wayline placemark turn mode"),
-                () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist>"), "wayline placemark damping=10"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"), "wayline placemark strict turn mode"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>"), "strict waypoint damping=0"),
                 () -> assertTrue(waylines.contains("<wpml:waypointGimbalHeadingParam>"), "waypointGimbalHeadingParam block"),
                 () -> assertTrue(waylines.contains("<wpml:waypointGimbalPitchAngle>-30</wpml:waypointGimbalPitchAngle>"), "gimbal pitch default -30"),
                 () -> assertTrue(waylines.contains("<wpml:waypointGimbalYawAngle>0</wpml:waypointGimbalYawAngle>"), "gimbal yaw"),
@@ -1609,9 +1672,9 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>"), "wp[0] turnMode = coordinateTurn"),
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>2</wpml:waypointTurnDampingDist>"), "wp[0] turnDamping = 2"));
 
-        assertAll("wp[1] 全 null 走全局默认",
-                () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"), "wp[1] default turnMode"),
-                () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist>"), "wp[1] default turnDamping = 10"),
+        assertAll("wp[1] 全 null 走严格过点默认",
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"), "wp[1] default strict turnMode"),
+                () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>"), "wp[1] default turnDamping = 0"),
                 () -> assertTrue(waylines.contains("<wpml:waypointHeadingMode>followWayline</wpml:waypointHeadingMode>"), "wp[1] default headingMode"));
     }
 
@@ -1631,9 +1694,9 @@ class PlannedWaylineServiceTest {
                 .defaultHeight(30.0)
                 .maxSpeed(5.0)
                 .waypointsJson("[" +
-                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0}," +
-                        "{\"order\":2,\"gcjLng\":113.001,\"gcjLat\":22.00108,\"wgsLng\":113.0,\"wgsLat\":22.00007,\"height\":30.0}," +
-                        "{\"order\":3,\"gcjLng\":113.001,\"gcjLat\":22.00115,\"wgsLng\":113.0,\"wgsLat\":22.00014,\"height\":30.0}]")
+                        "{\"order\":1,\"gcjLng\":113.001,\"gcjLat\":22.001,\"wgsLng\":113.0,\"wgsLat\":22.0,\"height\":30.0,\"turnMode\":\"toPointAndPassWithContinuityCurvature\"}," +
+                        "{\"order\":2,\"gcjLng\":113.001,\"gcjLat\":22.00108,\"wgsLng\":113.0,\"wgsLat\":22.00007,\"height\":30.0,\"turnMode\":\"toPointAndPassWithContinuityCurvature\"}," +
+                        "{\"order\":3,\"gcjLng\":113.001,\"gcjLat\":22.00115,\"wgsLng\":113.0,\"wgsLat\":22.00014,\"height\":30.0,\"turnMode\":\"toPointAndPassWithContinuityCurvature\"}]")
                 .status("draft")
                 .creator("alice")
                 .createTime(1000L)
@@ -1893,6 +1956,7 @@ class PlannedWaylineServiceTest {
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(waylineAgentService.hasRecentCommandPoll(anyString(), anyLong())).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
 
@@ -1927,6 +1991,7 @@ class PlannedWaylineServiceTest {
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(waylineAgentService.hasRecentCommandPoll(anyString(), anyLong())).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
 
@@ -1970,6 +2035,7 @@ class PlannedWaylineServiceTest {
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(waylineAgentService.hasRecentCommandPoll(anyString(), anyLong())).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
 
@@ -2019,6 +2085,7 @@ class PlannedWaylineServiceTest {
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(waylineAgentService.hasRecentCommandPoll(anyString(), anyLong())).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
         setField(service, "msdkDeviceStateService", msdkDeviceStateService);
@@ -2068,6 +2135,42 @@ class PlannedWaylineServiceTest {
     }
 
     @Test
+    void executeM300WaylineShouldRejectTelemetryOnlyAgentWithoutWaylinePoller() throws Exception {
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService waylineFileService = mock(IWaylineFileService.class);
+        com.yx.uavfire.wayline.agent.service.IWaylineAgentService agentService =
+                mock(com.yx.uavfire.wayline.agent.service.IWaylineAgentService.class);
+        MsdkDeviceStateService stateService = new MsdkDeviceStateService();
+        stateService.upsert(new MsdkDeviceStateDTO()
+                .setAircraftSn("M300-SN-001").setOnline(true).setConnectionState("CONNECTED")
+                .setAircraftModelKey("M300").setSelectedPayloadPositionIndex(0)
+                .setWaylineCommandSupported(true)
+                .setPayloads(List.of(new com.yx.uavfire.msdk.model.PayloadCapabilityDTO()
+                        .setPayloadModelKey("H20T").setPayloadPositionIndex(0))));
+        Path kmzPath = Files.createTempFile("pw-m300-no-router", ".kmz");
+        Files.write(kmzPath, new byte[]{1, 2, 3});
+        PlannedWaylineEntity existing = PlannedWaylineEntity.builder()
+                .id(3011).plannedWaylineId("pw-m300-no-router").workspaceId("workspace-001")
+                .flightId("flight-m300-no-router").aircraftModelKey("M300")
+                .payloadModelKey("H20T").payloadPositionIndex(0)
+                .droneSn("M300-SN-001").aircraftSn("M300-SN-001")
+                .kmzUrl(kmzPath.toUri().toURL().toString()).status("ready").taskStatus("ready").build();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(
+                mapper, new ObjectMapper(), waylineFileService);
+        setField(service, "waylineAgentService", agentService);
+        setField(service, "msdkDeviceStateService", stateService);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> service.executeTask("workspace-001", "pw-m300-no-router"));
+
+        assertEquals("遥控器航线执行服务未连接，请安装并启动最新 Agent 后重试。", error.getMessage());
+        verify(agentService, never()).prepareKmz(any(), any(), any());
+        verify(agentService, never()).dispatchWayline(any(), any());
+        verify(mapper, never()).updateById(any(PlannedWaylineEntity.class));
+    }
+
+    @Test
     void executeAgentWaylineShouldNormalizePilotM4tKmzBeforeDispatch() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
         IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
@@ -2095,6 +2198,7 @@ class PlannedWaylineServiceTest {
                 .build();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(mapper.updateById(any(PlannedWaylineEntity.class))).thenReturn(1);
+        when(waylineAgentService.hasRecentCommandPoll(anyString(), anyLong())).thenReturn(true);
         PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, waylineFileService);
         setField(service, "waylineAgentService", waylineAgentService);
 
@@ -2107,8 +2211,6 @@ class PlannedWaylineServiceTest {
         ArgumentCaptor<com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO> dispatchCaptor =
                 ArgumentCaptor.forClass(com.yx.uavfire.wayline.agent.model.dto.WaylineDispatchDataDTO.class);
         verify(waylineAgentService).dispatchWayline(eq("M4T-SN-001"), dispatchCaptor.capture());
-        double normalizedTurnDamping = firstTurnDamping(normalizedWaylines);
-
         assertAll("M4T KMZ runtime normalization",
                 () -> assertTrue(normalizedTemplate.contains("<wpml:droneEnumValue>99</wpml:droneEnumValue>")),
                 () -> assertTrue(normalizedTemplate.contains("<wpml:payloadEnumValue>89</wpml:payloadEnumValue>")),
@@ -2122,14 +2224,15 @@ class PlannedWaylineServiceTest {
                 () -> assertFalse(normalizedWaylines.contains("<wpml:realTimeFollowSurfaceByFov>")),
                 () -> assertTrue(normalizedTemplate.contains("<wpml:globalWaypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:globalWaypointTurnMode>")),
                 () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnParam>")),
-                () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>")),
+                () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>")),
                 () -> assertFalse(normalizedTemplate.contains("<wpml:useGlobalTurnParam>")),
                 () -> assertFalse(normalizedTemplate.contains("<wpml:useGlobalHeight>")),
-                () -> assertTrue(normalizedWaylines.contains("<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>")),
-                () -> assertTrue(normalizedTurnDamping > 0, "turn damping must be positive per DJI WPML"),
-                () -> assertTrue(normalizedTurnDamping * 2 < 15.0, "two turn intercepts must fit short segment"),
-                () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnDampingDist>" + formatTurnDamping(normalizedTurnDamping) + "</wpml:waypointTurnDampingDist>")),
-                () -> assertTrue(normalizedWaylines.contains("<wpml:useStraightLine>1</wpml:useStraightLine>")),
+                () -> assertFalse(normalizedWaylines.contains("toPointAndPassWithContinuityCurvature")),
+                () -> assertFalse(normalizedTemplate.contains("toPointAndPassWithContinuityCurvature")),
+                () -> assertEquals(2, normalizedWaylines.split(Pattern.quote(
+                        "<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>"), -1).length - 1),
+                () -> assertTrue(normalizedTemplate.contains("<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>")),
+                () -> assertTrue(normalizedWaylines.contains("<wpml:useStraightLine>0</wpml:useStraightLine>")),
                 () -> assertEquals(org.springframework.util.DigestUtils.md5DigestAsHex(kmzCaptor.getValue()),
                         dispatchCaptor.getValue().getKmzMd5()));
     }
@@ -2147,6 +2250,145 @@ class PlannedWaylineServiceTest {
         throw new AssertionError("Missing zip entry: " + expectedEntry);
     }
 
+    @Test
+    void m300AreaPublishShouldMatchPilotMapping2dStructureAndExecutionSemantics() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService fileService = mock(IWaylineFileService.class);
+        PlannedWaylineEntity entity = PlannedWaylineEntity.builder()
+                .id(300).plannedWaylineId("area-pilot-format").workspaceId("workspace-001")
+                .name("M300 area mapping").aircraftModelKey("M300")
+                .payloadModelKey("H20T").payloadPositionIndex(0)
+                .gatewaySn("RC-001").aircraftSn("M300-001")
+                .defaultHeight(60.1).maxSpeed(6.2).routeKind("area")
+                .areaCameraKey("H20T").areaFrontOverlap(80).areaSideOverlap(70).areaHeadingDeg(88.0)
+                .areaPolygonJson("["
+                        + "{\"gcjLng\":108.101,\"gcjLat\":34.266,\"wgsLng\":108.098619263059,\"wgsLat\":34.2647414895835},"
+                        + "{\"gcjLng\":108.101,\"gcjLat\":34.265,\"wgsLng\":108.098648870962,\"wgsLat\":34.2637077980047},"
+                        + "{\"gcjLng\":108.102,\"gcjLat\":34.265,\"wgsLng\":108.099963977788,\"wgsLat\":34.2637380436354},"
+                        + "{\"gcjLng\":108.102,\"gcjLat\":34.266,\"wgsLng\":108.099919607331,\"wgsLat\":34.2647562181606}]")
+                .waypointsJson("["
+                        + "{\"order\":1,\"gcjLng\":108.101,\"gcjLat\":34.2658,\"wgsLng\":108.098624439944,\"wgsLat\":34.2645606933011,\"height\":60.1},"
+                        + "{\"order\":2,\"gcjLng\":108.102,\"gcjLat\":34.2658,\"wgsLng\":108.099926490215,\"wgsLat\":34.2645982637158,\"height\":60.1},"
+                        + "{\"order\":3,\"gcjLng\":108.102,\"gcjLat\":34.2655,\"wgsLng\":108.099936360882,\"wgsLat\":34.264371764003,\"height\":60.1},"
+                        + "{\"order\":4,\"gcjLng\":108.101,\"gcjLat\":34.2655,\"wgsLng\":108.098630928257,\"wgsLat\":34.2643340959765,\"height\":60.1},"
+                        + "{\"order\":5,\"gcjLng\":108.101,\"gcjLat\":34.2652,\"wgsLng\":108.098637416534,\"wgsLat\":34.2641074986515,\"height\":60.1},"
+                        + "{\"order\":6,\"gcjLng\":108.102,\"gcjLat\":34.2652,\"wgsLng\":108.099946231495,\"wgsLat\":34.2641452642894,\"height\":60.1},"
+                        + "{\"order\":7,\"gcjLng\":108.102,\"gcjLat\":34.2649,\"wgsLng\":108.099956102056,\"wgsLat\":34.2639187645751,\"height\":60.1},"
+                        + "{\"order\":8,\"gcjLng\":108.101,\"gcjLat\":34.2649,\"wgsLng\":108.098649342312,\"wgsLat\":34.2638810582543,\"height\":60.1}]")
+                .status("draft").creator("pilot-user").createTime(1000L).updateTime(1000L).build();
+        when(mapper.selectOne(any())).thenReturn(entity);
+        when(mapper.update(any(PlannedWaylineEntity.class), any())).thenReturn(1);
+        when(fileService.createPublishedWayline(eq("workspace-001"), any(PublishedWaylineCreateDTO.class)))
+                .thenReturn(PublishedWaylineFileDTO.builder().waylineId("published-area")
+                        .name("M300 area mapping").objectKey("area.kmz").build());
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, fileService);
+
+        service.publish("workspace-001", "area-pilot-format", "tester");
+
+        ArgumentCaptor<PublishedWaylineCreateDTO> captor = ArgumentCaptor.forClass(PublishedWaylineCreateDTO.class);
+        verify(fileService).createPublishedWayline(eq("workspace-001"), captor.capture());
+        String template = readZipEntry(captor.getValue().getContent(), "wpmz/template.kml");
+        String waylines = readZipEntry(captor.getValue().getContent(), "wpmz/waylines.wpml");
+        String areaDumpPath = System.getProperty("kmz.area.dump.path");
+        if (areaDumpPath != null && !areaDumpPath.isBlank()) {
+            Files.write(Path.of(areaDumpPath), captor.getValue().getContent());
+        }
+
+        assertAll("Pilot 2 mapping2d template",
+                () -> assertTrue(template.contains("<wpml:templateType>mapping2d</wpml:templateType>")),
+                () -> assertTrue(template.contains("<wpml:globalShootHeight>60.1</wpml:globalShootHeight>")),
+                () -> assertTrue(template.contains("<wpml:shootType>time</wpml:shootType>")),
+                () -> assertTrue(template.contains("<wpml:direction>88</wpml:direction>")),
+                () -> assertTrue(template.contains("<wpml:orthoCameraOverlapH>80</wpml:orthoCameraOverlapH>")),
+                () -> assertTrue(template.contains("<wpml:orthoCameraOverlapW>70</wpml:orthoCameraOverlapW>")),
+                () -> assertTrue(template.contains("108.098619263059,34.2647414895835,0")),
+                () -> assertTrue(template.contains("<wpml:payloadParam>")),
+                () -> assertTrue(template.contains("<wpml:imageFormat>wide</wpml:imageFormat>")),
+                () -> assertTrue(template.contains("<wpml:elevationOptimizeEnable>0</wpml:elevationOptimizeEnable>")),
+                () -> assertFalse(template.contains("<wpml:index>")),
+                () -> assertFalse(template.contains("<wpml:waylineAvoidLimitAreaMode>")));
+
+        assertAll("safe patrol mapping2d execution wayline without payload actions",
+                () -> assertTrue(waylines.contains("<wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost>")),
+                () -> assertTrue(waylines.contains("<wpml:takeOffSecurityHeight>60</wpml:takeOffSecurityHeight>")),
+                () -> assertTrue(waylines.contains("<wpml:globalTransitionalSpeed>15</wpml:globalTransitionalSpeed>")),
+                () -> assertTrue(waylines.contains("<wpml:waypointHeadingAngleEnable>1</wpml:waypointHeadingAngleEnable>")),
+                () -> assertTrue(waylines.contains("<wpml:waypointHeadingPathMode>followBadArc</wpml:waypointHeadingPathMode>")),
+                () -> assertEquals(8, waylines.split(Pattern.quote(
+                        "<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"), -1).length - 1),
+                () -> assertEquals(8, waylines.split(Pattern.quote(
+                        "<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>"), -1).length - 1),
+                () -> assertFalse(waylines.contains("<wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>")),
+                () -> assertFalse(waylines.contains("toPointAndPassWithContinuityCurvature")),
+                () -> assertFalse(waylines.contains("<wpml:actionGroup>")),
+                () -> assertFalse(waylines.contains("<wpml:actionTriggerType>multipleTiming</wpml:actionTriggerType>")),
+                () -> assertFalse(waylines.contains("<wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>")),
+                () -> assertFalse(waylines.contains("<wpml:actionActuatorFunc>gimbalRotate</wpml:actionActuatorFunc>")));
+    }
+
+    @Test
+    void createShouldPersistAndReturnAreaPlanningFields() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        IPlannedWaylineMapper mapper = mock(IPlannedWaylineMapper.class);
+        IWaylineFileService fileService = mock(IWaylineFileService.class);
+        AtomicReference<PlannedWaylineEntity> inserted = new AtomicReference<>();
+        when(mapper.insert(any(PlannedWaylineEntity.class))).thenAnswer(invocation -> {
+            inserted.set(invocation.getArgument(0));
+            return 1;
+        });
+        PlannedWaylineServiceImpl service = new PlannedWaylineServiceImpl(mapper, objectMapper, fileService);
+        List<PlannedAreaVertexDTO> polygon = List.of(
+                new PlannedAreaVertexDTO().setGcjLng(108.101).setGcjLat(34.266).setWgsLng(108.0986).setWgsLat(34.2647),
+                new PlannedAreaVertexDTO().setGcjLng(108.101).setGcjLat(34.265).setWgsLng(108.0987).setWgsLat(34.2637),
+                new PlannedAreaVertexDTO().setGcjLng(108.102).setGcjLat(34.265).setWgsLng(108.1000).setWgsLat(34.2638));
+        PlannedWaypointDTO waypoint = new PlannedWaypointDTO().setOrder(1)
+                .setGcjLng(108.101).setGcjLat(34.265).setWgsLng(108.0987).setWgsLat(34.2637).setHeight(60.0);
+
+        PlannedWaylineDTO result = service.create("workspace-001", "tester", CreatePlannedWaylineParam.builder()
+                .name("Area persistence").aircraftModelKey("M300").payloadModelKey("H20T").payloadPositionIndex(0)
+                .gatewaySn("RC").aircraftSn("AC").defaultHeight(60.0).maxSpeed(6.2)
+                .routeKind("area").areaPolygon(polygon).areaCameraKey("H20T")
+                .areaFrontOverlap(80).areaSideOverlap(70).areaHeadingDeg(88.0)
+                .waypoints(List.of(waypoint)).build());
+
+        assertAll(
+                () -> assertEquals("area", inserted.get().getRouteKind()),
+                () -> assertTrue(inserted.get().getAreaPolygonJson().contains("108.0986")),
+                () -> assertEquals("H20T", result.getAreaCameraKey()),
+                () -> assertEquals(80, result.getAreaFrontOverlap()),
+                () -> assertEquals(70, result.getAreaSideOverlap()),
+                () -> assertEquals(88.0, result.getAreaHeadingDeg()),
+                () -> assertEquals(3, result.getAreaPolygon().size()));
+    }
+
+    @Test
+    void areaVertexShouldDeserializeCamelAndSnakeCaseWithGlobalSnakeCaseMapper() throws IOException {
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.setPropertyNamingStrategy(PropertyNamingStrategy.SNAKE_CASE);
+
+        CreatePlannedWaylineParam camelPayload = objectMapper.readValue(
+                "{\"areaPolygon\":[{\"gcjLng\":108.101,\"gcjLat\":34.266,"
+                        + "\"wgsLng\":108.0986,\"wgsLat\":34.2647}]}",
+                CreatePlannedWaylineParam.class);
+        CreatePlannedWaylineParam snakePayload = objectMapper.readValue(
+                "{\"area_polygon\":[{\"gcj_lng\":108.102,\"gcj_lat\":34.267,"
+                        + "\"wgs_lng\":108.0996,\"wgs_lat\":34.2657}]}",
+                CreatePlannedWaylineParam.class);
+        PlannedAreaVertexDTO camelCase = camelPayload.getAreaPolygon().get(0);
+        PlannedAreaVertexDTO snakeCase = snakePayload.getAreaPolygon().get(0);
+
+        assertAll(
+                () -> assertEquals(108.101, camelCase.getGcjLng()),
+                () -> assertEquals(34.266, camelCase.getGcjLat()),
+                () -> assertEquals(108.0986, camelCase.getWgsLng()),
+                () -> assertEquals(34.2647, camelCase.getWgsLat()),
+                () -> assertEquals(108.102, snakeCase.getGcjLng()),
+                () -> assertEquals(34.267, snakeCase.getGcjLat()),
+                () -> assertEquals(108.0996, snakeCase.getWgsLng()),
+                () -> assertEquals(34.2657, snakeCase.getWgsLat()));
+    }
+
     private static String readZipEntry(byte[] content, String entryName) throws IOException {
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
             ZipEntry entry = zipInputStream.getNextEntry();
@@ -2160,22 +2402,6 @@ class PlannedWaylineServiceTest {
             }
         }
         throw new AssertionError("Missing zip entry: " + entryName);
-    }
-
-    private static double firstTurnDamping(String wpml) {
-        Matcher matcher = Pattern.compile("<wpml:waypointTurnDampingDist>([^<]+)</wpml:waypointTurnDampingDist>")
-                .matcher(wpml);
-        if (!matcher.find()) {
-            throw new AssertionError("Missing waypointTurnDampingDist");
-        }
-        return Double.parseDouble(matcher.group(1));
-    }
-
-    private static String formatTurnDamping(double value) {
-        if (value == Math.floor(value)) {
-            return String.valueOf((long) value);
-        }
-        return String.valueOf(value);
     }
 
     private static byte[] buildM4tPilotRuntimeKmz() throws IOException {
@@ -2215,6 +2441,25 @@ class PlannedWaylineServiceTest {
                     + "<wpml:waypointTurnDampingDist>10</wpml:waypointTurnDampingDist></wpml:waypointTurnParam>"
                     + "<wpml:useStraightLine>0</wpml:useStraightLine></Placemark></Folder></Document></kml>")
                     .getBytes(StandardCharsets.UTF_8));
+            zipOutputStream.closeEntry();
+        }
+        return outputStream.toByteArray();
+    }
+
+    private static byte[] buildLegacyAreaKmz() throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
+            zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
+            zipOutputStream.write(("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    + "<kml xmlns:wpml=\"http://www.dji.com/wpmz/1.0.6\"><Document><Folder>"
+                    + "<Placemark><wpml:waypointTurnParam><wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>"
+                    + "<wpml:waypointTurnDampingDist>8.2</wpml:waypointTurnDampingDist></wpml:waypointTurnParam>"
+                    + "<wpml:actionGroup><wpml:actionTrigger><wpml:actionTriggerType>multipleTiming</wpml:actionTriggerType>"
+                    + "</wpml:actionTrigger><wpml:action><wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>"
+                    + "</wpml:action></wpml:actionGroup></Placemark>"
+                    + "<Placemark><wpml:waypointTurnParam><wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>"
+                    + "<wpml:waypointTurnDampingDist>8.2</wpml:waypointTurnDampingDist></wpml:waypointTurnParam></Placemark>"
+                    + "</Folder></Document></kml>").getBytes(StandardCharsets.UTF_8));
             zipOutputStream.closeEntry();
         }
         return outputStream.toByteArray();

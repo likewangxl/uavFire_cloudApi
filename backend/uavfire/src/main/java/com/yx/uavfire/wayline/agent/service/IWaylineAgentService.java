@@ -12,6 +12,13 @@ public interface IWaylineAgentService {
 
     WaylineAgentCommandDTO pollCommand(String droneSn);
 
+    /**
+     * True only when this backend instance has recently been polled by the
+     * RC-side wayline command router. Device telemetry alone is insufficient:
+     * older Agent builds can report online while never consuming wayline commands.
+     */
+    boolean hasRecentCommandPoll(String droneSn, long maxAgeMs);
+
     void acknowledgeCommand(String droneSn, WaylineAgentCommandAckDTO ack);
 
     WaylineAgentCommandDTO dispatchWayline(String droneSn, WaylineDispatchDataDTO data);

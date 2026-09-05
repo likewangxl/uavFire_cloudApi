@@ -1,0 +1,9 @@
+(function () {
+  var host = window.location.hostname;
+  var origin = window.location.protocol + '//' + window.location.host;
+  window.__UAVFIRE_RUNTIME_CONFIG__ = {
+    backendHost: origin,
+    websocketHost: (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host,
+    rtmpUrl: 'rtmp://' + host + ':{{ZLM_RTMP_PORT}}/live/'
+  };
+})();

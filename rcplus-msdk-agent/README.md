@@ -52,20 +52,25 @@ adb shell am start -n com.yinxin.uavfir/.MainActivity
 关键配置在 `gradle.properties`：
 
 ```text
-agentBackendBaseUrl=http://127.0.0.1:6789/
-agentMediaHost=127.0.0.1
-agentMediaRtmpPort=1935
+agentBackendBaseUrl=http://192.168.0.100:81/
+agentAiServiceBaseUrl=http://192.168.0.100:81/
+agentMediaHost=192.168.0.100
+agentMediaRtmpPort=8089
 agentMediaStreamApp=live
-agentMqttBrokerUrl=tcp://127.0.0.1:1883
+agentMqttBrokerUrl=tcp://192.168.0.100:1883
 agentWaylineSharedSecret=
 agentAircraftSn=
 agentGatewaySn=
-agentFireOnnxEnabled=false
-agentFireModelProfile=legacy416
+agentFireOnnxEnabled=true
+agentFireModelProfile=visible1088
 ```
 
 `agentWaylineSharedSecret` 必须与后端环境变量 `WAYLINE_AGENT_SHARED_SECRET` 一致；两端默认均为空，
 未显式配置时 Agent 火情事件和航线控制鉴权保持不可用。
+
+远端部署中 MQTT 通过 Paho 支持的 WebSocket URI 复用公网 HTTP 入口；Nginx 的 `/mqtt`
+必须把 WebSocket Upgrade 请求转发到 EMQX `127.0.0.1:8083/mqtt`。RTMP 仍使用独立 TCP
+局域网 Agent 直接使用 `192.168.0.100:8089` 推送 RTMP，不需要再经过外网端口映射。
 
 `agentAircraftSn` 为空时会禁用 OSD/HMS reporters；非空时 `DjiLiveStreamController` 也会优先用该 SN 生成 ZLM stream id。
 
@@ -78,21 +83,25 @@ agentPayloadPositionIndex=-1
 m300FireClosedLoopEnabled=false
 ```
 
-端侧同时保留两套 `fire/smoke` 模型，通过 `agentFireModelProfile` 在构建时选择：
+端侧同时保留三套 `fire/smoke` 模型，通过 `agentFireModelProfile` 在构建时选择：
 
 - `legacy416`（默认）：`best.onnx`，固定输入 `1×3×416×416`，SHA-256
   `68db8102b3ae591d2f1bca3e585d8bc1850933d608ae132a86f61eee89d42271`。
 - `visible960`（观察版）：`best-fire-smoke-960.onnx`，固定输入 `1×3×960×960`，SHA-256
   `24563198eb66e797ac3f32123dfe78410aeeb6ef766b936e825c3146686137a6`。该文件是把训练元数据
   `imgsz=640` 的 checkpoint 导出为 960 推理尺寸，并不是用 960 重新训练，效果和耗时仍需真机验证。
+- `visible1088`（当前 M300 实飞配置）：`best-fire-smoke-1088.onnx`，固定输入 `1×3×1088×1088`，
+  当前为 19 张误报负样本增量训练版本 `best-fire-smoke-hardneg19-1088-20260903`，SHA-256
+  `1ba96ad39f66fc8cc674d5155850996da1f311c34786675f661d980be75c8d1e`。
 
-960 观察版构建参数为
-`-PagentFireOnnxEnabled=true -PagentFireModelProfile=visible960 -Pm300FireClosedLoopEnabled=false`；
+当前 1088 飞行包构建参数为
+`-PagentFireOnnxEnabled=true -PagentFireModelProfile=visible1088 -Pm300FireClosedLoopEnabled=false`；
+960 观察版把 profile 改为 `visible960`；
 回退旧模型只需将 profile 改回 `legacy416` 后重新构建。
 Agent 最多同时执行一次推理，只保留最新待处理帧；同类目标需在 6 秒内连续命中两帧才上报，
 同一任务 10 秒内去重。后端将结果保存为 `UNLOCATED`、`MANUAL_CONFIRM` 的待确认候选，
-不会据此自动抵近、测距或投放。RC Plus 真机完成 RGBA、RTMP、ONNX 推理和 UXSDK 页面共存验收前，
-保持 `agentFireOnnxEnabled=false`；通过验收后再显式改为 `true` 并重新构建 APK。
+不会据此自动抵近、测距或投放。当前飞行包默认启用 1088 观察识别，但仍保持
+`m300FireClosedLoopEnabled=false`；需要仅推流回退包时必须显式传入 `-PagentFireOnnxEnabled=false`。
 
 识别结果不会直接从推理协程发 HTTP：Agent 先生成不超过 64 字符的稳定 `event_id`，写入
 本地 SQLite `fire_event_outbox`，再由单独工作线程调用

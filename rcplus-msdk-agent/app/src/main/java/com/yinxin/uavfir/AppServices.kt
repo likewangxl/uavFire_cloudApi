@@ -56,17 +56,22 @@ import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 class AppServices(
     application: Application,
+    onTrialExpired: () -> Unit = {},
 ) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val shutdownStarted = AtomicBoolean(false)
     private val kmzCacheDir = File(application.getExternalFilesDir(null), "wayline-kmz")
     private val localKmzDir = File(application.filesDir, "wayline-local")
     private val api = AgentBackendApiFactory.create()
@@ -199,9 +204,18 @@ class AppServices(
     )
 
     private val commandPoller = CompositeCommandPoller(
-        listOf(thermalHotspotMonitor, dualStreamPoller, waylineRouter),
+        listOf(thermalHotspotMonitor, dualStreamPoller),
         onFailure = { poller, error ->
             Log.e(TAG, "command poll failed poller=${poller.javaClass.simpleName}", error)
+        },
+    )
+    // 航线下发不能依赖状态上报/图传/测温所在的普通轮询链。普通链中任一网络或
+    // MSDK 调用变慢，都会让 WAYLINE_DISPATCH 长时间取不到。把航线与紧急飞控命令
+    // 放进独立的 500ms job，保证下发、暂停、恢复、停止都能及时到达执行器。
+    private val urgentCommandPoller = CompositeCommandPoller(
+        listOf(msdkControlPoller, waylineRouter),
+        onFailure = { poller, error ->
+            Log.e(TAG, "urgent command poll failed poller=${poller.javaClass.simpleName}", error)
         },
     )
     @Volatile
@@ -219,7 +233,7 @@ class AppServices(
         deviceSession = deviceSession,
         reporter = reporter,
         commandPoller = commandPoller,
-        urgentCommandPoller = msdkControlPoller,
+        urgentCommandPoller = urgentCommandPoller,
         sessionManager = sessionManager,
         scope = appScope,
         onIdentityActivated = { identity ->
@@ -228,6 +242,8 @@ class AppServices(
         onError = { stage, throwable ->
             Log.e(TAG, "runtime loop $stage failed", throwable)
         },
+        trialExpired = TrialExpirationPolicy()::isExpired,
+        onTrialExpired = onTrialExpired,
     )
 
     init {
@@ -402,10 +418,16 @@ class AppServices(
     }
 
     fun shutdown() {
+        if (!shutdownStarted.compareAndSet(false, true)) return
+        runtimeLoop.stop()
         osdReporter.stop()
         hmsReporter.stop()
         waypointExecutor.detach()
-        runtimeLoop.stop()
+        runBlocking {
+            withTimeoutOrNull(STREAM_SHUTDOWN_TIMEOUT_MS) {
+                sessionManager.stop()
+            }
+        }
         onDeviceFireDetectionCoordinator.close()
         fireEventOutbox.close()
         mqttPublisher.disconnect()
@@ -416,6 +438,7 @@ class AppServices(
         private const val TAG = "AppServices"
         private const val AUTO_START_DELAY_MS: Long = 6_000
         private const val AUTHORITY_RECONCILIATION_SETTLE_MS: Long = 250
+        private const val STREAM_SHUTDOWN_TIMEOUT_MS: Long = 10_000
     }
 }
 

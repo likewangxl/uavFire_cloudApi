@@ -644,6 +644,7 @@ import {
   setFlightPositionFromRecord,
   setFlightPositionFromWgs,
   setTrackedAircraft,
+  syncPlannedWaylineTrackSession,
 } from '/@/hooks/use-wayline-planning'
 import { getDeviceTopo } from '/@/api/manage'
 import { listMsdkDevices } from '/@/api/msdk-device'
@@ -656,6 +657,8 @@ import { loadFlightAreas, confirmComplianceBeforeAction } from '/@/hooks/use-fli
 import { getFc100GeneratedWaylineActions, beforeFc100WaylineUpload, uploadFc100WaylineFile, fc100PlanningState, fc100AircraftDevices, isFc100DeviceOnline, formatFc100DeliveryAircraftModel, getSelectedFc100DeviceSn, onFc100PreviewGeneratedWayline, handleFc100ImportGeneratedWaylineTask, handleFc100StartGeneratedWaylineTask, getFc100RouteTask, setFc100RouteTask, handleFc100GeneratedWaylineTaskStatus, handleFc100RopeDown, handleFc100RopeStop, handleFc100RopeUp, handleFc100ReleaseHook, handleFc100ReturnHome, canUseFc100TerminalControls, isFc100TerminalCommandLoading, fc100TerminalControlHint } from '/@/hooks/use-fc100-delivery'
 import type { FileItem } from '/@/components/wayline-planner/wayline-format'
 import { canOverwritePlannedWayline, formatNumber, formatPlannedWaylineStatus, formatSafePlannedWaylineTimestamp, formatTimestamp, getPlannedWaylineTaskReason, normalizePlannedWaylineStatus, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
+// @ts-ignore .mjs 纯计算策略（node 测试可直跑）
+import { selectActiveTrackRecord } from '/@/components/wayline-planner/flight-track-policy.mjs'
 
 const loading = ref(false)
 const store = useMyStore()
@@ -795,7 +798,10 @@ const savePlannedWaylineModal = reactive({
   waypointCount: 0,
 })
 
+const MSDK_FLIGHT_REFRESH_INTERVAL_MS = 1_000
 let topoTimer: number | null = null
+let msdkFlightTimer: number | null = null
+let msdkFlightRefreshInFlight = false
 
 const AIRCRAFT_MODEL_KEY_MAP: Record<string, string> = {
   [DEVICE_MODEL_KEY.M30]: 'M30',
@@ -958,6 +964,7 @@ function syncMsdkOnlineAircrafts (devices: MsdkDeviceState[], seen: Set<string>)
       setFlightPositionFromWgs(device.aircraftSn, device.longitude, device.latitude, {
         height: device.height,
         updatedAt: device.updatedAt || Date.now(),
+        source: 'msdk-agent',
       })
     }
   })
@@ -970,14 +977,17 @@ function syncSelectedAircraftFlightPosition (sn = selectedAircraftSn.value) {
     setFlightPositionFromWgs(sn, msdkDevice.longitude, msdkDevice.latitude, {
       height: msdkDevice.height,
       updatedAt: msdkDevice.updatedAt || Date.now(),
+      source: 'msdk-agent',
     })
     return
   }
+  if (planningState.flightTrackRecording) return
   const osd = store.state.deviceState.deviceInfo[sn]
   if (!osd) return
   setFlightPositionFromWgs(sn, (osd as any).longitude, (osd as any).latitude, {
     height: (osd as any).height,
     updatedAt: Date.now(),
+    source: 'cloud-osd',
   })
 }
 
@@ -1021,12 +1031,27 @@ function resolvePlanningExecutionTarget (): AircraftSummary | null {
 function isPlannedWaylineLive (record: PlannedWaylineRecord | null | undefined): boolean {
   if (!record) return false
   const status = normalizePlannedWaylineStatus(record)
-  return status === PlannedWaylineStatus.EXECUTING || status === PlannedWaylineStatus.PUBLISHING
+  return [
+    PlannedWaylineStatus.EXECUTING,
+    PlannedWaylineStatus.PAUSED,
+    PlannedWaylineStatus.BROKEN,
+  ].includes(status as PlannedWaylineStatus)
 }
 
-function applyPlannedWaylineFlightPosition (record: PlannedWaylineRecord | null | undefined) {
+function applyPlannedWaylineFlightPosition (
+  record: PlannedWaylineRecord | null | undefined,
+  allowTrackSwitch = false,
+) {
   const recordAircraftSn = getRecordAircraftSn(record)
   if (!recordAircraftSn) return
+  const recordId = record?.plannedWaylineId || ''
+  if (planningState.flightTrackPlannedWaylineId &&
+    recordId &&
+    planningState.flightTrackPlannedWaylineId !== recordId &&
+    !allowTrackSwitch) {
+    return
+  }
+  syncPlannedWaylineTrackSession(record, allowTrackSwitch)
   // 执行中的航线 → 该飞机认领地图跟踪，挡掉其它(停地)飞机的位置写入。
   if (isPlannedWaylineLive(record)) {
     setTrackedAircraft(recordAircraftSn)
@@ -1039,12 +1064,15 @@ function applyPlannedWaylineFlightPosition (record: PlannedWaylineRecord | null 
       updatedAt: msdkDevice.updatedAt || Date.now(),
       currentWaypointIndex: record?.currentWaypointIndex,
       totalWaypoints: record?.totalWaypoints,
+      source: 'msdk-agent',
     })
     return
   }
   if (onlineMsdkSnList.length > 0) {
     return
   }
+  // 任务执行期间宁可保留最后一个 Agent 点，也不回退到另一套 OSD 坐标源。
+  if (planningState.flightTrackRecording) return
   setFlightPositionFromRecord(record)
 }
 
@@ -1114,12 +1142,23 @@ function buildPagePlannedWaylineBody (name: string, aircraftModelKey: string): C
     aircraftSn: planningState.aircraftSn || '',
     defaultHeight,
     maxSpeed,
+    routeKind: planningState.routeKind,
+    areaPolygon: planningState.routeKind === 'area'
+      ? planningState.areaPolygon.map(vertex => {
+        const [wgsLng, wgsLat] = gcj02towgs84(vertex.gcjLng, vertex.gcjLat) as [number, number]
+        return { gcjLng: vertex.gcjLng, gcjLat: vertex.gcjLat, wgsLng, wgsLat }
+      })
+      : undefined,
+    areaCameraKey: planningState.routeKind === 'area' ? planningState.areaParams.cameraKey : undefined,
+    areaFrontOverlap: planningState.routeKind === 'area' ? planningState.areaParams.frontOverlap : undefined,
+    areaSideOverlap: planningState.routeKind === 'area' ? planningState.areaParams.sideOverlap : undefined,
+    areaHeadingDeg: planningState.routeKind === 'area' ? planningState.areaParams.headingDeg : undefined,
     // L1 全局 mission 配置 (undefined 时由后端 entity 默认值兜底)
     finishAction: planningState.finishAction ?? undefined,
-    exitOnRcLost: planningState.exitOnRcLost ?? undefined,
+    exitOnRcLost: planningState.exitOnRcLost ?? (planningState.routeKind === 'area' ? 'executeLostAction' : undefined),
     rcLostAction: planningState.rcLostAction ?? undefined,
-    takeoffSecurityHeight: planningState.takeoffSecurityHeight ?? undefined,
-    globalTransitionalSpeed: planningState.globalTransitionalSpeed ?? undefined,
+    takeoffSecurityHeight: planningState.takeoffSecurityHeight ?? (planningState.routeKind === 'area' ? 60 : undefined),
+    globalTransitionalSpeed: planningState.globalTransitionalSpeed ?? (planningState.routeKind === 'area' ? 15 : undefined),
     rthAltitude: planningState.rthAltitude ?? undefined,
     waypoints: planningState.waypoints.map((wp, idx) => buildPagePlannedWaypointBody(wp, idx, defaultHeight)),
   }
@@ -1162,6 +1201,22 @@ async function refreshOnlineAircrafts () {
   const aircrafts = onlineAircrafts.value
   if (!selectedAircraftSn.value && !planningState.executing && !planningState.active && aircrafts.length === 1) {
     onSelectAircraft(aircrafts[0].sn)
+  }
+}
+
+async function refreshMsdkFlightPosition () {
+  if (msdkFlightRefreshInFlight) return
+  msdkFlightRefreshInFlight = true
+  try {
+    const res = await listMsdkDevices()
+    if (res.code === 0 && Array.isArray(res.data)) {
+      // 位置单独按 1 Hz 拉取；设备拓扑仍按 5 秒刷新，避免为实时轨迹重复请求拓扑。
+      syncMsdkOnlineAircrafts(res.data, new Set<string>())
+    }
+  } catch (e) {
+    // 保留最后一个有效点，下一次轮询自动恢复。
+  } finally {
+    msdkFlightRefreshInFlight = false
   }
 }
 
@@ -1344,12 +1399,16 @@ async function refreshPlannedWaylines (reset = false) {
     if (res.code !== 0) return
     const list = res.data?.list || []
     plannedWaylinesData.data = reset ? list : [...plannedWaylinesData.data, ...list]
-    const activeRecord = plannedWaylinesData.data.find(record => {
-      const status = String(record.taskStatus || record.status || '').toLowerCase()
-      return ['executing', 'paused', 'broken'].includes(status) &&
-        (record.aircraftGcjLng != null || record.aircraftLng != null)
-    })
+    const activeRecord = selectActiveTrackRecord(
+      plannedWaylinesData.data,
+      planningState.flightTrackPlannedWaylineId,
+    ) as PlannedWaylineRecord | null
     if (activeRecord) applyPlannedWaylineFlightPosition(activeRecord)
+    if (!activeRecord && planningState.flightTrackPlannedWaylineId) {
+      const trackedRecord = plannedWaylinesData.data.find(record =>
+        record.plannedWaylineId === planningState.flightTrackPlannedWaylineId)
+      if (trackedRecord) syncPlannedWaylineTrackSession(trackedRecord)
+    }
     plannedWaylinesPagination.total = res.data?.pagination?.total ?? list.length
     plannedWaylinesPagination.page = res.data?.pagination?.page ?? plannedWaylinesPagination.page
     plannedWaylinesCanRefresh.value = Math.ceil(plannedWaylinesPagination.total / plannedWaylinesPagination.page_size) > plannedWaylinesPagination.page
@@ -1616,6 +1675,17 @@ async function confirmExecuteTarget () {
     if (prepareRes.code !== 0) return
     const executeRes = await executePlannedWaylineTask(workspaceId, record.plannedWaylineId, prepareBody)
     if (executeRes.code !== 0) return
+    // 不等待下一轮 2s 任务轮询：执行接口成功即建立轨迹会话、锁定 MSDK 定位源。
+    // execute 初始响应尚无 flightId 时先沿用 plannedWaylineId，拿到 flightId 后原地升级。
+    const executingRecord = {
+      ...record,
+      ...(executeRes.data || {}),
+      aircraftSn: targetDroneSn,
+      droneSn: targetDroneSn,
+      taskStatus: executeRes.data?.taskStatus || PlannedWaylineStatus.EXECUTING,
+      executedTime: executeRes.data?.executedTime || Date.now(),
+    } as PlannedWaylineRecord
+    applyPlannedWaylineFlightPosition(executingRecord, true)
     executeTargetModal.visible = false
     executeTargetModal.record = null
     executeTargetModal.targetSn = ''
@@ -1771,6 +1841,7 @@ onMounted(() => {
     selectedAircraftSn.value = planningState.aircraftSn || ''
     refreshOnlineAircrafts()
     topoTimer = window.setInterval(refreshOnlineAircrafts, 5000)
+    msdkFlightTimer = window.setInterval(refreshMsdkFlightPosition, MSDK_FLIGHT_REFRESH_INTERVAL_MS)
   }
 })
 
@@ -1779,6 +1850,10 @@ onUnmounted(() => {
   if (topoTimer !== null) {
     window.clearInterval(topoTimer)
     topoTimer = null
+  }
+  if (msdkFlightTimer !== null) {
+    window.clearInterval(msdkFlightTimer)
+    msdkFlightTimer = null
   }
   if (showPlanningTools.value) {
     if (planningState.executing) {

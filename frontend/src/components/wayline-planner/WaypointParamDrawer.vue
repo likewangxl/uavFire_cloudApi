@@ -110,14 +110,14 @@
             dropdown-class-name="planner-dark-dropdown"
             style="width: 100%;"
             :value="selectedWaypoint.turnMode"
-            placeholder="默认平滑过弯"
+            placeholder="默认严格过点"
             allow-clear
             :disabled="planningState.executing"
-            @change="(v: any) => updateWaypointField(selectedWaypoint!.id, 'turnMode', v ?? undefined)">
-            <a-select-option value="coordinateTurn">协调转弯</a-select-option>
-            <a-select-option value="toPointAndStopWithDiscontinuityCurvature">停止转弯</a-select-option>
-            <a-select-option value="toPointAndStopWithContinuityCurvature">平滑停止</a-select-option>
-            <a-select-option value="toPointAndPassWithContinuityCurvature">平滑通过</a-select-option>
+            @change="onTurnModeChange">
+            <a-select-option value="toPointAndStopWithDiscontinuityCurvature">严格过点（到点停）</a-select-option>
+            <a-select-option value="toPointAndPassWithContinuityCurvature">平滑通过（提前转弯）</a-select-option>
+            <a-select-option value="toPointAndStopWithContinuityCurvature">平滑到点后停</a-select-option>
+            <a-select-option value="coordinateTurn">协调转弯（提前转弯）</a-select-option>
           </a-select>
         </div>
         <div>
@@ -129,8 +129,8 @@
             :max="500"
             :step="1"
             :value="selectedWaypoint.turnDamping"
-            placeholder="10"
-            :disabled="planningState.executing"
+            :placeholder="isStrictTurnMode ? '0' : '10'"
+            :disabled="planningState.executing || isStrictTurnMode"
             @change="(v: any) => updateWaypointField(selectedWaypoint!.id, 'turnDamping', v ?? undefined)" />
         </div>
       </div>
@@ -170,11 +170,26 @@ const selectedWaypoint = computed(() =>
   planningState.waypoints.find(w => w.id === planningState.selectedWaypointId) || null)
 const selectedIndex = computed(() =>
   planningState.waypoints.findIndex(w => w.id === planningState.selectedWaypointId))
+const isStrictTurnMode = computed(() =>
+  !selectedWaypoint.value?.turnMode ||
+  selectedWaypoint.value.turnMode === 'toPointAndStopWithDiscontinuityCurvature')
 
 function onHeightChange (value: number | string | null) {
   const n = typeof value === 'number' ? value : Number(value)
   if (Number.isFinite(n) && selectedWaypoint.value) {
     updateWaypointHeight(selectedWaypoint.value.id, n)
+  }
+}
+
+function onTurnModeChange (value: string | undefined) {
+  const waypoint = selectedWaypoint.value
+  if (!waypoint) return
+  const mode = value || 'toPointAndStopWithDiscontinuityCurvature'
+  updateWaypointField(waypoint.id, 'turnMode', mode)
+  if (mode === 'toPointAndStopWithDiscontinuityCurvature') {
+    updateWaypointField(waypoint.id, 'turnDamping', 0)
+  } else if (!Number.isFinite(Number(waypoint.turnDamping)) || Number(waypoint.turnDamping) <= 0) {
+    updateWaypointField(waypoint.id, 'turnDamping', 10)
   }
 }
 

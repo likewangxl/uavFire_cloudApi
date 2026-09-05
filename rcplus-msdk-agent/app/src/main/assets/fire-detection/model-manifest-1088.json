@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "modelVersion": "best-fire-smoke-1088-20260902",
+  "modelVersion": "best-fire-smoke-hardneg19-1088-20260903",
   "assetPath": "fire-detection/best-fire-smoke-1088.onnx",
-  "sha256": "ea55d1d386b04dff9e4ff93ac621536cebd6364f23ccbd3eb7f27603331f39e1",
-  "sourceSha256": "ac0a10257b2bc1f20c9d957f8adeeb61dd6140322fc19d0b4a116cb491776d16",
+  "sha256": "1ba96ad39f66fc8cc674d5155850996da1f311c34786675f661d980be75c8d1e",
+  "sourceSha256": "2f3a25a87d44e70bd0bbd77df5d5cdc30945272926ce48c625a01b2089fc394e",
   "sourceTrainingImageSize": 640,
   "runtime": "onnxruntime-android-1.26.0",
-  "exporter": "ultralytics-8.4.42",
+  "exporter": "ultralytics-8.2.83",
   "opset": 17,
   "input": {
     "name": "images",
@@ -25,6 +25,6 @@
     "smoke": 0.55
   },
   "iouThreshold": 0.70,
-  "enabledByDefault": false,
-  "notes": "Fixed 1088 inference export for RC Plus observation; source checkpoint training metadata image size is 640. Automated flight closed loop remains disabled. Real-device accuracy, latency, thermals, and stability require validation."
+  "enabledByDefault": true,
+  "notes": "Hard-negative fine-tune using 19 cleaned false-positive event images, with positive rehearsal. Fixed 1088 inference export for RC Plus observation; source checkpoint training image size is 640. Automated flight closed loop remains disabled. Real-device accuracy, latency, thermals, and stability require validation."
 }

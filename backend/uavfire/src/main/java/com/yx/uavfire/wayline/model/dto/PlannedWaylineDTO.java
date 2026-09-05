@@ -37,6 +37,13 @@ public class PlannedWaylineDTO {
 
     private Double maxSpeed;
 
+    private String routeKind;
+    private List<PlannedAreaVertexDTO> areaPolygon;
+    private String areaCameraKey;
+    private Integer areaFrontOverlap;
+    private Integer areaSideOverlap;
+    private Double areaHeadingDeg;
+
     // L1 mission 配置
     private String finishAction;
     private String exitOnRcLost;

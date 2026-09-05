@@ -1,0 +1,16 @@
+per_listener_settings false
+allow_anonymous false
+password_file {{ROOT_FORWARD}}/config/mosquitto.passwd
+log_dest file {{ROOT_FORWARD}}/data/logs/mosquitto.log
+persistence true
+persistence_location {{ROOT_FORWARD}}/data/mosquitto/
+
+# The RC Plus Agent publishes device topology and OSD over the authenticated
+# native MQTT listener. Bind it to LAN interfaces; Windows Firewall controls
+# reachability and the password file still enforces authentication.
+listener {{MQTT_PORT}} 0.0.0.0
+protocol mqtt
+
+listener {{MQTT_WS_PORT}} 127.0.0.1
+protocol websockets
+http_dir {{ROOT_FORWARD}}/app/frontend

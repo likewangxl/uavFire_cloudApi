@@ -1,6 +1,7 @@
 package com.yx.uavfire.wayline.model.param;
 
 import com.yx.uavfire.wayline.model.dto.PlannedWaypointDTO;
+import com.yx.uavfire.wayline.model.dto.PlannedAreaVertexDTO;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
@@ -55,6 +56,27 @@ public class CreatePlannedWaylineParam {
     @JsonSetter(nulls = Nulls.SKIP)
     @Builder.Default
     private Double maxSpeed = 5.0;
+
+    @JsonAlias({"routeKind", "route_kind"})
+    @JsonSetter(nulls = Nulls.SKIP)
+    @Builder.Default
+    private String routeKind = "waypoint";
+
+    @Valid
+    @JsonAlias({"areaPolygon", "area_polygon"})
+    private List<PlannedAreaVertexDTO> areaPolygon;
+
+    @JsonAlias({"areaCameraKey", "area_camera_key"})
+    private String areaCameraKey;
+
+    @JsonAlias({"areaFrontOverlap", "area_front_overlap"})
+    private Integer areaFrontOverlap;
+
+    @JsonAlias({"areaSideOverlap", "area_side_overlap"})
+    private Integer areaSideOverlap;
+
+    @JsonAlias({"areaHeadingDeg", "area_heading_deg"})
+    private Double areaHeadingDeg;
 
     // ---- L1 mission 配置(可选,缺省走 DB 列默认值)。契约见 WAYLINE_L1_L2_CONTRACT.md 2.3 ----
 

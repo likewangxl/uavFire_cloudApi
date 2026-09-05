@@ -75,11 +75,27 @@ function validatePlannedWaylineBody<T extends CreatePlannedWaylineBody | UpdateP
       throw new Error('M300 payload model and position are required')
     }
   }
+  if (body.routeKind === 'area' && (!Array.isArray(body.areaPolygon) || body.areaPolygon.length < 3)) {
+    message.error('面状航线缺少测区边界，请重新圈定测区后保存。')
+    throw new Error('planned area polygon requires at least 3 vertices')
+  }
   return {
     ...body,
     aircraftModelKey,
     defaultHeight: positiveNumber(body.defaultHeight, DEFAULT_PLANNED_WAYLINE_HEIGHT),
     maxSpeed: positiveNumber(body.maxSpeed, DEFAULT_PLANNED_WAYLINE_SPEED),
+    areaPolygon: Array.isArray(body.areaPolygon)
+      ? body.areaPolygon.map((vertex, index) => {
+        const gcjLng = finiteNumber(vertex?.gcjLng)
+        const gcjLat = finiteNumber(vertex?.gcjLat)
+        const wgsLng = finiteNumber(vertex?.wgsLng)
+        const wgsLat = finiteNumber(vertex?.wgsLat)
+        if (gcjLng === null || gcjLat === null || wgsLng === null || wgsLat === null) {
+          throw new Error(`planned area vertex[${index}] coordinates required`)
+        }
+        return { gcjLng, gcjLat, wgsLng, wgsLat }
+      })
+      : undefined,
     waypoints: body.waypoints.map((waypoint, index) => assertPlannedWaypoint(waypoint, index)),
   }
 }
@@ -130,6 +146,25 @@ function normalizePlannedWaylineResponse (record: any): PlannedWaylineRecord {
     aircraftSn: record?.aircraftSn ?? record?.aircraft_sn,
     defaultHeight: record?.defaultHeight ?? record?.default_height,
     maxSpeed: record?.maxSpeed ?? record?.max_speed,
+    routeKind: record?.routeKind ?? record?.route_kind ?? 'waypoint',
+    areaPolygon: Array.isArray(record?.areaPolygon ?? record?.area_polygon)
+      ? (record.areaPolygon ?? record.area_polygon).map((vertex: any) => ({
+          gcjLng: vertex?.gcjLng ?? vertex?.gcj_lng,
+          gcjLat: vertex?.gcjLat ?? vertex?.gcj_lat,
+          wgsLng: vertex?.wgsLng ?? vertex?.wgs_lng,
+          wgsLat: vertex?.wgsLat ?? vertex?.wgs_lat,
+        }))
+      : [],
+    areaCameraKey: record?.areaCameraKey ?? record?.area_camera_key,
+    areaFrontOverlap: record?.areaFrontOverlap ?? record?.area_front_overlap,
+    areaSideOverlap: record?.areaSideOverlap ?? record?.area_side_overlap,
+    areaHeadingDeg: record?.areaHeadingDeg ?? record?.area_heading_deg,
+    finishAction: record?.finishAction ?? record?.finish_action,
+    exitOnRcLost: record?.exitOnRcLost ?? record?.exit_on_rc_lost,
+    rcLostAction: record?.rcLostAction ?? record?.rc_lost_action,
+    takeoffSecurityHeight: record?.takeoffSecurityHeight ?? record?.takeoff_security_height,
+    globalTransitionalSpeed: record?.globalTransitionalSpeed ?? record?.global_transitional_speed,
+    rthAltitude: record?.rthAltitude ?? record?.rth_altitude,
     waypoints: Array.isArray(record?.waypoints) ? record.waypoints.map(normalizePlannedWaypointResponse) : [],
     status: record?.status,
     publishedWaylineId: record?.publishedWaylineId ?? record?.published_wayline_id,

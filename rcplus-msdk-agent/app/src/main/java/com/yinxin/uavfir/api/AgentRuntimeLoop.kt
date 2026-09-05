@@ -1,5 +1,6 @@
 package com.yinxin.uavfir.api
 
+import com.yinxin.uavfir.BuildConfig
 import com.yinxin.uavfir.sdk.CameraCapability
 import com.yinxin.uavfir.sdk.DjiDeviceIdentity
 import com.yinxin.uavfir.sdk.DjiDeviceSessionAdapter
@@ -29,6 +30,8 @@ class AgentRuntimeLoop(
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
     private val sessionRetryIntervalMs: Long = DEFAULT_SESSION_RETRY_INTERVAL_MS,
     private val clockMs: () -> Long = { System.currentTimeMillis() },
+    private val trialExpired: () -> Boolean = { false },
+    private val onTrialExpired: () -> Unit = {},
 ) {
     private var loopJob: Job? = null
     private var urgentCommandJob: Job? = null
@@ -39,6 +42,7 @@ class AgentRuntimeLoop(
     private var activeIdentity: DjiDeviceIdentity? = null
 
     fun start(droneSn: String) {
+        if (stopForTrialExpiration()) return
         if (loopJob?.isActive == true) {
             debug("start skipped, runtime loop already active for $droneSn")
             return
@@ -46,6 +50,7 @@ class AgentRuntimeLoop(
         debug("starting runtime loop for $droneSn")
         loopJob = scope.launch(dispatcher) {
             while (isActive) {
+                if (stopForTrialExpiration()) break
                 tickOnce(droneSn)
                 delay(intervalMs)
             }
@@ -68,6 +73,7 @@ class AgentRuntimeLoop(
         }
         urgentCommandJob = scope.launch(dispatcher) {
             while (isActive) {
+                if (stopForTrialExpiration()) break
                 val pollSn = activeIdentity?.aircraftSn ?: droneSn.takeIf { it.isNotBlank() }
                 if (pollSn != null) {
                     runCatching { poller.pollOnce(pollSn) }
@@ -79,6 +85,7 @@ class AgentRuntimeLoop(
     }
 
     suspend fun tickOnce(droneSn: String) {
+        if (stopForTrialExpiration()) return
         debug("tick start for $droneSn")
         val deviceState = runCatching { deviceSession.initialize() }
             .getOrElse { throwable ->
@@ -209,6 +216,12 @@ class AgentRuntimeLoop(
         println("$TAG: $message")
     }
 
+    private fun stopForTrialExpiration(): Boolean {
+        if (!trialExpired()) return false
+        onTrialExpired()
+        return true
+    }
+
     private suspend fun safeReportHeartbeat(
         droneSn: String,
         connectionState: AgentConnectionState,
@@ -271,6 +284,9 @@ class AgentRuntimeLoop(
                     gpsCount = telemetry?.gpsCount,
                     rtkCount = telemetry?.rtkCount,
                     positionFixed = telemetry?.positionFixed,
+                    agentVersionName = BuildConfig.VERSION_NAME,
+                    agentVersionCode = BuildConfig.VERSION_CODE.toLong(),
+                    waylineCommandSupported = true,
                     capabilities = mapOf(
                         "takeoff" to true,
                         "land" to true,
@@ -291,6 +307,7 @@ class AgentRuntimeLoop(
                         "nightScene" to true,
                         "navigationLight" to true,
                         "laserFillLight" to true,
+                        "wayline" to true,
                         "visibleStream" to (capability?.visibleSupported == true),
                         "thermalFocus" to (capability?.thermalSupported == true),
                         "thermalSecondStream" to false,
@@ -328,7 +345,9 @@ class AgentRuntimeLoop(
     companion object {
         private const val TAG = "AgentRuntimeLoop"
         const val DEFAULT_GATEWAY_SN: String = "RC_PLUS_LOCAL"
-        const val DEFAULT_INTERVAL_MS: Long = 5_000
+        // 航线页以该 MSDK 状态作为唯一飞行轨迹源；1 Hz 可把 5 m/s 巡航时的
+        // 可视采样间距由约 25 m 降到约 5 m，同时保持 HTTP 上报负载可控。
+        const val DEFAULT_INTERVAL_MS: Long = 1_000
         const val DEFAULT_URGENT_COMMAND_INTERVAL_MS: Long = 500
         const val DEFAULT_SESSION_RETRY_INTERVAL_MS: Long = 15_000
     }

@@ -30,6 +30,8 @@ import rootStore from '/@/store'
 import { uuidv4 } from '/@/utils/uuid'
 // @ts-ignore .mjs 纯计算模块（node 测试可直跑）
 import { generateAreaCoverage, getCameraPreset, lineSpacingFromOverlap } from '/@/components/wayline-planner/area-utils.mjs'
+// @ts-ignore .mjs 纯计算策略（node 测试可直跑）
+import { plannedWaylineTrackState, shouldAcceptFlightPosition } from '/@/components/wayline-planner/flight-track-policy.mjs'
 
 export interface PlannedWaypoint {
   id: string
@@ -65,6 +67,7 @@ export interface FlightPosition {
   updatedAt?: number
   currentWaypointIndex?: number
   totalWaypoints?: number
+  source?: 'cloud-osd' | 'msdk-agent' | 'planned-record' | 'unknown'
 }
 
 export enum PlanningExecState {
@@ -81,6 +84,10 @@ const DEFAULT_REACH_STABLE_MS = 1500
 const DEFAULT_HEIGHT_M = 30
 const DEFAULT_MAX_SPEED = 5
 const DEFAULT_AIRCRAFT_MODEL_KEY = 'M30T'
+// M300 适配分支的面状航线以 Pilot 样例中的 Zenmuse H20T 参数为默认值。
+// 其他载荷仍可在面状航线参数面板中显式选择。
+const DEFAULT_AREA_CAMERA_KEY = 'H20T'
+const DEFAULT_WAYPOINT_TURN_MODE: WaypointTurnMode = 'toPointAndStopWithDiscontinuityCurvature'
 const WAYPOINT_EXECUTION_TIMEOUT_MS = 90_000
 const MIN_WAYPOINT_SPACING_M = 16
 const PLANNING_DRAFT_VERSION = 1
@@ -92,12 +99,13 @@ const state = reactive({
   waypoints: [] as PlannedWaypoint[],
   previewWaypoints: [] as PlannedWaypoint[],
   previewTitle: '',
+  previewMaxSpeed: undefined as number | undefined,
   // 航线类型：waypoint=逐点布点；patrol=闭合回路（保存时末点接回首点）；
   // area=面状（先画多边形 areaPolygon，再按相机重叠率生成弓字形航点）。
   routeKind: 'waypoint' as 'waypoint' | 'patrol' | 'area',
   areaPolygon: [] as Array<{ gcjLng: number; gcjLat: number }>,
   areaParams: {
-    cameraKey: 'M30T',
+    cameraKey: DEFAULT_AREA_CAMERA_KEY,
     frontOverlap: 80,
     sideOverlap: 70,
     headingDeg: 0,
@@ -124,6 +132,11 @@ const state = reactive({
   // 位置写进单一 flightPosition 槽，导致飞机在两架之间来回跳。以此为唯一闸门：
   // 只接受跟踪目标那架的位置写入。由“正在执行任务的飞机”/“用户显式选择”设定。
   trackedAircraftSn: '',
+  // 轨迹按任务隔离；revision 用于通知地图立即清掉上一任务的折线。
+  flightTrackSessionId: '',
+  flightTrackPlannedWaylineId: '',
+  flightTrackRevision: 0,
+  flightTrackRecording: false,
   // 自增令牌：每次需要把地图居中到飞机时 +1。GMap 监听它并执行一次性居中
   // （进入航线页面时由 wayline.vue 触发），不做持续跟随。
   recenterAircraftToken: 0,
@@ -148,6 +161,14 @@ interface PersistedPlanningDraft {
   takeoffSecurityHeight?: number
   globalTransitionalSpeed?: number
   rthAltitude?: number
+  routeKind?: 'waypoint' | 'patrol' | 'area'
+  areaPolygon?: Array<{ gcjLng: number; gcjLat: number }>
+  areaParams?: {
+    cameraKey: string
+    frontOverlap: number
+    sideOverlap: number
+    headingDeg: number
+  }
   waypoints: PlannedWaypoint[]
 }
 
@@ -165,6 +186,9 @@ function buildPersistedDraft (): PersistedPlanningDraft {
     takeoffSecurityHeight: state.takeoffSecurityHeight,
     globalTransitionalSpeed: state.globalTransitionalSpeed,
     rthAltitude: state.rthAltitude,
+    routeKind: state.routeKind,
+    areaPolygon: state.areaPolygon.map(vertex => ({ ...vertex })),
+    areaParams: { ...state.areaParams },
     waypoints: state.waypoints.map(wp => ({ ...wp })),
   }
 }
@@ -203,6 +227,18 @@ function restoreDraft () {
     state.takeoffSecurityHeight = Number.isFinite(Number(parsed.takeoffSecurityHeight)) ? Number(parsed.takeoffSecurityHeight) : undefined
     state.globalTransitionalSpeed = Number.isFinite(Number(parsed.globalTransitionalSpeed)) ? Number(parsed.globalTransitionalSpeed) : undefined
     state.rthAltitude = Number.isFinite(Number(parsed.rthAltitude)) ? Number(parsed.rthAltitude) : undefined
+    state.routeKind = parsed.routeKind === 'patrol' || parsed.routeKind === 'area' ? parsed.routeKind : 'waypoint'
+    state.areaPolygon = Array.isArray(parsed.areaPolygon)
+      ? parsed.areaPolygon
+        .map(vertex => ({ gcjLng: Number(vertex.gcjLng), gcjLat: Number(vertex.gcjLat) }))
+        .filter(vertex => Number.isFinite(vertex.gcjLng) && Number.isFinite(vertex.gcjLat))
+      : []
+    if (parsed.areaParams) {
+      state.areaParams.cameraKey = typeof parsed.areaParams.cameraKey === 'string' ? parsed.areaParams.cameraKey : DEFAULT_AREA_CAMERA_KEY
+      state.areaParams.frontOverlap = Number.isFinite(Number(parsed.areaParams.frontOverlap)) ? Number(parsed.areaParams.frontOverlap) : 80
+      state.areaParams.sideOverlap = Number.isFinite(Number(parsed.areaParams.sideOverlap)) ? Number(parsed.areaParams.sideOverlap) : 70
+      state.areaParams.headingDeg = Number.isFinite(Number(parsed.areaParams.headingDeg)) ? Number(parsed.areaParams.headingDeg) : 0
+    }
     const draftWaypoints = Array.isArray(parsed.waypoints) ? parsed.waypoints : []
     const restoredWaypoints = draftWaypoints.map(wp => normalizePlannedWaypoint(wp as PlannedWaypoint))
     state.waypoints = restoredWaypoints
@@ -337,7 +373,91 @@ export function updateAircraftFlightPosition (position: FlightPosition | null) {
   if (position && state.trackedAircraftSn && position.aircraftSn !== state.trackedAircraftSn) {
     return
   }
+  // 规划航线执行期间固定使用 Agent 设备状态。Cloud OSD 与 Agent 的上报频率、
+  // 设备身份映射不同，混写同一个 marker 会让飞机在当前位置和起飞点之间跳变。
+  if (position && state.flightTrackRecording && position.source === 'cloud-osd') {
+    return
+  }
+  if (position && state.flightPosition && !shouldAcceptFlightPosition(state.flightPosition, position)) {
+    // 迟到的低频 Agent/任务轮询不得把实时 OSD 坐标拉回去；航点进度仍可合并。
+    if (position.aircraftSn === state.flightPosition.aircraftSn) {
+      if (position.currentWaypointIndex != null) state.flightPosition.currentWaypointIndex = position.currentWaypointIndex
+      if (position.totalWaypoints != null) state.flightPosition.totalWaypoints = position.totalWaypoints
+    }
+    return
+  }
+  if (position && state.flightPosition?.aircraftSn === position.aircraftSn) {
+    // MSDK 设备状态提供最新坐标，但不带航点序号。保留同一任务最近一次进度，
+    // 避免每次位置轮询都把 2/10 一类标签清空。
+    state.flightPosition = {
+      ...position,
+      currentWaypointIndex: position.currentWaypointIndex ?? state.flightPosition.currentWaypointIndex,
+      totalWaypoints: position.totalWaypoints ?? state.flightPosition.totalWaypoints,
+    }
+    return
+  }
   state.flightPosition = position
+}
+
+export function updateFlightPositionProgress (
+  aircraftSn: string,
+  currentWaypointIndex?: number,
+  totalWaypoints?: number,
+) {
+  if (!state.flightPosition || state.flightPosition.aircraftSn !== aircraftSn) return
+  if (currentWaypointIndex != null) state.flightPosition.currentWaypointIndex = currentWaypointIndex
+  if (totalWaypoints != null) state.flightPosition.totalWaypoints = totalWaypoints
+}
+
+function beginFlightTrackSession (sessionId: string, plannedWaylineId = '', allowSwitch = false): boolean {
+  if (!sessionId) return false
+  const ownedByAnotherPlannedWayline = !!state.flightTrackPlannedWaylineId &&
+    !!plannedWaylineId &&
+    state.flightTrackPlannedWaylineId !== plannedWaylineId
+  if (ownedByAnotherPlannedWayline && !allowSwitch) return false
+  const isSameActivePlannedWayline = state.flightTrackRecording &&
+    !!plannedWaylineId &&
+    state.flightTrackPlannedWaylineId === plannedWaylineId
+  if (state.flightTrackSessionId !== sessionId && !isSameActivePlannedWayline) {
+    state.flightTrackSessionId = sessionId
+    state.flightTrackPlannedWaylineId = plannedWaylineId
+    state.flightTrackRevision += 1
+    state.flightPosition = null
+  } else {
+    // execute 初始响应没有 flightId 时先用 plannedWaylineId；轮询拿到真实
+    // flightId 后只升级会话标识，不重置本次已经采集的点。
+    state.flightTrackSessionId = sessionId
+    if (plannedWaylineId) state.flightTrackPlannedWaylineId = plannedWaylineId
+  }
+  state.flightTrackRecording = true
+  return true
+}
+
+function finishFlightTrackSession (sessionId?: string, plannedWaylineId = '') {
+  const matchesPlannedWayline = !!plannedWaylineId &&
+    state.flightTrackPlannedWaylineId === plannedWaylineId
+  if (!sessionId || state.flightTrackSessionId === sessionId || matchesPlannedWayline) {
+    state.flightTrackRecording = false
+  }
+}
+
+export function syncPlannedWaylineTrackSession (
+  record: PlannedWaylineRecord | null | undefined,
+  allowSwitch = false,
+): boolean {
+  if (!record) return false
+  const track = plannedWaylineTrackState(record)
+  if (!track.sessionId) return false
+  if (track.recording) {
+    return beginFlightTrackSession(track.sessionId, record.plannedWaylineId, allowSwitch)
+  } else if (track.terminal) {
+    if (state.flightTrackPlannedWaylineId && state.flightTrackPlannedWaylineId !== record.plannedWaylineId) {
+      return false
+    }
+    finishFlightTrackSession(track.sessionId, record.plannedWaylineId)
+    return true
+  }
+  return false
 }
 
 // 设定地图跟踪的飞机（在飞的飞机或用户显式选择的飞机）。切换目标时清掉旧飞机的
@@ -366,6 +486,7 @@ export function setFlightPositionFromWgs (
     updatedAt?: unknown
     currentWaypointIndex?: number
     totalWaypoints?: number
+    source?: FlightPosition['source']
   } = {},
 ) {
   const lng = finiteNumber(wgsLng)
@@ -385,6 +506,7 @@ export function setFlightPositionFromWgs (
     updatedAt: finiteNumber(options.updatedAt) ?? Date.now(),
     currentWaypointIndex: options.currentWaypointIndex,
     totalWaypoints: options.totalWaypoints,
+    source: options.source || 'unknown',
   })
 }
 
@@ -399,6 +521,7 @@ export function setFlightPositionFromGcj (
     updatedAt?: unknown
     currentWaypointIndex?: number
     totalWaypoints?: number
+    source?: FlightPosition['source']
   } = {},
 ) {
   const gcjLng = finiteNumber(gcjLngValue)
@@ -414,6 +537,7 @@ export function setFlightPositionFromGcj (
     updatedAt: finiteNumber(options.updatedAt) ?? Date.now(),
     currentWaypointIndex: options.currentWaypointIndex,
     totalWaypoints: options.totalWaypoints,
+    source: options.source || 'unknown',
   })
 }
 
@@ -432,6 +556,7 @@ export function setFlightPositionFromRecord (record: PlannedWaylineRecord | null
       updatedAt: finiteNumber(record.aircraftUpdatedAt) ?? record.lastProgressTime,
       currentWaypointIndex: record.currentWaypointIndex,
       totalWaypoints: record.totalWaypoints,
+      source: 'planned-record',
     })
     return
   }
@@ -447,6 +572,7 @@ export function setFlightPositionFromRecord (record: PlannedWaylineRecord | null
     updatedAt: finiteNumber(record.aircraftUpdatedAt) ?? record.lastProgressTime,
     currentWaypointIndex: record.currentWaypointIndex,
     totalWaypoints: record.totalWaypoints,
+    source: 'planned-record',
   })
 }
 
@@ -518,6 +644,7 @@ export function clearWaypoints () {
 export function clearPlannedWaylinePreview () {
   state.previewWaypoints = []
   state.previewTitle = ''
+  state.previewMaxSpeed = undefined
 }
 
 export function setRouteKind (kind: 'waypoint' | 'patrol' | 'area') {
@@ -626,6 +753,8 @@ export function addWaypointGcj (gcjLng: number, gcjLat: number, height?: number)
     wgsLng,
     wgsLat,
     height: Number.isFinite(height) ? (height as number) : state.defaultHeight,
+    turnMode: DEFAULT_WAYPOINT_TURN_MODE,
+    turnDamping: 0,
   }
   state.waypoints.push(wp)
   state.selectedWaypointId = wp.id
@@ -688,6 +817,8 @@ export function insertWaypointAfterGcj (afterId: string, gcjLng: number, gcjLat:
     wgsLng,
     wgsLat,
     height: prev.height,
+    turnMode: DEFAULT_WAYPOINT_TURN_MODE,
+    turnDamping: 0,
   }
   state.waypoints.splice(idx + 1, 0, wp)
   state.selectedWaypointId = wp.id
@@ -758,11 +889,22 @@ export function buildPlannedWaylineBody (name: string, aircraftModelKey?: string
     aircraftSn: state.aircraftSn,
     defaultHeight: normalizePositiveNumber(state.defaultHeight, DEFAULT_HEIGHT_M),
     maxSpeed: normalizePositiveNumber(state.maxSpeed, DEFAULT_MAX_SPEED),
+    routeKind: state.routeKind,
+    areaPolygon: state.routeKind === 'area'
+      ? state.areaPolygon.map(vertex => {
+        const [wgsLng, wgsLat] = gcj02towgs84(vertex.gcjLng, vertex.gcjLat) as [number, number]
+        return { gcjLng: vertex.gcjLng, gcjLat: vertex.gcjLat, wgsLng, wgsLat }
+      })
+      : undefined,
+    areaCameraKey: state.routeKind === 'area' ? state.areaParams.cameraKey : undefined,
+    areaFrontOverlap: state.routeKind === 'area' ? state.areaParams.frontOverlap : undefined,
+    areaSideOverlap: state.routeKind === 'area' ? state.areaParams.sideOverlap : undefined,
+    areaHeadingDeg: state.routeKind === 'area' ? state.areaParams.headingDeg : undefined,
     finishAction: state.finishAction,
-    exitOnRcLost: state.exitOnRcLost,
+    exitOnRcLost: state.exitOnRcLost ?? (state.routeKind === 'area' ? 'executeLostAction' : undefined),
     rcLostAction: state.rcLostAction,
-    takeoffSecurityHeight: state.takeoffSecurityHeight,
-    globalTransitionalSpeed: state.globalTransitionalSpeed,
+    takeoffSecurityHeight: state.takeoffSecurityHeight ?? (state.routeKind === 'area' ? 60 : undefined),
+    globalTransitionalSpeed: state.globalTransitionalSpeed ?? (state.routeKind === 'area' ? 15 : undefined),
     rthAltitude: state.rthAltitude,
     waypoints: bodyWaypoints.map((wp, idx) => buildPlannedWaypointBody(normalizePlannedWaypoint(wp), idx)),
   }
@@ -775,9 +917,20 @@ export function loadPlannedWayline (record: PlannedWaylineRecord) {
   state.executing = false
   state.execState = PlanningExecState.IDLE
   state.currentIndex = -1
-  // 后端不存航线类型，读回的航线统一按航点航线编辑
-  state.routeKind = 'waypoint'
-  state.areaPolygon = []
+  state.routeKind = record.routeKind === 'patrol' || record.routeKind === 'area' ? record.routeKind : 'waypoint'
+  state.areaPolygon = Array.isArray(record.areaPolygon)
+    ? record.areaPolygon.map(vertex => {
+      if (Number.isFinite(Number(vertex.gcjLng)) && Number.isFinite(Number(vertex.gcjLat))) {
+        return { gcjLng: Number(vertex.gcjLng), gcjLat: Number(vertex.gcjLat) }
+      }
+      const [gcjLng, gcjLat] = wgs84togcj02(Number(vertex.wgsLng), Number(vertex.wgsLat)) as [number, number]
+      return { gcjLng, gcjLat }
+    })
+    : []
+  state.areaParams.cameraKey = record.areaCameraKey || DEFAULT_AREA_CAMERA_KEY
+  state.areaParams.frontOverlap = Number.isFinite(Number(record.areaFrontOverlap)) ? Number(record.areaFrontOverlap) : 80
+  state.areaParams.sideOverlap = Number.isFinite(Number(record.areaSideOverlap)) ? Number(record.areaSideOverlap) : 70
+  state.areaParams.headingDeg = Number.isFinite(Number(record.areaHeadingDeg)) ? Number(record.areaHeadingDeg) : 0
   state.editingPlannedWaylineId = record.plannedWaylineId
   state.aircraftModelKey = record.aircraftModelKey
   state.gatewaySn = record.gatewaySn
@@ -830,6 +983,7 @@ export function previewPlannedWayline (record: PlannedWaylineRecord) {
     actions: Array.isArray(wp.actions) ? wp.actions.map(a => ({ ...a, params: a.params ? { ...a.params } : undefined })) : undefined,
   }))
   state.previewTitle = record.name || ''
+  state.previewMaxSpeed = Number.isFinite(Number(record.maxSpeed)) ? Number(record.maxSpeed) : DEFAULT_MAX_SPEED
   state.statusText = record.name ? `预览规划航线“${record.name}”。` : '预览规划航线。'
 }
 
@@ -846,6 +1000,10 @@ export function resetPlanningDraft () {
   state.waypoints = []
   state.routeKind = 'waypoint'
   state.areaPolygon = []
+  state.areaParams.cameraKey = DEFAULT_AREA_CAMERA_KEY
+  state.areaParams.frontOverlap = 80
+  state.areaParams.sideOverlap = 70
+  state.areaParams.headingDeg = 0
   clearPlannedWaylinePreview()
   state.defaultHeight = DEFAULT_HEIGHT_M
   state.maxSpeed = DEFAULT_MAX_SPEED
@@ -858,6 +1016,10 @@ export function resetPlanningDraft () {
   state.statusText = ''
   state.lastError = ''
   state.flightPosition = null
+  state.flightTrackSessionId = ''
+  state.flightTrackPlannedWaylineId = ''
+  state.flightTrackRecording = false
+  state.flightTrackRevision += 1
   persistDraft()
 }
 
@@ -950,6 +1112,7 @@ function defaultParamsFor (actuatorFunc: WaypointActuatorFunc): Record<string, s
 function abortExecution (reason: 'error' | 'stopped' | 'done') {
   activeExecutionId += 1
   resetExecutionInternal()
+  finishFlightTrackSession()
   if (reason === 'done') {
     state.execState = PlanningExecState.STOPPED
     state.statusText = 'Execution finished.'
@@ -1112,6 +1275,7 @@ export async function startExecution () {
   ensureWsSubscription()
   activeExecutionId += 1
   const executionId = activeExecutionId
+  beginFlightTrackSession(`manual:${executionId}`, '', true)
   state.executing = true
   state.active = false
   state.lastError = ''

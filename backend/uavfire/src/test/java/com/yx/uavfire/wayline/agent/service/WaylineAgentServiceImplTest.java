@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -53,6 +54,19 @@ class WaylineAgentServiceImplTest {
     void pollCommand_returnsNullWhenNoCommandPending() {
         WaylineAgentServiceImpl svc = new WaylineAgentServiceImpl();
         assertNull(svc.pollCommand("SN-A"));
+    }
+
+    @Test
+    void recentCommandPoll_tracksRouterLivenessEvenWhenQueueIsEmpty() {
+        AtomicLong now = new AtomicLong(10_000L);
+        WaylineAgentServiceImpl svc = new WaylineAgentServiceImpl(now::get);
+
+        assertFalse(svc.hasRecentCommandPoll("SN-A", 15_000L));
+        assertNull(svc.pollCommand("SN-A"));
+        assertTrue(svc.hasRecentCommandPoll("SN-A", 15_000L));
+
+        now.set(25_001L);
+        assertFalse(svc.hasRecentCommandPoll("SN-A", 15_000L));
     }
 
     @Test

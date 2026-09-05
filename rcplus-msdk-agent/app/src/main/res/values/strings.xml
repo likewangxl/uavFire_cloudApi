@@ -7,6 +7,8 @@
     <string name="app_status_placeholder">MSDK 控制通道待刷新。</string>
     <string name="app_status_running">执行中: %1$s</string>
     <string name="app_status_error">执行失败: %1$s\n原因: %2$s</string>
+    <string name="trial_expired_short">试用期已结束</string>
+    <string name="trial_expired_message">本试用版本已于 2026 年 10 月 1 日 00:00（北京时间）到期，所有功能已停用。请联系软件供应方获取正式授权。</string>
     <string name="action_refresh_device_status">读取设备状态</string>
     <string name="action_start_dual_stream">启动双流</string>
     <string name="action_probe_waypoint">探针:推送 KMZ</string>

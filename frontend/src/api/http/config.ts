@@ -1,6 +1,7 @@
-const backendHost = (import.meta.env.VITE_APP_APIGATEWAY_BACKEND_HOST || 'http://127.0.0.1:6789').replace(/\/$/, '')
-const websocketHost = import.meta.env.VITE_APP_APIGATEWAY_WEBSOCKET_HOST || backendHost.replace(/^http/, 'ws')
-const rtmpUrl = import.meta.env.VITE_APP_LIVESTREAM_RTMP_URL || 'rtmp://localhost:1935/live/'
+const runtimeConfig = window.__UAVFIRE_RUNTIME_CONFIG__ || {}
+const backendHost = (runtimeConfig.backendHost || import.meta.env.VITE_APP_APIGATEWAY_BACKEND_HOST || 'http://127.0.0.1:6789').replace(/\/$/, '')
+const websocketHost = runtimeConfig.websocketHost || import.meta.env.VITE_APP_APIGATEWAY_WEBSOCKET_HOST || backendHost.replace(/^http/, 'ws')
+const rtmpUrl = runtimeConfig.rtmpUrl || import.meta.env.VITE_APP_LIVESTREAM_RTMP_URL || 'rtmp://localhost:1935/live/'
 
 export const CURRENT_CONFIG = {
 

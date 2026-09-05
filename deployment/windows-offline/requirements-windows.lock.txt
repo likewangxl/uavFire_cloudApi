@@ -1,0 +1,11 @@
+fastapi==0.136.0
+uvicorn==0.44.0
+pydantic==2.13.3
+pydantic-settings==2.14.0
+python-multipart==0.0.29
+numpy==1.26.4
+opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84
+torch==2.2.2
+torchvision==0.17.2
+ultralytics==8.4.42

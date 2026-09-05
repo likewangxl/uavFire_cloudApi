@@ -52,6 +52,12 @@ public class MsdkDeviceStateDTO {
 
     private Long updatedAt;
 
+    private String agentVersionName;
+
+    private Long agentVersionCode;
+
+    private Boolean waylineCommandSupported;
+
     private Map<String, Boolean> capabilities;
 
     private String aircraftModelKey;

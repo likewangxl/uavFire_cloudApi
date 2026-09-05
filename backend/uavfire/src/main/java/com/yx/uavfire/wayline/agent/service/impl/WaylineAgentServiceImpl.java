@@ -16,16 +16,43 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
 
 @Service
 public class WaylineAgentServiceImpl implements IWaylineAgentService {
 
     private final Map<String, WaylineAgentCommandDTO> pendingByDrone = new ConcurrentHashMap<>();
     private final Map<String, WaylineAgentKmzEntry> kmzByDrone = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastCommandPollAtByDrone = new ConcurrentHashMap<>();
+    private final LongSupplier clock;
+
+    public WaylineAgentServiceImpl() {
+        this(System::currentTimeMillis);
+    }
+
+    public WaylineAgentServiceImpl(LongSupplier clock) {
+        this.clock = clock;
+    }
 
     @Override
     public WaylineAgentCommandDTO pollCommand(String droneSn) {
+        if (droneSn != null && !droneSn.isBlank()) {
+            lastCommandPollAtByDrone.put(droneSn, clock.getAsLong());
+        }
         return pendingByDrone.get(droneSn);
+    }
+
+    @Override
+    public boolean hasRecentCommandPoll(String droneSn, long maxAgeMs) {
+        if (droneSn == null || droneSn.isBlank() || maxAgeMs < 0) {
+            return false;
+        }
+        Long lastPollAt = lastCommandPollAtByDrone.get(droneSn);
+        if (lastPollAt == null) {
+            return false;
+        }
+        long ageMs = clock.getAsLong() - lastPollAt;
+        return ageMs >= 0 && ageMs <= maxAgeMs;
     }
 
     @Override

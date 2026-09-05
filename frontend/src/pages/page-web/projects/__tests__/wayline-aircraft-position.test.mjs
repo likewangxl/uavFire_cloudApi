@@ -53,6 +53,49 @@ test('GMap ignores non-selected aircraft OSD when no wayline tracking target exi
   assert.match(gmapSource, /if \(!trackingSn\) return/)
 })
 
+test('wayline track is mission-scoped and rejects stale position rewinds', () => {
+  const planningSource = readSource('src/hooks/use-wayline-planning.ts')
+  const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
+  const gmapSource = readSource('src/components/GMap.vue')
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
+
+  assert.match(planningSource, /shouldAcceptFlightPosition\(state\.flightPosition, position\)/)
+  assert.match(planningSource, /export function syncPlannedWaylineTrackSession/)
+  assert.match(waylineSource, /syncPlannedWaylineTrackSession\(record, allowTrackSwitch\)/)
+  assert.match(waylineSource, /applyPlannedWaylineFlightPosition\(executingRecord, true\)/)
+  assert.match(waylineSource, /selectActiveTrackRecord\(/)
+  assert.doesNotMatch(waylineSource, /return \['publishing', 'executing', 'paused', 'broken'\]\.includes\(status\)/)
+  assert.match(planningSource, /position\.source === 'cloud-osd'/)
+  assert.match(gmapSource, /if \(planningState\.flightTrackRecording\) return/)
+  assert.match(waylineSource, /source:\s*'msdk-agent'/)
+  assert.match(waylineSource, /if \(planningState\.flightTrackRecording\) return\s+setFlightPositionFromRecord\(record\)/)
+  assert.match(gmapSource, /source:\s*'cloud-osd'/)
+  assert.match(overlaysSource, /planningState\.flightTrackRecording && !isSameTrackPoint/)
+  assert.match(overlaysSource, /watch\(\(\) => planningState\.flightTrackRevision/)
+  assert.match(overlaysSource, /function resetFlightSessionOverlay \(\)/)
+  assert.match(overlaysSource, /if \(!position\) \{ clearFlightPositionMarker\(\); return \}/)
+  assert.match(overlaysSource, /flightHomePosition \|\| posLngLat\(pos\)/)
+  assert.doesNotMatch(overlaysSource, /homeMarker\.setLngLat\(lngLat\)/)
+  assert.ok(overlaysSource.indexOf("id: 'plan-route-line'") < overlaysSource.indexOf("id: 'plan-track-line'"))
+})
+
+test('wayline polls the Agent flight position at one hertz independently from topology', () => {
+  const waylineSource = readSource('src/pages/page-web/projects/wayline.vue')
+
+  assert.match(waylineSource, /const MSDK_FLIGHT_REFRESH_INTERVAL_MS = 1_000/)
+  assert.match(waylineSource, /function refreshMsdkFlightPosition \(\)/)
+  assert.match(waylineSource, /setInterval\(refreshMsdkFlightPosition, MSDK_FLIGHT_REFRESH_INTERVAL_MS\)/)
+  assert.match(waylineSource, /clearInterval\(msdkFlightTimer\)/)
+})
+
+test('saved wayline preview uses the saved max speed for waypoint labels', () => {
+  const planningSource = readSource('src/hooks/use-wayline-planning.ts')
+  const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
+
+  assert.match(planningSource, /state\.previewMaxSpeed = Number\.isFinite\(Number\(record\.maxSpeed\)\)/)
+  assert.match(overlaysSource, /const previewSpeed = planningState\.previewWaypoints\.length > 0 \? planningState\.previewMaxSpeed/)
+})
+
 test('delivery tab hides monitor aircraft position marker and track', () => {
   const overlaysSource = readSource('src/hooks/use-planner-overlays.ts')
   const gmapSource = readSource('src/components/GMap.vue')

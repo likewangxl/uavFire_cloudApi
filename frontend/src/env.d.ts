@@ -10,3 +10,17 @@ interface ImportMetaEnv {
   VITE_OPERATION_MOCK?: string
   // More environment variables...
 }
+
+interface Window {
+  __UAVFIRE_SITE_LOCATION__?: {
+    longitude: number
+    latitude: number
+    coordinateSystem: 'WGS84' | 'GCJ02'
+    zoom?: number
+  } | null
+  __UAVFIRE_RUNTIME_CONFIG__?: {
+    backendHost?: string
+    websocketHost?: string
+    rtmpUrl?: string
+  }
+}

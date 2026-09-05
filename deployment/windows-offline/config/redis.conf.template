@@ -1,0 +1,13 @@
+bind 127.0.0.1
+protected-mode yes
+port {{REDIS_PORT}}
+timeout 0
+tcp-keepalive 300
+dir {{ROOT_FORWARD}}/data/redis
+dbfilename dump.rdb
+# The Windows Redis port can enter a permanent MISCONF state when AOF writes
+# fail even though TCP remains open. UAVFire stores durable business data in
+# MySQL/MinIO; Redis holds rebuildable runtime state, so use RDB on Windows.
+appendonly no
+appendfilename appendonly.aof
+logfile {{ROOT_FORWARD}}/data/logs/redis.log

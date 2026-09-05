@@ -17,8 +17,8 @@ class LauncherIconResourcePolicyTest {
         assertTrue(manifest.contains("""android:label="@string/agent_app_name""""))
 
         val strings = File(main, "res/values/strings.xml").readText()
-        assertTrue(strings.contains("""<string name="app_name">无人机火情智巡平台</string>"""))
-        assertTrue(strings.contains("""<string name="agent_app_name">无人机火情智巡平台</string>"""))
+        assertTrue(strings.contains("""<string name="app_name">火情智巡平台</string>"""))
+        assertTrue(strings.contains("""<string name="agent_app_name">火情智巡平台</string>"""))
 
         listOf("ic_launcher.xml", "ic_launcher_round.xml").forEach { name ->
             val xml = File(main, "res/mipmap-anydpi-v26/$name").readText()

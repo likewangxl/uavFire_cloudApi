@@ -6,12 +6,12 @@ plugins {
 val djiMsdkVersion = providers.gradleProperty("djiMsdkVersion").orElse("5.18.0")
 val djiApiKey = providers.gradleProperty("djiApiKey").orElse("")
 val maplibreToken = providers.gradleProperty("maplibreToken").orElse("unused")
-val agentBackendBaseUrl = providers.gradleProperty("agentBackendBaseUrl").orElse("http://192.168.1.10:6789/")
-val agentAiServiceBaseUrl = providers.gradleProperty("agentAiServiceBaseUrl").orElse("http://192.168.1.10:9000/")
-val agentMediaHost = providers.gradleProperty("agentMediaHost").orElse("192.168.1.10")
-val agentMediaRtmpPort = providers.gradleProperty("agentMediaRtmpPort").orElse("1935")
+val agentBackendBaseUrl = providers.gradleProperty("agentBackendBaseUrl").orElse("http://192.168.0.100:81/")
+val agentAiServiceBaseUrl = providers.gradleProperty("agentAiServiceBaseUrl").orElse("http://192.168.0.100:81/")
+val agentMediaHost = providers.gradleProperty("agentMediaHost").orElse("192.168.0.100")
+val agentMediaRtmpPort = providers.gradleProperty("agentMediaRtmpPort").orElse("8089")
 val agentMediaStreamApp = providers.gradleProperty("agentMediaStreamApp").orElse("live")
-val agentMqttBrokerUrl = providers.gradleProperty("agentMqttBrokerUrl").orElse("tcp://192.168.1.10:1883")
+val agentMqttBrokerUrl = providers.gradleProperty("agentMqttBrokerUrl").orElse("tcp://192.168.0.100:1883")
 val agentMqttBrokerUsername = providers.gradleProperty("agentMqttBrokerUsername").orElse("")
 val agentMqttBrokerPassword = providers.gradleProperty("agentMqttBrokerPassword").orElse("")
 val agentWaylineSharedSecret = providers.gradleProperty("agentWaylineSharedSecret").orElse("")
@@ -38,8 +38,8 @@ android {
         applicationId = "com.yinxin.uavfir"
         minSdk = 26
         targetSdk = 34
-        versionCode = 17
-        versionName = "0.1.16"
+        versionCode = 28
+        versionName = "0.1.27-trial"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["DJI_API_KEY"] = djiApiKey.get()
@@ -61,6 +61,7 @@ android {
         buildConfigField("String", "AGENT_FIRE_MODEL_PROFILE", "\"${agentFireModelProfile.get()}\"")
         buildConfigField("int", "AGENT_FIRE_INTRA_OP_THREADS", agentFireIntraOpThreads.get())
         buildConfigField("int", "AGENT_FIRE_INTER_OP_THREADS", agentFireInterOpThreads.get())
+        buildConfigField("long", "TRIAL_EXPIRES_AT_EPOCH_MS", "1790784000000L")
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

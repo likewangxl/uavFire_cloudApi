@@ -66,3 +66,6 @@ Mobile-SDK-Android-V5/
 /outputs/
 /artifacts/apks/
 /videos/
+
+# Local delivery packages are retained in the private cleanup archive, not Git.
+/releases/

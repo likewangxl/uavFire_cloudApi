@@ -1,0 +1,14 @@
+[mysqld]
+basedir={{MYSQL_ROOT_FORWARD}}
+datadir={{ROOT_FORWARD}}/data/mysql
+port={{MYSQL_PORT}}
+bind-address=127.0.0.1
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+max_allowed_packet=2G
+sql_mode=STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION
+log-error={{ROOT_FORWARD}}/data/logs/mysql-error.log
+
+[client]
+port={{MYSQL_PORT}}
+default-character-set=utf8mb4

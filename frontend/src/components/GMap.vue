@@ -827,12 +827,16 @@ export default defineComponent({
       const trackingSn = planningState.flightPosition?.aircraftSn || planningState.aircraftSn
       if (!trackingSn) return
       if (trackingSn && sn !== trackingSn) return
+      // 航线任务期间由 wayline.vue 单独使用 MSDK Agent 状态更新位置，禁止 Cloud OSD
+      // 交替覆盖同一个 marker；非任务态仍保留 Cloud OSD 的实时位置能力。
+      if (planningState.flightTrackRecording) return
       if (!Number.isFinite(gcjLng) || !Number.isFinite(gcjLat) || gcjLng === 0 || gcjLat === 0) return
       setFlightPositionFromWgs(sn, osd?.longitude, osd?.latitude, {
         height: Number(osd?.height),
         updatedAt: Date.now(),
         currentWaypointIndex: planningState.flightPosition?.currentWaypointIndex,
         totalWaypoints: planningState.flightPosition?.totalWaypoints,
+        source: 'cloud-osd',
       })
     }
 

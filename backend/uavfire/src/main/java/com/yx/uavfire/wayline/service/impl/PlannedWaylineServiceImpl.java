@@ -9,6 +9,7 @@ import com.yx.uavfire.msdk.service.MsdkDeviceStateService;
 import com.yx.uavfire.wayline.dao.IPlannedWaylineMapper;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineCreateDTO;
 import com.yx.uavfire.wayline.model.dto.PublishedWaylineFileDTO;
+import com.yx.uavfire.wayline.model.dto.PlannedAreaVertexDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaylineDTO;
 import com.yx.uavfire.wayline.model.dto.PlannedWaypointDTO;
 import com.yx.uavfire.wayline.model.dto.WaypointActionDTO;
@@ -73,6 +74,21 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
     private static final String STATUS_PAUSED = "paused";
     private static final String STATUS_STOPPED = "stopped";
+
+    /**
+     * 巡检航点默认必须真实到点。平滑通过会按 waypointTurnDampingDist 提前切弯，
+     * 只能由用户在单个航点上显式选择，不能作为未配置时的隐式默认值。
+     */
+    private static final String STRICT_WAYPOINT_TURN_MODE =
+            "toPointAndStopWithDiscontinuityCurvature";
+
+    private static final String ROUTE_KIND_WAYPOINT = "waypoint";
+    private static final String ROUTE_KIND_PATROL = "patrol";
+    private static final String ROUTE_KIND_AREA = "area";
+    private static final String DEFAULT_AREA_CAMERA_KEY = "H20T";
+    private static final int DEFAULT_AREA_FRONT_OVERLAP = 80;
+    private static final int DEFAULT_AREA_SIDE_OVERLAP = 70;
+    private static final long AGENT_COMMAND_POLL_MAX_AGE_MS = 15_000L;
 
     private final IPlannedWaylineMapper mapper;
 
@@ -523,6 +539,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!StringUtils.hasText(existing.getPublishedWaylineId())) {
             throw new IllegalArgumentException("Generate the planned wayline file before preparing the flight task.");
         }
+        // 历史面状航线及未显式设置转弯方式的航点航线可能仍引用旧 KMZ。
+        // “再次执行”必须先重生当前安全格式，不能仅因已有 publishedWaylineId 就复用。
+        if ((isAreaRoute(existing) || requiredStrictWaypointCount(existing) > 0)
+                && !isGeneratedWaylineSafe(workspaceId, existing)) {
+            generateFile(workspaceId, id, username);
+            existing = getExisting(workspaceId, id);
+        }
 
         long now = System.currentTimeMillis();
         resetExecutionRuntimeState(existing);
@@ -818,6 +841,14 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
 
         validateAgentPayloadMatch(entity, droneSn);
 
+        // MSDK 状态上报在线不等于航线执行器在线。旧版/卡住的遥控器 App 仍会持续
+        // 上报位置，却不会轮询 WAYLINE_DISPATCH；过去这里仍把任务标成 executing。
+        // 必须看到本后端实例上的近期航线取令心跳，才允许真正下发。
+        if (!waylineAgentService.hasRecentCommandPoll(droneSn, AGENT_COMMAND_POLL_MAX_AGE_MS)) {
+            throw new IllegalStateException(
+                    "遥控器航线执行服务未连接，请安装并启动最新 Agent 后重试。");
+        }
+
         // Load KMZ into memory so the agent can download it via the HTTP KMZ endpoint.
         byte[] kmzBytes;
         try {
@@ -870,6 +901,13 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 normalizePayloadModelKey(selectedPayload))) {
             throw new IllegalStateException("Online payload model does not match the wayline; dispatch blocked.");
         }
+        if (!Boolean.TRUE.equals(state.getWaylineCommandSupported())) {
+            String version = StringUtils.hasText(state.getAgentVersionName())
+                    ? "（当前 " + state.getAgentVersionName() + "）"
+                    : "";
+            throw new IllegalStateException(
+                    "遥控器 Agent" + version + "不支持当前航线下发，请安装 0.1.17 或更高版本。");
+        }
     }
 
     private byte[] normalizeAgentRuntimeKmz(byte[] kmzBytes) throws IOException {
@@ -912,7 +950,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!m4tLike) {
             return xml;
         }
-        String turnDamping = formatNumeric(resolveM4tRuntimeTurnDamping(xml));
         String normalized = xml;
         normalized = normalized.replace("<wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost>",
                 "<wpml:exitOnRCLost>goContinue</wpml:exitOnRCLost>");
@@ -924,17 +961,19 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 "<wpml:globalWaypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:globalWaypointTurnMode>");
         normalized = normalized.replaceAll("(?s)\\s*<wpml:useGlobalHeight>.*?</wpml:useGlobalHeight>", "");
         normalized = normalized.replaceAll("(?s)\\s*<wpml:useGlobalTurnParam>.*?</wpml:useGlobalTurnParam>", "");
-        normalized = addM4tTemplateTurnParams(normalized, turnDamping);
-        normalized = normalized.replace("<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>",
-                "<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>");
-        normalized = normalized.replaceAll("<wpml:waypointTurnDampingDist>[^<]+</wpml:waypointTurnDampingDist>",
-                "<wpml:waypointTurnDampingDist>" + turnDamping + "</wpml:waypointTurnDampingDist>");
-        normalized = normalized.replace("<wpml:useStraightLine>0</wpml:useStraightLine>",
-                "<wpml:useStraightLine>1</wpml:useStraightLine>");
+        normalized = addM4tTemplateTurnParams(normalized);
+        // 保留航线原本的转弯语义。旧逻辑在 Agent 下发前会把 DJI Pilot 导出的
+        // “到点停”强制改成“连续曲率通过”，并注入正的 damping，导致飞行器提前切弯。
+        // 严格过点必须保持 stop + damping=0；显式选择平滑通过的航点则不做改写。
+        normalized = normalized.replaceAll(
+                "<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>\\s*"
+                        + "<wpml:waypointTurnDampingDist>[^<]+</wpml:waypointTurnDampingDist>",
+                "<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"
+                        + "<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>");
         return normalized;
     }
 
-    private String addM4tTemplateTurnParams(String xml, String turnDamping) {
+    private String addM4tTemplateTurnParams(String xml) {
         Matcher matcher = Pattern.compile("(?s)<Placemark>(.*?)</Placemark>").matcher(xml);
         StringBuffer buffer = new StringBuffer();
         while (matcher.find()) {
@@ -942,8 +981,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             if (!placemarkBody.contains("<wpml:waypointTurnParam>")
                     && placemarkBody.contains("</wpml:height>")) {
                 String turnParam = "<wpml:waypointTurnParam>"
-                        + "<wpml:waypointTurnMode>toPointAndPassWithContinuityCurvature</wpml:waypointTurnMode>"
-                        + "<wpml:waypointTurnDampingDist>" + turnDamping + "</wpml:waypointTurnDampingDist>"
+                        + "<wpml:waypointTurnMode>" + STRICT_WAYPOINT_TURN_MODE + "</wpml:waypointTurnMode>"
+                        + "<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>"
                         + "</wpml:waypointTurnParam>";
                 String replacement = "<Placemark>"
                         + placemarkBody.replaceFirst("</wpml:height>", "</wpml:height>" + turnParam)
@@ -953,39 +992,6 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         matcher.appendTail(buffer);
         return buffer.toString();
-    }
-
-    private double resolveM4tRuntimeTurnDamping(String xml) {
-        double minSegmentMeters = minAdjacentCoordinateDistanceMeters(xml);
-        if (minSegmentMeters > 0) {
-            return Math.min(10.0, Math.max(0.5, minSegmentMeters / 4.0));
-        }
-        return 10.0;
-    }
-
-    private double minAdjacentCoordinateDistanceMeters(String xml) {
-        Matcher matcher = Pattern.compile("(?s)<coordinates>\\s*([0-9.+\\-]+),([0-9.+\\-]+)(?:,[^<]*)?\\s*</coordinates>")
-                .matcher(xml);
-        List<double[]> coordinates = new ArrayList<>();
-        while (matcher.find()) {
-            try {
-                double lng = Double.parseDouble(matcher.group(1));
-                double lat = Double.parseDouble(matcher.group(2));
-                coordinates.add(new double[]{lat, lng});
-            } catch (NumberFormatException ignored) {
-                // Ignore malformed coordinates; structural validation runs elsewhere.
-            }
-        }
-        if (coordinates.size() < 2) {
-            return 0.0;
-        }
-        double min = Double.MAX_VALUE;
-        for (int i = 1; i < coordinates.size(); i++) {
-            double[] previous = coordinates.get(i - 1);
-            double[] current = coordinates.get(i);
-            min = Math.min(min, haversineMeters(previous[0], previous[1], current[0], current[1]));
-        }
-        return min == Double.MAX_VALUE ? 0.0 : min;
     }
 
     private void invokeAgentControl(PlannedWaylineEntity entity, ControlOp op) {
@@ -1130,7 +1136,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         validateEditableFields(param.getName(), param.getAircraftModelKey(), param.getGatewaySn(),
                 param.getAircraftSn(), param.getPayloadModelKey(), param.getPayloadPositionIndex(),
-                param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
+                param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints(),
+                param.getRouteKind(), param.getAreaPolygon(), param.getAreaFrontOverlap(),
+                param.getAreaSideOverlap(), param.getAreaHeadingDeg());
     }
 
     private void validateParam(UpdatePlannedWaylineParam param) {
@@ -1139,7 +1147,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         validateEditableFields(param.getName(), param.getAircraftModelKey(), param.getGatewaySn(),
                 param.getAircraftSn(), param.getPayloadModelKey(), param.getPayloadPositionIndex(),
-                param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints());
+                param.getDefaultHeight(), param.getMaxSpeed(), param.getWaypoints(),
+                param.getRouteKind(), param.getAreaPolygon(), param.getAreaFrontOverlap(),
+                param.getAreaSideOverlap(), param.getAreaHeadingDeg());
     }
 
     private void validateEditableFields(String name,
@@ -1150,7 +1160,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                                         Integer payloadPositionIndex,
                                         Double defaultHeight,
                                         Double maxSpeed,
-                                        List<PlannedWaypointDTO> waypoints) {
+                                        List<PlannedWaypointDTO> waypoints,
+                                        String routeKind,
+                                        List<PlannedAreaVertexDTO> areaPolygon,
+                                        Integer areaFrontOverlap,
+                                        Integer areaSideOverlap,
+                                        Double areaHeadingDeg) {
         if (!StringUtils.hasText(name)) {
             throw new IllegalArgumentException("Planned wayline name is required.");
         }
@@ -1171,7 +1186,54 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!isFinite(maxSpeed)) {
             throw new IllegalArgumentException("Planned wayline max speed is required.");
         }
+        validateAreaFields(routeKind, areaPolygon, areaFrontOverlap, areaSideOverlap, areaHeadingDeg);
         validateWaypoints(waypoints);
+    }
+
+    private void validateAreaFields(String routeKind,
+                                    List<PlannedAreaVertexDTO> areaPolygon,
+                                    Integer areaFrontOverlap,
+                                    Integer areaSideOverlap,
+                                    Double areaHeadingDeg) {
+        String normalizedKind = normalizeRouteKind(routeKind);
+        if (!ROUTE_KIND_AREA.equals(normalizedKind)) {
+            return;
+        }
+        if (areaPolygon == null || areaPolygon.size() < 3) {
+            throw new IllegalArgumentException("Area planned wayline requires at least 3 polygon vertices.");
+        }
+        for (int i = 0; i < areaPolygon.size(); i++) {
+            PlannedAreaVertexDTO vertex = areaPolygon.get(i);
+            if (vertex == null
+                    || !isLegalLongitude(vertex.getGcjLng())
+                    || !isLegalLatitude(vertex.getGcjLat())
+                    || !isLegalLongitude(vertex.getWgsLng())
+                    || !isLegalLatitude(vertex.getWgsLat())) {
+                throw new IllegalArgumentException("Area polygon vertex[" + i + "] coordinates are invalid.");
+            }
+        }
+        validateOverlap("front", areaFrontOverlap);
+        validateOverlap("side", areaSideOverlap);
+        if (areaHeadingDeg != null && (!Double.isFinite(areaHeadingDeg)
+                || areaHeadingDeg < 0 || areaHeadingDeg >= 360)) {
+            throw new IllegalArgumentException("Area heading must be in [0, 360).");
+        }
+    }
+
+    private void validateOverlap(String label, Integer value) {
+        if (value != null && (value < 0 || value > 95)) {
+            throw new IllegalArgumentException("Area " + label + " overlap must be in [0, 95].");
+        }
+    }
+
+    private String normalizeRouteKind(String raw) {
+        String normalized = StringUtils.hasText(raw) ? raw.trim().toLowerCase(Locale.ROOT) : ROUTE_KIND_WAYPOINT;
+        if (!ROUTE_KIND_WAYPOINT.equals(normalized)
+                && !ROUTE_KIND_PATROL.equals(normalized)
+                && !ROUTE_KIND_AREA.equals(normalized)) {
+            throw new IllegalArgumentException("Unsupported planned wayline route kind: " + raw);
+        }
+        return normalized;
     }
 
     private void validateWaypoints(List<PlannedWaypointDTO> waypoints) {
@@ -1269,6 +1331,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 throw new IllegalArgumentException("Planned wayline waypoint[" + i + "] height is invalid.");
             }
         }
+        if (isAreaRoute(entity)) {
+            validateAreaFields(entity.getRouteKind(), readAreaPolygon(entity.getAreaPolygonJson()),
+                    entity.getAreaFrontOverlap(), entity.getAreaSideOverlap(), entity.getAreaHeadingDeg());
+        }
     }
 
     private boolean isLegalLongitude(Double value) {
@@ -1308,21 +1374,133 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         DeviceEnum droneDevice = resolveDroneDevice(entity.getAircraftModelKey());
         DeviceEnum payloadDevice = resolvePayloadDevice(droneDevice, entity.getPayloadModelKey());
         List<PlannedWaypointDTO> waypoints = readWaypoints(entity.getWaypointsJson());
+        List<PlannedAreaVertexDTO> areaPolygon = readAreaPolygon(entity.getAreaPolygonJson());
 
         try {
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream, StandardCharsets.UTF_8)) {
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/template.kml"));
-                zipOutputStream.write(buildTemplateKml(publishedName, entity, droneDevice, payloadDevice, waypoints));
+                zipOutputStream.write(isAreaRoute(entity)
+                        ? buildAreaTemplateKml(entity, droneDevice, payloadDevice, areaPolygon, waypoints)
+                        : buildTemplateKml(publishedName, entity, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
                 zipOutputStream.putNextEntry(new ZipEntry("wpmz/waylines.wpml"));
-                zipOutputStream.write(buildWaylinesWpml(publishedName, entity, droneDevice, payloadDevice, waypoints));
+                zipOutputStream.write(isAreaRoute(entity)
+                        ? buildAreaWaylinesWpml(entity, droneDevice, payloadDevice, waypoints)
+                        : buildWaylinesWpml(publishedName, entity, droneDevice, payloadDevice, waypoints));
                 zipOutputStream.closeEntry();
             }
             return outputStream.toByteArray();
         } catch (IOException e) {
             throw new IllegalStateException("Failed to generate published KMZ.", e);
         }
+    }
+
+    private boolean isAreaRoute(PlannedWaylineEntity entity) {
+        return entity != null && ROUTE_KIND_AREA.equalsIgnoreCase(entity.getRouteKind());
+    }
+
+    /**
+     * DJI Pilot 2 面状航线的 template.kml 是 mapping2d 多边形模板，不是展开后的 waypoint 模板。
+     * 展开的蛇形航点仅写入 waylines.wpml，二者共用同一 WGS84 测区和测绘参数。
+     */
+    private byte[] buildAreaTemplateKml(PlannedWaylineEntity entity,
+                                        DeviceEnum droneDevice,
+                                        DeviceEnum payloadDevice,
+                                        List<PlannedAreaVertexDTO> areaPolygon,
+                                        List<PlannedWaypointDTO> waypoints) {
+        return writeKml(w -> {
+            long now = System.currentTimeMillis();
+            elem(w, "createTime", String.valueOf(now));
+            elem(w, "updateTime", String.valueOf(now));
+            writeAreaMissionConfig(w, entity, droneDevice, payloadDevice, true);
+
+            w.writeStartElement("Folder");
+            elem(w, "templateType", "mapping2d");
+            elem(w, "templateId", "0");
+
+            double height = globalAvgHeightValue(waypoints, entity.getDefaultHeight());
+            w.writeStartElement(NS_WPML, "waylineCoordinateSysParam");
+            elem(w, "coordinateMode", "WGS84");
+            elem(w, "heightMode", "relativeToStartPoint");
+            elem(w, "globalShootHeight", formatNumeric(height));
+            w.writeEndElement();
+            elem(w, "autoFlightSpeed", formatNumeric(generatedFlightSpeed(entity)));
+
+            w.writeStartElement("Placemark");
+            elem(w, "caliFlightEnable", "0");
+            // Pilot 样例开启高程优化后会额外生成一段不可见于当前规划绿线的校准航段。
+            // 系统必须让执行线与界面规划线一致，因此关闭该附加航段。
+            elem(w, "elevationOptimizeEnable", "0");
+            elem(w, "smartObliqueEnable", "0");
+            elem(w, "facadeWaylineEnable", "0");
+            elem(w, "isLookAtSceneSet", "0");
+            elem(w, "smartObliqueGimbalPitch", "-45");
+            elem(w, "shootType", "time");
+            elem(w, "direction", formatNumeric(defaultAreaHeading(entity.getAreaHeadingDeg())));
+            elem(w, "margin", "0");
+            elem(w, "efficiencyFlightModeEnable", "0");
+
+            int frontOverlap = defaultAreaOverlap(entity.getAreaFrontOverlap(), DEFAULT_AREA_FRONT_OVERLAP);
+            int sideOverlap = defaultAreaOverlap(entity.getAreaSideOverlap(), DEFAULT_AREA_SIDE_OVERLAP);
+            w.writeStartElement(NS_WPML, "overlap");
+            elem(w, "orthoLidarOverlapH", String.valueOf(frontOverlap));
+            elem(w, "orthoLidarOverlapW", String.valueOf(sideOverlap));
+            elem(w, "orthoCameraOverlapH", String.valueOf(frontOverlap));
+            elem(w, "orthoCameraOverlapW", String.valueOf(sideOverlap));
+            w.writeEndElement();
+
+            w.writeStartElement("Polygon");
+            w.writeStartElement("outerBoundaryIs");
+            w.writeStartElement("LinearRing");
+            w.writeStartElement("coordinates");
+            String polygonCoordinates = areaPolygon.stream()
+                    .map(vertex -> vertex.getWgsLng() + "," + vertex.getWgsLat() + ",0")
+                    .collect(Collectors.joining(" "));
+            w.writeCharacters(polygonCoordinates);
+            w.writeEndElement();
+            w.writeEndElement();
+            w.writeEndElement();
+            w.writeEndElement();
+            elem(w, "ellipsoidHeight", formatNumeric(height));
+            elem(w, "height", formatNumeric(height));
+            w.writeEndElement(); // /Placemark
+
+            w.writeStartElement(NS_WPML, "payloadParam");
+            elem(w, "payloadPositionIndex", String.valueOf(payloadPositionIndex(entity)));
+            elem(w, "dewarpingEnable", "0");
+            elem(w, "returnMode", "singleReturnFirst");
+            elem(w, "samplingRate", "240000");
+            elem(w, "scanningMode", "nonRepetitive");
+            elem(w, "modelColoringEnable", "0");
+            elem(w, "imageFormat", "wide");
+            w.writeEndElement();
+            w.writeEndElement(); // /Folder
+        });
+    }
+
+    private byte[] buildAreaWaylinesWpml(PlannedWaylineEntity entity,
+                                         DeviceEnum droneDevice,
+                                         DeviceEnum payloadDevice,
+                                         List<PlannedWaypointDTO> waypoints) {
+        return writeKml(w -> {
+            writeAreaMissionConfig(w, entity, droneDevice, payloadDevice, false);
+            w.writeStartElement("Folder");
+            elem(w, "templateId", "0");
+            elem(w, "executeHeightMode", "relativeToStartPoint");
+            elem(w, "waylineId", "0");
+
+            double flightSpeed = generatedFlightSpeed(entity);
+            double distance = totalDistanceMeters(waypoints);
+            elem(w, "distance", formatNumeric(distance));
+            elem(w, "duration", formatNumeric(distance / Math.max(flightSpeed, 1)));
+            elem(w, "autoFlightSpeed", formatNumeric(flightSpeed));
+
+            for (int index = 0; index < waypoints.size(); index++) {
+                writeAreaWaylinePlacemark(w, waypoints, index, flightSpeed);
+            }
+            w.writeEndElement(); // /Folder
+        });
     }
 
     private DeviceEnum resolveDroneDevice(String aircraftModelKey) {
@@ -1464,6 +1642,56 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         w.writeEndElement(); // /missionConfig
     }
 
+    private void writeAreaMissionConfig(XMLStreamWriter w,
+                                        PlannedWaylineEntity entity,
+                                        DeviceEnum droneDevice,
+                                        DeviceEnum payloadDevice,
+                                        boolean includeTakeOffRefPoint) throws XMLStreamException {
+        w.writeStartElement(NS_WPML, "missionConfig");
+        elem(w, "flyToWaylineMode", "safely");
+        elem(w, "finishAction",
+                entity.getFinishAction() != null ? entity.getFinishAction() : FINISH_ACTION);
+        elem(w, "exitOnRCLost",
+                entity.getExitOnRcLost() != null ? entity.getExitOnRcLost() : "executeLostAction");
+        elem(w, "executeRCLostAction",
+                entity.getRcLostAction() != null ? entity.getRcLostAction() : EXECUTE_RC_LOST_ACTION);
+        elem(w, "takeOffSecurityHeight", formatNumeric(
+                entity.getTakeoffSecurityHeight() != null ? entity.getTakeoffSecurityHeight() : 60));
+        if (includeTakeOffRefPoint) {
+            takeOffRefPoint(entity).ifPresent(value -> {
+                try {
+                    elem(w, "takeOffRefPoint", value);
+                } catch (XMLStreamException e) {
+                    throw new IllegalStateException("Failed to write area takeoff reference point.", e);
+                }
+            });
+        }
+        elem(w, "globalTransitionalSpeed", formatNumeric(
+                entity.getGlobalTransitionalSpeed() != null ? entity.getGlobalTransitionalSpeed() : 15.0));
+        writeDroneInfo(w, droneDevice);
+        writePayloadInfo(w, payloadDevice, entity.getPayloadPositionIndex());
+        w.writeEndElement();
+    }
+
+    private Optional<String> takeOffRefPoint(PlannedWaylineEntity entity) {
+        if (msdkDeviceStateService == null) {
+            return Optional.empty();
+        }
+        String aircraftSn = StringUtils.hasText(entity.getDroneSn()) ? entity.getDroneSn() : entity.getAircraftSn();
+        if (!StringUtils.hasText(aircraftSn)) {
+            return Optional.empty();
+        }
+        return msdkDeviceStateService.get(aircraftSn)
+                .filter(state -> isLegalLatitude(state.getLatitude()) && isLegalLongitude(state.getLongitude())
+                        && !(state.getLatitude() == 0.0 && state.getLongitude() == 0.0))
+                // DJI Pilot 2 的 takeOffRefPoint 顺序是 lat,lng,alt，与 KML coordinates 相反。
+                .map(state -> state.getLatitude() + "," + state.getLongitude() + ",0.000000");
+    }
+
+    private int payloadPositionIndex(PlannedWaylineEntity entity) {
+        return entity.getPayloadPositionIndex() == null ? 0 : entity.getPayloadPositionIndex();
+    }
+
     private void writeDroneInfo(XMLStreamWriter w, DeviceEnum droneDevice) throws XMLStreamException {
         w.writeStartElement(NS_WPML, "droneInfo");
         // KMZ 离线导出和 Cloud API runtime 对 M4 系列飞机的 type 编码不一致：
@@ -1494,7 +1722,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "height", String.valueOf(wp.getHeight()));
         w.writeStartElement(NS_WPML, "waypointTurnParam");
         elem(w, "waypointTurnMode",
-                wp.getTurnMode() != null ? wp.getTurnMode() : "toPointAndPassWithContinuityCurvature");
+                wp.getTurnMode() != null ? wp.getTurnMode() : STRICT_WAYPOINT_TURN_MODE);
         elem(w, "waypointTurnDampingDist", formatNumeric(
                 wp.getTurnDamping() != null ? wp.getTurnDamping() : 0.0));
         w.writeEndElement();
@@ -1534,10 +1762,11 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "waypointHeadingPoiIndex", "0");
         w.writeEndElement();
         w.writeStartElement(NS_WPML, "waypointTurnParam");
-        elem(w, "waypointTurnMode",
-                wp.getTurnMode() != null ? wp.getTurnMode() : "toPointAndPassWithContinuityCurvature");
+        String turnMode = wp.getTurnMode() != null ? wp.getTurnMode() : STRICT_WAYPOINT_TURN_MODE;
+        elem(w, "waypointTurnMode", turnMode);
+        double defaultTurnDamping = STRICT_WAYPOINT_TURN_MODE.equals(turnMode) ? 0.0 : 10.0;
         elem(w, "waypointTurnDampingDist", formatNumeric(Math.min(
-                wp.getTurnDamping() != null ? wp.getTurnDamping() : 10.0, maxTurnDamping)));
+                wp.getTurnDamping() != null ? wp.getTurnDamping() : defaultTurnDamping, maxTurnDamping)));
         w.writeEndElement();
         elem(w, "useStraightLine", "1");
         w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
@@ -1548,6 +1777,46 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 wp.getGimbalYaw() != null ? wp.getGimbalYaw() : 0.0));
         w.writeEndElement();
         writeActionGroups(w, wp, index);
+        elem(w, "isRisky", "0");
+        elem(w, "waypointWorkType", "0");
+        w.writeEndElement();
+    }
+
+    private void writeAreaWaylinePlacemark(XMLStreamWriter w,
+                                           List<PlannedWaypointDTO> waypoints,
+                                           int index,
+                                           double defaultSpeed) throws XMLStreamException {
+        PlannedWaypointDTO wp = waypoints.get(index);
+        boolean last = index == waypoints.size() - 1;
+        w.writeStartElement("Placemark");
+        w.writeStartElement("Point");
+        elem(w, NS_KML, "coordinates", wp.getWgsLng() + "," + wp.getWgsLat());
+        w.writeEndElement();
+        elem(w, "index", String.valueOf(index));
+        elem(w, "executeHeight", formatNumeric(wp.getHeight()));
+        elem(w, "waypointSpeed", formatNumeric(wp.getSpeed() != null ? wp.getSpeed() : defaultSpeed));
+
+        w.writeStartElement(NS_WPML, "waypointHeadingParam");
+        elem(w, "waypointHeadingMode", "followWayline");
+        elem(w, "waypointHeadingAngle", formatNumeric(last ? 0.0 : bearingDegrees(wp, waypoints.get(index + 1))));
+        elem(w, "waypointPoiPoint", "0.000000,0.000000,0.000000");
+        elem(w, "waypointHeadingAngleEnable", last ? "0" : "1");
+        elem(w, "waypointHeadingPathMode", "followBadArc");
+        elem(w, "waypointHeadingPoiIndex", "0");
+        w.writeEndElement();
+
+        w.writeStartElement(NS_WPML, "waypointTurnParam");
+        // 面状巡逻以“实际经过每个规划转折点”为安全边界。coordinateTurn 会在到点前
+        // 按阻尼距离切弯，真机轨迹因此会偏离绿线；逐点停车转向则不会切角。
+        elem(w, "waypointTurnMode", "toPointAndStopWithDiscontinuityCurvature");
+        elem(w, "waypointTurnDampingDist", "0");
+        w.writeEndElement();
+        elem(w, "useStraightLine", "1");
+
+        w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
+        elem(w, "waypointGimbalPitchAngle", "0");
+        elem(w, "waypointGimbalYawAngle", "0");
+        w.writeEndElement();
         elem(w, "isRisky", "0");
         elem(w, "waypointWorkType", "0");
         w.writeEndElement();
@@ -1614,6 +1883,26 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         return n == 0 ? 100 : (int) (sum / n);
     }
 
+    private static double globalAvgHeightValue(List<PlannedWaypointDTO> wps, Double fallback) {
+        // mapping2d has a single global shoot height; keep the user-entered value exact instead of
+        // accumulating binary floating-point noise while averaging identical waypoint heights.
+        if (fallback != null && fallback > 0) {
+            return fallback;
+        }
+        if (wps == null || wps.isEmpty()) {
+            return 100.0;
+        }
+        double sum = 0;
+        int count = 0;
+        for (PlannedWaypointDTO wp : wps) {
+            if (wp != null && wp.getHeight() != null && wp.getHeight() > 0) {
+                sum += wp.getHeight();
+                count++;
+            }
+        }
+        return count == 0 ? 100.0 : sum / count;
+    }
+
     private static double generatedFlightSpeed(PlannedWaylineEntity entity) {
         if (entity != null && entity.getMaxSpeed() != null && entity.getMaxSpeed() > 0) {
             return entity.getMaxSpeed();
@@ -1643,6 +1932,18 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             return 10.0;
         }
         return Math.min(10.0, Math.max(0.5, minSegment / 4.0));
+    }
+
+    /** Initial great-circle bearing normalized to Pilot 2's [-180, 180) representation. */
+    private static double bearingDegrees(PlannedWaypointDTO from, PlannedWaypointDTO to) {
+        double lat1 = Math.toRadians(from.getWgsLat());
+        double lat2 = Math.toRadians(to.getWgsLat());
+        double dLng = Math.toRadians(to.getWgsLng() - from.getWgsLng());
+        double y = Math.sin(dLng) * Math.cos(lat2);
+        double x = Math.cos(lat1) * Math.sin(lat2)
+                - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+        double bearing = Math.toDegrees(Math.atan2(y, x));
+        return bearing >= 180.0 ? bearing - 360.0 : bearing;
     }
 
     private static double totalDistanceMeters(List<PlannedWaypointDTO> wps) {
@@ -1760,10 +2061,92 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         try {
             byte[] content = waylineFileService.downloadWaylineContent(workspaceId, entity.getPublishedWaylineId());
-            return content != null && content.length > 0;
-        } catch (SQLException e) {
+            if (content == null || content.length == 0) {
+                return false;
+            }
+            if (isAreaRoute(entity)) {
+                return isSafeAreaExecutionKmz(content);
+            }
+            int requiredStrictWaypoints = requiredStrictWaypointCount(entity);
+            return requiredStrictWaypoints == 0
+                    || isSafeStrictWaypointExecutionKmz(content, requiredStrictWaypoints);
+        } catch (SQLException | IOException e) {
             return false;
         }
+    }
+
+    private int requiredStrictWaypointCount(PlannedWaylineEntity entity) {
+        if (entity == null || isAreaRoute(entity)) {
+            return 0;
+        }
+        int count = 0;
+        for (PlannedWaypointDTO waypoint : readWaypoints(entity.getWaypointsJson())) {
+            if (!StringUtils.hasText(waypoint.getTurnMode())
+                    || STRICT_WAYPOINT_TURN_MODE.equals(waypoint.getTurnMode())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean isSafeStrictWaypointExecutionKmz(byte[] content, int requiredStrictWaypoints) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(
+                new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
+            ZipEntry entry = zipInputStream.getNextEntry();
+            while (entry != null) {
+                if ("wpmz/waylines.wpml".equals(entry.getName())) {
+                    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                    zipInputStream.transferTo(outputStream);
+                    String wpml = outputStream.toString(StandardCharsets.UTF_8);
+                    int stopTurnCount = countOccurrences(wpml,
+                            "<wpml:waypointTurnMode>" + STRICT_WAYPOINT_TURN_MODE + "</wpml:waypointTurnMode>");
+                    int zeroDampingCount = countOccurrences(wpml,
+                            "<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>");
+                    return stopTurnCount >= requiredStrictWaypoints
+                            && zeroDampingCount >= requiredStrictWaypoints;
+                }
+                entry = zipInputStream.getNextEntry();
+            }
+        }
+        return false;
+    }
+
+    private boolean isSafeAreaExecutionKmz(byte[] content) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(
+                new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
+            ZipEntry entry = zipInputStream.getNextEntry();
+            while (entry != null) {
+                if ("wpmz/waylines.wpml".equals(entry.getName())) {
+                    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+                    zipInputStream.transferTo(outputStream);
+                    String wpml = outputStream.toString(StandardCharsets.UTF_8);
+                    int placemarkCount = countOccurrences(wpml, "<Placemark>");
+                    int stopTurnCount = countOccurrences(wpml,
+                            "<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>");
+                    return placemarkCount > 0
+                            && stopTurnCount == placemarkCount
+                            && !wpml.contains("<wpml:waypointTurnMode>coordinateTurn</wpml:waypointTurnMode>")
+                            && !wpml.contains("<wpml:actionGroup>")
+                            && !wpml.contains("<wpml:actionActuatorFunc>takePhoto</wpml:actionActuatorFunc>")
+                            && !wpml.contains("<wpml:actionTriggerType>multipleTiming</wpml:actionTriggerType>");
+                }
+                entry = zipInputStream.getNextEntry();
+            }
+        }
+        return false;
+    }
+
+    private static int countOccurrences(String value, String token) {
+        if (!StringUtils.hasLength(value) || !StringUtils.hasLength(token)) {
+            return 0;
+        }
+        int count = 0;
+        int offset = 0;
+        while ((offset = value.indexOf(token, offset)) >= 0) {
+            count++;
+            offset += token.length();
+        }
+        return count;
     }
 
     private void rollbackPublishedWayline(String workspaceId, String publishedWaylineId) {
@@ -1786,6 +2169,18 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         target.setAircraftSn(param.getAircraftSn());
         target.setDefaultHeight(param.getDefaultHeight());
         target.setMaxSpeed(param.getMaxSpeed());
+        target.setRouteKind(normalizeRouteKind(param.getRouteKind()));
+        target.setAreaPolygonJson(writeAreaPolygon(param.getAreaPolygon()));
+        target.setAreaCameraKey(normalizeAreaCameraKey(param.getAreaCameraKey(), param.getPayloadModelKey()));
+        target.setAreaFrontOverlap(defaultAreaOverlap(param.getAreaFrontOverlap(), DEFAULT_AREA_FRONT_OVERLAP));
+        target.setAreaSideOverlap(defaultAreaOverlap(param.getAreaSideOverlap(), DEFAULT_AREA_SIDE_OVERLAP));
+        target.setAreaHeadingDeg(defaultAreaHeading(param.getAreaHeadingDeg()));
+        target.setFinishAction(param.getFinishAction());
+        target.setExitOnRcLost(param.getExitOnRcLost());
+        target.setRcLostAction(param.getRcLostAction());
+        target.setTakeoffSecurityHeight(param.getTakeoffSecurityHeight());
+        target.setGlobalTransitionalSpeed(param.getGlobalTransitionalSpeed());
+        target.setRthAltitude(param.getRthAltitude());
         target.setWaypointsJson(writeWaypoints(param.getWaypoints()));
     }
 
@@ -1802,6 +2197,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
                 .maxSpeed(param.getMaxSpeed())
+                .routeKind(normalizeRouteKind(param.getRouteKind()))
+                .areaPolygonJson(writeAreaPolygon(param.getAreaPolygon()))
+                .areaCameraKey(normalizeAreaCameraKey(param.getAreaCameraKey(), param.getPayloadModelKey()))
+                .areaFrontOverlap(defaultAreaOverlap(param.getAreaFrontOverlap(), DEFAULT_AREA_FRONT_OVERLAP))
+                .areaSideOverlap(defaultAreaOverlap(param.getAreaSideOverlap(), DEFAULT_AREA_SIDE_OVERLAP))
+                .areaHeadingDeg(defaultAreaHeading(param.getAreaHeadingDeg()))
                 .finishAction(param.getFinishAction())
                 .exitOnRcLost(param.getExitOnRcLost())
                 .rcLostAction(param.getRcLostAction())
@@ -1827,6 +2228,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(dto.getAircraftSn())
                 .defaultHeight(dto.getDefaultHeight())
                 .maxSpeed(dto.getMaxSpeed())
+                .routeKind(normalizeRouteKind(dto.getRouteKind()))
+                .areaPolygonJson(writeAreaPolygon(dto.getAreaPolygon()))
+                .areaCameraKey(normalizeAreaCameraKey(dto.getAreaCameraKey(), dto.getPayloadModelKey()))
+                .areaFrontOverlap(defaultAreaOverlap(dto.getAreaFrontOverlap(), DEFAULT_AREA_FRONT_OVERLAP))
+                .areaSideOverlap(defaultAreaOverlap(dto.getAreaSideOverlap(), DEFAULT_AREA_SIDE_OVERLAP))
+                .areaHeadingDeg(defaultAreaHeading(dto.getAreaHeadingDeg()))
                 .finishAction(dto.getFinishAction())
                 .exitOnRcLost(dto.getExitOnRcLost())
                 .rcLostAction(dto.getRcLostAction())
@@ -1875,6 +2282,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(param.getAircraftSn())
                 .defaultHeight(param.getDefaultHeight())
                 .maxSpeed(param.getMaxSpeed())
+                .routeKind(normalizeRouteKind(param.getRouteKind()))
+                .areaPolygonJson(writeAreaPolygon(param.getAreaPolygon()))
+                .areaCameraKey(normalizeAreaCameraKey(param.getAreaCameraKey(), param.getPayloadModelKey()))
+                .areaFrontOverlap(defaultAreaOverlap(param.getAreaFrontOverlap(), DEFAULT_AREA_FRONT_OVERLAP))
+                .areaSideOverlap(defaultAreaOverlap(param.getAreaSideOverlap(), DEFAULT_AREA_SIDE_OVERLAP))
+                .areaHeadingDeg(defaultAreaHeading(param.getAreaHeadingDeg()))
                 .finishAction(param.getFinishAction())
                 .exitOnRcLost(param.getExitOnRcLost())
                 .rcLostAction(param.getRcLostAction())
@@ -1906,6 +2319,12 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 .aircraftSn(entity.getAircraftSn())
                 .defaultHeight(entity.getDefaultHeight())
                 .maxSpeed(entity.getMaxSpeed())
+                .routeKind(StringUtils.hasText(entity.getRouteKind()) ? entity.getRouteKind() : ROUTE_KIND_WAYPOINT)
+                .areaPolygon(readAreaPolygon(entity.getAreaPolygonJson()))
+                .areaCameraKey(normalizeAreaCameraKey(entity.getAreaCameraKey(), entity.getPayloadModelKey()))
+                .areaFrontOverlap(defaultAreaOverlap(entity.getAreaFrontOverlap(), DEFAULT_AREA_FRONT_OVERLAP))
+                .areaSideOverlap(defaultAreaOverlap(entity.getAreaSideOverlap(), DEFAULT_AREA_SIDE_OVERLAP))
+                .areaHeadingDeg(defaultAreaHeading(entity.getAreaHeadingDeg()))
                 .finishAction(entity.getFinishAction())
                 .exitOnRcLost(entity.getExitOnRcLost())
                 .rcLostAction(entity.getRcLostAction())
@@ -1973,6 +2392,49 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize planned waypoints.", e);
         }
+    }
+
+    private String writeAreaPolygon(List<PlannedAreaVertexDTO> areaPolygon) {
+        if (areaPolygon == null || areaPolygon.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(areaPolygon);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize planned area polygon.", e);
+        }
+    }
+
+    private List<PlannedAreaVertexDTO> readAreaPolygon(String areaPolygonJson) {
+        if (!StringUtils.hasText(areaPolygonJson)) {
+            return new ArrayList<>();
+        }
+        try {
+            List<PlannedAreaVertexDTO> vertices = objectMapper.readValue(
+                    areaPolygonJson, new TypeReference<List<PlannedAreaVertexDTO>>() {
+                    });
+            return vertices == null ? new ArrayList<>() : vertices;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Failed to deserialize planned area polygon.", e);
+        }
+    }
+
+    private String normalizeAreaCameraKey(String raw, String payloadModelKey) {
+        if (StringUtils.hasText(raw)) {
+            return raw.trim().toUpperCase(Locale.ROOT);
+        }
+        if (StringUtils.hasText(payloadModelKey)) {
+            return payloadModelKey.trim().toUpperCase(Locale.ROOT);
+        }
+        return DEFAULT_AREA_CAMERA_KEY;
+    }
+
+    private int defaultAreaOverlap(Integer value, int fallback) {
+        return value == null ? fallback : value;
+    }
+
+    private double defaultAreaHeading(Double value) {
+        return value == null ? 0.0 : value;
     }
 
     private List<PlannedWaypointDTO> readWaypoints(String waypointsJson) {

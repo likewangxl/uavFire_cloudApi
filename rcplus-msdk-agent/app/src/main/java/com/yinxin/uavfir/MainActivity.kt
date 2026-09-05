@@ -68,6 +68,15 @@ class MainActivity : AppCompatActivity(), FireDetectionObservationListener {
         executeLocalKmzButton = findViewById(R.id.executeLocalKmzButton)
         openSampleToolsButton = findViewById(R.id.openSampleToolsButton)
 
+        val app = application as App
+        app.trialExpired.observe(this) { expired ->
+            if (expired) showTrialExpiredState()
+        }
+        if (app.isTrialExpired()) {
+            showTrialExpiredState()
+            return
+        }
+
         ensureRuntimePermissions()
 
         probeWaypointButton.setOnClickListener {
@@ -99,6 +108,7 @@ class MainActivity : AppCompatActivity(), FireDetectionObservationListener {
 
     override fun onStart() {
         super.onStart()
+        if ((application as App).isTrialExpired()) return
         FireDetectionObservationBus.addListener(this)
     }
 
@@ -108,6 +118,7 @@ class MainActivity : AppCompatActivity(), FireDetectionObservationListener {
     }
 
     override fun onObservation(observation: FireDetectionObservation) {
+        if ((application as App).isTrialExpired()) return
         runOnUiThread {
             aiDetectionSwitch.isChecked = observation.active
             aiDetectionSwitch.isEnabled = observation.enabled && !aiDetectionToggleBusy
@@ -147,6 +158,10 @@ class MainActivity : AppCompatActivity(), FireDetectionObservationListener {
         action: String,
         work: suspend () -> ValidationConsoleController.UiResult,
     ) {
+        if ((application as App).isTrialExpired()) {
+            showTrialExpiredState()
+            return
+        }
         fireTaskButton.isEnabled = false
         refreshButton.isEnabled = false
         probeWaypointButton.isEnabled = false
@@ -166,16 +181,22 @@ class MainActivity : AppCompatActivity(), FireDetectionObservationListener {
                     statusText.text = statusMessage
                     Log.e(TAG, "$action failed: $message", it)
                 }
-            fireTaskButton.isEnabled = true
-            refreshButton.isEnabled = true
-            probeWaypointButton.isEnabled = true
-            deviceStatusButton.isEnabled = true
-            executeLocalKmzButton.isEnabled = true
-            openSampleToolsButton.isEnabled = true
+            if (!(application as App).isTrialExpired()) {
+                fireTaskButton.isEnabled = true
+                refreshButton.isEnabled = true
+                probeWaypointButton.isEnabled = true
+                deviceStatusButton.isEnabled = true
+                executeLocalKmzButton.isEnabled = true
+                openSampleToolsButton.isEnabled = true
+            }
         }
     }
 
     private fun setManualFireDetectionEnabled(enabled: Boolean) {
+        if ((application as App).isTrialExpired()) {
+            showTrialExpiredState()
+            return
+        }
         if (aiDetectionToggleBusy) return
         aiDetectionToggleBusy = true
         aiDetectionSwitch.isEnabled = false
@@ -233,11 +254,27 @@ class MainActivity : AppCompatActivity(), FireDetectionObservationListener {
 
     private fun startHomeStatusRefresh() {
         uiScope.launch {
-            while (true) {
+            while (!(application as App).isTrialExpired()) {
                 refreshHomeStatus()
                 delay(HOME_STATUS_REFRESH_MS)
             }
         }
+    }
+
+    private fun showTrialExpiredState() {
+        statusText.text = getString(R.string.trial_expired_message)
+        flightLimitText.text = getString(R.string.trial_expired_short)
+        taskSpaceText.text = getString(R.string.trial_expired_short)
+        aircraftStatusText.text = getString(R.string.trial_expired_short)
+        aiDetectionSwitch.isChecked = false
+        aiDetectionSwitch.isEnabled = false
+        aiDetectionStatusText.text = getString(R.string.trial_expired_short)
+        fireTaskButton.isEnabled = false
+        refreshButton.isEnabled = false
+        probeWaypointButton.isEnabled = false
+        deviceStatusButton.isEnabled = false
+        executeLocalKmzButton.isEnabled = false
+        openSampleToolsButton.isEnabled = false
     }
 
     private suspend fun refreshHomeStatus() {

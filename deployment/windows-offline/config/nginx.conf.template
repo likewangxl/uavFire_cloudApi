@@ -1,0 +1,86 @@
+worker_processes  1;
+error_log  {{ROOT_FORWARD}}/data/logs/nginx-error.log;
+pid        {{ROOT_FORWARD}}/data/pids/nginx.pid;
+
+events { worker_connections 1024; }
+
+http {
+    include       {{ROOT_FORWARD}}/runtime/nginx/conf/mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+    client_max_body_size 2048m;
+
+    server {
+        listen {{WEB_PORT}};
+        server_name _;
+        root {{ROOT_FORWARD}}/app/frontend;
+        index index.html;
+
+        location /api/v1/snapshots/ {
+            proxy_pass http://127.0.0.1:{{AI_PORT}};
+            proxy_set_header Host $host;
+        }
+
+        location = /ZLMRTCClient.js {
+            proxy_pass http://127.0.0.1:{{ZLM_HTTP_PORT}};
+            proxy_set_header Host $host;
+        }
+
+        location ^~ /index/api/ {
+            proxy_pass http://127.0.0.1:{{ZLM_HTTP_PORT}};
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_buffering off;
+        }
+
+        location ^~ /live/ {
+            proxy_pass http://127.0.0.1:{{ZLM_HTTP_PORT}};
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_buffering off;
+        }
+
+        location /api/v1/ws {
+            proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_read_timeout 3600s;
+        }
+
+        location = /mqtt {
+            proxy_pass http://127.0.0.1:{{MQTT_WS_PORT}}/mqtt;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+            proxy_buffering off;
+        }
+
+        location /api/ {
+            proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        location ~ ^/(manage|map|media|wayline|wayline-agent|control|storage)/ {
+            proxy_pass http://127.0.0.1:{{BACKEND_PORT}};
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        location /assets/ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        location / {
+            try_files $uri $uri/ /index.html;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+    }
+}

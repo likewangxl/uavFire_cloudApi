@@ -1,0 +1,2029 @@
+openapi: 3.0.3
+info:
+  title: UAVFire WeChat Mini Program API
+  version: 1.0.0
+  license:
+    name: Proprietary
+  description: |
+    无人机火情智巡微信小程序 v1 目标契约。
+    异步接口返回 202 仅表示请求已受理，设备最终结果需查询命令或接收实时事件。
+servers:
+  - url: /miniapp/api/v1
+    description: Current origin
+tags:
+  - name: Auth
+    description: 微信登录、绑定、令牌轮换和注销
+  - name: Me
+    description: 当前用户、工作空间和设备会话
+  - name: Dashboard
+    description: 首页、态势和待办聚合
+  - name: Task
+    description: 航线与巡检任务只读能力
+  - name: Approval
+    description: 任务审批流程
+  - name: FlightCommand
+    description: 飞行指令预检、入队和状态查询
+  - name: Event
+    description: 火情与 AI 异常
+  - name: Incident
+    description: 事件处置与资源分派
+  - name: Issue
+    description: 问题督办、整改和复检
+  - name: Report
+    description: 报告生成、版本、下载、签阅和分享
+  - name: Device
+    description: 无人机、遥控器、载荷和战备状态
+  - name: Live
+    description: 短时授权直播会话
+  - name: Realtime
+    description: WebSocket ticket 和断线补拉
+  - name: Notification
+    description: 订阅授权、偏好和站内通知
+  - name: Audit
+    description: 安全审计查询
+  - name: Admin
+    description: 绑定审核和灰度开关
+  - name: Callback
+    description: 微信与媒体服务端回调
+security:
+  - bearerAuth: []
+paths:
+  /auth/wechat/login:
+    post:
+      tags: [Auth]
+      operationId: wechatLogin
+      summary: 使用 wx.login 临时 code 登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WechatLoginRequest'
+      responses:
+        '200':
+          description: 已登录或需要绑定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WechatLoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+  /auth/bindings:
+    post:
+      tags: [Auth]
+      operationId: createAuthBinding
+      summary: 绑定现有系统账号
+      security:
+        - bindingTicketAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBindingRequest'
+      responses:
+        '200':
+          description: 绑定成功或进入待审核
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WechatLoginResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: 轮换刷新令牌
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: 新令牌对
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPairResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: 注销当前会话
+      responses:
+        '204':
+          description: 已注销
+  /me:
+    get:
+      tags: [Me]
+      operationId: getMe
+      summary: 当前用户、工作空间和权限
+      responses:
+        '200':
+          description: 当前用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+  /me/workspaces:
+    get:
+      tags: [Me]
+      operationId: listMyWorkspaces
+      summary: 可访问工作空间
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /me/workspace-switches:
+    post:
+      tags: [Me]
+      operationId: switchWorkspace
+      summary: 切换工作空间并换发令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspaceId]
+              properties:
+                workspaceId:
+                  type: string
+      responses:
+        '200':
+          description: 新令牌和工作空间
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPairResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /me/sessions:
+    get:
+      tags: [Me]
+      operationId: listMySessions
+      summary: 登录设备会话
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /me/sessions/{sessionId}:
+    delete:
+      tags: [Me]
+      operationId: revokeSession
+      summary: 撤销指定会话
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '204':
+          description: 已撤销
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /dashboard/summary:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboardSummary
+      summary: 首页聚合摘要
+      responses:
+        '200':
+          description: 首页数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSummaryResponse'
+  /dashboard/situation:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboardSituation
+      summary: 地图态势图层
+      parameters:
+        - name: bbox
+          in: query
+          schema:
+            type: string
+          description: lng1,lat1,lng2,lat2
+        - name: layers
+          in: query
+          schema:
+            type: string
+          description: aircraft,tasks,events,areas
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /todos:
+    get:
+      tags: [Dashboard]
+      operationId: listTodos
+      summary: 当前用户待办
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /todos/{todoId}/read:
+    post:
+      tags: [Dashboard]
+      operationId: markTodoRead
+      summary: 标记待办已读
+      parameters:
+        - $ref: '#/components/parameters/TodoId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /waylines:
+    get:
+      tags: [Task]
+      operationId: listWaylines
+      summary: 可用航线列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /waylines/{waylineId}:
+    get:
+      tags: [Task]
+      operationId: getWayline
+      summary: 航线详情与地图几何
+      parameters:
+        - $ref: '#/components/parameters/WaylineId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /inspection-tasks:
+    get:
+      tags: [Task]
+      operationId: listInspectionTasks
+      summary: 巡检任务列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: 任务分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectionTaskPageResponse'
+  /inspection-tasks/{taskId}:
+    get:
+      tags: [Task]
+      operationId: getInspectionTask
+      summary: 任务详情
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InspectionTaskResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /inspection-tasks/{taskId}/timeline:
+    get:
+      tags: [Task]
+      operationId: getInspectionTaskTimeline
+      summary: 任务时间线
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /inspection-tasks/{taskId}/track:
+    get:
+      tags: [Task]
+      operationId: getInspectionTaskTrack
+      summary: 实际航迹
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: simplifyToleranceM
+          in: query
+          schema:
+            type: number
+            format: double
+            minimum: 0
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /inspection-tasks/{taskId}/media:
+    get:
+      tags: [Task]
+      operationId: listInspectionTaskMedia
+      summary: 任务媒体
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /inspection-tasks/{taskId}/approval-submissions:
+    post:
+      tags: [Approval]
+      operationId: submitTaskApproval
+      summary: 提交任务审批
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalSubmissionRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /inspection-tasks/{taskId}/flight-commands:
+    get:
+      tags: [FlightCommand]
+      operationId: listTaskFlightCommands
+      summary: 任务指令历史
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /approvals:
+    get:
+      tags: [Approval]
+      operationId: listApprovals
+      summary: 审批列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /approvals/{approvalId}:
+    get:
+      tags: [Approval]
+      operationId: getApproval
+      summary: 审批详情
+      parameters:
+        - $ref: '#/components/parameters/ApprovalId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /approvals/{approvalId}/decisions:
+    post:
+      tags: [Approval]
+      operationId: decideApproval
+      summary: 批准或驳回
+      parameters:
+        - $ref: '#/components/parameters/ApprovalId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecisionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /flight-command-previews:
+    post:
+      tags: [FlightCommand]
+      operationId: previewFlightCommand
+      summary: 飞行指令权限、状态与风险预检
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlightCommandPreviewRequest'
+      responses:
+        '200':
+          description: 允许或阻断详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightCommandPreviewResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /flight-commands:
+    post:
+      tags: [FlightCommand]
+      operationId: createFlightCommand
+      summary: 二次确认后提交飞行指令
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFlightCommandRequest'
+      responses:
+        '202':
+          description: 指令已入持久化队列
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightCommandResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /flight-commands/{commandId}:
+    get:
+      tags: [FlightCommand]
+      operationId: getFlightCommand
+      summary: 查询指令生命周期
+      parameters:
+        - $ref: '#/components/parameters/CommandId'
+      responses:
+        '200':
+          description: 指令详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightCommandResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /flight-commands/{commandId}/cancel-requests:
+    post:
+      tags: [FlightCommand]
+      operationId: requestFlightCommandCancellation
+      summary: 请求取消尚未派发的指令
+      parameters:
+        - $ref: '#/components/parameters/CommandId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 2
+                  maxLength: 500
+      responses:
+        '202':
+          $ref: '#/components/responses/GenericSuccess'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /events:
+    get:
+      tags: [Event]
+      operationId: listEvents
+      summary: 火情和 AI 异常列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: level
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /events/{eventId}:
+    get:
+      tags: [Event]
+      operationId: getEvent
+      summary: 事件详情、证据和坐标
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /events/{eventId}/timeline:
+    get:
+      tags: [Event]
+      operationId: getEventTimeline
+      summary: 事件时间线
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /events/{eventId}/reviews:
+    post:
+      tags: [Event]
+      operationId: reviewEvent
+      summary: 人工复核事件
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventReviewRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /events/{eventId}/incident-links:
+    post:
+      tags: [Event, Incident]
+      operationId: linkEventIncident
+      summary: 创建或关联处置事件
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                incidentId:
+                  type: string
+                createIfAbsent:
+                  type: boolean
+                  default: true
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /events/{eventId}/issue-links:
+    post:
+      tags: [Event, Issue]
+      operationId: linkEventIssue
+      summary: 创建或关联督办问题
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issueId:
+                  type: string
+                createIfAbsent:
+                  type: boolean
+                  default: true
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /incidents/{incidentId}:
+    get:
+      tags: [Incident]
+      operationId: getIncident
+      summary: 处置事件详情
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /incidents/{incidentId}/assignments:
+    post:
+      tags: [Incident]
+      operationId: assignIncident
+      summary: 分派资源或责任人
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /incidents/{incidentId}/comments:
+    post:
+      tags: [Incident]
+      operationId: commentIncident
+      summary: 添加批示或反馈
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CommentBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /issues:
+    get:
+      tags: [Issue]
+      operationId: listIssues
+      summary: 问题列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: level
+          in: query
+          schema:
+            type: string
+        - name: assigneeUserId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+    post:
+      tags: [Issue]
+      operationId: createIssue
+      summary: 创建问题
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIssueRequest'
+      responses:
+        '201':
+          description: 问题已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueResponse'
+  /issues/{issueId}:
+    get:
+      tags: [Issue]
+      operationId: getIssue
+      summary: 问题详情
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+      responses:
+        '200':
+          description: 问题详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /issues/{issueId}/assignments:
+    post:
+      tags: [Issue]
+      operationId: assignIssue
+      summary: 分派或转派问题
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignmentRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /issues/{issueId}/comments:
+    post:
+      tags: [Issue]
+      operationId: commentIssue
+      summary: 添加反馈或批示
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CommentBody'
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /issues/{issueId}/attachments:
+    post:
+      tags: [Issue]
+      operationId: prepareIssueAttachment
+      summary: 创建附件上传凭证
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrepareAttachmentRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /issues/{issueId}/attachments/{uploadId}/complete:
+    post:
+      tags: [Issue]
+      operationId: completeIssueAttachment
+      summary: 完成附件登记与校验
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+        - $ref: '#/components/parameters/UploadId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sha256]
+              properties:
+                sha256:
+                  type: string
+                  pattern: '^[a-fA-F0-9]{64}$'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /issues/{issueId}/completion-submissions:
+    post:
+      tags: [Issue]
+      operationId: submitIssueCompletion
+      summary: 提交问题处理完成
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueCompletionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /issues/{issueId}/recheck-decisions:
+    post:
+      tags: [Issue]
+      operationId: decideIssueRecheck
+      summary: 复检通过或重新打开
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueRecheckRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /issues/{issueId}/reminders:
+    post:
+      tags: [Issue]
+      operationId: remindIssue
+      summary: 催办问题
+      parameters:
+        - $ref: '#/components/parameters/IssueId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        $ref: '#/components/requestBodies/CommentBody'
+      responses:
+        '202':
+          $ref: '#/components/responses/GenericSuccess'
+  /reports:
+    get:
+      tags: [Report]
+      operationId: listReports
+      summary: 报告列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: taskId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+    post:
+      tags: [Report]
+      operationId: createReport
+      summary: 触发报告生成或重生成
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReportRequest'
+      responses:
+        '202':
+          description: 报告生成已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /reports/{reportId}:
+    get:
+      tags: [Report]
+      operationId: getReport
+      summary: 报告结构化详情
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 报告详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /reports/{reportId}/versions:
+    get:
+      tags: [Report]
+      operationId: listReportVersions
+      summary: 报告历史版本
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /reports/{reportId}/download-ticket:
+    get:
+      tags: [Report]
+      operationId: createReportDownloadTicket
+      summary: 创建 PDF 短时下载凭证
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /reports/{reportId}/signatures:
+    post:
+      tags: [Report]
+      operationId: signReport
+      summary: 签阅报告
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportSignatureRequest'
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /reports/{reportId}/shares:
+    post:
+      tags: [Report]
+      operationId: createReportShare
+      summary: 创建短时分享
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expiresInSeconds]
+              properties:
+                expiresInSeconds:
+                  type: integer
+                  minimum: 60
+                  maximum: 86400
+                maxViews:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+      responses:
+        '201':
+          $ref: '#/components/responses/GenericSuccess'
+  /reports/{reportId}/shares/{shareId}:
+    delete:
+      tags: [Report]
+      operationId: revokeReportShare
+      summary: 撤销分享
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+        - $ref: '#/components/parameters/ShareId'
+      responses:
+        '204':
+          description: 已撤销
+  /devices:
+    get:
+      tags: [Device]
+      operationId: listDevices
+      summary: 设备列表和战备摘要
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: online
+          in: query
+          schema:
+            type: boolean
+        - name: model
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 设备分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DevicePageResponse'
+  /devices/{deviceSn}:
+    get:
+      tags: [Device]
+      operationId: getDevice
+      summary: 设备详情、载荷、HMS 和遥测
+      parameters:
+        - $ref: '#/components/parameters/DeviceSn'
+      responses:
+        '200':
+          description: 设备详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /devices/{deviceSn}/timeline:
+    get:
+      tags: [Device]
+      operationId: getDeviceTimeline
+      summary: 设备关键事件
+      parameters:
+        - $ref: '#/components/parameters/DeviceSn'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /live-sessions:
+    post:
+      tags: [Live]
+      operationId: createLiveSession
+      summary: 创建短时播放会话
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLiveSessionRequest'
+      responses:
+        '201':
+          description: 播放会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveSessionResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /live-sessions/{liveSessionId}:
+    get:
+      tags: [Live]
+      operationId: getLiveSession
+      summary: 查询播放状态
+      parameters:
+        - $ref: '#/components/parameters/LiveSessionId'
+      responses:
+        '200':
+          description: 播放会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveSessionResponse'
+    delete:
+      tags: [Live]
+      operationId: closeLiveSession
+      summary: 结束播放会话
+      parameters:
+        - $ref: '#/components/parameters/LiveSessionId'
+      responses:
+        '204':
+          description: 已结束
+  /realtime-tickets:
+    post:
+      tags: [Realtime]
+      operationId: createRealtimeTicket
+      summary: 创建一次性 WSS ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRealtimeTicketRequest'
+      responses:
+        '201':
+          description: 一次性 ticket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RealtimeTicketResponse'
+  /events/since:
+    get:
+      tags: [Realtime]
+      operationId: listEventsSince
+      summary: 断线后按游标补拉关键事件
+      parameters:
+        - name: lastEventId
+          in: query
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /notification-preferences:
+    get:
+      tags: [Notification]
+      operationId: getNotificationPreferences
+      summary: 通知偏好和模板状态
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+    put:
+      tags: [Notification]
+      operationId: updateNotificationPreferences
+      summary: 更新站内及备用通道偏好
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /notification-subscriptions:
+    post:
+      tags: [Notification]
+      operationId: registerNotificationSubscriptions
+      summary: 登记 wx.requestSubscribeMessage 授权结果
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationSubscriptionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /notifications:
+    get:
+      tags: [Notification]
+      operationId: listNotifications
+      summary: 站内消息列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /notifications/{notificationId}/read:
+    post:
+      tags: [Notification]
+      operationId: markNotificationRead
+      summary: 标记站内消息已读
+      parameters:
+        - $ref: '#/components/parameters/NotificationId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /audit-logs:
+    get:
+      tags: [Audit]
+      operationId: listAuditLogs
+      summary: 检索审计日志
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: resourceType
+          in: query
+          schema:
+            type: string
+        - name: resourceId
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: userId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /audit-logs/{auditId}:
+    get:
+      tags: [Audit]
+      operationId: getAuditLog
+      summary: 审计详情
+      parameters:
+        - $ref: '#/components/parameters/AuditId'
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /admin/user-bindings:
+    get:
+      tags: [Admin]
+      operationId: listUserBindings
+      summary: 微信账号绑定审核列表
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericPageSuccess'
+  /admin/user-bindings/{bindingId}/decisions:
+    post:
+      tags: [Admin]
+      operationId: decideUserBinding
+      summary: 批准或拒绝账号绑定
+      parameters:
+        - $ref: '#/components/parameters/BindingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [APPROVE, REJECT]
+                comment:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /admin/feature-flags:
+    get:
+      tags: [Admin]
+      operationId: listFeatureFlags
+      summary: 灰度能力列表
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /admin/feature-flags/{flagKey}:
+    put:
+      tags: [Admin]
+      operationId: updateFeatureFlag
+      summary: 更新灰度开关
+      parameters:
+        - $ref: '#/components/parameters/FlagKey'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+                workspaceIds:
+                  type: array
+                  items:
+                    type: string
+                userIds:
+                  type: array
+                  items:
+                    type: string
+                deviceSns:
+                  type: array
+                  items:
+                    type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/GenericSuccess'
+  /callbacks/wechat/subscribe-message:
+    post:
+      tags: [Callback]
+      operationId: receiveWechatSubscribeMessageCallback
+      summary: 微信订阅消息发送结果回调
+      security:
+        - wechatSignatureAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 已接收
+  /callbacks/media/playback:
+    post:
+      tags: [Callback]
+      operationId: receiveMediaPlaybackCallback
+      summary: 媒体播放状态回调
+      security:
+        - callbackHmacAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 已接收
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    bindingTicketAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: '格式: Binding bt_xxx'
+    wechatSignatureAuth:
+      type: apiKey
+      in: header
+      name: X-Wechat-Signature
+    callbackHmacAuth:
+      type: apiKey
+      in: header
+      name: X-Callback-Signature
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionId: {name: sessionId, in: path, required: true, schema: {type: string}}
+    TodoId: {name: todoId, in: path, required: true, schema: {type: string}}
+    WaylineId: {name: waylineId, in: path, required: true, schema: {type: string}}
+    TaskId: {name: taskId, in: path, required: true, schema: {type: string}}
+    ApprovalId: {name: approvalId, in: path, required: true, schema: {type: string}}
+    CommandId: {name: commandId, in: path, required: true, schema: {type: string}}
+    EventId: {name: eventId, in: path, required: true, schema: {type: string}}
+    IncidentId: {name: incidentId, in: path, required: true, schema: {type: string}}
+    IssueId: {name: issueId, in: path, required: true, schema: {type: string}}
+    UploadId: {name: uploadId, in: path, required: true, schema: {type: string}}
+    ReportId: {name: reportId, in: path, required: true, schema: {type: string}}
+    ShareId: {name: shareId, in: path, required: true, schema: {type: string}}
+    DeviceSn: {name: deviceSn, in: path, required: true, schema: {type: string}}
+    LiveSessionId: {name: liveSessionId, in: path, required: true, schema: {type: string}}
+    NotificationId: {name: notificationId, in: path, required: true, schema: {type: string}}
+    AuditId: {name: auditId, in: path, required: true, schema: {type: string}}
+    BindingId: {name: bindingId, in: path, required: true, schema: {type: string}}
+    FlagKey: {name: flagKey, in: path, required: true, schema: {type: string}}
+  requestBodies:
+    CommentBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [content]
+            properties:
+              content:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              attachmentIds:
+                type: array
+                items:
+                  type: string
+  responses:
+    GenericSuccess:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GenericSuccessResponse'
+    GenericPageSuccess:
+      description: 分页成功
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GenericPageResponse'
+    BadRequest:
+      description: 参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: 未认证或令牌无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Forbidden:
+      description: 无权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: 资源不存在或无权查看
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Conflict:
+      description: 状态、版本或幂等冲突
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unprocessable:
+      description: 业务条件不满足
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unavailable:
+      description: 服务暂不可用
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    UpstreamError:
+      description: 上游服务异常
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  schemas:
+    ApiError:
+      type: object
+      required: [requestId, code, message, serverTime]
+      properties:
+        requestId: {type: string}
+        code: {type: string}
+        message: {type: string}
+        details: {type: object, additionalProperties: true}
+        serverTime: {type: string, format: date-time}
+    GenericSuccessResponse:
+      type: object
+      required: [requestId, code, message, data, serverTime]
+      properties:
+        requestId: {type: string}
+        code: {type: string, example: OK}
+        message: {type: string, example: success}
+        data: {type: object, additionalProperties: true}
+        serverTime: {type: string, format: date-time}
+    GenericPageResponse:
+      type: object
+      required: [requestId, code, message, data, serverTime]
+      properties:
+        requestId: {type: string}
+        code: {type: string, example: OK}
+        message: {type: string, example: success}
+        data:
+          $ref: '#/components/schemas/CursorPage'
+        serverTime: {type: string, format: date-time}
+    CursorPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          items: {}
+        nextCursor:
+          type: string
+          nullable: true
+        hasMore:
+          type: boolean
+    WechatLoginRequest:
+      type: object
+      required: [code, deviceId, clientVersion]
+      properties:
+        code: {type: string, minLength: 1, maxLength: 256}
+        deviceId: {type: string, minLength: 8, maxLength: 128}
+        clientVersion: {type: string, maxLength: 32}
+    CreateBindingRequest:
+      type: object
+      required: [method, workspaceCode, username]
+      properties:
+        method:
+          type: string
+          enum: [ACCOUNT_PASSWORD, SMS_CODE, ADMIN_APPROVAL]
+        workspaceCode: {type: string, maxLength: 64}
+        username: {type: string, maxLength: 128}
+        password: {type: string, format: password, maxLength: 256}
+        smsCode: {type: string, maxLength: 16}
+    RefreshRequest:
+      type: object
+      required: [refreshToken, deviceId]
+      properties:
+        refreshToken: {type: string}
+        deviceId: {type: string}
+    TokenPair:
+      type: object
+      required: [accessToken, accessTokenExpiresIn, refreshToken, refreshTokenExpiresIn]
+      properties:
+        accessToken: {type: string}
+        accessTokenExpiresIn: {type: integer, example: 900}
+        refreshToken: {type: string}
+        refreshTokenExpiresIn: {type: integer, example: 604800}
+    TokenPairResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/TokenPair'
+    UserSummary:
+      type: object
+      required: [userId, displayName, roles]
+      properties:
+        userId: {type: string}
+        displayName: {type: string}
+        roles:
+          type: array
+          items: {type: string}
+        permissions:
+          type: array
+          items: {type: string}
+    WorkspaceSummary:
+      type: object
+      required: [workspaceId, name]
+      properties:
+        workspaceId: {type: string}
+        name: {type: string}
+    WechatLoginData:
+      type: object
+      required: [loginStatus]
+      properties:
+        loginStatus:
+          type: string
+          enum: [AUTHENTICATED, BINDING_REQUIRED, PENDING_APPROVAL]
+        accessToken: {type: string}
+        accessTokenExpiresIn: {type: integer}
+        refreshToken: {type: string}
+        refreshTokenExpiresIn: {type: integer}
+        bindingTicket: {type: string}
+        expiresIn: {type: integer}
+        bindingId: {type: string}
+        bindingMethods:
+          type: array
+          items: {type: string}
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        workspace:
+          $ref: '#/components/schemas/WorkspaceSummary'
+    WechatLoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/WechatLoginData'
+    MeResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                user: {$ref: '#/components/schemas/UserSummary'}
+                workspace: {$ref: '#/components/schemas/WorkspaceSummary'}
+                sessionId: {type: string}
+    DashboardSummaryResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [conclusion, metrics, dataStatus, partial, warnings, generatedAt]
+              properties:
+                conclusion: {type: object, additionalProperties: true}
+                metrics: {type: object, additionalProperties: true}
+                activeTasks: {type: array, items: {$ref: '#/components/schemas/InspectionTaskSummary'}}
+                urgentEvents: {type: array, items: {type: object, additionalProperties: true}}
+                topTodos: {type: array, items: {type: object, additionalProperties: true}}
+                latestReport: {type: object, nullable: true, additionalProperties: true}
+                dataStatus: {$ref: '#/components/schemas/DataStatus'}
+                partial: {type: boolean}
+                warnings: {type: array, items: {type: string}}
+                generatedAt: {type: string, format: date-time}
+    DataStatus:
+      type: string
+      enum: [FRESH, DELAYED, STALE, UNKNOWN]
+    InspectionTaskStatus:
+      type: string
+      enum: [DRAFT, PENDING_APPROVAL, APPROVED, PREPARING, PRECHECK_FAILED, READY, EXECUTING, PAUSED, SUCCEEDED, FAILED, STOPPED, REPORT_GENERATING, CLOSED]
+    InspectionTaskSummary:
+      type: object
+      required: [taskId, name, status, version]
+      properties:
+        taskId: {type: string}
+        name: {type: string}
+        status: {$ref: '#/components/schemas/InspectionTaskStatus'}
+        version: {type: integer, format: int64}
+        progressPercent: {type: number, minimum: 0, maximum: 100, nullable: true}
+        wayline: {type: object, additionalProperties: true}
+        aircraft: {type: object, additionalProperties: true}
+        payload: {type: object, additionalProperties: true}
+        currentWaypointIndex: {type: integer, nullable: true}
+        totalWaypoints: {type: integer, nullable: true}
+        batteryPercent: {type: number, nullable: true}
+        dataStatus: {$ref: '#/components/schemas/DataStatus'}
+        scheduledAt: {type: string, format: date-time, nullable: true}
+        updatedAt: {type: string, format: date-time}
+    InspectionTask:
+      allOf:
+        - $ref: '#/components/schemas/InspectionTaskSummary'
+        - type: object
+          properties:
+            progress: {type: object, additionalProperties: true}
+            telemetry: {type: object, additionalProperties: true}
+            preflight: {type: object, additionalProperties: true}
+            approval: {type: object, additionalProperties: true}
+            counts: {type: object, additionalProperties: true}
+            availableActions:
+              type: array
+              items: {$ref: '#/components/schemas/FlightAction'}
+    InspectionTaskPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items: {$ref: '#/components/schemas/InspectionTaskSummary'}
+                nextCursor: {type: string, nullable: true}
+                hasMore: {type: boolean}
+    InspectionTaskResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/InspectionTask'}
+    ApprovalSubmissionRequest:
+      type: object
+      required: [expectedTaskVersion, approverUserIds]
+      properties:
+        expectedTaskVersion: {type: integer, format: int64}
+        approverUserIds:
+          type: array
+          minItems: 1
+          items: {type: string}
+        comment: {type: string, maxLength: 1000}
+    ApprovalDecisionRequest:
+      type: object
+      required: [decision, expectedApprovalVersion]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVE, REJECT]
+        comment: {type: string, maxLength: 1000}
+        expectedApprovalVersion: {type: integer, format: int64}
+    FlightAction:
+      type: string
+      enum: [EXECUTE, PAUSE, RESUME, STOP, RETURN_HOME_REQUEST, RETURN_HOME]
+    FlightCommandPreviewRequest:
+      type: object
+      required: [taskId, action, expectedTaskVersion, reason]
+      properties:
+        taskId: {type: string}
+        action: {$ref: '#/components/schemas/FlightAction'}
+        expectedTaskVersion: {type: integer, format: int64}
+        reason: {type: string, minLength: 2, maxLength: 500}
+    PreflightCheck:
+      type: object
+      required: [code, status, message]
+      properties:
+        code: {type: string}
+        status:
+          type: string
+          enum: [PASS, WARN, BLOCK]
+        message: {type: string}
+        evidence: {type: object, additionalProperties: true}
+    FlightCommandPreview:
+      type: object
+      required: [allowed, action, taskVersion, riskLevel, checks]
+      properties:
+        allowed: {type: boolean}
+        confirmToken: {type: string}
+        expiresAt: {type: string, format: date-time}
+        taskVersion: {type: integer, format: int64}
+        action: {$ref: '#/components/schemas/FlightAction'}
+        riskLevel: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+        summary: {type: string}
+        checks:
+          type: array
+          items: {$ref: '#/components/schemas/PreflightCheck'}
+        requiredConfirmationText: {type: string}
+    FlightCommandPreviewResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/FlightCommandPreview'}
+    CreateFlightCommandRequest:
+      type: object
+      required: [taskId, action, expectedTaskVersion, confirmToken, confirmationTextAccepted, reason]
+      properties:
+        taskId: {type: string}
+        action: {$ref: '#/components/schemas/FlightAction'}
+        expectedTaskVersion: {type: integer, format: int64}
+        confirmToken: {type: string}
+        confirmationTextAccepted: {type: boolean, enum: [true]}
+        reason: {type: string, minLength: 2, maxLength: 500}
+    FlightCommandStatus:
+      type: string
+      enum: [CREATED, VALIDATING, QUEUED, DISPATCHED, ACKED, EXECUTING, CANCEL_REQUESTED, SUCCEEDED, FAILED, TIMED_OUT, REJECTED, CANCELLED]
+    FlightCommand:
+      type: object
+      required: [commandId, taskId, action, status, version]
+      properties:
+        commandId: {type: string}
+        taskId: {type: string}
+        action: {$ref: '#/components/schemas/FlightAction'}
+        status: {$ref: '#/components/schemas/FlightCommandStatus'}
+        statusMessage: {type: string}
+        requestedBy: {$ref: '#/components/schemas/UserSummary'}
+        reason: {type: string}
+        queuedAt: {type: string, format: date-time, nullable: true}
+        dispatchedAt: {type: string, format: date-time, nullable: true}
+        ackedAt: {type: string, format: date-time, nullable: true}
+        finishedAt: {type: string, format: date-time, nullable: true}
+        expiresAt: {type: string, format: date-time, nullable: true}
+        result: {type: object, nullable: true, additionalProperties: true}
+        version: {type: integer, format: int64}
+    FlightCommandResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/FlightCommand'}
+    EventReviewRequest:
+      type: object
+      required: [decision, expectedEventVersion]
+      properties:
+        decision:
+          type: string
+          enum: [CONFIRMED, SUSPECTED, FALSE_ALARM]
+        comment: {type: string, maxLength: 1000}
+        expectedEventVersion: {type: integer, format: int64}
+    AssignmentRequest:
+      type: object
+      properties:
+        assigneeOrganizationId: {type: string}
+        assigneeUserId: {type: string}
+        resourceSn: {type: string}
+        role: {type: string}
+        dueAt: {type: string, format: date-time}
+        comment: {type: string, maxLength: 1000}
+    CreateIssueRequest:
+      type: object
+      required: [sourceType, sourceId, level, title, description, dueAt]
+      properties:
+        sourceType: {type: string, enum: [FIRE_EVENT, AI_EVENT, TASK, MANUAL, REPORT_ITEM]}
+        sourceId: {type: string}
+        taskId: {type: string}
+        level: {type: string, enum: [LOW, MEDIUM, HIGH, CRITICAL]}
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, minLength: 1, maxLength: 4000}
+        assigneeOrganizationId: {type: string}
+        assigneeUserId: {type: string}
+        dueAt: {type: string, format: date-time}
+    IssueStatus:
+      type: string
+      enum: [NEW, ASSIGNED, IN_PROGRESS, PENDING_RECHECK, CLOSED, REOPENED]
+    Issue:
+      type: object
+      required: [issueId, level, title, status, version]
+      properties:
+        issueId: {type: string}
+        sourceType: {type: string}
+        sourceId: {type: string}
+        taskId: {type: string, nullable: true}
+        level: {type: string}
+        title: {type: string}
+        description: {type: string}
+        status: {$ref: '#/components/schemas/IssueStatus'}
+        assigneeOrganizationId: {type: string, nullable: true}
+        assigneeUserId: {type: string, nullable: true}
+        dueAt: {type: string, format: date-time}
+        version: {type: integer, format: int64}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    IssueResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/Issue'}
+    PrepareAttachmentRequest:
+      type: object
+      required: [fileName, contentType, sizeBytes, sha256]
+      properties:
+        fileName: {type: string, maxLength: 255}
+        contentType: {type: string, maxLength: 128}
+        sizeBytes: {type: integer, format: int64, minimum: 1}
+        sha256: {type: string, pattern: '^[a-fA-F0-9]{64}$'}
+    IssueCompletionRequest:
+      type: object
+      required: [expectedIssueVersion, result, requestRecheck]
+      properties:
+        expectedIssueVersion: {type: integer, format: int64}
+        result: {type: string, minLength: 1, maxLength: 4000}
+        attachmentIds:
+          type: array
+          items: {type: string}
+        requestRecheck: {type: boolean}
+    IssueRecheckRequest:
+      type: object
+      required: [decision, expectedIssueVersion]
+      properties:
+        decision: {type: string, enum: [PASS, REOPEN]}
+        comment: {type: string, maxLength: 2000}
+        attachmentIds:
+          type: array
+          items: {type: string}
+        expectedIssueVersion: {type: integer, format: int64}
+    CreateReportRequest:
+      type: object
+      required: [taskId, reportType, regenerate, reason]
+      properties:
+        taskId: {type: string}
+        reportType: {type: string, enum: [INSPECTION, INCIDENT, DAILY_BRIEF, WEEKLY_BRIEF, MONTHLY_BRIEF]}
+        regenerate: {type: boolean}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    ReportStatus:
+      type: string
+      enum: [PENDING, GENERATING, READY, FAILED, SIGNED, ARCHIVED]
+    Report:
+      type: object
+      required: [reportId, reportNo, reportType, status, version]
+      properties:
+        reportId: {type: string}
+        reportNo: {type: string}
+        reportType: {type: string}
+        status: {$ref: '#/components/schemas/ReportStatus'}
+        version: {type: integer, format: int64}
+        task: {type: object, additionalProperties: true}
+        conclusion: {type: object, additionalProperties: true}
+        metrics: {type: object, additionalProperties: true}
+        issues: {type: array, items: {$ref: '#/components/schemas/Issue'}}
+        signatures: {type: array, items: {type: object, additionalProperties: true}}
+        file: {type: object, additionalProperties: true}
+        templateVersion: {type: string}
+        generatedAt: {type: string, format: date-time, nullable: true}
+    ReportResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/Report'}
+    ReportSignatureRequest:
+      type: object
+      required: [decision, expectedReportVersion, fileSha256]
+      properties:
+        decision: {type: string, enum: [ACKNOWLEDGED, APPROVED, REJECTED]}
+        comment: {type: string, maxLength: 2000}
+        expectedReportVersion: {type: integer, format: int64}
+        fileSha256: {type: string, pattern: '^[a-fA-F0-9]{64}$'}
+    DeviceSummary:
+      type: object
+      required: [deviceSnMasked, model, online, dataStatus]
+      properties:
+        deviceSnMasked: {type: string}
+        model: {type: string}
+        online: {type: boolean}
+        batteryPercent: {type: number, nullable: true}
+        payloads: {type: array, items: {type: object, additionalProperties: true}}
+        taskId: {type: string, nullable: true}
+        dataStatus: {$ref: '#/components/schemas/DataStatus'}
+        updatedAt: {type: string, format: date-time}
+    DevicePageResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items: {type: array, items: {$ref: '#/components/schemas/DeviceSummary'}}
+                nextCursor: {type: string, nullable: true}
+                hasMore: {type: boolean}
+    DeviceResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: '#/components/schemas/DeviceSummary'
+                - type: object
+                  properties:
+                    telemetry: {type: object, additionalProperties: true}
+                    hms: {type: array, items: {type: object, additionalProperties: true}}
+                    capabilities: {type: object, additionalProperties: true}
+    CreateLiveSessionRequest:
+      type: object
+      required: [deviceSn, camera, quality]
+      properties:
+        deviceSn: {type: string}
+        camera: {type: string, enum: [VISIBLE, THERMAL, ZOOM]}
+        quality: {type: string, enum: [ADAPTIVE, HIGH, MEDIUM, LOW]}
+        taskId: {type: string}
+    LiveSession:
+      type: object
+      required: [liveSessionId, status]
+      properties:
+        liveSessionId: {type: string}
+        status: {type: string, enum: [PREPARING, READY, PLAYING, DEGRADED, ENDED, FAILED]}
+        protocol: {type: string, enum: [RTMP, FLV, HLS]}
+        playUrl: {type: string, format: uri}
+        expiresAt: {type: string, format: date-time}
+        fallbackSnapshotUrl: {type: string, format: uri}
+        telemetryChannel: {type: string}
+    LiveSessionResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/LiveSession'}
+    CreateRealtimeTicketRequest:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: {type: string}
+        lastEventId: {type: string}
+    RealtimeTicketResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericSuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              required: [ticket, websocketUrl, expiresAt, heartbeatSeconds]
+              properties:
+                ticket: {type: string}
+                websocketUrl: {type: string, format: uri}
+                expiresAt: {type: string, format: date-time}
+                heartbeatSeconds: {type: integer}
+    NotificationSubscriptionRequest:
+      type: object
+      required: [results, requestedAt]
+      properties:
+        results:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [templateId, eventType, decision]
+            properties:
+              templateId: {type: string}
+              eventType: {type: string}
+              decision: {type: string, enum: [ACCEPT, REJECT, BAN]}
+        requestedAt: {type: string, format: date-time}
