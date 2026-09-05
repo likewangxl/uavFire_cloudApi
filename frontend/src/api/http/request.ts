@@ -46,6 +46,8 @@ instance.interceptors.response.use(
     return response
   },
   err => {
+    // Background video leases/status must not produce a toast every polling interval.
+    if (err?.config?.url?.includes('/video-bandwidth/')) return Promise.reject(err)
     const requestId = err?.config?.headers && err?.config?.headers[REQUEST_ID]
     if (requestId) {
       console.info(REQUEST_ID, '：', requestId)

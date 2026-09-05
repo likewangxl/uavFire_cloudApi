@@ -76,6 +76,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
                 .addPathPatterns(
                         waylineAgentBase + "/agents/**",
                         agentFireEventPath,
+                        "/" + managePrefix + manageVersion + "/dual-stream/agents/*/video-policy",
                         "/" + managePrefix + manageVersion + "/dual-stream/agents/*/fire-evidence");
 
         registry.addInterceptor(miniAppAuthInterceptor)

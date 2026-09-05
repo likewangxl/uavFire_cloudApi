@@ -78,7 +78,16 @@ test('cockpit removes the upper live status chip row and gives flight HUD more r
 test('cockpit avoids duplicate playback when visible and thermal share one stream url', () => {
   assert.match(cockpitSource, /allowSharedThermalPreview:\s*true/)
   assert.match(cockpitSource, /livePaneState\.value\.preview\.url/)
-  assert.match(cockpitSource, /mountPlayerInstance\(\s*livePaneState\.value\.preview\.url/)
+  assert.match(cockpitSource, /slot: previewPlayer,[^\n]+url: livePaneState\.value\.preview\.url/)
+  assert.match(cockpitSource, /mountPlayerInstance\(url, shell, state, isCurrent\)/)
+  const shared = buildLivePaneState({
+    visiblePlayUrl: 'webrtc://localhost/live/drone-0',
+    thermalPlayUrl: 'webrtc://localhost/live/drone-0',
+    primaryPreference: 'visible',
+    allowSharedThermalPreview: true
+  })
+  assert.equal(shared.primary.url, 'webrtc://localhost/live/drone-0')
+  assert.equal(shared.preview.url, '')
   assert.match(cockpitSource, /focusAction/)
 })
 

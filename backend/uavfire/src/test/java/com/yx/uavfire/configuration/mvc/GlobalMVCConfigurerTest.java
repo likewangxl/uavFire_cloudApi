@@ -11,6 +11,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.filter.CommonsRequestLoggingFilter;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.handler.MappedInterceptor;
 
 import java.util.List;
 
@@ -18,6 +19,25 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GlobalMVCConfigurerTest {
+
+    @Test
+    void videoPolicyHasAgentAuthWhileViewerAndStatusKeepUserAuth() {
+        InterceptorRegistry registry = new InterceptorRegistry();
+        configurer.addInterceptors(registry);
+        List<?> interceptors = ReflectionTestUtils.invokeMethod(registry, "getInterceptors");
+        MappedInterceptor agent = (MappedInterceptor) interceptors.stream()
+                .filter(i -> i instanceof MappedInterceptor && ((MappedInterceptor) i).getInterceptor() instanceof WaylineAgentAuthInterceptor)
+                .findFirst().orElseThrow();
+        MappedInterceptor user = (MappedInterceptor) interceptors.stream()
+                .filter(i -> i instanceof MappedInterceptor && ((MappedInterceptor) i).getInterceptor() instanceof AuthInterceptor)
+                .findFirst().orElseThrow();
+        var matcher = new org.springframework.util.AntPathMatcher();
+        String policy = "/manage/api/v1/dual-stream/agents/A/video-policy";
+        assertTrue(agent.matches(policy, matcher));
+        assertFalse(user.matches(policy, matcher));
+        assertTrue(user.matches("/manage/api/v1/video-bandwidth/viewers/page-0001", matcher));
+        assertTrue(user.matches("/manage/api/v1/video-bandwidth/status", matcher));
+    }
 
     private GlobalMVCConfigurer configurer;
 

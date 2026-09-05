@@ -357,6 +357,7 @@
                   @change="handleFireMonitorTargetChange"
                 />
                 <span class="status-pill" :class="dualStreamPillClass">{{ dualStreamPillText }}</span>
+                <span class="status-pill" :title="videoBandwidthHint">{{ videoBandwidthLabel }}</span>
                 <button
                   class="fire-detect-btn"
                   :class="{ active: fireDetectionState.running }"
@@ -393,7 +394,8 @@
               </div>
 
               <div class="live-badge" :class="{ idle: !primaryPlayerState.playing }">
-                <span class="live-dot"></span>{{ fireDetectionLiveFeedbackText }}
+                <span class="live-dot"></span>{{ primaryPlayerState.stalled ? '画面暂未更新' : fireDetectionLiveFeedbackText }}
+                <span v-if="primaryPlayerState.metricsLabel"> · {{ primaryPlayerState.metricsLabel }}</span>
               </div>
 
               <div class="flight-hud-overlay">
@@ -733,6 +735,9 @@ import {
 } from './leadership-cockpit-summary.mjs'
 import { buildSituationLayers } from './leadership-cockpit-situation.mjs'
 import { formatFireLocation, isUsableFireLocation } from './fire/fire-event-location.mjs'
+import { getVideoBandwidthStatus, updateVideoViewer } from '/@/api/video-bandwidth'
+import { createVideoPlayerSlot, createVideoViewerLease, monitorVideoPlayer, videoProfileLabel } from '/@/components/cockpit/video-bandwidth-runtime.mjs'
+import { uuidv4 } from '/@/utils/uuid'
 
 const store = useMyStore()
 const FIELD_AGENT_AIRCRAFT_SN = (import.meta.env.VITE_AGENT_AIRCRAFT_SN as string | undefined) || ''
@@ -1155,14 +1160,50 @@ const lastAiRiskNotificationByKey = new Map<string, number>()
 const primaryPlayerState = reactive({
   loading: false,
   playing: false,
-  error: ''
+  error: '',
+  stalled: false,
+  metricsLabel: ''
 })
 
 const previewPlayerState = reactive({
   loading: false,
   playing: false,
-  error: ''
+  error: '',
+  stalled: false,
+  metricsLabel: ''
 })
+
+const videoBandwidthRows = ref<any[]>([])
+const videoBandwidthError = ref(false)
+const videoBandwidthLabel = computed(() => videoBandwidthError.value
+  ? '视频策略暂不可用'
+  : videoProfileLabel(videoBandwidthRows.value.find(row => row.drone_sn === selectedFireMonitorTarget.value?.deviceSn)))
+const videoBandwidthHint = '全机群最多 4 路高清，其余低清持续上传；切换重点画面需要等待高清名额交接。'
+const videoViewerId = uuidv4()
+let videoViewerLease: ReturnType<typeof createVideoViewerLease> | null = null
+let videoBandwidthTimer: number | undefined
+let videoBandwidthLoading = false
+let videoBandwidthDisposed = false
+const syncVideoViewer = () => videoViewerLease?.select(
+  !document.hidden && activeVisualTab.value === 'fire-monitor' ? selectedFireMonitorTarget.value?.deviceSn || null : null
+)
+const handleVideoVisibility = () => {
+  syncVideoViewer()
+  if (document.hidden) destroyAllPlayers()
+  else syncLivePlayers()
+}
+const refreshVideoBandwidth = async () => {
+  if (videoBandwidthLoading || videoBandwidthDisposed) return
+  videoBandwidthLoading = true
+  try {
+    const status = await getVideoBandwidthStatus()
+    if (videoBandwidthDisposed) return
+    videoBandwidthRows.value = Array.isArray(status?.aircraft) ? status.aircraft : []
+    videoBandwidthError.value = false
+  } catch (_) {
+    if (!videoBandwidthDisposed) videoBandwidthError.value = true
+  } finally { videoBandwidthLoading = false }
+}
 
 type PlayerRuntimeState = typeof primaryPlayerState
 
@@ -1173,8 +1214,15 @@ let fireDetectionStatusTimer: number | undefined
 let livePlayerRetryTimer: number | undefined
 let liveReconnectTimer: number | undefined
 let liveReconnectAttempts = 0
-let primaryPlayer: any = null
-let previewPlayer: any = null
+const closeVideoEndpoint = (player: any) => {
+  player.__cockpitDisposed = true
+  player.__stopVideoMonitor?.()
+  player.__videoElement?.remove()
+  if (player.close) player.close()
+  else player.destroy?.()
+}
+const primaryPlayer = createVideoPlayerSlot(closeVideoEndpoint)
+const previewPlayer = createVideoPlayerSlot(closeVideoEndpoint)
 let zlmClientLoader: Promise<any> | null = null
 let lastMirroredFocusCommand = ''
 
@@ -1239,6 +1287,8 @@ const resetPlayerState = (state: PlayerRuntimeState) => {
   state.loading = false
   state.playing = false
   state.error = ''
+  state.stalled = false
+  state.metricsLabel = ''
 }
 
 const destroyPlayerInstance = (
@@ -1246,20 +1296,11 @@ const destroyPlayerInstance = (
   state: PlayerRuntimeState,
   shell: HTMLElement | null
 ) => {
-  if (player) {
-    // 主动销毁会触发 endpoint 的 closed 事件，不能被断流看门狗当成需要重连的断开
-    player.__cockpitDisposed = true
-  }
-  if (player?.close) {
-    player.close()
-  } else if (player?.destroy) {
-    player.destroy()
-  }
+  player.clear()
   resetPlayerState(state)
   if (shell) {
     shell.innerHTML = ''
   }
-  return null
 }
 
 const cancelLiveReconnect = () => {
@@ -1270,9 +1311,9 @@ const cancelLiveReconnect = () => {
 }
 
 // 断流看门狗：agent 切镜头会 restartLiveStream，ZLM 踢掉 WebRTC 会话后画面定格，
-// 这里统一调度重建（syncLivePlayers 会同时重建两个画面）。
+// 只重建异常画面，保留另一条健康连接。
 const scheduleLiveReconnect = (hasPlayed: boolean, reason: string) => {
-  if (activeVisualTab.value !== 'fire-monitor') return
+  if (activeVisualTab.value !== 'fire-monitor' || document.hidden || videoBandwidthDisposed) return
   if (liveReconnectTimer != null) return
   if (!shouldReconnectLivePlayer({ hasPlayed, attempts: liveReconnectAttempts })) return
   liveReconnectAttempts += 1
@@ -1282,7 +1323,7 @@ const scheduleLiveReconnect = (hasPlayed: boolean, reason: string) => {
     const primaryHealthy = !livePaneState.value.primary.url || primaryPlayerState.playing
     const previewHealthy = !livePaneState.value.preview.url || previewPlayerState.playing
     if (primaryHealthy && previewHealthy) return
-    syncLivePlayers()
+    syncLivePlayers(true)
   }, LIVE_RECONNECT_DELAY_MS)
 }
 
@@ -1299,9 +1340,11 @@ const applyFullFrameStyles = (video: HTMLVideoElement) => {
 const mountPlayerInstance = async (
   url: string,
   shell: HTMLElement | null,
-  state: PlayerRuntimeState
+  state: PlayerRuntimeState,
+  isCurrent: () => boolean
 ) => {
-  if (!url || activeVisualTab.value !== 'fire-monitor') {
+  if (!isCurrent()) return null
+  if (!url || activeVisualTab.value !== 'fire-monitor' || document.hidden) {
     resetPlayerState(state)
     if (shell) {
       shell.innerHTML = ''
@@ -1310,6 +1353,7 @@ const mountPlayerInstance = async (
   }
 
   await nextTick()
+  if (!isCurrent() || document.hidden || videoBandwidthDisposed) return null
   const mountPoint = shell
   if (!mountPoint) {
     state.loading = false
@@ -1339,8 +1383,10 @@ const mountPlayerInstance = async (
   try {
     const apiUrl = buildZlmRtcApiUrl(url)
     const ZLMRTCClient = await loadZlmRtcClient(url)
+    if (!isCurrent() || document.hidden || videoBandwidthDisposed) { video.remove(); return null }
 
     const markPlaying = () => {
+      if (!isCurrent()) return
       state.loading = false
       state.playing = true
       state.error = ''
@@ -1356,6 +1402,7 @@ const mountPlayerInstance = async (
     video.addEventListener('loadeddata', markPlaying, { once: true })
     video.addEventListener('playing', markPlaying, { once: true })
     video.addEventListener('error', () => {
+      if (!isCurrent()) return
       state.loading = false
       if (state.playing) {
         console.warn('[cockpit] ignore non-fatal video error after playback started', url)
@@ -1373,11 +1420,25 @@ const mountPlayerInstance = async (
       audioEnable: false,
       videoEnable: true
     })
+    endpoint.__videoElement = video
+    endpoint.__stopVideoMonitor = monitorVideoPlayer(endpoint, video, (metrics: any) => {
+      if (endpoint.__cockpitDisposed || !isCurrent()) return
+      state.stalled = metrics.stalled
+      state.metricsLabel = typeof metrics.bitrateMbps === 'number' ? `${metrics.bitrateMbps.toFixed(2)} Mbps` : ''
+      if (metrics.stalled) {
+        const hasPlayed = state.playing
+        state.playing = false
+        state.loading = true
+        scheduleLiveReconnect(hasPlayed, 'no-fresh-video-frame')
+      } else if (state.stalled === false && video.readyState >= 2) {
+        markPlaying()
+      }
+    })
 
     endpoint.on?.(ZLMRTCClient.Events.WEBRTC_ON_CONNECTION_STATE_CHANGE, (connectionState: string) => {
-      if (endpoint.__cockpitDisposed) return
+      if (endpoint.__cockpitDisposed || !isCurrent()) return
       if (connectionState === 'connected') {
-        markPlaying()
+        // ICE connected is not proof of a fresh decoded frame; loadeddata/playing marks playback.
         return
       }
       if (connectionState === 'failed' || connectionState === 'disconnected' || connectionState === 'closed') {
@@ -1395,7 +1456,7 @@ const mountPlayerInstance = async (
     })
 
     endpoint.on?.(ZLMRTCClient.Events.WEBRTC_OFFER_ANWSER_EXCHANGE_FAILED, (payload: any) => {
-      if (endpoint.__cockpitDisposed) return
+      if (endpoint.__cockpitDisposed || !isCurrent()) return
       state.loading = false
       if (state.playing) {
         console.warn('[cockpit] ignore late zlm offer/answer error after playback started', payload)
@@ -1406,6 +1467,9 @@ const mountPlayerInstance = async (
     })
     return endpoint
   } catch (error: any) {
+    video.remove()
+    if (!isCurrent()) return null
+    zlmClientLoader = null
     state.loading = false
     state.playing = false
     state.error = error?.message || String(error)
@@ -1414,8 +1478,8 @@ const mountPlayerInstance = async (
 }
 
 const destroyAllPlayers = () => {
-  primaryPlayer = destroyPlayerInstance(primaryPlayer, primaryPlayerState, primaryPlayerShell.value)
-  previewPlayer = destroyPlayerInstance(previewPlayer, previewPlayerState, previewPlayerShell.value)
+  destroyPlayerInstance(primaryPlayer, primaryPlayerState, primaryPlayerShell.value)
+  destroyPlayerInstance(previewPlayer, previewPlayerState, previewPlayerShell.value)
   if (livePlayerRetryTimer != null) {
     window.clearTimeout(livePlayerRetryTimer)
     livePlayerRetryTimer = undefined
@@ -1423,37 +1487,28 @@ const destroyAllPlayers = () => {
   cancelLiveReconnect()
 }
 
-const syncLivePlayers = async () => {
+const syncLivePlayers = async (onlyUnhealthy = false) => {
   if (livePlayerRetryTimer != null) {
     window.clearTimeout(livePlayerRetryTimer)
     livePlayerRetryTimer = undefined
   }
   cancelLiveReconnect()
-  primaryPlayer = destroyPlayerInstance(primaryPlayer, primaryPlayerState, primaryPlayerShell.value)
-  previewPlayer = destroyPlayerInstance(previewPlayer, previewPlayerState, previewPlayerShell.value)
-
-  if (activeVisualTab.value !== 'fire-monitor') {
+  if (activeVisualTab.value !== 'fire-monitor' || document.hidden || videoBandwidthDisposed) {
+    destroyAllPlayers()
     return
   }
-
   if (!primaryPlayerShell.value || !previewPlayerShell.value) {
-    livePlayerRetryTimer = window.setTimeout(() => {
-      syncLivePlayers()
-    }, 120)
+    livePlayerRetryTimer = window.setTimeout(() => { syncLivePlayers() }, 120)
     return
   }
-
-  primaryPlayer = await mountPlayerInstance(
-    livePaneState.value.primary.url,
-    primaryPlayerShell.value,
-    primaryPlayerState
-  )
-
-  previewPlayer = await mountPlayerInstance(
-    livePaneState.value.preview.url,
-    previewPlayerShell.value,
-    previewPlayerState
-  )
+  await Promise.all([
+    { slot: primaryPlayer, state: primaryPlayerState, shell: primaryPlayerShell.value, url: livePaneState.value.primary.url },
+    { slot: previewPlayer, state: previewPlayerState, shell: previewPlayerShell.value, url: livePaneState.value.preview.url }
+  ].map(async ({ slot, state, shell, url }) => {
+    if (onlyUnhealthy && state.playing && !state.stalled) return
+    destroyPlayerInstance(slot, state, shell)
+    await slot.replace((isCurrent: () => boolean) => mountPlayerInstance(url, shell, state, isCurrent))
+  }))
 }
 
 type FireDetectionPhase = 'idle' | 'starting' | 'switching' | 'running' | 'stopping' | 'switch_failed'
@@ -2022,6 +2077,11 @@ function shouldNotifyFireEvent (evt: FireEventDTO) {
 }
 
 onMounted(async () => {
+  videoViewerLease = createVideoViewerLease({ send: (sn: string | null) => updateVideoViewer(videoViewerId, sn) })
+  syncVideoViewer()
+  refreshVideoBandwidth()
+  videoBandwidthTimer = window.setInterval(refreshVideoBandwidth, 5000)
+  document.addEventListener('visibilitychange', handleVideoVisibility)
   document.addEventListener('fullscreenchange', syncFireMonitorFullscreenState)
   refreshMsdkHudDevices()
   loadDualStreamState()
@@ -2037,6 +2097,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  videoBandwidthDisposed = true
+  videoViewerLease?.stop()
+  if (videoBandwidthTimer != null) window.clearInterval(videoBandwidthTimer)
+  document.removeEventListener('visibilitychange', handleVideoVisibility)
   document.removeEventListener('fullscreenchange', syncFireMonitorFullscreenState)
   if (msdkHudTimer != null) {
     window.clearInterval(msdkHudTimer)
@@ -2398,6 +2462,7 @@ watch(
 watch(
   selectedFireMonitorTarget,
   (target, previous) => {
+    syncVideoViewer()
     if (!target || target.deviceSn === previous?.deviceSn) return
     fireDetectionState.droneSn = target.deviceSn
     fireDetectionState.running = false
@@ -2411,6 +2476,7 @@ watch(
 watch(
   activeVisualTab,
   (tab) => {
+    syncVideoViewer()
     if (tab === 'delivery-execution' && deliveryExecutionTargets.value.length === 0) {
       loadDeliveryExecutionTargets()
     }

@@ -1,0 +1,9 @@
+# Merge into the backend's externally loaded configuration after all fleet Agents
+# are upgraded and two-profile source encoding is verified on actual hardware.
+# Exactly ONE backend coordinator may run for this bandwidth domain.
+video-bandwidth:
+  enabled: false
+  # Register the real aircraft SNs here (1..20, no duplicates); do not use RC SNs.
+  aircraft-sns: []
+  # Optional baseline priority, must be a subset of aircraft-sns.
+  preferred-aircraft-sns: []

@@ -41,6 +41,9 @@ public class DualStreamController {
     @Autowired
     private AgentFireEvidenceService agentFireEvidenceService;
 
+    @Autowired(required = false)
+    private com.yx.uavfire.video.VideoBandwidthService videoBandwidthService;
+
     @PostMapping("/agents/{drone_sn}/heartbeat")
     public HttpResultResponse<Void> heartbeat(@PathVariable("drone_sn") String droneSn,
                                               @RequestBody DualStreamAgentHeartbeatDTO body) {
@@ -105,7 +108,11 @@ public class DualStreamController {
                     .setReason("evidence-not-verified"));
         }
         body.setEvidenceStatus("VERIFIED");
-        return HttpResultResponse.success(dualStreamService.acceptAgentFireEvent(taskId, body));
+        AgentFireEventReceiptDTO receipt = dualStreamService.acceptAgentFireEvent(taskId, body);
+        if (videoBandwidthService != null && receipt != null && "accepted".equals(receipt.getStatus())) {
+            videoBandwidthService.prioritizeVerifiedFire(body.getDroneSn());
+        }
+        return HttpResultResponse.success(receipt);
     }
 
     @PostMapping(value = "/agents/{drone_sn}/fire-evidence", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

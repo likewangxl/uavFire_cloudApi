@@ -119,6 +119,7 @@ public class WaylineAgentAuthInterceptor implements HandlerInterceptor {
     private boolean isProtectedFireRequest(HttpServletRequest request) {
         String uri = request.getRequestURI();
         return uri.endsWith("/agent-fire-events")
+                || uri.endsWith("/video-policy")
                 || ("POST".equalsIgnoreCase(request.getMethod()) && uri.endsWith("/fire-evidence"));
     }
 

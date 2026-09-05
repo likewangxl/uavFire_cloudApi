@@ -1,0 +1,24 @@
+cockpit keeps visible playback as the default until fire detection is running
+cockpit live video uses aspect-fit sizing instead of cropping
+cockpit only falls back to the default agent placeholder when no real aircraft exist
+cockpit uses the preview window as the only visible thermal switch control
+delivery execution target list excludes rc controller devices
+fire event list adds inline approve entry; heavier delivery/route ops stay in mission list
+horizontal axis controls use DRC stick commands instead of fly_to_point
+leadership cockpit keeps separate map and livestream panel state
+leadership cockpit limits visible AI event records and handles empty state
+leadership cockpit puts AI recognition above fire event queue
+leadership cockpit renders polling AI risk records inside key alerts
+leadership cockpit renders the fire monitor flight panel inside the player stage
+leadership cockpit shows unavailable backend-only data explicitly
+leadership cockpit switches map panel layout for livestream tabs
+official takeoff keeps the original 30m command height contract
+overlays wire draggable markers, midpoint ghosts, rightclick delete
+pilot liveshare RTMP config uses a real endpoint instead of placeholder text
+planning hook can build save payloads and hydrate saved planned-wayline records
+planning hook sanitizes saved payloads before calling planned-wayline APIs
+right side column puts aircraft status above FC100 and link status
+wayline map renders live aircraft flight position and follow control
+wayline page exposes FC100 planning from saved generated KMZ records
+wayline page exposes fc100 terminal delivery controls in delivery wayline flow
+wayline page renders saved planned-wayline management and calls planned APIs

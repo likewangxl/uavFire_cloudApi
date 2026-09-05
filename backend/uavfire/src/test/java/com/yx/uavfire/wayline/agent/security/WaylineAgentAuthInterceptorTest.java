@@ -93,6 +93,16 @@ class WaylineAgentAuthInterceptorTest {
     }
 
     @Test
+    void videoPolicyRequiresFreshNonceAndMatchingAircraft() throws Exception {
+        String token = JwtUtil.createToken(Map.of("role", WaylineAgentClaim.ROLE, "droneSn", "SN-A"));
+        String path = "/manage/api/v1/dual-stream/agents/SN-A/video-policy";
+        assertTrue(interceptor.preHandle(fireRequest(path, token, "video-1", System.currentTimeMillis()), new MockHttpServletResponse(), new Object()));
+        assertFalse(interceptor.preHandle(fireRequest(path, token, "video-1", System.currentTimeMillis()), new MockHttpServletResponse(), new Object()));
+        assertFalse(interceptor.preHandle(fireRequest(path.replace("SN-A", "SN-B"), token, "video-2", System.currentTimeMillis()), new MockHttpServletResponse(), new Object()));
+        assertFalse(interceptor.preHandle(fireRequest(path, token, "video-3", System.currentTimeMillis() - 600_000), new MockHttpServletResponse(), new Object()));
+    }
+
+    @Test
     void preHandle_rejectsRequestWithoutToken() throws Exception {
         MockHttpServletRequest req = new MockHttpServletRequest("GET", "/wayline-agent/api/v1/agents/SN-A/command");
         MockHttpServletResponse resp = new MockHttpServletResponse();

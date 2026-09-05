@@ -38,8 +38,8 @@ android {
         applicationId = "com.yinxin.uavfir"
         minSdk = 26
         targetSdk = 34
-        versionCode = 28
-        versionName = "0.1.27-trial"
+        versionCode = 29
+        versionName = "0.1.28-video-policy-trial"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["DJI_API_KEY"] = djiApiKey.get()

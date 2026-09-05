@@ -28,8 +28,8 @@ class RemoteEndpointConfigPolicyTest {
 
         assertTrue(buildScript.contains("orElse(\"8089\")"))
         assertTrue(buildScript.contains("orElse(\"tcp://192.168.0.100:1883\")"))
-        assertTrue(buildScript.contains("versionCode = 28"))
-        assertTrue(buildScript.contains("versionName = \"0.1.27-trial\""))
+        assertTrue(buildScript.contains("versionCode = 29"))
+        assertTrue(buildScript.contains("versionName = \"0.1.28-video-policy-trial\""))
         assertTrue(buildScript.contains("TRIAL_EXPIRES_AT_EPOCH_MS"))
     }
 }

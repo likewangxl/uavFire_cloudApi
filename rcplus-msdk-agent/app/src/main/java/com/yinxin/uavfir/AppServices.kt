@@ -101,10 +101,22 @@ class AppServices(
         enabled = BuildConfig.AGENT_FIRE_ONNX_ENABLED,
         reporter = VisibleDetectionReporter(fireEventOutbox::enqueue),
     )
+    private val videoPolicyState = com.yinxin.uavfir.stream.VideoPolicyState(android.os.SystemClock::elapsedRealtime)
+    private val liveStreamController = com.yinxin.uavfir.stream.DjiLiveStreamController(policy = videoPolicyState)
+    private val videoPolicyLoop = com.yinxin.uavfir.api.VideoPolicyLoop(
+        scope = appScope,
+        state = videoPolicyState,
+        port = liveStreamController,
+        requester = com.yinxin.uavfir.api.AuthenticatedVideoPolicyRequester(
+            AgentBackendApiFactory.create(com.yinxin.uavfir.api.VideoPolicyApi::class.java), waylineClient,
+        ),
+        onError = { Log.w(TAG, "video policy unavailable; high lease will not be extended: ${it.javaClass.simpleName}") },
+    )
     private val sessionManager = DualStreamSessionManager(
         RealMsdkStreamProvider(
             hotspotCandidateListener = thermalHotspotTriggerBridge,
             visibleFrameConsumer = onDeviceFireDetectionCoordinator,
+            liveStreamController = liveStreamController,
         ),
         fireConfirmationRunner = fireConfirmationRunnerBridge::run,
         visibleAiControl = onDeviceFireDetectionCoordinator,
@@ -254,6 +266,7 @@ class AppServices(
             }
         }
         fireEventOutbox.start()
+        videoPolicyLoop.start()
         Log.i(TAG, "initialized backend=${AgentBackendConfig.DEFAULT_BASE_URL}")
         waypointExecutor.attach()
     }
@@ -420,6 +433,7 @@ class AppServices(
     fun shutdown() {
         if (!shutdownStarted.compareAndSet(false, true)) return
         runtimeLoop.stop()
+        videoPolicyLoop.stop()
         osdReporter.stop()
         hmsReporter.stop()
         waypointExecutor.detach()
