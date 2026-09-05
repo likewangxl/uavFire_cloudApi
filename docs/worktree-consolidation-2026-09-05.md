@@ -2,6 +2,8 @@
 
 日期：2026-09-05。范围：本机 Git 分支、工作树、未提交成果及回归验证。
 
+> 同日后续更新：M300 最新成果已合入并推送至 `main`，原 M300 分支名已归档清理。当前在下述相同工作目录使用 `main`；以下为本次整合当时的历史记录。后续状态见 [Main 整合与 M4T 兼容性评估](main-integration-and-m4t-compatibility-2026-09-05.md)。
+
 ## 结论与统一入口
 
 - 后续 M300/Windows 现场交付开发统一使用 `feature/m300-model-adaptation`。

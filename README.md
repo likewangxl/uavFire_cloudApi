@@ -1,11 +1,14 @@
 ﻿# uavFire Cloud API
 
-本仓库最初来自 DJI Cloud API 前后端工程，现在已经扩展为 M4T / RC Plus 2 巡检火情识别与 FC100 重载灭火协同系统。
+本仓库最初来自 DJI Cloud API 前后端工程，现在已经扩展为巡检火情识别与 FC100 重载灭火协同系统，包含 M4T 路径及 M300/M350 适配代码。
 
-生产分支是 `feature/fire-precision-and-realtime-detection`，跟踪 `origin/feature/fire-precision-and-realtime-detection`。发布和验收时必须以该分支已提交内容为准，不得把未提交工作区改动宣称为已上线能力。
+源码主线是 `main`，跟踪 `origin/main`；2026-09-05 已合入原 M300 分支及小程序基础成果。当前开发目录仍为 `.worktrees/m300-model-adaptation`，检出分支已经是 `main`。现场运行版本以实际部署产物为准，不得把源码合并或未提交工作区改动宣称为已上线能力。
+
+当前代码仍包含北京时间 `2026-10-01 00:00` 到期的试用限制，前端还有 24 项已记录的测试失败。M4T 的新火情监测命令需要配套新版 Agent；详见 [主线整合、分支清理与 M4T 兼容性评估](docs/main-integration-and-m4t-compatibility-2026-09-05.md)。
 
 当前项目状态与运行入口：
 
+- `docs/main-integration-and-m4t-compatibility-2026-09-05.md`（当前源码与兼容性边界）
 - `docs/CURRENT_PROJECT_STATUS_2026-08-05.md`
 - `RUNBOOK.md`
 - `HANDOFF_2026-07-28_VISIBLE_ONLY_FIRE_DETECTION.md`

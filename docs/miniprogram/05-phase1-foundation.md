@@ -9,6 +9,8 @@
 > 2026-09-05 更新：以上为历史开发位置，现已合入 `feature/m300-model-adaptation`，旧工作树已归档。
 > 后续使用 `/Users/likewang/uavfire/.worktrees/m300-model-adaptation`；详见 `docs/worktree-consolidation-2026-09-05.md`。
 
+> 同日后续更新：上述 M300 成果已合入 `main`，当前继续在相同目录使用 `main`。参见 [Main 整合与 M4T 兼容性评估](../main-integration-and-m4t-compatibility-2026-09-05.md)。
+
 ## 1. 本批交付
 
 ### 1.1 后端 Mini Program BFF
