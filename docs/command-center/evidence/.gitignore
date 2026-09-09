@@ -1,0 +1,2 @@
+# Raw runtime/build logs remain local; sanitized JSON and screenshots are deliverable evidence.
+*.log

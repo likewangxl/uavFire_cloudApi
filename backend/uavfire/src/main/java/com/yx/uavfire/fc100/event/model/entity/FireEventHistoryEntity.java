@@ -44,5 +44,6 @@ public class FireEventHistoryEntity {
     private String modelSha256;
     private Long eventTimestamp;
     private String action;
+    private String decisionReason;
     private Long createTime;
 }

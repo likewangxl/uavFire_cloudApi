@@ -4,7 +4,7 @@
       <template v-if="detail">
         <div class="detail-header">
           <div>
-            <span class="panel-kicker">Incident Detail</span>
+            <span class="panel-kicker">事件详情</span>
             <h3>{{ detail.incidentNo }}</h3>
           </div>
           <div class="detail-tags">
@@ -132,7 +132,7 @@
         <section class="detail-section">
           <h4>视频</h4>
           <div class="video-placeholder">
-            <span>Video Placeholder</span>
+            <router-link to="/video-monitor">打开视频监控，选择处置飞机</router-link>
           </div>
         </section>
       </template>

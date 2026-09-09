@@ -93,8 +93,8 @@ export function normalizeMsdkDeviceState (device: any): MsdkDeviceState {
   }
 }
 
-export async function listMsdkDevices (): Promise<IWorkspaceResponse<MsdkDeviceState[]>> {
-  const result = await request.get(`${HTTP_PREFIX}/msdk/devices`)
+export async function listMsdkDevices (silent = false): Promise<IWorkspaceResponse<MsdkDeviceState[]>> {
+  const result = await request.get(`${HTTP_PREFIX}/msdk/devices`, { ...(silent ? { suppressErrorToast: true } : {}) })
   const response = result.data
   return {
     ...response,

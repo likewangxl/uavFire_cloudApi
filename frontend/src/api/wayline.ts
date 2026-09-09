@@ -397,9 +397,9 @@ export interface Task {
 }
 
 // Get Wayline Jobs
-export const getWaylineJobs = async function (workspaceId: string, page: IPage): Promise<IListWorkspaceResponse<Task>> {
+export const getWaylineJobs = async function (workspaceId: string, page: IPage, silent = false): Promise<IListWorkspaceResponse<Task>> {
   const url = `${HTTP_PREFIX}/workspaces/${workspaceId}/jobs?page=${page.page}&page_size=${page.page_size}`
-  const result = await request.get(url)
+  const result = await request.get(url, { ...(silent ? { suppressErrorToast: true } : {}) })
   return result.data
 }
 

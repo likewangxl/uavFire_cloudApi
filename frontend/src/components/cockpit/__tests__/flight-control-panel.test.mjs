@@ -23,11 +23,10 @@ test('leadership cockpit renders the fire monitor flight panel inside the player
     /<div class="dual-stream-player-stage">[\s\S]*?<CockpitFlightControlPanel[\s\S]*?class="fire-monitor-flight-panel"[\s\S]*?:target="selectedFireMonitorTarget"[\s\S]*?:msdk-device="selectedFireMonitorMsdkDevice"[\s\S]*?:osd="selectedFireMonitorOsd"[\s\S]*?<\/div>/,
     'fire monitor panel should be mounted inside the live player so fullscreen keeps it visible'
   )
-  assert.match(
-    cockpitSource,
-    /v-if="activeVisualTab === 'map'"\s+class="map-kpi-grid"/,
-    'the old lower KPI grid should stay on the map tab only'
-  )
+  // The lower KPI grid was removed from the redesigned map. If restored, it must stay map-only.
+  if (cockpitSource.includes('class="map-kpi-grid"')) {
+    assert.match(cockpitSource, /v-if="activeVisualTab === 'map'"\s+class="map-kpi-grid"/)
+  }
   assert.doesNotMatch(cockpitSource, /当前约束/, 'fire monitor live view should not render the lower current constraint block')
 })
 

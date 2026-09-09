@@ -1,0 +1,12 @@
+{
+  "entrySha256": "28a5f5266ef3d2388b107d3f30952698ca295126477170ea04348dccb59aa1c9",
+  "frontendTests": 175,
+  "backendTests": 499,
+  "frontendFailures": 0,
+  "backendFailures": 0,
+  "gitBase": "6c5e319",
+  "runtime": "Vite production preview on 127.0.0.1:8080, Java API 127.0.0.1:6789",
+  "servedEntrySha256": "28a5f5266ef3d2388b107d3f30952698ca295126477170ea04348dccb59aa1c9",
+  "servedMatchesBuild": true,
+  "revision": "navigation-consolidation"
+}

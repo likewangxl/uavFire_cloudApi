@@ -129,4 +129,9 @@ function onUndo () {
   border: 1px solid #2c3a4f;
   border-radius: 6px;
 }
+@media(max-width:800px){
+  .planner-toolbar-wrap{width:calc(100% - 20px)}
+  .planner-toolbar{flex-wrap:wrap;justify-content:center;max-width:100%;gap:6px}
+  .planning-status-chip,.planning-compliance-chip{max-width:100%}
+}
 </style>

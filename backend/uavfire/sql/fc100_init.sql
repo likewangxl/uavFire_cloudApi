@@ -100,6 +100,7 @@ CREATE TABLE `fire_event_history` (
   `model_sha256` char(64) CHARACTER SET ascii COLLATE ascii_bin DEFAULT NULL COMMENT '推理模型SHA-256',
   `event_timestamp` bigint NOT NULL,
   `action` varchar(16) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT 'CREATED / MERGED',
+  `decision_reason` varchar(1000) DEFAULT NULL COMMENT '人工复核说明',
   `create_time` bigint NOT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_fire_event_history_parent` (`fire_event_id`,`event_timestamp`),

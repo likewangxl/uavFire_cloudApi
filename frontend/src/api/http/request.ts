@@ -12,6 +12,7 @@ function getAuthToken () {
 }
 
 function shouldSuppressBusinessError (response: any) {
+  if (response?.config?.suppressErrorToast) return true
   const url = response?.config?.url ?? ''
   const messageText = response?.data?.message ?? ''
   return url.includes('/manage/api/v1/devices/') && messageText === 'device not found.'
@@ -46,6 +47,8 @@ instance.interceptors.response.use(
     return response
   },
   err => {
+    // Page-owned error states replace repetitive polling toasts; 401 still follows login recovery.
+    if (err?.config?.suppressErrorToast && err?.response?.status !== 401) return Promise.reject(err)
     // Background video leases/status must not produce a toast every polling interval.
     if (err?.config?.url?.includes('/video-bandwidth/')) return Promise.reject(err)
     const requestId = err?.config?.headers && err?.config?.headers[REQUEST_ID]

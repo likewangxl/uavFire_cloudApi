@@ -2,7 +2,7 @@
   <aside class="incident-list-panel">
     <div class="panel-title-row">
       <div>
-        <span class="panel-kicker">Incidents</span>
+        <span class="panel-kicker">处置事件</span>
         <h3>事件列表</h3>
       </div>
       <a-button size="small" @click="emit('refresh')">刷新</a-button>

@@ -1,0 +1,41 @@
+{
+  "cssViewports": [
+    [
+      1440,
+      960
+    ],
+    [
+      1280,
+      900
+    ],
+    [
+      1792,
+      900
+    ],
+    [
+      390,
+      844
+    ]
+  ],
+  "wide": {
+    "scrollWidth": 1792,
+    "columns": [
+      {
+        "left": 32,
+        "right": 312,
+        "width": 280
+      },
+      {
+        "left": 330,
+        "right": 1352,
+        "width": 1022
+      },
+      {
+        "left": 1370,
+        "right": 1760,
+        "width": 390
+      }
+    ]
+  },
+  "captureLimit": "1792 CSS viewport screenshot tool captures 1748 px; original 1440 reference raster is 1434x956. DOM geometry and 1440 full capture supplement visual review."
+}

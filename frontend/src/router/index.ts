@@ -25,8 +25,11 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: '/' + ERouterName.LEADERSHIP_COCKPIT,
         name: ERouterName.LEADERSHIP_COCKPIT,
-        component: () => import('/@/pages/page-web/projects/leadership-cockpit.vue')
+        component: () => import('/@/pages/page-web/command-center/Overview.vue')
       },
+      { path: '/flight-control', name: 'flight-control', redirect: '/video-monitor' },
+      { path: '/task-history', name: 'task-history', component: () => import('/@/pages/page-web/command-center/ExecutionHistory.vue') },
+      { path: '/video-monitor', name: 'video-monitor', component: () => import('/@/pages/page-web/command-center/VideoMonitor.vue') },
       {
         path: '/' + ERouterName.MEMBERS,
         name: ERouterName.MEMBERS,
@@ -82,6 +85,7 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: '/' + ERouterName.WAYLINE,
         name: ERouterName.WAYLINE,
+        beforeEnter: to => to.query.view === 'delivery' ? { path: '/wayline', query: { ...to.query, view: undefined }, replace: true } : true,
         component: () => import('/@/pages/page-web/projects/wayline.vue')
       },
       {
@@ -116,8 +120,9 @@ const routes: Array<RouteRecordRaw> = [
       {
         path: '/' + ERouterName.FIRE_EVENTS,
         name: ERouterName.FIRE_EVENTS,
-        component: () => import('/@/pages/page-web/projects/fire/FireEventList.vue')
+        component: () => import('/@/pages/page-web/command-center/FireEventCenter.vue')
       },
+      { path: '/fire-events-table', name: 'fire-events-table', component: () => import('/@/pages/page-web/projects/fire/FireEventList.vue') },
       {
         path: '/' + ERouterName.FIRE_MISSIONS,
         name: ERouterName.FIRE_MISSIONS,

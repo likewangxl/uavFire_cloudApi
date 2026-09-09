@@ -77,5 +77,6 @@ export interface FireEventHistoryDTO {
   visibleImageUrl: string | null;
   eventTimestamp: number | null;
   action: 'CREATED' | 'MERGED' | 'VISIBLE_CONFIRM' | string;
+  decisionReason?: string;
   createTime: number;
 }

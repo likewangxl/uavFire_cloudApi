@@ -48,12 +48,14 @@
 </template>
 
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import IncidentListPanel from '/@/components/operation/IncidentListPanel.vue'
 import IncidentDetailPanel from '/@/components/operation/IncidentDetailPanel.vue'
 import OperationMap from '/@/components/operation/OperationMap.vue'
 import OperationTimeline from '/@/components/operation/OperationTimeline.vue'
+import { eventState } from '/@/components/command-center/event-model.mjs'
 import { operationIncidentApi, useOperationMock } from '/@/api/operation/incident'
 import { operationComplianceApi } from '/@/api/operation/compliance'
 import { eventApi } from '/@/api/fire/event'
@@ -73,6 +75,7 @@ import type { AssignableDeviceOption } from '/@/types/operation/resource'
 import type { FireEventDTO } from '/@/types/fire/event'
 import { ELocalStorageKey } from '/@/types'
 
+const route = useRoute()
 const incidents = ref<OperationIncidentDTO[]>([])
 const detail = ref<OperationIncidentDetailDTO | null>(null)
 const timeline = ref<OperationTimelineItem[]>([])
@@ -121,7 +124,7 @@ async function loadIncidents (selectFirst: boolean) {
         size: 50,
       }),
       shouldLoadCandidates()
-        ? eventApi.list({ status: 'CANDIDATE' } as any)
+        ? eventApi.list({ workspaceId: localStorage.getItem(ELocalStorageKey.WorkspaceId) || undefined, limit: 200 })
         : Promise.resolve({ data: { data: [] } } as any),
     ])
     const rows = [
@@ -135,7 +138,8 @@ async function loadIncidents (selectFirst: boolean) {
       await loadIncidentDetail(current.id)
       return
     }
-    const next = selectFirst ? rows[0] : current || rows[0]
+    const linked = rows.find(item => String(item.id) === route.query.incident)
+    const next = linked || (selectFirst ? rows[0] : current || rows[0])
     if (next) {
       await selectIncident(next)
     } else {
@@ -505,7 +509,7 @@ function shouldLoadCandidates () {
 
 function candidateEvents (events: FireEventDTO[]): OperationIncidentDTO[] {
   return events
-    .filter(event => !event.linkedIncidentId)
+    .filter(event => !event.linkedIncidentId && eventState(event).key === 'pending')
     .map(event => ({
       id: -Number(event.id),
       incidentNo: event.eventId,

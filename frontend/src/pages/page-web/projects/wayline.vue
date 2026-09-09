@@ -4,7 +4,7 @@
     <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #4f4f4f; font-weight: 450;">
       <a-row>
         <a-col :span="1"></a-col>
-        <a-col :span="15">{{ isTaskRouteSelector ? '选择KMZ航线文件' : '航线任务' }}</a-col>
+        <a-col :span="15">{{ isTaskRouteSelector ? '选择KMZ航线文件' : '航线库' }}</a-col>
         <a-col :span="8" v-if="importVisible" class="wayline-header-actions">
           <a-tooltip title="导入航线">
             <a-upload
@@ -29,23 +29,16 @@
       </a-row>
     </div>
     <div :style="{ height : height + 'px'}" class="scrollbar">
-      <a-tabs
-        v-if="showPlanningTools"
-        v-model:activeKey="plannerTab"
-        class="planner-mode-tabs">
-        <a-tab-pane key="monitor" tab="监测规划" />
-        <a-tab-pane key="delivery" tab="投放任务" />
-      </a-tabs>
-      <div v-if="showPlanningTools" v-show="plannerTab === 'monitor'">
+      <div v-if="showPlanningTools">
       <div class="planned-wayline-panel">
         <div class="planned-wayline-title">
-          <span>监测航线库</span>
+          <span>已保存航线</span>
           <a-button size="small" type="link" :loading="plannedWaylinesLoading" @click="refreshPlannedWaylines">
             刷新
           </a-button>
         </div>
         <div class="planning-empty" v-if="!plannedWaylinesLoading && plannedWaylinesData.data.length === 0">
-          暂无已保存监测航线。
+          暂无已保存航线，可从右上角新建或导入。
         </div>
         <div v-else class="planned-wayline-list" @scroll="onPlannedWaylinesScroll">
           <div class="planned-wayline-card" v-for="record in plannedWaylinesData.data" :key="record.plannedWaylineId" @click="onPreviewPlannedWayline(record)">
@@ -81,7 +74,7 @@
               <a-button size="small" @click.stop="showPlannedWaylineDetail(record)">详情</a-button>
               <a-button size="small" :disabled="!canOverwritePlannedWayline(record)" @click.stop="onEditPlannedWayline(record)">编辑</a-button>
               <a-button
-                v-for="action in getPlannedWaylineActions(record)"
+                v-for="action in getPlannedWaylineActions(record).filter(action => !record.flightId || !['execute-again', 'cancel'].includes(action.key))"
                 :key="action.key"
                 size="small"
                 :type="action.primary ? 'primary' : 'default'"
@@ -90,6 +83,7 @@
                 @click.stop="action.handler(record, $event)">
                 {{ action.label }}
               </a-button>
+              <a-button size="small" :disabled="!record.kmzUrl" @click.stop="openDeliveryTaskModal(record, $event)">用于投放</a-button>
               <a-button size="small" danger @click.stop="onDeletePlannedWayline(record)">删除</a-button>
             </div>
           </div>
@@ -98,17 +92,6 @@
         </div>
       </div>
       </div>
-      <Fc100DeliveryView
-        v-if="showPlanningTools"
-        v-show="plannerTab === 'delivery'"
-        :planned-waylines-data="plannedWaylinesData"
-        :planned-waylines-loading="plannedWaylinesLoading"
-        :planned-waylines-can-refresh="plannedWaylinesCanRefresh"
-        :refresh-planned-waylines="refreshPlannedWaylines"
-        :on-planned-waylines-scroll="onPlannedWaylinesScroll"
-        :show-planned-wayline-detail="showPlannedWaylineDetail"
-        :on-open-delivery-task="openDeliveryTaskModal"
-        :on-delete-planned-wayline="onDeletePlannedWayline" />
       <a-collapse
         v-if="showPlanningTools"
         v-show="plannerTab === 'monitor'"
@@ -650,11 +633,10 @@ import { getDeviceTopo } from '/@/api/manage'
 import { listMsdkDevices } from '/@/api/msdk-device'
 import type { MsdkDeviceState } from '/@/api/msdk-device'
 import WaylineMissionMonitor from '/@/components/WaylineMissionMonitor.vue'
-import Fc100DeliveryView from '/@/components/wayline-planner/Fc100DeliveryView.vue'
 import PlannerWorkspace from '/@/components/wayline-planner/PlannerWorkspace.vue'
 import { setParamDrawerOpen, setPlannerTab, usePlannerUi } from '/@/hooks/use-planner-ui'
 import { loadFlightAreas, confirmComplianceBeforeAction } from '/@/hooks/use-flight-area-compliance'
-import { getFc100GeneratedWaylineActions, beforeFc100WaylineUpload, uploadFc100WaylineFile, fc100PlanningState, fc100AircraftDevices, isFc100DeviceOnline, formatFc100DeliveryAircraftModel, getSelectedFc100DeviceSn, onFc100PreviewGeneratedWayline, handleFc100ImportGeneratedWaylineTask, handleFc100StartGeneratedWaylineTask, getFc100RouteTask, setFc100RouteTask, handleFc100GeneratedWaylineTaskStatus, handleFc100RopeDown, handleFc100RopeStop, handleFc100RopeUp, handleFc100ReleaseHook, handleFc100ReturnHome, canUseFc100TerminalControls, isFc100TerminalCommandLoading, fc100TerminalControlHint } from '/@/hooks/use-fc100-delivery'
+import { getFc100GeneratedWaylineActions, beforeFc100WaylineUpload, uploadFc100WaylineFile, fc100PlanningState, fc100AircraftDevices, isFc100DeviceOnline, formatFc100DeliveryAircraftModel, getSelectedFc100DeviceSn, onFc100PreviewGeneratedWayline, handleFc100ImportGeneratedWaylineTask, handleFc100StartGeneratedWaylineTask, getFc100RouteTask, setFc100RouteTask, handleFc100GeneratedWaylineTaskStatus, handleFc100RopeDown, handleFc100RopeStop, handleFc100RopeUp, handleFc100ReleaseHook, handleFc100ReturnHome, handleFc100RefreshDevices, startFc100RealtimeRefresh, stopFc100RealtimeRefresh, canUseFc100TerminalControls, isFc100TerminalCommandLoading, fc100TerminalControlHint } from '/@/hooks/use-fc100-delivery'
 import type { FileItem } from '/@/components/wayline-planner/wayline-format'
 import { canOverwritePlannedWayline, formatNumber, formatPlannedWaylineStatus, formatSafePlannedWaylineTimestamp, formatTimestamp, getPlannedWaylineTaskReason, normalizePlannedWaylineStatus, sanitizeDjiWaylineName } from '/@/components/wayline-planner/wayline-format'
 // @ts-ignore .mjs 纯计算策略（node 测试可直跑）
@@ -689,6 +671,10 @@ function openCreateRouteModal () {
   createRouteModal.routeType = 'waypoint'
   createRouteModal.visible = true
 }
+watch(() => route.query.view, (view) => {
+  if (!showPlanningTools.value) return
+  if (view === 'planner') { setPlannerTab('monitor'); if (!planningActive.value) openCreateRouteModal() } else setPlannerTab('monitor')
+}, { immediate: true })
 function selectMissionType (type: 'monitor' | 'delivery') {
   createRouteModal.missionType = type
   createRouteModal.routeType = 'waypoint'
@@ -1261,7 +1247,7 @@ async function onStopExecution () {
   await planningStopExec()
 }
 
-function validatePlannedWaylineSave (): AircraftSummary {
+function validatePlannedWaylineSave (requireModel = true): AircraftSummary {
   let summary = onlineAircraftMap[selectedAircraftSn.value]
   if (!summary && planningState.gatewaySn && planningState.aircraftSn && (planningState as any).aircraftModelKey) {
     summary = {
@@ -1283,7 +1269,7 @@ function validatePlannedWaylineSave (): AircraftSummary {
     aircraftModelKey: fallbackModel,
   }
   target.aircraftModelKey = normalizePlannedWaylineModel(target.aircraftModelKey || fallbackModel)
-  if (!target.aircraftModelKey) {
+  if (requireModel && !target.aircraftModelKey) {
     message.warning('请选择机型后再保存规划航线。')
     throw new Error('aircraft model required')
   }
@@ -1299,7 +1285,7 @@ function onSavePlannedWayline (saveAs: boolean) {
 function openSavePlannedWaylineModal (saveAs: boolean) {
   let summary: AircraftSummary
   try {
-    summary = validatePlannedWaylineSave()
+    summary = validatePlannedWaylineSave(false)
   } catch (e) {
     return
   }
@@ -1427,6 +1413,7 @@ function onPlannedWaylinesScroll (e: any) {
 }
 
 function onPreviewPlannedWayline (record: PlannedWaylineRecord) {
+  setPlannerTab('monitor')
   // 点击预览别的航线时收起任务类弹窗（下发/执行/投放），避免弹窗残留指向旧航线
   const openTaskRecord = [prepareTargetModal, executeTargetModal, deliveryTaskModal]
     .find(m => m.visible)?.record
@@ -1444,6 +1431,7 @@ function onPreviewPlannedWayline (record: PlannedWaylineRecord) {
 }
 
 function onEditPlannedWayline (record: PlannedWaylineRecord) {
+  setPlannerTab('monitor')
   loadPlannedWayline(record)
   selectedAircraftSn.value = record.aircraftSn
   const summary = onlineAircraftMap[record.aircraftSn]
@@ -1571,7 +1559,9 @@ async function onPreparePlannedWaylineTask (record: PlannedWaylineRecord, ev?: E
 }
 
 // ---- 投放任务弹窗（FC100）：点航线卡片"下发"→弹窗选设备+创建/执行 ----
-function openDeliveryTaskModal (record: PlannedWaylineRecord, ev?: Event) {
+async function openDeliveryTaskModal (record: PlannedWaylineRecord, ev?: Event) {
+  setPlannerTab('delivery')
+  await nextTick()
   closeWaylineTaskPopovers()
   deliveryTaskModal.anchorTop = computePrepareAnchorTop(ev)
   onFc100PreviewGeneratedWayline(record) // 设 selectedRecord + 地图预览
@@ -1820,10 +1810,12 @@ onMounted(() => {
     planningOverlayReady.value = true
   })
   const parent = document.getElementsByClassName('scrollbar').item(0)?.parentNode as HTMLDivElement
-  height.value = document.body.clientHeight - parent.firstElementChild!.clientHeight
+  height.value = Math.max(240, (parent?.closest('.project-wayline-wrapper')?.clientHeight || document.body.clientHeight - 138) - (parent?.firstElementChild?.clientHeight || 0))
   getWaylines()
   if (showPlanningTools.value) {
     refreshPlannedWaylines(true)
+    handleFc100RefreshDevices().catch(() => {})
+    startFc100RealtimeRefresh()
     loadFlightAreas()
   }
 
@@ -1847,6 +1839,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (showPlanningTools.value) stopFc100RealtimeRefresh()
   setParamDrawerOpen(false)
   if (topoTimer !== null) {
     window.clearInterval(topoTimer)
@@ -2395,7 +2388,7 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   background: #26382f;
 }
 .planned-wayline-list {
-  max-height: 360px;
+  max-height: calc(100dvh - 355px);
   overflow-y: auto;
   padding-right: 2px;
 }

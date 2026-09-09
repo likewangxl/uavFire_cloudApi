@@ -15,10 +15,8 @@ test('task plan route picker only exposes generated KMZ wayline files', () => {
 
   assert.match(source, /const isTaskRouteSelector = computed\(\(\) => route\.name === ERouterName\.SELECT_PLAN\)/)
   assert.match(source, /const showPlanningTools = computed\(\(\) => !isTaskRouteSelector\.value\)/)
-  assert.match(source, /<a-tabs[\s\S]*v-if="showPlanningTools"[\s\S]*v-model:activeKey="plannerTab"/)
-  assert.match(source, /<a-tab-pane key="monitor"/)
-  assert.match(source, /<a-tab-pane key="delivery"/)
-  assert.match(source, /<Fc100DeliveryView[\s\S]*v-if="showPlanningTools"[\s\S]*v-show="plannerTab === 'delivery'"/)
+  assert.match(source, /<div v-if="showPlanningTools">/ )
+  assert.doesNotMatch(source, /<Fc100DeliveryView|FC100 投放航线库/)
   assert.match(source, /<a-collapse[\s\S]*v-if="showPlanningTools"[\s\S]*v-show="plannerTab === 'monitor'"/)
   assert.match(source, /<div id="data" class="height-100 uranus-scrollbar" v-else-if="waylinesData\.data\.length !== 0"/)
   assert.match(source, /isTaskRouteSelector \? '.*KMZ.*' : '.*'/)

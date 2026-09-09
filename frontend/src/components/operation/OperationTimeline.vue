@@ -2,7 +2,7 @@
   <section class="operation-timeline-panel">
     <div class="timeline-header">
       <div>
-        <span class="panel-kicker">Timeline</span>
+        <span class="panel-kicker">处置记录</span>
         <h3>事件时间线</h3>
       </div>
       <span class="timeline-count">{{ sortedItems.length }} 条</span>

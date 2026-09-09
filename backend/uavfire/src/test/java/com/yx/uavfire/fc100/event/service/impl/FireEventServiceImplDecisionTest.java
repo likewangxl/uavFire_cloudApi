@@ -46,6 +46,19 @@ import static org.mockito.Mockito.when;
 class FireEventServiceImplDecisionTest {
 
     @Test
+    void rejectWithoutLinkedIncidentPersistsReasonAndReviewerInHistory() {
+        Fixture f = fixture();
+        when(f.events.selectOne(any(Wrapper.class))).thenReturn(event("UNLOCATED"));
+        FireEventActionParam param = action("qa-reviewer");
+        param.setReason("现场核实为非火情，仅本地验证");
+        f.service.reject("10", param, request());
+        verify(f.histories).insert(argThat(history ->
+            "REJECTED".equals(history.getAction())
+                && "qa-reviewer".equals(history.getSourceEventId())
+                && param.getReason().equals(history.getDecisionReason())));
+    }
+
+    @Test
     void confirmPreciseFireEventCreatesIncidentAndDraftMissionOnce() {
         Fixture f = fixture();
         FireEventEntity event = event("PRECISE");

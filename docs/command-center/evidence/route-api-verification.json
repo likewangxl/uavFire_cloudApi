@@ -1,0 +1,14 @@
+{
+  "code": 0,
+  "qaRoutes": [
+    {
+      "name": "QA-CC-两航点保存验收",
+      "planned_wayline_id": "7669b1a5-a0b1-4866-bdcc-d4e8c1c76edc",
+      "status": "draft",
+      "aircraft_model_key": "M300",
+      "payload_model_key": "H20T",
+      "flight_id": null,
+      "waypoint_count": null
+    }
+  ]
+}

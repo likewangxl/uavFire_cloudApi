@@ -42,6 +42,8 @@ import com.yx.uavfire.fc100.operation.service.IncidentStateMachine;
 import com.yx.uavfire.fc100.operation.service.IncidentTransitCommand;
 import com.yx.uavfire.fc100.operation.service.OperationIncidentService;
 import com.yx.uavfire.manage.service.IDeviceRedisService;
+import com.yx.uavfire.manage.dao.IDeviceMapper;
+import com.yx.uavfire.manage.model.entity.DeviceEntity;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -114,6 +116,9 @@ public class FireEventServiceImpl implements FireEventService {
     private final Fc100ThermalProperties thermalProperties;
     private final FireApproachDispatcher fireApproachDispatcher;
 
+    @Autowired
+    private IDeviceMapper deviceMapper;
+
     @Autowired(required = false)
     private VisibleFireLocalizationDispatcher visibleFireLocalizationDispatcher;
 
@@ -151,7 +156,7 @@ public class FireEventServiceImpl implements FireEventService {
         event.setUpdatedBy(param.getOperatorId());
         event.setUpdateTime(now);
         eventMapper.updateById(event);
-        insertDecisionHistory(event, "CONFIRMED", param.getOperatorId(), now);
+        insertDecisionHistory(event, "CONFIRMED", param.getOperatorId(), param.getReason(), now);
 
         OperationIncidentEntity existing = findActiveIncident(event.getId());
         OperationIncidentDTO incident;
@@ -224,7 +229,7 @@ public class FireEventServiceImpl implements FireEventService {
         event.setUpdatedBy(param.getOperatorId());
         event.setUpdateTime(now);
         eventMapper.updateById(event);
-        insertDecisionHistory(event, "REJECTED", param.getOperatorId(), now);
+        insertDecisionHistory(event, "REJECTED", param.getOperatorId(), param.getReason(), now);
 
         OperationIncidentDTO incident = null;
         if (event.getLinkedIncidentId() != null) {
@@ -337,6 +342,7 @@ public class FireEventServiceImpl implements FireEventService {
     @Override
     @Transactional
     public FireEventCreateResponse create(FireEventCreateParam param) {
+        resolveDeviceWorkspace(param);
         resolveFirePointFromGeoSnapshot(param);
         fillThermalRoiFromMeasureRoi(param);
         // 去重资格必须在 OSD 回填坐标之后判：串行确认链的事件不带火点坐标（回填飞机位置），
@@ -924,6 +930,30 @@ public class FireEventServiceImpl implements FireEventService {
         insertHistory(event, snapshot, sourceTs, clock.now(), action);
     }
 
+    // Agent reports may omit workspace_id. Resolve only placeholder workspaces from
+    // the durable device binding, before the dedup lock, event and history are written.
+    // Never guess a workspace from the current login or from a single-tenant default.
+    private void resolveDeviceWorkspace(FireEventCreateParam param) {
+        String workspace = param.getWorkspaceId();
+        if (workspace != null && !workspace.isBlank() && !"DEFAULT".equals(workspace)) {
+            return;
+        }
+        param.setWorkspaceId("DEFAULT");
+        if (deviceMapper == null || param.getDeviceSn() == null || param.getDeviceSn().isBlank()) {
+            return;
+        }
+        List<DeviceEntity> devices = deviceMapper.selectList(new QueryWrapper<DeviceEntity>()
+            .eq("device_sn", param.getDeviceSn()).eq("bound_status", true));
+        Set<String> workspaces = devices.stream()
+            .filter(device -> Boolean.TRUE.equals(device.getBoundStatus()))
+            .map(DeviceEntity::getWorkspaceId)
+            .filter(value -> value != null && !value.isBlank() && !"DEFAULT".equals(value))
+            .collect(java.util.stream.Collectors.toSet());
+        if (workspaces.size() == 1) {
+            param.setWorkspaceId(workspaces.iterator().next());
+        }
+    }
+
     private String workspaceIdOf(FireEventCreateParam param) {
         return param.getWorkspaceId() != null ? param.getWorkspaceId() : "DEFAULT";
     }
@@ -1291,10 +1321,11 @@ public class FireEventServiceImpl implements FireEventService {
         return -1.0;
     }
 
-    private void insertDecisionHistory(FireEventEntity event, String action, String operatorId, long now) {
+    private void insertDecisionHistory(FireEventEntity event, String action, String operatorId, String reason, long now) {
         FireEventHistoryEntity history = historyFromEvent(event, now);
         history.setSourceEventId(operatorId);
         history.setAction(action);
+        history.setDecisionReason(reason);
         historyMapper.insert(history);
     }
 

@@ -3,6 +3,7 @@
     <a-layout-header class="header">
       <Topbar />
     </a-layout-header>
+    <SectionNav />
     <a-layout-content class="page-content">
       <router-view />
     </a-layout-content>
@@ -11,6 +12,7 @@
 </template>
 
 <script lang="ts" setup>
+import SectionNav from '/@/components/command-center/SectionNav.vue'
 import Topbar from '/@/components/common/topbar.vue'
 import { onMounted, reactive, ref, UnwrapRef, watch } from 'vue'
 import { getRoot } from '/@/root'
@@ -76,8 +78,9 @@ onMounted(() => {
 .header {
   background-color: black;
   color: white;
-  height: 60px;
+  height: auto;
+  line-height: normal;
   font-size: 15px;
-  padding: 0 20px;
+  padding: 0;
 }
 </style>

@@ -48,14 +48,19 @@ export interface FireEventRecheckResultBody {
 }
 
 export const eventApi = {
-  list: (params?: { workspaceId?: string; page?: number; size?: number }) =>
-    client.get<ApiResult<FireEventDTO[]>>('/api/fire/events', { params }),
+  list: (params?: { workspaceId?: string; status?: string; limit?: number; page?: number; size?: number }, silent = false) =>
+    client.get<ApiResult<FireEventDTO[]>>('/api/fire/events', {
+      ...(silent ? { suppressErrorToast: true } : {}),
+      params: { workspaceId: params?.workspaceId, status: params?.status, limit: params?.limit ?? params?.size ?? 200 },
+      // Spring request parameters remain camelCase even though JSON bodies use snake_case.
+      paramsSerializer: values => new URLSearchParams(Object.entries(values).filter(([, value]) => value != null).map(([key, value]) => [key === 'workspace_id' ? 'workspaceId' : key, String(value)])).toString(),
+    }),
 
   get: (eventId: string) =>
-    client.get<ApiResult<FireEventDTO>>(`/api/fire/events/${eventId}`),
+    client.get<ApiResult<FireEventDTO>>(`/api/fire/events/${encodeURIComponent(String(eventId))}`),
 
   history: (eventId: string, limit = 100) =>
-    client.get<ApiResult<FireEventHistoryDTO[]>>(`/api/fire/events/${eventId}/history`, {
+    client.get<ApiResult<FireEventHistoryDTO[]>>(`/api/fire/events/${encodeURIComponent(String(eventId))}/history`, {
       params: { limit },
     }),
 
@@ -63,11 +68,11 @@ export const eventApi = {
     client.post<ApiResult<FireEventCreateResponse>>('/api/fire/events', body),
 
   confirm: (eventId: string | number, body: FireEventActionBody) =>
-    client.post<ApiResult<FireEventDecisionResult>>(`/api/fire/events/${eventId}/confirm`, body),
+    client.post<ApiResult<FireEventDecisionResult>>(`/api/fire/events/${encodeURIComponent(String(eventId))}/confirm`, body),
 
   reject: (eventId: string | number, body: FireEventActionBody) =>
-    client.post<ApiResult<FireEventDecisionResult>>(`/api/fire/events/${eventId}/reject`, body),
+    client.post<ApiResult<FireEventDecisionResult>>(`/api/fire/events/${encodeURIComponent(String(eventId))}/reject`, body),
 
   recheckResult: (eventId: string | number, body: FireEventRecheckResultBody) =>
-    client.post<ApiResult<any>>(`/api/fire/events/${eventId}/recheck-result`, body),
+    client.post<ApiResult<any>>(`/api/fire/events/${encodeURIComponent(String(eventId))}/recheck-result`, body),
 }

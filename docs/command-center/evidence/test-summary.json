@@ -1,0 +1,10 @@
+{
+  "frontendTestFiles": 26,
+  "frontendExit": 0,
+  "backend": {
+    "tests": 499,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  }
+}

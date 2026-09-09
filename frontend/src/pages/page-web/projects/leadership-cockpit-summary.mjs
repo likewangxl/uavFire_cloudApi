@@ -55,7 +55,7 @@ export function buildCockpitSummary ({
 
   const activeFireEvents = fireEvents.filter(event => {
     const status = String(event?.status || '').toUpperCase()
-    return status !== 'IGNORED' && status !== 'ARCHIVED'
+    return status !== 'IGNORED' && status !== 'ARCHIVED' && String(event?.confirmedStatus || '').toUpperCase() !== 'REJECTED'
   })
 
   const fireLevelCounts = activeFireEvents.reduce((acc, event) => {

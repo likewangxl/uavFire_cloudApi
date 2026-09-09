@@ -1,7 +1,7 @@
 <template>
+  <div class="command-workspace-shell"><CommandHeader /><SectionNav />
   <div class="project-app-wrapper" :class="{ 'fire-mode': isFireRoute }">
     <div class="left">
-      <Sidebar />
       <div class="main-content uranus-scrollbar dark">
         <router-view />
       </div>
@@ -22,26 +22,30 @@
       </div>
     </div>
   </div>
+  </div>
 </template>
 <script lang="ts" setup>
-import Sidebar from '/@/components/common/sidebar.vue'
+import CommandHeader from '/@/components/command-center/CommandHeader.vue'
+import SectionNav from '/@/components/command-center/SectionNav.vue'
 import MediaPanel from '/@/components/MediaPanel.vue'
 import TaskPanel from '/@/components/task/TaskPanel.vue'
 import WorkspaceLivestreamPanel from '/@/components/WorkspaceLivestreamPanel.vue'
 import GMap from '/@/components/GMap.vue'
-import { EBizCode, ERouterName } from '/@/types'
+import { EBizCode, ERouterName, ELocalStorageKey } from '/@/types'
 import { getRoot } from '/@/root'
 import { useMyStore } from '/@/store'
 import { useConnectWebSocket } from '/@/hooks/use-connect-websocket'
 import EventBus from '/@/event-bus'
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 
 const root = getRoot()
 const store = useMyStore()
+onMounted(() => { if (!localStorage.getItem(ELocalStorageKey.Token)) root.$router.push('/project') })
 
 // fc100 灭火模块的路由进入时,隐藏右侧固定 GMap,左侧扩展占满,fire 页面有自己的地图和全宽列表
 const FIRE_ROUTES = new Set<string>([
   ERouterName.FIRE_EVENTS,
+  'fire-events-table',
   ERouterName.FIRE_MISSIONS,
   ERouterName.OPERATION_INCIDENTS,
   ERouterName.FIRE_MISSION_DETAIL,
@@ -152,10 +156,13 @@ useConnectWebSocket(messageHandler)
 <style lang="scss" scoped>
 @use '/@/styles/index.scss';
 
+.command-workspace-shell {height:100dvh;display:flex;flex-direction:column;background:#0c1420;}
 .project-app-wrapper {
+  flex:1;
+  min-height:0;
   display: flex;
   transition: width 0.2s ease;
-  height: 100%;
+  height: auto;
   width: 100%;
 
   &.fire-mode {
@@ -171,7 +178,7 @@ useConnectWebSocket(messageHandler)
         width: auto;
         overflow-y: auto;
         overflow-x: hidden;
-        background-color: #f6f8fa;
+        background-color: #0c1420;
         color: #222;
       }
     }
@@ -186,14 +193,14 @@ useConnectWebSocket(messageHandler)
 
   .left {
     display: flex;
-    width: 335px;
-    flex: 0 0 335px;
+    width: 290px;
+    flex: 0 0 290px;
     background-color: #232323;
 
     .main-content {
       flex: 1;
       color: $text-white-basic;
-      width: 285px;
+      width: 100%;
     }
   }
 
@@ -227,6 +234,12 @@ useConnectWebSocket(messageHandler)
       z-index: 100;
       background: #f6f8fa;
     }
+  }
+}
+@media(max-width:800px){
+  .project-app-wrapper:not(.fire-mode){flex-direction:column;overflow:auto;
+    .left{width:100%;flex:0 0 300px;min-height:0;overflow:auto}
+    .right{width:100%;flex:0 0 620px;min-height:620px}
   }
 }
 </style>

@@ -1,0 +1,14 @@
+{
+  "beforeCounts": {
+    "fire_event": 113,
+    "fire_event_history": 144,
+    "fc100_fire_mission": 487
+  },
+  "changedWorkspaceRows": {
+    "fire_event": 110,
+    "fire_event_history": 138,
+    "fc100_fire_mission": 0
+  },
+  "onlyWorkspaceChanged": true,
+  "idempotent": true
+}

@@ -136,7 +136,7 @@ test('delivery execution target list excludes rc controller devices', () => {
   )
   assert.match(
     cockpitSource,
-    /\.filter\(isFc100DeliveryAircraftDevice\)/,
+    /\.filter\((?:isFc100DeliveryAircraftDevice\)|device => isFc100DeliveryAircraftDevice\(device\) && !isMockCockpitDeviceSn\(device\.deviceSn\)\))/,
     'delivery target list should filter out non-aircraft delivery devices before mapping targets'
   )
   assert.match(

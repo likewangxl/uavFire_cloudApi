@@ -711,6 +711,7 @@ import type { MsdkDeviceState } from '/@/api/msdk-device'
 import type { FireEventDTO } from '/@/types/fire/event'
 import type { WaypointDTO } from '/@/types/fire/waypoint'
 import { useMyStore } from '/@/store'
+import { ELocalStorageKey } from '/@/types'
 import { EModeCode } from '/@/types/device'
 import CockpitAircraftStreamSelector from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
 import type { CockpitStreamTarget } from '/@/components/cockpit/CockpitAircraftStreamSelector.vue'
@@ -958,7 +959,7 @@ function responseStatValue (key: string) {
 }
 
 const situationLayers = computed(() => buildSituationLayers({
-  fireEvents: fireEventState.events,
+  fireEvents: cockpitSummary.value.activeFireEvents,
   missionWaypoints: missionWaypoints.value,
   msdkDevices: msdkDeviceSnapshots.value,
   deliveryTargets: deliveryExecutionTargets.value
@@ -1963,7 +1964,7 @@ const lastNotifiedFireEventVersions = new Map<number, number>()
 async function loadCockpitFireEvents (): Promise<FireEventDTO[]> {
   fireEventState.loading = true
   try {
-    const res = await fireEventApi.list()
+    const res = await fireEventApi.list({ workspaceId: localStorage.getItem(ELocalStorageKey.WorkspaceId) || '', limit: 200 })
     const events = res.data.data ?? []
     fireEventState.events = events
     fireEventState.error = ''
@@ -2295,6 +2296,7 @@ const formatFireEventLocation = (event: FireEventDTO) => {
 }
 
 const formatFireLocationSummary = (event: FireEventDTO) => {
+  if (event.geoQuality === 'UNLOCATED') return '定位待确认'
   return formatFireLocation(event, 4)
 }
 

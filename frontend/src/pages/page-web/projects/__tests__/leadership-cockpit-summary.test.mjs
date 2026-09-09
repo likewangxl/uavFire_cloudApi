@@ -279,3 +279,14 @@ test('uses explicit unavailable states instead of invented system health data', 
   assert.match(summary.dataGaps.find(item => item.key === 'serviceHealth').note, /没有统一 health 汇总接口/)
   assert.match(summary.dataGaps.find(item => item.key === 'zlmHealth').note, /没有专用 ZLM health 接口/)
 })
+
+test('review rejection removes candidate from active metrics and recent queue', () => {
+  const summary = buildCockpitSummary({
+    fireEvents: [
+      { id: 1, status: 'CANDIDATE', confirmedStatus: 'REJECTED', fireLevel: 'HIGH' },
+      { id: 2, status: 'CANDIDATE', confirmedStatus: 'CONFIRMED', fireLevel: 'LOW' }
+    ]
+  })
+  assert.deepEqual(summary.activeFireEvents.map(event => event.id), [2])
+  assert.deepEqual(summary.recentFireEvents.map(event => event.id), [2])
+})

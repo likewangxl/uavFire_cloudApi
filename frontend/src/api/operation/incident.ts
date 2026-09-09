@@ -21,7 +21,7 @@ function mockSwitchValue () {
 
 export const useOperationMock = mockSwitchValue()
 
-const realOperationIncidentApi = {
+export const realOperationIncidentApi = {
   create: (body: CreateOperationIncidentParam) =>
     client.post<ApiResult<OperationIncidentDTO>>('/api/operations/incidents', body),
 

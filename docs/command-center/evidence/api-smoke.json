@@ -1,0 +1,30 @@
+{
+  "time": "2026-09-06T01:28:16.226726",
+  "results": [
+    {
+      "case": "create/get",
+      "passed": true,
+      "ids": [
+        "QA-CC-20260906-012815-0",
+        "QA-CC-20260906-012815-1",
+        "QA-CC-20260906-012815-2"
+      ],
+      "flightCommands": 0
+    },
+    {
+      "case": "workspace filtering",
+      "passed": true,
+      "count": 3
+    },
+    {
+      "case": "confirm/idempotency/reason",
+      "passed": true,
+      "incidentId": 2
+    },
+    {
+      "case": "reject without incident persists reviewer/reason",
+      "passed": true
+    }
+  ],
+  "browserReviewEvent": "QA-CC-20260906-012815-0"
+}
