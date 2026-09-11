@@ -10,6 +10,6 @@ import { Divider } from 'ant-design-vue'
 .divider {
   margin: 10px 0;
   height: 1px;
-  background-color: #4f4f4f;
+  background-color: #26364a;
 }
 </style>

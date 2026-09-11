@@ -330,7 +330,7 @@ function nextYearDate () {
 
   h4 {
     margin: 0;
-    color: #253140;
+    color: #e2eaf5;
     font-size: 14px;
   }
 }
@@ -354,13 +354,13 @@ function nextYearDate () {
   justify-content: space-between;
   gap: 8px;
   padding: 8px;
-  border: 1px solid #e4e9ef;
+  border: 1px solid #2a3b50;
   border-radius: 6px;
-  background: #f9fbfd;
+  background: #1a2a3f;
 
   &.blocked {
     border-color: #ffccc7;
-    background: #fff1f0;
+    background: #3b2430;
   }
 }
 
@@ -370,12 +370,12 @@ function nextYearDate () {
   min-width: 0;
 
   strong {
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 12px;
   }
 
   small {
-    color: #697586;
+    color: #91a4bd;
     overflow-wrap: anywhere;
   }
 }
@@ -391,7 +391,7 @@ function nextYearDate () {
 
   h5 {
     margin: 0;
-    color: #253140;
+    color: #e2eaf5;
     font-size: 13px;
   }
 }

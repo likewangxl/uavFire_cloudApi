@@ -12,6 +12,7 @@ import { DeploymentUnitOutlined, DashboardOutlined, VideoCameraOutlined, FireOut
 import { ELocalStorageKey } from '/@/types'
 import { sections, sectionFor } from './navigation.mjs'
 import './command-center.css'
+import './legacy-theme.scss'
 const route = useRoute(); const router = useRouter()
 const icons = { DashboardOutlined, VideoCameraOutlined, FireOutlined, ScheduleOutlined, AppstoreOutlined }
 const current = computed(() => sectionFor(route.path, route.query))

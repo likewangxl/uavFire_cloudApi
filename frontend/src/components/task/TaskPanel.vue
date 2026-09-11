@@ -346,7 +346,7 @@ async function onUploadMediaFileNow (jobId: string) {
   width: 100%;
   padding: 16px;
   .plan-table {
-    background: #fff;
+    background: #121f2f;
     margin-top: 10px;
   }
   .action-area {
@@ -370,11 +370,11 @@ async function onUploadMediaFileNow (jobId: string) {
 .header {
   width: 100%;
   height: 60px;
-  background: #fff;
+  background: #121f2f;
   padding: 16px;
   font-size: 20px;
   font-weight: bold;
   text-align: start;
-  color: #000;
+  color: #e2eaf5;
 }
 </style>

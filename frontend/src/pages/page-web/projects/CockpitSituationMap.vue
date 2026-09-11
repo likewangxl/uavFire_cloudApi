@@ -68,6 +68,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { browserMapInitialView, createBrowserLocationControl } from '/@/hooks/browser-map-location.mjs'
 import { buildTiandituStyle } from '/@/hooks/tianditu'
 import { useUomAirspaceReferenceLayer } from '/@/hooks/use-uom-airspace-reference-layer'
 import { loadTelluxModule } from './leadership-cockpit-situation.mjs'
@@ -76,6 +77,7 @@ const props = defineProps<{
   layers: any
   focusKey?: string
   showUomAirspace?: boolean
+  browserLocation?: boolean
 }>()
 
 const emit = defineEmits(['select'])
@@ -256,17 +258,19 @@ function unmountTelluxStage () {
 
 function initMap () {
   if (!mapEl.value || map) return
+  const initial = browserMapInitialView(window.__UAVFIRE_SITE_LOCATION__)
   map = new maplibregl.Map({
     container: mapEl.value,
     style: buildTiandituStyle('satellite'),
-    center: [109.32667, 34.66791],
-    zoom: 10.8,
+    center: props.browserLocation ? initial.center : [109.32667, 34.66791],
+    zoom: props.browserLocation ? initial.zoom : 10.8,
     pitch: 0,
     maxPitch: 78,
     antialias: true,
     attributionControl: false
   })
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-left')
+  if (props.browserLocation) map.addControl(createBrowserLocationControl(), 'bottom-right')
   map.on('dragstart', markUserCameraInteraction)
   map.on('zoomstart', markUserCameraInteraction)
   map.on('load', renderLayers)
@@ -413,6 +417,7 @@ function addMarker (coordinates: [number, number], className: string, popup: any
 }
 
 function fitInitialSituationBounds () {
+  if (props.browserLocation) return
   if (hasInitialViewportFit || userCameraInteraction) return
   const b = layers.value.bounds
   if (!map || !b) return

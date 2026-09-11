@@ -6,7 +6,7 @@
     <div class="content">
       <a-form ref="valueRef" layout="horizontal" :hideRequiredMark="true" :rules="rules" :model="planBody" labelAlign="left">
         <a-form-item label="计划名称" name="name" :labelCol="{span: 23}">
-          <a-input style="background: black;"  placeholder="请输入计划名称" v-model:value="planBody.name"/>
+          <a-input placeholder="请输入计划名称" v-model:value="planBody.name"/>
         </a-form-item>
         <!-- 航线 -->
         <a-form-item label="巡检航线" :wrapperCol="{offset: 7}" name="file_id">
@@ -137,7 +137,7 @@
         </a-form-item>
         <a-form-item class="width-100" style="margin-bottom: 40px;">
           <div class="footer">
-            <a-button class="mr10" style="background: #3c3c3c;" @click="closePlan">取消
+            <a-button class="mr10" style="background: #1a2a3f;" @click="closePlan">取消
             </a-button>
             <a-button type="primary" @click="onSubmit" :disabled="disabled">确定
             </a-button>
@@ -146,7 +146,7 @@
       </a-form>
     </div>
   </div>
-  <div v-if="drawerVisible" style="position: absolute; left: 335px; width: 280px; height: 100vh; float: right; top: 0; z-index: 1000; color: white; background: #282828;">
+  <div v-if="drawerVisible" style="position: absolute; left: 335px; width: 280px; height: 100vh; float: right; top: 0; z-index: 1000; color: white; background: #121f2f;">
     <div>
       <router-view :name="routeName"/>
     </div>
@@ -340,8 +340,8 @@ function removeTime () {
 
 <style lang="scss">
 .create-plan-wrapper {
-  background-color: #232323;
-  color: fff;
+  background-color: #0f1b2a;
+  color: #e2eaf5;
   padding-bottom: 0;
   height: 100vh;
   display: flex;
@@ -350,7 +350,7 @@ function removeTime () {
 
   .header {
     height: 52px;
-    border-bottom: 1px solid #4f4f4f;
+    border-bottom: 1px solid #26364a;
     font-weight: 700;
     font-size: 16px;
     padding-left: 10px;
@@ -372,7 +372,7 @@ function removeTime () {
 
     form label, input, .ant-input, .ant-calendar-range-picker-separator,
     .ant-input:hover, .ant-time-picker .anticon, .ant-calendar-picker .anticon {
-      background-color: #232323;
+      background-color: #0f1b2a;
       color: #fff;
     }
 
@@ -383,7 +383,7 @@ function removeTime () {
     .plan-timer-form-item {
 
       .ant-radio-button-wrapper{
-        background-color: #232323;
+        background-color: #0f1b2a;
         color: #fff;
         width: 33%;
         text-align: center;
@@ -407,7 +407,7 @@ function removeTime () {
 }
 
 .wayline-panel {
-  background: #3c3c3c;
+  background: #1a2a3f;
   margin-left: auto;
   margin-right: auto;
   margin-top: 10px;
@@ -428,7 +428,7 @@ function removeTime () {
 }
 
 .panel {
-  background: #3c3c3c;
+  background: #1a2a3f;
   margin-left: auto;
   margin-right: auto;
   margin-top: 10px;

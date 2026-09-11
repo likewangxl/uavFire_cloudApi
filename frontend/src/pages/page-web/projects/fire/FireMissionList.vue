@@ -247,7 +247,7 @@ onMounted(() => {
 <style lang="scss" scoped>
 .fire-mission-page {
   padding: 24px;
-  background: #f5f7fa;
+  background: #0f1b2a;
   min-height: 100%;
 }
 
@@ -260,7 +260,7 @@ onMounted(() => {
 
   h2 {
     margin: 0;
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 22px;
     font-weight: 650;
     line-height: 1.3;
@@ -269,7 +269,7 @@ onMounted(() => {
   span {
     display: block;
     margin-top: 4px;
-    color: #8c8c8c;
+    color: #91a4bd;
     font-size: 13px;
   }
 }
@@ -280,20 +280,20 @@ onMounted(() => {
 }
 
 .fire-mission-table {
-  background: #fff;
-  border: 1px solid #edf0f3;
+  background: #121f2f;
+  border: 1px solid #2a3b50;
   border-radius: 6px;
   overflow: hidden;
 }
 
 .fire-mission-table :deep(.ant-table) {
-  color: #2f343b;
+  color: #c7d6e9;
 }
 
 .fire-mission-table :deep(.ant-table-thead > tr > th) {
-  background: #fbfcfd;
-  border-bottom: 1px solid #edf0f3;
-  color: #4b5563;
+  background: #1a2b40;
+  border-bottom: 1px solid #2a3b50;
+  color: #b8cbe2;
   font-weight: 600;
   padding: 14px 18px;
 }
@@ -301,11 +301,11 @@ onMounted(() => {
 .fire-mission-table :deep(.ant-table-tbody > tr > td) {
   padding: 18px;
   vertical-align: middle;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid #2a3b50;
 }
 
 .fire-mission-table :deep(.ant-table-tbody > tr:hover > td) {
-  background: #f8fbff;
+  background: #20334c;
 }
 
 .mission-number-cell,
@@ -319,7 +319,7 @@ onMounted(() => {
 
 .mission-number-cell strong,
 .mission-aircraft strong {
-  color: #262626;
+  color: #e2eaf5;
   font-weight: 600;
   line-height: 1.35;
   word-break: break-word;
@@ -327,8 +327,8 @@ onMounted(() => {
 
 .mission-number-cell span,
 .mission-aircraft span,
-.mission-runtime span {
-  color: #8c8c8c;
+.mission-runtime span:not(.ant-tag) {
+  color: #91a4bd;
   font-size: 12px;
   line-height: 1.35;
 }
@@ -349,7 +349,7 @@ onMounted(() => {
   strong {
     display: inline;
     min-width: 0;
-    color: #262626;
+    color: #e2eaf5;
     font-weight: 600;
     line-height: 1.35;
     word-break: break-word;
@@ -364,7 +364,7 @@ onMounted(() => {
   padding: 1px 7px;
   border: 1px solid #ffd6d6;
   border-radius: 999px;
-  background: #fff7f7;
+  background: #3b2430;
   color: #cf3f3f;
   font-size: 12px;
   line-height: 18px;
@@ -374,7 +374,7 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  color: #5c6670;
+  color: #91a4bd;
   font-size: 12px;
   line-height: 1.35;
 }
@@ -441,11 +441,11 @@ onMounted(() => {
 .mission-detail-button {
   color: #2563eb;
   border-color: #bfdbfe;
-  background: #eff6ff;
+  background: #1a2b40;
 }
 
 .mission-no-actions {
-  color: #8c8c8c;
+  color: #91a4bd;
   font-size: 12px;
 }
 </style>

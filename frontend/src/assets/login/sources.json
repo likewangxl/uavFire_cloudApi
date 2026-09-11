@@ -1,0 +1,242 @@
+{
+  "date": "2026-09-10",
+  "approach": "Official product images copied without AI editing. Generated landscape is illustrative, not a photograph of a real deployment. Device display does not assert system integration or certification. Dock 3 compatible aircraft are 4D/4TD; M4T displayed independently.",
+  "assets": [
+    {
+      "file": "dock3.png",
+      "official_page": "https://enterprise.dji.com/cn/dock-3",
+      "sha256": "b3772f04cf7295f0085b95886b1e747f6c4389127fd82ac87c8f15d4e9f4113f",
+      "asset_url": "https://www-cdn.djiits.com/cms/uploads/596a276ec8d8577111cfa9bc19f147dd@374*374.png"
+    },
+    {
+      "file": "m4t.png",
+      "official_page": "https://enterprise.dji.com/cn/matrice-4-series",
+      "sha256": "75712976a7d5dc23a6c4243c81b27047d0b717adea8cb458e31788200212004a",
+      "asset_url": "https://www-cdn.djiits.com/cms/uploads/5a6ef3ed6f35e3719453a78ff0e67af4@374*374.png"
+    },
+    {
+      "file": "fc100.png",
+      "official_page": "https://www.dji.com/cn/flycart-100",
+      "sha256": "7d502b01c451e649b438064361c633d4baa39ef9caac4b100331b32e865f28fd",
+      "asset_url": "https://www-cdn.djiits.com/cms/uploads/ca4874861c76a3bffac78bb7b2af56fc@374*374.png"
+    },
+    {
+      "file": "fc200.png",
+      "official_page": "https://www.dji.com/cn/flycart-200",
+      "sha256": "e14b2c8a3639486532b6868fdebe80cd4e32c262d2787de9957a2b58104a3717",
+      "asset_url": "https://www-cdn.djiits.com/cms/uploads/c3492e15879312e323846e00930b1899@374*374.png"
+    },
+    {
+      "file": "fc200-hero.jpg",
+      "official_page": "https://www.dji.com/cn/flycart-200",
+      "sha256": "a9ed1e82eed09ff9cbe115295f85c7fc37239eeed202b5d14eb4409bb45f1fdd",
+      "asset_url": "https://www-cdn.djiits.com/dps/d2593ffff78d0cf0a4feba66fac736b9.jpg?w=2560&h=1440"
+    }
+  ],
+  "forest-background.png": {
+    "source": "Built-in imagegen",
+    "prompt": "Photorealistic overcast forested mountains in central China. Restrained green and slate palette. No aircraft, buildings, people, logos, text, fire or neon. Official aircraft overlaid separately in application."
+  },
+  "fire-response-scene.png": {
+    "source": "Built-in imagegen, generated composite using the four official product references listed above. Not an official DJI scene photograph.",
+    "references": [
+      "dock3.png",
+      "m4t.png",
+      "fc100.png",
+      "fc200.png"
+    ],
+    "scene": "Forest fire discovery, aerial transport of firefighting supplies and water containers, ground hose suppression. Illustrative, does not verify equipment integration or operational capabilities."
+  },
+  "fire-response-panorama.png": {
+    "source": "Built-in imagegen. Photographic composite, NOT actual incident footage or an official DJI firefighting demonstration.",
+    "references": [
+      "fire-bucket-reference.png",
+      "fc100.png",
+      "fc200.png",
+      "m4t.png",
+      "dock3.png",
+      "fc200-hero.jpg"
+    ],
+    "verified_rigging_sources": [
+      "https://www.dji.com/cn/flycart-100/faq",
+      "https://developer.dji.com/doc/payload-sdk-tutorial/cn/function-overview/basic-function/hoist-controller-function.html",
+      "https://dl.djicdn.com/downloads/DJI_FlyCart_100/20251127/DJI_FlyCart_100_User_Manual_v1.2_zh-cn_i.pdf"
+    ],
+    "changes": "No people; long single central hoist line to hook, short cargo bridle below hook; supplied red cylinder with water release; deep wildfire terrain; foreground suppression, midground supply transport, distant reconnaissance.",
+    "limitations": "Illustrative payload, perspective and action; no claim of certified bucket compatibility or exact engineering geometry.",
+    "prompt_file": "fire-response-panorama.prompt.txt"
+  },
+  "m4td-official-reference.png": {
+    "official_page": "https://enterprise.dji.com/cn/dock-3",
+    "asset_url": "https://www-cdn.djiits.com/dps/327591d733a27facc346073fac9e8685.png",
+    "usage": "Reference for the airborne M4TD only; the ground Dock enclosure is omitted from the composite."
+  },
+  "fire-response-panorama-v2.png": {
+    "source": "Built-in imagegen edit of previous panorama; illustrative composite, not actual incident photography.",
+    "changes": [
+      "Central aircraft corrected using official FC200 images.",
+      "Larger netted pallet load intended to illustrate approximately 200kg-class rescue cargo; image does not establish actual weight or operating limits.",
+      "Added M4TD in upper valley, retained existing reconnaissance aircraft.",
+      "Removed lower-left Dock 3 enclosure.",
+      "Replaced opaque conical water with narrower translucent irregular streams and spray."
+    ],
+    "prompt_file": "fire-response-panorama-v2.prompt.txt",
+    "official_sources": [
+      "https://www.dji.com/cn/flycart-200",
+      "https://enterprise.dji.com/cn/dock-3"
+    ],
+    "sha256": "6f83dc73c5ec367fae30ca93773a39d8e8d5d1426eb34d835289a2d04fab3a63"
+  },
+  "fire-response-panorama-v3.png": {
+    "source": "Built-in imagegen, two local edits to previous panorama. Illustrative composite, not incident footage.",
+    "changes": [
+      "FC200 and attached pallet moved farther away, smaller in perspective, changed to rear three-quarter departing pose.",
+      "Uppermost M4TD moved lower/right to survey a fire point and scaled down, away from header and login form.",
+      "Foreground bucket, water, original distant M4T and overall layout retained."
+    ],
+    "prompt_file": "fire-response-panorama-v3.prompt.txt",
+    "sha256": "c8a2c56c3f0596ccf50980a3f94eeb6fc40a551d591ff2037d8e691b561ae066"
+  },
+  "fire-response-panorama-fc200-v5.png": {
+    "source": "Built-in imagegen, incorporating user-selected FC200 body/landing-gear/cargo material and a rear-quarter render of the user supplied STEP model. Illustrative composite, not exact CAD output or incident photography.",
+    "changes": [
+      "Small distant FC200 turned to a visibly oblique rear-quarter departing heading, with black rear battery housings facing the viewer.",
+      "White-gray body, tall landing gear, single hoist line and red soft cargo bag with black straps.",
+      "M4TD remains lowered at the right-side fire point, away from the page header.",
+      "Foreground water-bucket aircraft, original reconnaissance aircraft and login layout retained."
+    ],
+    "references": [
+      "fire-response-panorama-fc200-v4.png",
+      "C:/Users/51799/.codex/generated_images/01a08957-c671-7160-8ba3-8ec974dc42a0/exec-8717eb3f-d304-45e5-9611-192cd45c6743.png",
+      "D:/likewangx/项目材料/智能集群大载重无人机灭火系统/.codex-temp/login-redesign-20260910/rear-quarter.png"
+    ],
+    "geometry_reference": "C:/Users/51799/Downloads/DJI_FlyCart_200_Aircraft_Simple_3D_Model.stp",
+    "prompt_file": "fire-response-panorama-fc200-v5.prompt.txt",
+    "sha256": "e7264bb4919830dc6aad28e81e87730546bbe9a7c456fc81fed6f0aade2734a7"
+  },
+  "active_background": "fire-response-panorama-user-v9.png",
+  "fire-response-panorama-fc200-v4.png": {
+    "source": "User-selected built-in imagegen composite from coordinated asset task; directly used without further image generation or pose changes.",
+    "selected_original": "C:/Users/51799/.codex/generated_images/01a08957-c671-7160-8ba3-8ec974dc42a0/exec-17255105-04ad-4e30-83fe-375ef08b7b95.png",
+    "changes": [
+      "Light gray-white FC200 with tall landing gear, single long hoist line and red soft cargo bag.",
+      "Existing lowered M4TD and forest-fire composition retained.",
+      "Selected by the user to supersede the rear-pose v5 image."
+    ],
+    "sha256": "27d23822997b4aa459bb0f22567680693cebb56f7ab8668fd590cb9f82eee6e8"
+  },
+  "fire-response-panorama-forest-v6.png": {
+    "source": "Built-in imagegen background detail edit of the user-selected FC200 v4. Illustrative scene, not incident photography.",
+    "reference": "fire-response-panorama-fc200-v4.png",
+    "changes": [
+      "Rebuilt foreground branches and needle clusters, irregular individual tree crowns, forest floor texture and middle-distance foliage.",
+      "Retained four aircraft identities, positions, selected pale-gray FC200 pose and red transport bag.",
+      "Retained login layout, fire locations, bucket and rigging."
+    ],
+    "actual_resolution": [
+      1672,
+      941
+    ],
+    "limitation": "Two requests for 3840x2160 returned 1672x941; this is a texture improvement, not native 4K. The first result was selected for more natural foliage.",
+    "prompt_file": "fire-response-panorama-forest-v6.prompt.txt",
+    "sha256": "8783230395c2b41fa46c878f89d8041cfdcf4cead246f37f0418c8e0329e6755"
+  },
+  "active_aircraft_overlay": "matrice-4d-rear-transparent-v1.png",
+  "fire-response-panorama-m4d-base-v7.png": {
+    "source": "Built-in imagegen single-object removal from approved forest-v6. The upper reconnaissance drone is removed for replacement by a real model render in the page.",
+    "prompt_file": "fire-response-panorama-m4d-base-v7.prompt.txt",
+    "sha256": "f72a7666e5c7af4e275126e3a5044660782b0becdbf89295ef7bc7f439bf6ad4"
+  },
+  "matrice-4d-rear-transparent-v1.png": {
+    "source": "Direct VTK render of geometry imported from user-supplied STEP; aircraft not generated by imagegen.",
+    "model": "C:/Users/51799/Downloads/DJI_Matrice_4D_Series.stp",
+    "model_sha256": "cfc40dc334ea627e72990e207f67b0865e5c276f14bd3ff3723ff3ff6389b99c",
+    "palette_reference": "C:/Users/51799/AppData/Local/Temp/codex-clipboard-4d2f12d4-97e1-4a68-980e-0551440749a8.png",
+    "camera": {
+      "up_axis": "+Y",
+      "aircraft_front_and_gimbal_axis": "+Z",
+      "camera_direction": [
+        0.45,
+        0.24,
+        -1
+      ],
+      "description": "Rear quarter, camera behind aircraft, gimbal facing away"
+    },
+    "colors": {
+      "body": "graphite gray",
+      "gimbal_and_sensors": "near black",
+      "battery": "dark gray",
+      "propellers": "dark graphite"
+    },
+    "geometry_note": "Body, battery, gimbal and vision sensors from STEP. Auxiliary FOV and dock/clearance fixture excluded. Simplified STEP contains rotor swept envelopes rather than detailed blades; visual blades/motion blur derive from those axes and radii.",
+    "native_resolution": [
+      1800,
+      1050
+    ],
+    "alpha": true,
+    "placement": {
+      "x_percent": 44.4,
+      "y_percent": 13.3,
+      "width_percent": 4.3,
+      "coordinate_system": "1672x941 cover-scaled background, crop compensated"
+    },
+    "sha256": "6171a0dadfbeb54d9bd62b9ac817a7f06f724d3f75cf70d98849db4ec8602898",
+    "placements": [
+      {
+        "name": "retained upper valley aircraft",
+        "x_percent": 44.4,
+        "y_percent": 13.3,
+        "width_percent": 4.3
+      },
+      {
+        "name": "new aircraft at user-marked right ellipse",
+        "x_percent": 63.6,
+        "y_percent": 46.2,
+        "width_percent": 5.2
+      }
+    ],
+    "display_correction": {
+      "date": "2026-09-11",
+      "css_brightness": 2.2,
+      "stacking": "Above scene shade, below login layout",
+      "reason": "Original 3.4% width and dark overlay made graphite aircraft difficult to distinguish from forest; geometry, heading and positions unchanged."
+    }
+  },
+  "fire-response-panorama-payload-v8.png": {
+    "source": "Built-in imagegen local edit of m4d-base-v7; illustrative composite, not actual deployment photography.",
+    "reference": "fire-response-panorama-m4d-base-v7.png",
+    "changes": [
+      "Removed the lower-right baked reconnaissance drone; replaced it on the webpage with another instance of the unchanged user STEP render.",
+      "Replaced the FC200 red soft cargo bag with a closed red rigid water-based firefighting canister concept on the existing long hoist line.",
+      "Preserved the foreground bucket aircraft, selected pale-gray FC200 pose and detailed forest-fire composition."
+    ],
+    "payload_design_target_litres": 100,
+    "payload_limitation": "100L is a visual design target to satisfy the requested greater-than-80L class, not a verified commercial model, measured capacity, or certified FC200 payload compatibility. The manufacturer reference is explicitly 50L and is used for shape only; branding and label omitted.",
+    "appearance_reference": "fire-extinguisher-reference-50l.png",
+    "actual_resolution": [
+      1672,
+      941
+    ],
+    "prompt_file": "fire-response-panorama-payload-v8.prompt.txt",
+    "sha256": "3b1d0be3425c96cc1869011919a05b4d21a11f5ef0d6031f31160d8cf1ab24c7"
+  },
+  "fire-extinguisher-reference-50l.png": {
+    "official_page": "https://www.tianyu123.com/product/1024.html",
+    "asset_url": "https://www.tianyu123.com/upload/20260702/f9f7cf26a8804871f6137351bed0bc85.png",
+    "actual_product": "TY02-UAV-50.0L",
+    "actual_capacity_litres": 50,
+    "usage": "Appearance reference only: closed red vessel with top lifting eye. Not evidence of a 100L model or FC200 compatibility.",
+    "sha256": "fafc23e8a844b34e4e3def659ee6e611314ebbd8ec32cb1fe86dce5cb6ddb27a"
+  },
+  "fire-response-panorama-user-v9.png": {
+    "source": "User supplied edited image copied byte-for-byte; no image generation or image processing applied.",
+    "original": "C:/Users/51799/AppData/Local/Temp/codex-clipboard-e0177126-2751-411b-862f-6b2efbd1e788.png",
+    "date": "2026-09-11",
+    "actual_resolution": [
+      1672,
+      941
+    ],
+    "sha256": "58e0752925d714f16060e6955225d53d3f98cf6943a8c97c952c530d5593a9b0",
+    "changes": "User image switches foreground to a closed red firefighting payload and middle-distance aircraft to a spraying red bucket. Both existing CAD-rendered reconnaissance overlays retain positions, sizes, heading and CSS brightness."
+  }
+}

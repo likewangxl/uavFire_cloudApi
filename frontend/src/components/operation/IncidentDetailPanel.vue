@@ -247,9 +247,9 @@ function submitRecheck () {
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #dde3ea;
+  border: 1px solid #2a3b50;
   border-radius: 8px;
-  background: #ffffff;
+  background: #121f2f;
   overflow: auto;
 }
 
@@ -262,7 +262,7 @@ function submitRecheck () {
 
   h3 {
     margin: 0;
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 16px;
     overflow-wrap: anywhere;
   }
@@ -270,7 +270,7 @@ function submitRecheck () {
 
 .panel-kicker {
   display: block;
-  color: #6b7a8c;
+  color: #91a4bd;
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -300,7 +300,7 @@ function submitRecheck () {
 
   h4 {
     margin: 0 0 8px;
-    color: #253140;
+    color: #e2eaf5;
     font-size: 14px;
   }
 }
@@ -316,9 +316,9 @@ function submitRecheck () {
   justify-content: space-between;
   gap: 8px;
   padding: 8px 10px;
-  border: 1px solid #e4e9ef;
+  border: 1px solid #2a3b50;
   border-radius: 6px;
-  background: #f9fbfd;
+  background: #1a2a3f;
 
   span {
     display: grid;
@@ -327,12 +327,12 @@ function submitRecheck () {
   }
 
   strong {
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 13px;
   }
 
   small {
-    color: #697586;
+    color: #91a4bd;
     overflow-wrap: anywhere;
   }
 }
@@ -344,10 +344,10 @@ function submitRecheck () {
   align-items: center;
   justify-content: center;
   padding: 12px;
-  border: 1px dashed #c9d3df;
+  border: 1px dashed #2a3b50;
   border-radius: 6px;
-  background: #f8fafc;
-  color: #65758a;
+  background: #1a2a3f;
+  color: #91a4bd;
   line-height: 1.6;
   text-align: center;
 }

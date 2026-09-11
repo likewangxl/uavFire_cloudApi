@@ -1,7 +1,7 @@
 <template>
   <div class="command-workspace-shell"><CommandHeader /><SectionNav />
   <div class="project-app-wrapper" :class="{ 'fire-mode': isFireRoute }">
-    <div class="left">
+    <div class="left cc-legacy-theme">
       <div class="main-content uranus-scrollbar dark">
         <router-view />
       </div>
@@ -11,10 +11,10 @@
         <GMap />
       </div>
       <div id="wayline-planning-overlay-host" class="wayline-planning-overlay-host" v-if="isWaylineRoute"></div>
-      <div class="media-wrapper" v-if="root.$route.name === ERouterName.MEDIA">
+      <div class="media-wrapper cc-legacy-theme" v-if="root.$route.name === ERouterName.MEDIA">
         <MediaPanel />
       </div>
-      <div class="task-wrapper" v-if="root.$route.name === ERouterName.TASK">
+      <div class="task-wrapper cc-legacy-theme" v-if="root.$route.name === ERouterName.TASK">
         <TaskPanel />
       </div>
       <div class="livestream-wrapper" v-if="root.$route.name === ERouterName.LIVESTREAM">
@@ -195,7 +195,7 @@ useConnectWebSocket(messageHandler)
     display: flex;
     width: 290px;
     flex: 0 0 290px;
-    background-color: #232323;
+    background-color: #0f1b2a;
 
     .main-content {
       flex: 1;
@@ -232,7 +232,7 @@ useConnectWebSocket(messageHandler)
       left: 0;
       right: 0;
       z-index: 100;
-      background: #f6f8fa;
+      background: #0f1b2a;
     }
   }
 }

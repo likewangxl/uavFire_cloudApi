@@ -1,6 +1,6 @@
 <template>
   <div class="height-100">
-    <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #4f4f4f; font-weight: 450;">
+    <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #26364a; font-weight: 450;">
       <a-row>
         <a-col :span="1"></a-col>
         <a-col :span="22">机场设备</a-col>
@@ -107,7 +107,7 @@ function selectDock (dock: Device) {
 
 <style lang="scss" scoped>
 .panel {
-  background: #3c3c3c;
+  background: #1a2a3f;
   margin-left: auto;
   margin-right: auto;
   margin-top: 10px;

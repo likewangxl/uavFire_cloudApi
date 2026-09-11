@@ -200,7 +200,7 @@ $antPrefix: 'ant';
         color: #2d8cf0;
         > span {
           &::before {
-            background-color: #4f4f4f;
+            background-color: #26364a;
           }
         }
       }

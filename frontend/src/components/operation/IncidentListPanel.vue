@@ -130,9 +130,9 @@ function formatTime (value?: number) {
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #dde3ea;
+  border: 1px solid #2a3b50;
   border-radius: 8px;
-  background: #ffffff;
+  background: #121f2f;
 }
 
 .panel-title-row {
@@ -143,7 +143,7 @@ function formatTime (value?: number) {
 
   h3 {
     margin: 0;
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 16px;
     line-height: 1.4;
   }
@@ -151,7 +151,7 @@ function formatTime (value?: number) {
 
 .panel-kicker {
   display: block;
-  color: #6b7a8c;
+  color: #91a4bd;
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -176,9 +176,9 @@ function formatTime (value?: number) {
   gap: 8px;
   width: 100%;
   padding: 10px;
-  border: 1px solid #e4e9ef;
+  border: 1px solid #2a3b50;
   border-radius: 6px;
-  background: #f9fbfd;
+  background: #1a2a3f;
   text-align: left;
   cursor: pointer;
 }
@@ -186,7 +186,7 @@ function formatTime (value?: number) {
 .incident-row:hover,
 .incident-row.selected {
   border-color: #1677ff;
-  background: #eef6ff;
+  background: #20334c;
 }
 
 .incident-row-main {
@@ -195,13 +195,13 @@ function formatTime (value?: number) {
   min-width: 0;
 
   strong {
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 13px;
     overflow-wrap: anywhere;
   }
 
   small {
-    color: #697586;
+    color: #91a4bd;
     font-size: 12px;
   }
 }

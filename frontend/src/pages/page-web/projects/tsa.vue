@@ -9,8 +9,8 @@
       </a-row>
     </div>
     <div class="scrollbar" :style="{ height: scorllHeight + 'px'}">
-      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #232323;">
-        <a-collapse-panel key="fc100-delivery" header="投放设备" style="border-bottom: 1px solid #4f4f4f;">
+      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #0f1b2a;">
+        <a-collapse-panel key="fc100-delivery" header="投放设备" style="border-bottom: 1px solid #26364a;">
           <div class="fc100-cloud-panel">
             <div class="fc100-cloud-header">
               <div class="fc100-cloud-title">FC100 云端设备</div>
@@ -121,13 +121,13 @@
           </div>
         </a-collapse-panel>
       </a-collapse>
-      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #232323;">
-        <a-collapse-panel :key="EDeviceTypeName.Dock" header="机场设备" style="border-bottom: 1px solid #4f4f4f;">
+      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #0f1b2a;">
+        <a-collapse-panel :key="EDeviceTypeName.Dock" header="机场设备" style="border-bottom: 1px solid #26364a;">
           <div v-if="onlineDocks.data.length === 0" style="height: 150px; color: white;">
             <a-empty :image="noData" :image-style="{ height: '60px' }" />
           </div>
           <div v-else class="fz12" style="color: white;">
-            <div v-for="dock in onlineDocks.data" :key="dock.sn" style="background: #3c3c3c; height: 90px; width: 250px; margin-bottom: 10px;">
+            <div v-for="dock in onlineDocks.data" :key="dock.sn" style="background: #1a2a3f; height: 90px; width: 250px; margin-bottom: 10px;">
               <div style="border-radius: 2px; height: 100%; width: 100%;" class="flex-row flex-justify-between flex-align-center">
                 <div style="float: left; padding: 0px 5px 8px 8px; width: 88%">
                   <div style="width: 80%; height: 30px; line-height: 30px; font-size: 16px;">
@@ -135,7 +135,7 @@
                       <div class="text-hidden" style="max-width: 200px;">{{ dock.gateway.callsign }} - {{ dock.callsign ?? '未挂载飞机' }}</div>
                     </a-tooltip>
                   </div>
-                  <div class="mt5 flex-align-center flex-row flex-justify-between" style="background: #595959;">
+                  <div class="mt5 flex-align-center flex-row flex-justify-between" style="background: #243b59;">
                     <div class="flex-align-center flex-row">
                       <span class="ml5 mr5"><RobotOutlined /></span>
                       <div class="font-bold text-hidden" style="max-width: 80px;" :style="dockInfo[dock.gateway.sn] && dockInfo[dock.gateway.sn].basic_osd?.mode_code !== EDockModeCode.Disconnected ? 'color: #00ee8b' :  'color: red;'">
@@ -186,7 +186,7 @@
                       <div v-else class="width-100" style="height: 90%; background: rgba(0, 0, 0, 0.35)"></div>
                     </div>
                   </div>
-                  <div class="mt5 flex-align-center flex-row flex-justify-between" style="background: #595959;">
+                  <div class="mt5 flex-align-center flex-row flex-justify-between" style="background: #243b59;">
                     <div class="flex-row">
                       <span class="ml5 mr5"><RocketOutlined /></span>
                       <div class="font-bold text-hidden" style="max-width: 80px" :style="deviceInfo[dock.sn] && deviceInfo[dock.sn].mode_code !== EModeCode.Disconnected ? 'color: #00ee8b' :  'color: red;'">
@@ -237,7 +237,7 @@
                     </div>
                   </div>
                 </div>
-                <div style="float: right; background: #595959; height: 100%; width: 40px;" class="flex-row flex-justify-center flex-align-center">
+                <div style="float: right; background: #243b59; height: 100%; width: 40px;" class="flex-row flex-justify-center flex-align-center">
                   <div class="fz16" @click="switchVisible($event, dock, true, dockInfo[dock.gateway.sn] && dockInfo[dock.gateway.sn].basic_osd?.mode_code !== EDockModeCode.Disconnected)">
                     <a v-if="osdVisible.gateway_sn === dock.gateway.sn && osdVisible.visible"><EyeOutlined /></a>
                     <a v-else><EyeInvisibleOutlined /></a>
@@ -248,8 +248,8 @@
           </div>
         </a-collapse-panel>
       </a-collapse>
-      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #232323;">
-        <a-collapse-panel :key="EDeviceTypeName.Aircraft" header="监测设备" style="border-bottom: 1px solid #4f4f4f;">
+      <a-collapse :bordered="false" expandIconPosition="right" accordion style="background: #0f1b2a;">
+        <a-collapse-panel :key="EDeviceTypeName.Aircraft" header="监测设备" style="border-bottom: 1px solid #26364a;">
           <div v-if="onlineDevices.data.length === 0" style="height: 150px; color: white;">
             <a-empty :image="noData" :image-style="{ height: '60px' }" />
           </div>
@@ -2440,7 +2440,7 @@ onUnmounted(() => {
   height: 50px;
   line-height: 50px;
   align-items: center;
-  border-bottom: 1px solid #4f4f4f;
+  border-bottom: 1px solid #26364a;
 }
 .project-tsa-wrapper {
   height: 100%;
@@ -2494,7 +2494,7 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .aircraft-card {
-  background: #3c3c3c;
+  background: #1a2a3f;
   width: 100%;
   max-width: 292px;
   margin-bottom: 12px;
@@ -2506,7 +2506,7 @@ onUnmounted(() => {
   margin: 0 0 10px;
   padding: 10px;
   background: #303030;
-  border-bottom: 1px solid #4f4f4f;
+  border-bottom: 1px solid #26364a;
   color: #f5f5f5;
 }
 .fc100-cloud-header {
@@ -2734,7 +2734,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 7px;
   border-radius: 4px;
-  background: #333333;
+  background: #1a2a3f;
   border: 1px solid rgba(255, 255, 255, 0.06);
   cursor: pointer;
 }
@@ -2793,7 +2793,7 @@ onUnmounted(() => {
   margin: 0 8px 8px;
   padding: 8px;
   border-radius: 4px;
-  background: #2b2b2b;
+  background: #121f2f;
 }
 .aircraft-osd-title {
   margin-bottom: 6px;
@@ -2811,7 +2811,7 @@ onUnmounted(() => {
   flex-direction: column;
   padding: 6px;
   border-radius: 4px;
-  background: #353535;
+  background: #1a2a3f;
 }
 .aircraft-osd-item .label {
   color: #8c8c8c;
@@ -2884,7 +2884,7 @@ onUnmounted(() => {
 }
 .aircraft-action-panel :deep(.ant-btn[disabled]) {
   color: rgba(255, 255, 255, 0.38);
-  background: #353535;
+  background: #1a2a3f;
   border-color: rgba(255, 255, 255, 0.05);
 }
 .aircraft-action-btn-inner {

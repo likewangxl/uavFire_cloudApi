@@ -1,7 +1,7 @@
 <template>
   <div class="project-wayline-wrapper height-100">
     <a-spin :spinning="loading" :delay="300" tip="下载中" size="large">
-    <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #4f4f4f; font-weight: 450;">
+    <div class="wayline-panel-header">
       <a-row>
         <a-col :span="1"></a-col>
         <a-col :span="15">{{ isTaskRouteSelector ? '选择KMZ航线文件' : '航线库' }}</a-col>
@@ -98,9 +98,8 @@
         class="wayline-mode-collapse generated-wayline-collapse"
         :bordered="false"
         expandIconPosition="right"
-        accordion
-        style="background: #232323;">
-        <a-collapse-panel key="generated-wayline" header="已生成航线" style="border-bottom: 1px solid #4f4f4f;">
+        accordion>
+        <a-collapse-panel key="generated-wayline" header="已生成航线">
           <div id="data" class="height-100 uranus-scrollbar" v-if="waylinesData.data.length !== 0" @scroll="onScroll">
             <div v-for="wayline in waylinesData.data" :key="wayline.id">
               <div class="wayline-panel" style="padding-top: 5px;" @click="selectRoute(wayline)">
@@ -118,7 +117,7 @@
                         <EllipsisOutlined />
                       </a>
                       <template #overlay>
-                        <a-menu theme="dark" class="more" style="background: #3c3c3c;">
+                        <a-menu theme="dark" class="more" style="background: #1a2a3f;">
                           <a-menu-item @click="downloadWayline(wayline.id, wayline.name)">
                             <span>下载</span>
                           </a-menu-item>
@@ -166,7 +165,7 @@
                     <EllipsisOutlined />
                   </a>
                   <template #overlay>
-                    <a-menu theme="dark" class="more" style="background: #3c3c3c;">
+                    <a-menu theme="dark" class="more" style="background: #1a2a3f;">
                       <a-menu-item @click="downloadWayline(wayline.id, wayline.name)">
                         <span>下载</span>
                       </a-menu-item>
@@ -1976,8 +1975,72 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
 </script>
 
 <style lang="scss" scoped>
+.project-wayline-wrapper {
+  background: #0f1b2a;
+  color: #e2eaf5;
+
+  :deep(.wayline-mission-monitor) {
+    background: #0f1b2a;
+  }
+  :deep(.mm-meta-row) {
+    color: #91a4bd;
+  }
+  :deep(.ant-btn:not(.ant-btn-primary):not(.ant-btn-link):not(.ant-btn-text)) {
+    background: #1a2b40;
+    border-color: #344861;
+    color: #b8cbe2;
+  }
+  :deep(.ant-btn:not(.ant-btn-primary):not(.ant-btn-link):not(.ant-btn-text):not(.ant-btn-dangerous):not(:disabled):hover) {
+    background: #243b59;
+    border-color: #7cacff;
+    color: #bed5ff;
+  }
+  :deep(.ant-btn.ant-btn-dangerous:not(.ant-btn-primary):not(.ant-btn-link):not(.ant-btn-text)) {
+    border-color: #74404a;
+    color: #ff9b9b;
+  }
+  :deep(.ant-btn:not(.ant-btn-primary):not(.ant-btn-link):not(.ant-btn-text):disabled) {
+    background: #162335;
+    border-color: #2a3b50;
+    color: #677c98;
+  }
+  :deep(.ant-btn-link) {
+    color: #91b8f6;
+  }
+  :deep(.ant-btn-primary:not(.ant-btn-dangerous)) {
+    background: #243b59;
+    border-color: #5786bd;
+    color: #bed5ff;
+  }
+  :deep(.ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover) {
+    background: #315077;
+    border-color: #7cacff;
+  }
+  :deep(.wayline-mode-collapse),
+  :deep(.wayline-mode-collapse .ant-collapse-content) {
+    background: #0f1b2a;
+    color: #e2eaf5;
+  }
+  :deep(.wayline-mode-collapse .ant-collapse-item) {
+    border-bottom-color: #26364a;
+  }
+  .scrollbar,
+  .planned-wayline-list {
+    scrollbar-color: #38516e #0f1b2a;
+  }
+  .planning-empty {
+    background: #1a2a3f;
+    color: #91a4bd;
+  }
+}
+.wayline-panel-header {
+  height: 50px;
+  line-height: 50px;
+  border-bottom: 1px solid #26364a;
+  font-weight: 450;
+}
 .wayline-panel {
-  background: #3c3c3c;
+  background: #1a2a3f;
   margin-left: auto;
   margin-right: auto;
   margin-top: 10px;
@@ -2362,9 +2425,9 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   margin: 10px auto 0;
   width: 95%;
   padding: 10px;
-  background: #2b2b2b;
+  background: #121f2f;
   border-radius: 4px;
-  color: #d9d9d9;
+  color: #b8cbe2;
   font-size: 12px;
 }
 .planned-wayline-title {
@@ -2373,19 +2436,19 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   justify-content: space-between;
   font-size: 13px;
   font-weight: 700;
-  color: #f5f5f5;
+  color: #e2eaf5;
   margin-bottom: 8px;
 }
 .planned-wayline-card {
   padding: 8px;
   margin-bottom: 8px;
-  background: #353535;
+  background: #1a2a3f;
   border-radius: 3px;
-  border: 1px solid transparent;
+  border: 1px solid #2b3b51;
 }
 .planned-wayline-card--selected {
-  border-color: #19be6b;
-  background: #26382f;
+  border-color: #77aafd;
+  background: #20334c;
 }
 .planned-wayline-list {
   max-height: calc(100dvh - 355px);
@@ -2394,7 +2457,7 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
 }
 .planned-wayline-list-footer {
   padding: 8px 0 2px;
-  color: #8c8c8c;
+  color: #91a4bd;
   text-align: center;
 }
 .planned-wayline-card:last-child {
@@ -2409,7 +2472,7 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
 }
 .planned-wayline-name {
   min-width: 0;
-  color: #f5f5f5;
+  color: #e2eaf5;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -2419,7 +2482,7 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   flex: 0 0 auto;
   padding: 1px 6px;
   border-radius: 2px;
-  background: #1f1f1f;
+  background: #0f1b2a;
   color: #faad14;
   font-size: 11px;
 }
@@ -2431,7 +2494,7 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
-  color: hsla(0, 0%, 100%, 0.65);
+  color: #b8cbe2;
   margin-bottom: 5px;
 }
 .planned-wayline-reason {
@@ -2445,7 +2508,7 @@ const uploadFile = async (options?: { file?: FileItem; onSuccess?: (res: any) =>
   word-break: break-word;
 }
 .planned-wayline-meta.muted {
-  color: hsla(0, 0%, 100%, 0.35);
+  color: #91a4bd;
 }
 .planned-wayline-actions {
   display: grid;

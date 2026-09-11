@@ -4,7 +4,7 @@
       <Topbar />
     </a-layout-header>
     <SectionNav />
-    <a-layout-content class="page-content">
+    <a-layout-content class="page-content" :class="{ 'cc-legacy-theme': ['/devices', '/firmwares', '/members'].includes(root.$route.path) }">
       <router-view />
     </a-layout-content>
 

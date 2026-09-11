@@ -59,7 +59,7 @@ const clickLocation = () => {
 
 <style lang="scss" scoped>
 .panel {
-  background: #3c3c3c;
+  background: #1a2a3f;
   margin-left: auto;
   margin-right: auto;
   margin-top: 10px;

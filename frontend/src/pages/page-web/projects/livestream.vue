@@ -90,7 +90,7 @@ onMounted(() => {
   text-align: center;
   width: 800px;
   height: 720px;
-  background: #232323;
+  background: #0f1b2a;
 }
 </style>
 
@@ -103,7 +103,7 @@ onMounted(() => {
 .livestream-header {
   height: 50px;
   line-height: 50px;
-  border-bottom: 1px solid #4f4f4f;
+  border-bottom: 1px solid #26364a;
   font-weight: 450;
 }
 

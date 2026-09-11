@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #4f4f4f; font-weight: 450;">
+    <div style="height: 50px; line-height: 50px; border-bottom: 1px solid #26364a; font-weight: 450;">
       <a-row>
         <a-col :span="1"></a-col>
         <a-col :span="20">火情巡检任务库</a-col>

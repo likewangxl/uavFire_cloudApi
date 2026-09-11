@@ -174,9 +174,9 @@ function formatTime (value?: number) {
   flex-direction: column;
   gap: 10px;
   padding: 14px;
-  border: 1px solid #dde3ea;
+  border: 1px solid #2a3b50;
   border-radius: 8px;
-  background: #ffffff;
+  background: #121f2f;
 }
 
 .operation-map-toolbar {
@@ -187,14 +187,14 @@ function formatTime (value?: number) {
 
   h3 {
     margin: 0;
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 16px;
   }
 }
 
 .panel-kicker {
   display: block;
-  color: #6b7a8c;
+  color: #91a4bd;
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -203,7 +203,7 @@ function formatTime (value?: number) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #3f4b5b;
+  color: #b8cbe2;
   font-size: 12px;
   white-space: nowrap;
 }

@@ -1,0 +1,120 @@
+// Scope the shared palette to legacy workspaces; maps and semantic status colors stay independent.
+:is(.command-workspace-shell, .page-shell) .cc-legacy-theme {
+  background: #0f1b2a;
+  color: #e2eaf5;
+  color-scheme: dark;
+
+  h2,
+  h3,
+  .ant-card-head-title {
+    color: #e2eaf5;
+  }
+
+  .table,
+  .plan-panel-wrapper,
+  .media-panel-wrapper,
+  .fire-mission-page,
+  .fire-event-page,
+  .operation-workbench-page {
+    background: #0f1b2a;
+    color: #e2eaf5;
+  }
+
+  .header,
+  .ant-menu,
+  .ant-tree,
+  .ant-collapse,
+  .ant-collapse-content {
+    background: #0f1b2a;
+    color: #e2eaf5;
+    border-color: #26364a;
+  }
+
+  .ant-card,
+  .ant-card-head,
+  .ant-table,
+  .ant-table-container,
+  .ant-table-tbody > tr > td,
+  .ant-table-placeholder,
+  .plan-table,
+  .media-table,
+  .fire-mission-table {
+    background: #121f2f;
+    color: #c7d6e9;
+    border-color: #2a3b50;
+  }
+
+  // Legacy device/member styles declare white table headers with !important.
+  .ant-table-header,
+  .ant-table-thead > tr > th {
+    background: #1a2b40 !important;
+    color: #b8cbe2;
+    border-color: #2a3b50;
+  }
+  .ant-table-tbody > tr.ant-table-row:hover > td,
+  .ant-table-tbody > tr.ant-table-row-selected > td,
+  .ant-table-tbody > tr > td.ant-table-cell-row-hover {
+    background: #20334c;
+  }
+  .ant-table-tbody > tr.table-striped > td {
+    background: #162638;
+  }
+  .ant-table-cell-scrollbar {
+    box-shadow: none;
+  }
+
+  .ant-empty-description,
+  .ant-pagination,
+  .ant-select-arrow,
+  .ant-picker-suffix,
+  .ant-form-item-label > label,
+  .ant-radio-wrapper,
+  .ant-checkbox-wrapper,
+  .ant-collapse-header,
+  .ant-descriptions-item-label,
+  .ant-descriptions-item-content {
+    color: #91a4bd;
+  }
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-input-number,
+  .ant-picker,
+  .ant-select:not(.ant-select-customize-input) .ant-select-selector,
+  .ant-pagination-item,
+  .ant-pagination-item-link,
+  .ant-pagination-options-quick-jumper input {
+    background: #17283c;
+    border-color: #344861;
+    color: #c7d6e9;
+  }
+  .ant-picker-input > input,
+  .ant-input-number-input,
+  .ant-pagination-item a {
+    color: #c7d6e9;
+  }
+  .ant-btn:not(.ant-btn-primary):not(.ant-btn-link):not(.ant-btn-text) {
+    background: #1a2b40;
+    border-color: #344861;
+    color: #b8cbe2;
+  }
+  .ant-btn:not(.ant-btn-primary):not(.ant-btn-link):not(.ant-btn-text):disabled {
+    background: #162335;
+    border-color: #2a3b50;
+    color: #677c98;
+  }
+  .ant-btn.ant-btn-dangerous:not(.ant-btn-primary) {
+    color: #ff9b9b;
+  }
+  .ant-btn-link,
+  a {
+    color: #91b8f6;
+  }
+  .ant-menu-item-selected,
+  .ant-tabs-tab-active .ant-tabs-tab-btn {
+    color: #a6c7ff;
+  }
+  .ant-table-body,
+  .uranus-scrollbar {
+    scrollbar-color: #38516e #0f1b2a;
+  }
+}

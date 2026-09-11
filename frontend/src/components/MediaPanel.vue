@@ -147,7 +147,7 @@ function downloadMedia (media: MediaFile) {
   width: 100%;
   padding: 16px;
   .media-table {
-    background: #fff;
+    background: #121f2f;
     margin-top: 10px;
   }
   .action-area {
@@ -158,11 +158,11 @@ function downloadMedia (media: MediaFile) {
 .header {
   width: 100%;
   height: 60px;
-  background: #fff;
+  background: #121f2f;
   padding: 16px;
   font-size: 20px;
   font-weight: bold;
   text-align: start;
-  color: #000;
+  color: #e2eaf5;
 }
 </style>

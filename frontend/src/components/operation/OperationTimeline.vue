@@ -87,9 +87,9 @@ function formatTime (value?: number) {
   min-width: 0;
   min-height: 0;
   padding: 14px;
-  border: 1px solid #dde3ea;
+  border: 1px solid #2a3b50;
   border-radius: 8px;
-  background: #ffffff;
+  background: #121f2f;
   overflow: auto;
 }
 
@@ -102,20 +102,20 @@ function formatTime (value?: number) {
 
   h3 {
     margin: 0;
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 16px;
   }
 }
 
 .panel-kicker {
   display: block;
-  color: #6b7a8c;
+  color: #91a4bd;
   font-size: 11px;
   text-transform: uppercase;
 }
 
 .timeline-count {
-  color: #697586;
+  color: #91a4bd;
   font-size: 12px;
 }
 
@@ -128,13 +128,13 @@ function formatTime (value?: number) {
   gap: 2px;
 
   strong {
-    color: #1f2933;
+    color: #e2eaf5;
     font-size: 13px;
   }
 
   p {
     margin: 0;
-    color: #5d6b7c;
+    color: #91a4bd;
     font-size: 12px;
     line-height: 1.6;
     overflow-wrap: anywhere;

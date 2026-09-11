@@ -655,8 +655,8 @@ function withOptionLabel (device: AssignableDeviceOption): AssignableDeviceOptio
   gap: 14px;
   padding: 16px;
   overflow: hidden;
-  background: #f3f6fa;
-  color: #1f2933;
+  background: #0f1b2a;
+  color: #e2eaf5;
 }
 
 .operation-workbench-header {
@@ -668,13 +668,13 @@ function withOptionLabel (device: AssignableDeviceOption): AssignableDeviceOptio
 
   span {
     display: block;
-    color: #627386;
+    color: #91a4bd;
     font-size: 12px;
   }
 
   h2 {
     margin: 0;
-    color: #162231;
+    color: #e2eaf5;
     font-size: 22px;
     line-height: 1.3;
   }

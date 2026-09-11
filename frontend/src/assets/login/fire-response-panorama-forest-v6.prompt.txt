@@ -1,0 +1,23 @@
+Mode: Built-in imagegen
+Selected output: exec-e9b78390-4054-4a5c-bb5b-e8aee17cbb59.png
+Actual output: 1672 x 941 pixels. Requested 4K was not returned. A second resolution-only attempt also returned 1672 x 941 and was not selected.
+
+Final selected prompt:
+Use case: background-swap / photorealistic detail restoration.
+Edit the attached ORIGINAL ACCEPTED FC200 v4 forest-fire panorama for a full-screen login background. The user has approved the aircraft and objects but rejects the trees: their crowns currently have repeating melted, scalloped, wavy contours and no genuine foliage texture. Replace that defective FOREST RENDERING with credible photographic forest detail, maintaining the same composition.
+
+OUTPUT: a native high-resolution 3840 x 2160 landscape image, 16:9, with newly resolved fine scene detail suited to a 4K monitor, NOT merely a resized or sharpened copy of the blurry image. Keep the complete wide frame. No UI or lettering.
+
+EDIT REGION: the vegetation and terrain throughout the scene, especially foreground lower-left, lower-centre and the middle-distance mountainsides. Regenerate foliage with true botanical branching and independent irregular tree crowns:
+- The evergreen mountain forest contains naturally varied pine/fir trees, with asymmetric vertical trunks, branching whorls, fine needle clusters along smaller branchlets, broken and irregular silhouette edges, and small gaps of sky/smoke or ground between branchlets.
+- The close trees must have distinctly resolved layered twig and needle-cluster texture, subtle bark, sparse dead branches, varied ages/heights/crown diameters, believable interlocking canopy shadows and depth between branches. Fine detail should be visible at 100% pixel viewing.
+- In the midground, show numerous distinct but naturally overlapping tree crowns, with granular foliage and individual crown structure rather than identical cartoon Christmas trees or swirls. Distant mountains retain sensible atmospheric haze and reduced contrast, not equal sharpness everywhere.
+- Use restrained natural dark-green, olive and gray-green variations, patchy light, some visible gray-brown forest floor and the existing left lower dirt path. Keep the original terrain contours and deep valley/fire layout.
+- Eliminate ALL repeated scalloped zigzags, concentric ripples, worm-like markings, curly strokes, waxy/plastic foliage, tiled canopy patterns, oversharpening halos, painterly oil-paint texture, miniatures and videogame-style vegetation. It must look like an actual documentary aerial photograph of a pine forest. Natural optical clarity, not fake edge enhancement.
+
+STRICT LOCKED OBJECTS: preserve all FOUR aircraft from the reference exactly in identity, white/gray/black colors, landing gear, pose, size, position and existing perspective. These were just approved and must not be redesigned or swapped.
+1. Large foreground bucket aircraft at x26%,y22%.
+2. Original small reconnaissance drone at x54%,y19%.
+3. Tiny white/light-gray FC200 with tall black landing gear at x56%,y31%, with its exact current front/oblique pose. DO NOT turn it around; do not add a black box in front of its pale body. Preserve its thin long hoist line, hook, and red soft cargo bag with black straps at x56%,y45%.
+4. Low-right reconnaissance M4TD at x61%,y54%, directly above the small fire point. Do not move it towards the top.
+Preserve the red bucket, its long single suspension line and short bridle, the water discharge, and all rigging; preserve fire locations, orange flame scale, smoke plumes and direction. Integrate newly detailed trees around smoke and water without moving these objects. Preserve mountain outlines, camera angle, horizon, distant depth, and the open right-hand composition used by the page's separate login panel. No people or ground dock. Do not add any aircraft, equipment, new fire sites, text, logos, labels, inset, border or watermark. Lighting should stay compatible with the accepted aircraft. This is a careful forest-background quality replacement, not a new art direction.

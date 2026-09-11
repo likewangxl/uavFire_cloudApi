@@ -24,7 +24,7 @@
   .media-header {
     height: 50px;
     line-height: 50px;
-    border-bottom: 1px solid #4f4f4f;
+    border-bottom: 1px solid #26364a;
     font-weight: 450;
   }
 

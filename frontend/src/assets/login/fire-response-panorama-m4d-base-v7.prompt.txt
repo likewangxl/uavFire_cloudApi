@@ -1,0 +1,7 @@
+Mode: Built-in imagegen for removal of the former upper aircraft only. The new aircraft is a separate transparent render of the user-supplied STEP model, overlaid by the login page.
+
+Precise single-object removal. EDIT TARGET: the attached accepted detailed forest-fire panorama. Remove ONLY the small upper reconnaissance quadcopter currently centered around x54.4%, y19.3% of the full image, approximately within x50.5–58.0%, y16.5–22.0%. This is the small gray camera drone above the white cargo drone, to the upper-right of the large foreground water-bucket aircraft.
+
+Fill only the removed drone silhouette and rotor blur with locally continuous distant forest and smoke that exactly matches the immediately surrounding background. No new aircraft is to be inserted. A separately rendered 3D aircraft will be positioned by the application later. Preserve the existing forest at every other location rather than repainting it.
+
+STRICTLY KEEP the large left foreground water-bucket aircraft, the white-gray middle cargo FC200 with long cable and red bag, the low-right M4TD above the fire, every cable/hook/bridle, the red water bucket, water stream, detailed trees, fire points, smoke, valley contours, colors, sharpness, lighting and complete framing unchanged. In particular do not alter the accepted FC200 pose, color, size or landing gear. Exactly THREE aircraft remain in this background after removing the single upper small drone. No other edits. Preserve original 1672 x 941 pixel dimensions. No red annotations, UI, people, ground dock, writing or watermarks.

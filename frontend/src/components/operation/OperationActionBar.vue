@@ -320,12 +320,12 @@ function submitConfirmedAction () {
 .operation-danger-copy {
   margin: 0 0 12px;
   line-height: 1.7;
-  color: #262626;
+  color: #e2eaf5;
 }
 
 .operation-form-hint {
   margin-top: 4px;
-  color: #6b7280;
+  color: #91a4bd;
   font-size: 12px;
 }
 
@@ -345,14 +345,14 @@ function submitConfirmedAction () {
   strong {
     min-width: 0;
     overflow: hidden;
-    color: #1f2933;
+    color: #e2eaf5;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
 
 .operation-device-option small {
-  color: #697586;
+  color: #91a4bd;
   overflow-wrap: anywhere;
 }
 
@@ -360,7 +360,7 @@ function submitConfirmedAction () {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
-  color: #4b5d72;
+  color: #b8cbe2;
   font-size: 12px;
 }
 </style>

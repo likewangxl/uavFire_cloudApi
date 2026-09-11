@@ -16,7 +16,7 @@
                   <div class="pr10 ml5" style="width: 120px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">{{ dock.nickname }}</div>
                 </a-tooltip>
               </div>
-              <div class="ml10 mr10 pr5 pl5 flex-align-center flex-row flex-justify-between" style="background: #595959;">
+              <div class="ml10 mr10 pr5 pl5 flex-align-center flex-row flex-justify-between" style="background: #243b59;">
                 <div>
                   Custom Flight Area
                 </div>
@@ -174,7 +174,7 @@ const syncDeviceFlightArea = () => {
   top: 0;
   z-index: 1000;
   color: white;
-  background: #282828;
+  background: #121f2f;
   .footer {
     position: absolute;
     width: 100%;
