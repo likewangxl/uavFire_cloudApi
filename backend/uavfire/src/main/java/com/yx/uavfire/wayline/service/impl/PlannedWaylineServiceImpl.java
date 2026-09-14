@@ -1582,7 +1582,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
             elem(w, "autoFlightSpeed", formatNumeric(flightSpeed));
             elem(w, "globalHeight", String.valueOf(globalAvgHeight(waypoints)));
             elem(w, "caliFlightEnable", "0");
-            elem(w, "gimbalPitchMode", "manual");
+            elem(w, "gimbalPitchMode", "usePointSetting");
 
             w.writeStartElement(NS_WPML, "globalWaypointHeadingParam");
             elem(w, "waypointHeadingMode", "followWayline");
@@ -1732,6 +1732,8 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "index", String.valueOf(index));
         elem(w, "ellipsoidHeight", String.valueOf(wp.getHeight()));
         elem(w, "height", String.valueOf(wp.getHeight()));
+        elem(w, "gimbalPitchAngle", formatNumeric(
+                wp.getGimbalPitch() != null ? wp.getGimbalPitch() : -45.0));
         w.writeStartElement(NS_WPML, "waypointTurnParam");
         elem(w, "waypointTurnMode",
                 wp.getTurnMode() != null ? wp.getTurnMode() : STRICT_WAYPOINT_TURN_MODE);
@@ -1782,9 +1784,9 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         w.writeEndElement();
         elem(w, "useStraightLine", "1");
         w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
-        // 未显式设置俯仰角的航点默认 -30°：航线飞行时相机前下视，供纯可见光火情识别取景。
+        // 火情巡航默认固定前下视 -45°，与前端及 template.kml 的航点设置一致。
         elem(w, "waypointGimbalPitchAngle", formatNumeric(
-                wp.getGimbalPitch() != null ? wp.getGimbalPitch() : -30.0));
+                wp.getGimbalPitch() != null ? wp.getGimbalPitch() : -45.0));
         elem(w, "waypointGimbalYawAngle", formatNumeric(
                 wp.getGimbalYaw() != null ? wp.getGimbalYaw() : 0.0));
         w.writeEndElement();
@@ -1826,7 +1828,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         elem(w, "useStraightLine", "1");
 
         w.writeStartElement(NS_WPML, "waypointGimbalHeadingParam");
-        elem(w, "waypointGimbalPitchAngle", "0");
+        elem(w, "waypointGimbalPitchAngle", "-45");
         elem(w, "waypointGimbalYawAngle", "0");
         w.writeEndElement();
         elem(w, "isRisky", "0");

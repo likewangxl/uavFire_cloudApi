@@ -15,6 +15,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -31,6 +36,7 @@ class WaypointMissionExecutor(
     private val gimbalActionClient: GimbalActionClient? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val patrolZoomController: PatrolZoomController? = null,
 ) {
 
     interface Listener {
@@ -43,12 +49,19 @@ class WaypointMissionExecutor(
     private val activeMissionId = AtomicReference<String?>(null)
     private val activeMissionFileName = AtomicReference<String?>(null)
     private val lastState = AtomicReference<WaypointMissionExecuteState?>(null)
+    private var patrolZoomJob: Job? = null
+    @Volatile private var patrolZoomSuspended = true
 
     fun activeMissionId(): String? = activeMissionId.get()
     fun activeMissionFileName(): String? = activeMissionFileName.get()
 
     private val stateListener = WaypointMissionExecuteStateListener { newState ->
         val previous = lastState.getAndSet(newState)
+        if (newState == WaypointMissionExecuteState.EXECUTING && !patrolZoomSuspended) {
+            startPatrolZoom()
+        } else {
+            stopPatrolZoom()
+        }
         listener.onState(activeMissionId.get(), newState, previous)
     }
 
@@ -58,6 +71,7 @@ class WaypointMissionExecutor(
         }
 
         override fun onWaylineExecutingInterruptReasonUpdate(error: IDJIError) {
+            stopPatrolZoom()
             Log.w(
                 TAG,
                 "wayline interrupted missionId=${activeMissionId.get()} reason=$error",
@@ -86,6 +100,7 @@ class WaypointMissionExecutor(
     }
 
     fun detach() {
+        stopPatrolZoom()
         WaypointMissionManager.getInstance().removeWaypointMissionExecuteStateListener(stateListener)
         WaypointMissionManager.getInstance().removeWaylineExecutingInfoListener(progressListener)
     }
@@ -153,13 +168,26 @@ class WaypointMissionExecutor(
 
         activeMissionId.set(missionId)
         activeMissionFileName.set(missionFileName)
+        stopPatrolZoom()
+        lastState.set(null)
+        patrolZoomSuspended = false
         val callback = simpleCallback(missionId, "startMission")
         WaypointMissionManager.getInstance().startMission(missionFileName, selection.waylineIds, callback)
         return null
     }
 
     fun pauseMission() {
+        patrolZoomSuspended = true
+        stopPatrolZoom()
         WaypointMissionManager.getInstance().pauseMission(simpleCallback(activeMissionId.get(), "pauseMission"))
+    }
+
+    suspend fun suspendPatrolZoomForConfirmation() {
+        val pending = synchronized(this) {
+            patrolZoomSuspended = true
+            patrolZoomJob.also { stopPatrolZoom() }
+        }
+        pending?.join()
     }
 
     fun resumeMission() {
@@ -167,6 +195,8 @@ class WaypointMissionExecutor(
     }
 
     fun stopActiveMission() {
+        patrolZoomSuspended = true
+        stopPatrolZoom()
         val fileName = activeMissionFileName.get()
         if (fileName == null) {
             Log.w(TAG, "stopActiveMission called but no active mission")
@@ -208,10 +238,55 @@ class WaypointMissionExecutor(
                 listener.onStartAccepted(missionId)
                 tiltGimbalToNadir(missionId)
             }
+            if (stage == "resumeMission") {
+                patrolZoomSuspended = false
+                tiltGimbalToNadir(missionId)
+                if (lastState.get() == WaypointMissionExecuteState.EXECUTING) startPatrolZoom()
+            }
         }
 
         override fun onFailure(error: IDJIError) {
+            if (stage == "startMission" || stage == "resumeMission") {
+                patrolZoomSuspended = true
+                stopPatrolZoom()
+            }
             listener.onError(missionId, stage, error)
+        }
+    }
+
+    @Synchronized
+    private fun stopPatrolZoom() {
+        patrolZoomJob?.cancel()
+    }
+
+    @Synchronized
+    private fun startPatrolZoom() {
+        val controller = patrolZoomController ?: return
+        if (patrolZoomJob?.isActive == true || patrolZoomSuspended) return
+        val missionId = activeMissionId.get() ?: return
+        val previous = patrolZoomJob
+        patrolZoomJob = scope.launch(dispatcher) {
+            previous?.join()
+            controller.reset()
+            var lastStatus: String? = null
+            while (isActive && !patrolZoomSuspended && activeMissionId.get() == missionId &&
+                lastState.get() == WaypointMissionExecuteState.EXECUTING) {
+                var interval = 1000L
+                try {
+                    val status = controller.tick()
+                    if (status != lastStatus) Log.i(TAG, "patrol zoom mission=$missionId $status")
+                    lastStatus = status
+                } catch (timeout: TimeoutCancellationException) {
+                    Log.w(TAG, "patrol zoom timed out mission=$missionId; retrying")
+                    interval = 5000L
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(TAG, "patrol zoom unavailable mission=$missionId: ${error.message}")
+                    interval = 5000L
+                }
+                delay(interval)
+            }
         }
     }
 

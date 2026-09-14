@@ -753,6 +753,7 @@ export function addWaypointGcj (gcjLng: number, gcjLat: number, height?: number)
     wgsLng,
     wgsLat,
     height: Number.isFinite(height) ? (height as number) : state.defaultHeight,
+    gimbalPitch: -45,
     turnMode: DEFAULT_WAYPOINT_TURN_MODE,
     turnDamping: 0,
   }
@@ -817,6 +818,7 @@ export function insertWaypointAfterGcj (afterId: string, gcjLng: number, gcjLat:
     wgsLng,
     wgsLat,
     height: prev.height,
+    gimbalPitch: -45,
     turnMode: DEFAULT_WAYPOINT_TURN_MODE,
     turnDamping: 0,
   }

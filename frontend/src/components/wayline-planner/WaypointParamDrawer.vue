@@ -51,8 +51,8 @@
             :min="-90"
             :max="30"
             :step="5"
-            :value="selectedWaypoint.gimbalPitch"
-            placeholder="0"
+            :value="selectedWaypoint.gimbalPitch ?? -45"
+            placeholder="-45"
             :disabled="planningState.executing"
             @change="(v: any) => updateWaypointField(selectedWaypoint!.id, 'gimbalPitch', v ?? undefined)" />
         </div>

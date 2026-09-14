@@ -1380,7 +1380,8 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(template.contains("<wpml:autoFlightSpeed>5</wpml:autoFlightSpeed>"), "autoFlightSpeed"),
                 () -> assertTrue(template.contains("<wpml:globalHeight>"), "globalHeight"),
                 () -> assertTrue(template.contains("<wpml:caliFlightEnable>0</wpml:caliFlightEnable>"), "caliFlightEnable"),
-                () -> assertTrue(template.contains("<wpml:gimbalPitchMode>manual</wpml:gimbalPitchMode>"), "gimbalPitchMode"),
+                () -> assertTrue(template.contains("<wpml:gimbalPitchMode>usePointSetting</wpml:gimbalPitchMode>"), "gimbalPitchMode"),
+                () -> assertTrue(template.contains("<wpml:gimbalPitchAngle>-45</wpml:gimbalPitchAngle>"), "template pitch default -45"),
                 () -> assertTrue(template.contains("<wpml:globalWaypointHeadingParam>"), "global heading param"),
                 () -> assertFalse(template.contains("waypointHeadingPathMode"), "no waypointHeadingPathMode (Pilot 2 omits)"),
                 () -> assertTrue(template.contains("<wpml:globalWaypointTurnMode>"), "global turn mode"),
@@ -1418,7 +1419,7 @@ class PlannedWaylineServiceTest {
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:waypointTurnMode>"), "wayline placemark strict turn mode"),
                 () -> assertTrue(waylines.contains("<wpml:waypointTurnDampingDist>0</wpml:waypointTurnDampingDist>"), "strict waypoint damping=0"),
                 () -> assertTrue(waylines.contains("<wpml:waypointGimbalHeadingParam>"), "waypointGimbalHeadingParam block"),
-                () -> assertTrue(waylines.contains("<wpml:waypointGimbalPitchAngle>-30</wpml:waypointGimbalPitchAngle>"), "gimbal pitch default -30"),
+                () -> assertTrue(waylines.contains("<wpml:waypointGimbalPitchAngle>-45</wpml:waypointGimbalPitchAngle>"), "gimbal pitch default -45"),
                 () -> assertTrue(waylines.contains("<wpml:waypointGimbalYawAngle>0</wpml:waypointGimbalYawAngle>"), "gimbal yaw"),
                 () -> assertTrue(waylines.contains("<wpml:waypointWorkType>0</wpml:waypointWorkType>"), "waypointWorkType"),
                 () -> assertTrue(waylines.contains("<wpml:useStraightLine>1</wpml:useStraightLine>"), "useStraightLine=1"),
@@ -2339,6 +2340,8 @@ class PlannedWaylineServiceTest {
                 () -> assertFalse(template.contains("<wpml:waylineAvoidLimitAreaMode>")));
 
         assertAll("safe patrol mapping2d execution wayline without payload actions",
+                () -> assertEquals(8, waylines.split(Pattern.quote(
+                        "<wpml:waypointGimbalPitchAngle>-45</wpml:waypointGimbalPitchAngle>"), -1).length - 1),
                 () -> assertTrue(waylines.contains("<wpml:exitOnRCLost>executeLostAction</wpml:exitOnRCLost>")),
                 () -> assertTrue(waylines.contains("<wpml:takeOffSecurityHeight>60</wpml:takeOffSecurityHeight>")),
                 () -> assertTrue(waylines.contains("<wpml:globalTransitionalSpeed>15</wpml:globalTransitionalSpeed>")),

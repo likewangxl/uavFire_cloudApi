@@ -153,6 +153,9 @@ class AppServices(
         listener = eventForwarder,
         gimbalActionClient = flightControlClient,
         scope = appScope,
+        patrolZoomController = com.yinxin.uavfir.wayline.PatrolZoomController(
+            com.yinxin.uavfir.wayline.DjiPatrolZoomPort(),
+        ),
     )
     private val missionHoldControl = WaypointMissionHoldControl(waypointExecutor)
     private val visibleFireLaserRangefinder = DjiLaserRangefinderClient()
@@ -495,6 +498,7 @@ private class WaypointMissionHoldControl(
             return false
         }
         return runCatching {
+            executor.suspendPatrolZoomForConfirmation()
             executor.pauseMission()
             held = true
             true
