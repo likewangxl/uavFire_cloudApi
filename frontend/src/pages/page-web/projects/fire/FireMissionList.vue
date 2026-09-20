@@ -3,7 +3,7 @@
     <div class="fire-mission-toolbar">
       <div>
         <h2>灭火任务列表</h2>
-        <span>按运行状态追踪 FC100 灭火任务和火情处置进度</span>
+        <span>按运行状态追踪 DJI FlyCart 100 灭火任务和火情处置进度</span>
       </div>
       <a-select
         v-model:value="statusFilter"

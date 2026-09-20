@@ -1,0 +1,26 @@
+[Unit]
+Description=UAVFire WeChat read-only mobile API
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=djdev
+Group=djdev
+WorkingDirectory=/home/djdev/uavfire-miniapp/current
+EnvironmentFile=/home/djdev/uavfire-miniapp/config/miniapp.env
+ExecStart=/usr/lib/jvm/java-17-openjdk-amd64/bin/java -Dfile.encoding=UTF-8 -cp /home/djdev/uavfire-miniapp/current/uavfire.jar:/home/djdev/uavfire-miniapp/current/lib/* com.yx.miniappruntime.MiniAppStandaloneApplication --spring.config.location=file:/home/djdev/uavfire-miniapp/current/application.yml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/djdev/uavfire-miniapp
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

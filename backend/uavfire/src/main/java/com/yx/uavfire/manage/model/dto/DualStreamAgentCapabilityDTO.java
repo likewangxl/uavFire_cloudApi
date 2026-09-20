@@ -20,6 +20,7 @@ public class DualStreamAgentCapabilityDTO {
 
     private Boolean thermalSupported;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String aircraftModelKey;
     private String controllerModelKey;
     private List<PayloadCapabilityDTO> payloads;

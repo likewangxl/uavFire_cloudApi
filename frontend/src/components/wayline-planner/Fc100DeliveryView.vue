@@ -2,7 +2,7 @@
   <div class="fc100-delivery-view">
       <div class="planned-wayline-panel planned-wayline-panel--delivery">
         <div class="planned-wayline-title">
-          <span>FC100 投放航线库</span>
+          <span>DJI FlyCart 100 投放航线库</span>
           <a-button size="small" type="link" :loading="plannedWaylinesLoading" @click="() => refreshPlannedWaylines(true)">
             刷新
           </a-button>

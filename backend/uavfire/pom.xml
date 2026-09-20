@@ -29,6 +29,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.dji</groupId>
             <artifactId>cloud-sdk</artifactId>
             <version>${cloud-sdk.revision}</version>
@@ -157,4 +162,15 @@
         </dependency>
 
     </dependencies>
+    <profiles>
+        <profile>
+            <id>deployable</id>
+            <build><plugins><plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration><classifier>runtime</classifier></configuration>
+                <executions><execution><goals><goal>repackage</goal></goals></execution></executions>
+            </plugin></plugins></build>
+        </profile>
+    </profiles>
 </project>

@@ -1066,7 +1066,7 @@ const selectedFireMonitorMsdkDevice = computed(() => {
 
 const selectedIsM300 = computed(() => {
   const model = selectedFireMonitorMsdkDevice.value?.aircraftModelKey || selectedFireMonitorMsdkDevice.value?.model || ''
-  return ['M300', 'M300RTK', 'MATRICE300RTK'].includes(model.toUpperCase().replace(/[_-]/g, ''))
+  return ['M300', 'M300RTK', 'MATRICE300RTK', 'DJIMATRICE300RTK'].includes(model.toUpperCase().replace(/[\s_-]/g, ''))
 })
 
 const fireClosedLoopBlocked = computed(() => (
@@ -1078,7 +1078,7 @@ const fireClosedLoopBlocked = computed(() => (
 const fireClosedLoopBlockingText = computed(() => {
   if (!fireClosedLoopBlocked.value) return ''
   const reasons = selectedFireMonitorMsdkDevice.value?.blockingReasons || []
-  return reasons.length > 0 ? reasons.join('；') : 'M300 消防闭环能力尚未就绪'
+  return reasons.length > 0 ? reasons.join('；') : 'DJI Matrice 300 RTK 消防闭环能力尚未就绪'
 })
 
 const selectedFireMonitorOsd = computed(() => {
@@ -1095,7 +1095,7 @@ const selectedDeliveryTarget = computed(() => {
 const visualPanelTitle = computed(() => {
   if (activeVisualTab.value === 'map') return '森林火场综合态势图'
   if (activeVisualTab.value === 'fire-monitor') return '森林火场火情监测画面'
-  return 'FC100 投放执行画面'
+  return 'DJI FlyCart 100 投放执行画面'
 })
 
 const visualPanelPillText = computed(() => {
@@ -1113,9 +1113,9 @@ const visualPanelPillClass = computed(() => {
 const deliveryPanelPillText = computed(() => {
   if (deliveryTargetsLoading.value) return '投放机同步中'
   const target = selectedDeliveryTarget.value
-  if (!target) return '等待 FC100 投放机'
-  if (target.streamStatus === 'running') return 'FC100 直播在线'
-  return target.online ? 'FC100 待播放' : 'FC100 离线'
+  if (!target) return '等待 DJI FlyCart 100 投放机'
+  if (target.streamStatus === 'running') return 'DJI FlyCart 100 直播在线'
+  return target.online ? 'DJI FlyCart 100 待播放' : 'DJI FlyCart 100 离线'
 })
 
 const deliveryPanelPillClass = computed(() => {
@@ -1546,7 +1546,7 @@ const onToggleFireDetection = async () => {
   if (fireDetectionState.loading) return
   if (fireClosedLoopBlocked.value) {
     notification.warning({
-      message: 'M300 火情监测已阻止',
+      message: 'DJI Matrice 300 RTK 火情监测已阻止',
       description: fireClosedLoopBlockingText.value
     })
     return

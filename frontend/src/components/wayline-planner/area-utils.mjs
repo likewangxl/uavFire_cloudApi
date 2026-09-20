@@ -9,9 +9,9 @@ const METERS_PER_DEG_LAT = 111320
 // 机载相机预设（广角，用于地面足迹反算）。传感器尺寸/焦距为近似官方值，仅用于
 // 旁向行间距与拍照间隔估算，非测绘级精度。默认 M30T 广角。
 export const CAMERA_PRESETS = [
-  { key: 'M30T', label: 'M30T 广角', sensorWidthMm: 6.4, sensorHeightMm: 4.8, focalMm: 4.5, imageWidthPx: 4000, imageHeightPx: 3000 },
-  { key: 'M3T', label: 'M3T 广角', sensorWidthMm: 6.4, sensorHeightMm: 4.8, focalMm: 4.4, imageWidthPx: 4000, imageHeightPx: 3000 },
-  { key: 'H20T', label: 'H20T 广角', sensorWidthMm: 6.17, sensorHeightMm: 4.55, focalMm: 4.5, imageWidthPx: 4056, imageHeightPx: 3040 },
+  { key: 'M30T', label: 'DJI Matrice 30T 广角', sensorWidthMm: 6.4, sensorHeightMm: 4.8, focalMm: 4.5, imageWidthPx: 4000, imageHeightPx: 3000 },
+  { key: 'M3T', label: 'DJI Mavic 3T 广角', sensorWidthMm: 6.4, sensorHeightMm: 4.8, focalMm: 4.4, imageWidthPx: 4000, imageHeightPx: 3000 },
+  { key: 'H20T', label: 'DJI Zenmuse H20T 广角', sensorWidthMm: 6.17, sensorHeightMm: 4.55, focalMm: 4.5, imageWidthPx: 4056, imageHeightPx: 3040 },
 ]
 
 export function getCameraPreset (key) {

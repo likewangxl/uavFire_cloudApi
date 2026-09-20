@@ -14,7 +14,7 @@ import java.io.Serializable;
  * @date 2022/12/21
  */
 @Data
-@TableName("manage_firmware_model")
+@TableName(value = "manage_firmware_model", autoResultMap = true)
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
@@ -26,7 +26,7 @@ public class FirmwareModelEntity implements Serializable {
     @TableField("firmware_id")
     private String firmwareId;
 
-    @TableField("device_name")
+    @TableField(value = "device_name", typeHandler = com.yx.uavfire.common.model.OfficialDeviceNameTypeHandler.class)
     private String deviceName;
 
     @TableField(value = "create_time", fill = FieldFill.INSERT)

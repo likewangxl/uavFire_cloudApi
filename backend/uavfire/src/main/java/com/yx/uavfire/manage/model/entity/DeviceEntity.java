@@ -19,7 +19,7 @@ import java.io.Serializable;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@TableName(value = "manage_device")
+@TableName(value = "manage_device", autoResultMap = true)
 public class DeviceEntity implements Serializable {
 
     @TableId(type = IdType.AUTO)
@@ -28,7 +28,7 @@ public class DeviceEntity implements Serializable {
     @TableField(value = "device_sn")
     private String deviceSn;
 
-    @TableField(value = "device_name")
+    @TableField(value = "device_name", typeHandler = com.yx.uavfire.common.model.OfficialDeviceNameTypeHandler.class)
     private String deviceName;
 
     @TableField(value = "workspace_id")
@@ -58,7 +58,7 @@ public class DeviceEntity implements Serializable {
     @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
     private Long updateTime;
 
-    @TableField(value = "device_desc")
+    @TableField(value = "device_desc", typeHandler = com.yx.uavfire.common.model.DeviceTextTypeHandler.class)
     private String deviceDesc;
 
     @TableField(value = "url_normal")
@@ -70,7 +70,7 @@ public class DeviceEntity implements Serializable {
     @TableField(value = "user_id")
     private String userId;
 
-    @TableField(value = "nickname")
+    @TableField(value = "nickname", typeHandler = com.yx.uavfire.common.model.DeviceTextTypeHandler.class)
     private String nickname;
 
     @TableField(value = "firmware_version")

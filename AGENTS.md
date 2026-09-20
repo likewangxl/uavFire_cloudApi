@@ -64,3 +64,11 @@ Stats: 50 obs (20,721t read) | 572,068t work | 96% savings
 
 Access 572k tokens of past work via get_observations([IDs]) or mem-search skill.
 </claude-mem-context>
+
+## Device display names
+
+Use the official full names from `shared/device-models.json` in every user-facing
+label and persisted device-name/model field. Read `shared/DEVICE_NAMING.md` before
+changing device naming. Keep SDK enums, protocol identifiers, serial numbers,
+object keys, CSS selectors, and historical raw evidence unchanged. Run the catalog
+and UI-name guards after changes; do not introduce new display abbreviations.

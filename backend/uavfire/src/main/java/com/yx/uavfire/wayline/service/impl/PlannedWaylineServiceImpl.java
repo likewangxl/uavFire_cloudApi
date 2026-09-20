@@ -1177,10 +1177,10 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         }
         if (usesZenmusePayloadSelection(aircraftModelKey)) {
             if (!isSupportedZenmusePayload(payloadModelKey)) {
-                throw new IllegalArgumentException("M300/M350 planned wayline requires payload model H20, H20T, H30, or H30T.");
+                throw new IllegalArgumentException("DJI Matrice 300 RTK/DJI Matrice 350 RTK planned wayline requires payload model DJI Zenmuse H20, DJI Zenmuse H20T, DJI Zenmuse H30, or DJI Zenmuse H30T.");
             }
             if (payloadPositionIndex == null || payloadPositionIndex < 0 || payloadPositionIndex > 2) {
-                throw new IllegalArgumentException("M300/M350 planned wayline requires payload position index 0, 1, or 2.");
+                throw new IllegalArgumentException("DJI Matrice 300 RTK/DJI Matrice 350 RTK planned wayline requires payload position index 0, 1, or 2.");
             }
         }
         if (!isFinite(defaultHeight)) {
@@ -1273,6 +1273,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
         if (!StringUtils.hasText(raw)) {
             return raw;
         }
+        raw = com.yx.uavfire.common.model.DeviceModelNames.code(raw);
         String normalized = raw.trim().toUpperCase(Locale.ROOT).replace(" ", "").replace("-", "_");
         if ("M300RTK".equals(normalized) || "MATRICE300RTK".equals(normalized)
                 || "MATRICE_300_RTK".equals(normalized)) {
@@ -1286,7 +1287,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
     }
 
     private String normalizePayloadModelKey(String raw) {
-        return StringUtils.hasText(raw) ? raw.trim().toUpperCase(Locale.ROOT) : null;
+        return StringUtils.hasText(raw) ? com.yx.uavfire.common.model.DeviceModelNames.code(raw).trim().toUpperCase(Locale.ROOT) : null;
     }
 
     private boolean isSupportedZenmusePayload(String payloadModelKey) {
@@ -1311,7 +1312,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                     || entity.getPayloadPositionIndex() < 0
                     || entity.getPayloadPositionIndex() > 2) {
                 throw new IllegalArgumentException(
-                        "M300/M350 wayline must confirm payload H20/H20T/H30/H30T and position 0/1/2 before publishing.");
+                        "DJI Matrice 300 RTK/DJI Matrice 350 RTK wayline must confirm payload DJI Zenmuse H20/DJI Zenmuse H20T/DJI Zenmuse H30/DJI Zenmuse H30T and position 0/1/2 before publishing.");
             }
         }
         if (!isFinite(entity.getDefaultHeight()) || entity.getDefaultHeight() <= 0) {
@@ -1534,7 +1535,7 @@ public class PlannedWaylineServiceImpl implements IPlannedWaylineService {
                 case "H30": return DeviceEnum.H30;
                 case "H30T": return DeviceEnum.H30T;
                 default:
-                    throw new IllegalArgumentException("Unsupported M300/M350 payload: " + payloadModelKey);
+                    throw new IllegalArgumentException("Unsupported DJI Matrice 300 RTK/DJI Matrice 350 RTK payload: " + payloadModelKey);
             }
         }
         switch (droneDevice) {

@@ -284,6 +284,8 @@ class AgentRuntimeLoop(
                     gpsCount = telemetry?.gpsCount,
                     rtkCount = telemetry?.rtkCount,
                     positionFixed = telemetry?.positionFixed,
+                    flying = telemetry?.flying,
+                    flightMode = telemetry?.flightMode,
                     agentVersionName = BuildConfig.VERSION_NAME,
                     agentVersionCode = BuildConfig.VERSION_CODE.toLong(),
                     waylineCommandSupported = true,

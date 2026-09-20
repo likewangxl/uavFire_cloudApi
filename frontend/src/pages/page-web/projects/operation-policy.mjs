@@ -39,7 +39,7 @@ const ACTION_META = {
     disabledReason: '当前后端未开放 CONFIRM 接口，S3 仅保留入口',
   },
   ASSIGN_DELIVERY: {
-    label: '分配 FC100',
+    label: '分配 DJI FlyCart 100',
     type: 'default',
     disabled: false,
   },
@@ -63,7 +63,7 @@ const ACTION_META = {
     label: '派发',
     type: 'primary',
     danger: true,
-    consequence: '将把事件派发给主投送 FC100，后端会执行预检并推进事件进入处置中。',
+    consequence: '将把事件派发给主投送 DJI FlyCart 100，后端会执行预检并推进事件进入处置中。',
   },
   ABORT: {
     label: '中止',

@@ -1,102 +1,53 @@
 const api = require('../../services/api')
-const { getRuntimeConfig } = require('../../config/runtime')
 const session = require('../../services/session')
-
+const view = require('../../services/presentation')
+const empty = { onlineAircraft: '—', todayTasks: '—', urgentEvents: '—', activeTasks: [], urgentItems: [], reports: [] }
 Page({
-  data: {
-    loading: false,
-    configured: false,
-    authenticated: false,
-    statusLabel: '系统未配置',
-    headline: '移动驾驶舱等待接入',
-    workspaceName: '未登录',
-    onlineAircraft: '—',
-    todayTasks: '—',
-    urgentEvents: '—',
-    warning: '请先完成后端地址和微信登录服务配置。',
-    flightControlEnabled: false,
-  },
-
+  data: { ...empty, loading: false, authenticated: false, hasLoaded: false, headline: '登录后查看巡护动态', workspaceName: '', warning: '', error: '', generatedAt: '', showWarnings: false },
   onShow() {
-    const config = getRuntimeConfig()
-    const configured = Boolean(config.apiBaseUrl)
-    const authenticated = Boolean(session.getAccessToken())
-    this.setData({
-      configured,
-      authenticated,
-      statusLabel: !configured ? '系统未配置' : (authenticated ? '数据连接中' : '待登录'),
-      flightControlEnabled: Boolean(config.flightControlEnabled),
-    })
-    if (configured && authenticated) {
-      this.refreshDashboard()
-    }
+    this._visible = true
+    this.stopAutoRefresh()
+    if (session.getAccessToken()) this._refreshTimer = setInterval(() => this.refreshDashboard(), 5000)
+    return this.refreshDashboard()
   },
-
-  handleLogin() {
-    if (!this.data.configured || this.data.loading) {
-      wx.showToast({ title: '请先配置后端地址', icon: 'none' })
-      return
-    }
-    this.setData({ loading: true, warning: '' })
-    wx.login({
-      success: ({ code }) => {
-        api.loginWithWechat(code)
-          .then((result) => {
-            if (result.loginStatus !== 'AUTHENTICATED' || !result.accessToken) {
-              throw { message: '当前微信账号尚未完成系统账号绑定' }
-            }
-            session.setAccessToken(result.accessToken)
-            this.setData({ authenticated: true })
-            return this.refreshDashboard()
-          })
-          .catch((error) => this.showError(error))
-          .finally(() => this.setData({ loading: false }))
-      },
-      fail: () => {
-        this.setData({ loading: false })
-        this.showError({ message: '无法获取微信登录凭证' })
-      },
-    })
-  },
-
+  stopAutoRefresh() { if (this._refreshTimer) clearInterval(this._refreshTimer); this._refreshTimer = null },
+  onHide() { this._visible = false; this.stopAutoRefresh(); this._requestId = (this._requestId || 0) + 1; this.setData({ loading: false }) },
+  onUnload() { this.onHide() },
+  onPullDownRefresh() { return this.refreshDashboard().finally(() => wx.stopPullDownRefresh()) },
+  toggleWarnings() { this.setData({ showWarnings: !this.data.showWarnings }) },
   refreshDashboard() {
-    this.setData({ loading: true })
-    return Promise.all([api.getMe(), api.getDashboardSummary()])
-      .then(([me, summary]) => {
-        const metrics = summary.metrics || {}
-        this.setData({
-          statusLabel: summary.dataStatus === 'FRESH' ? '数据正常' : '部分数据待接入',
-          headline: (summary.conclusion && summary.conclusion.headline) || '暂无态势结论',
-          workspaceName: (me.workspace && me.workspace.name) || '当前工作空间',
-          onlineAircraft: metrics.onlineAircraft === undefined ? '—' : String(metrics.onlineAircraft),
-          todayTasks: metrics.todayTasks === undefined ? '—' : String(metrics.todayTasks),
-          urgentEvents: metrics.urgentEvents === undefined ? '—' : String(metrics.urgentEvents),
-          warning: (summary.warnings || []).join('；'),
-          flightControlEnabled: Boolean(me.capabilities && me.capabilities.flightControlEnabled),
-        })
+    if (this._inFlight) return this._inFlight
+    const requestId = (this._requestId || 0) + 1; this._requestId = requestId
+    const identity = session.getSession().sessionId
+    if (this._identity !== identity) this.setData({ ...empty, workspaceName: '', generatedAt: '', hasLoaded: false, headline: '正在读取巡护动态' })
+    this._identity = identity
+    if (!session.getAccessToken()) { this.stopAutoRefresh(); this.setData({ ...empty, authenticated: false, hasLoaded: false, workspaceName: '', generatedAt: '', headline: '登录后查看巡护动态', loading: false, warning: '', error: '' }); return Promise.resolve() }
+    this.setData({ loading: true, error: '', authenticated: true })
+    this._inFlight = Promise.all([api.getMe(), api.getDashboardSummary()]).then(([me, summary]) => {
+      if (requestId !== this._requestId || identity !== session.getSession().sessionId) return
+      const metrics = summary.metrics || {}
+      this.setData({
+        headline: summary.conclusion.headline, workspaceName: me.workspace.name, hasLoaded: true,
+        onlineAircraft: metrics.onlineAircraft == null ? '—' : String(metrics.onlineAircraft),
+        todayTasks: metrics.todayTasks == null ? '—' : String(metrics.todayTasks),
+        urgentEvents: metrics.urgentEvents == null ? '—' : String(metrics.urgentEvents),
+        activeTasks: (summary.activeTasks || []).map(value => view.item(value, 'tasks')),
+        urgentItems: (summary.urgentEvents || []).map(value => view.item(value, 'events')),
+        reports: (summary.reports || []).map(value => view.item(value, 'reports')),
+        generatedAt: view.date(summary.generatedAt), warning: (summary.warnings || []).join('；'),
       })
-      .catch((error) => this.showError(error))
-      .finally(() => this.setData({ loading: false }))
+    }).catch(error => {
+      if (requestId !== this._requestId) return
+      if (!session.getAccessToken()) {
+        this.stopAutoRefresh()
+        this.setData({ ...empty, hasLoaded: false, authenticated: false, workspaceName: '', generatedAt: '', headline: '请重新登录', error: error.message })
+      } else this.setData({ error: this.data.hasLoaded ? '更新失败，当前显示上次成功读取的数据。' : error.message, ...(this.data.hasLoaded ? {} : { headline: '暂时无法更新数据' }) })
+    }).finally(() => { this._inFlight = null; if (requestId === this._requestId) this.setData({ loading: false }) })
+    return this._inFlight
   },
-
-  openTasks() {
-    wx.navigateTo({ url: '/pages/tasks/index' })
-  },
-
-  openReports() {
-    wx.navigateTo({ url: '/pages/reports/index' })
-  },
-
-  openMine() {
-    wx.navigateTo({ url: '/pages/mine/index' })
-  },
-
-  showError(error) {
-    const message = error && error.message ? error.message : '服务请求失败'
-    this.setData({
-      statusLabel: '连接异常',
-      warning: message,
-    })
-    wx.showToast({ title: message, icon: 'none' })
-  },
+  handleLogin() { wx.switchTab({ url: '/pages/mine/index' }) },
+  openTasks() { wx.switchTab({ url: '/pages/tasks/index' }) },
+  openEvents() { wx.switchTab({ url: '/pages/events/index' }) },
+  openReports() { wx.switchTab({ url: '/pages/reports/index' }) },
+  openItem(event) { view.openDetail(event.currentTarget.dataset.kind, event.currentTarget.dataset.id) },
 })

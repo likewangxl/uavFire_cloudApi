@@ -16,7 +16,7 @@ import java.io.Serializable;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@TableName("planned_wayline")
+@TableName(value = "planned_wayline", autoResultMap = true)
 public class PlannedWaylineEntity implements Serializable {
 
     @TableId(type = IdType.AUTO)
@@ -28,13 +28,13 @@ public class PlannedWaylineEntity implements Serializable {
     @TableField("workspace_id")
     private String workspaceId;
 
-    @TableField("name")
+    @TableField(value = "name", typeHandler = com.yx.uavfire.common.model.DeviceTextTypeHandler.class)
     private String name;
 
-    @TableField("aircraft_model_key")
+    @TableField(value = "aircraft_model_key", typeHandler = com.yx.uavfire.common.model.OfficialModelTypeHandler.class)
     private String aircraftModelKey;
 
-    @TableField("payload_model_key")
+    @TableField(value = "payload_model_key", typeHandler = com.yx.uavfire.common.model.OfficialModelTypeHandler.class)
     private String payloadModelKey;
 
     @TableField("payload_position_index")

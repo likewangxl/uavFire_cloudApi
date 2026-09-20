@@ -355,7 +355,7 @@ async function runIncidentAction (payload: { actionId: string; reason?: string; 
         confirmedPayloadReady: true,
         confirmedRelease: true,
         confirmationToken: mission.releaseConfirmationToken,
-        remoteHookRemark: payload.reason || '飞手已使用官方遥控器完成 FC100 开钩',
+        remoteHookRemark: payload.reason || '飞手已使用官方遥控器完成 DJI FlyCart 100 开钩',
         checklistTimestamps: {
           arrival: now,
           noPeopleRisk: now,
@@ -590,7 +590,7 @@ function toDeliveryDeviceOption (
   props?: DeliveryDeviceProperties,
 ): AssignableDeviceOption {
   const online = props?.onlineStatus ?? String(device.online || '').toUpperCase() === 'ONLINE'
-  const displayName = device.displayName || device.model || 'FC100 投送机'
+  const displayName = device.displayName || device.model || 'DJI FlyCart 100 投送机'
   return withOptionLabel({
     kind: 'DELIVERY',
     resourceSn: device.deviceSn,

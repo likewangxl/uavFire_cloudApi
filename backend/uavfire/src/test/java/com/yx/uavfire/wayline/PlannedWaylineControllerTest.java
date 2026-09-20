@@ -509,7 +509,7 @@ class PlannedWaylineControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.name").value("Survey B"))
-                .andExpect(jsonPath("$.data.aircraftModelKey").value("M300RTK"))
+                .andExpect(jsonPath("$.data.aircraftModelKey").value("DJI Matrice 300 RTK"))
                 .andExpect(jsonPath("$.data.gatewaySn").value("GW-002"))
                 .andExpect(jsonPath("$.data.aircraftSn").value("AC-002"))
                 .andExpect(jsonPath("$.data.defaultHeight").value(100.0))

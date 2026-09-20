@@ -1,0 +1,42 @@
+-- Additive flight evidence store. Existing business records are not synthesized or rewritten.
+CREATE TABLE IF NOT EXISTS flight_report_run (
+ run_id VARCHAR(36) PRIMARY KEY,
+ workspace_id VARCHAR(64) NOT NULL,
+ task_id VARCHAR(64) NOT NULL,
+ flight_id VARCHAR(128) NOT NULL,
+ aircraft_sn VARCHAR(64) NOT NULL,
+ aircraft_name VARCHAR(128),
+ task_snapshot_json MEDIUMTEXT,
+ first_record_at BIGINT NOT NULL,
+ last_record_at BIGINT NOT NULL,
+ airborne_seen BOOLEAN NOT NULL DEFAULT FALSE,
+ closed_at BIGINT,
+ UNIQUE KEY uk_flight_report_run (workspace_id,task_id,flight_id,aircraft_sn),
+ KEY ix_flight_report_task (workspace_id,task_id,last_record_at),
+ KEY ix_flight_report_aircraft (aircraft_sn,closed_at,last_record_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+CREATE TABLE IF NOT EXISTS flight_report_record (
+ record_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+ run_id VARCHAR(36) NOT NULL,
+ workspace_id VARCHAR(64) NOT NULL,
+ event_key CHAR(64) NOT NULL,
+ source VARCHAR(32) NOT NULL,
+ kind VARCHAR(64) NOT NULL,
+ observed_at BIGINT NOT NULL,
+ received_at BIGINT NOT NULL,
+ latitude DOUBLE,
+ longitude DOUBLE,
+ relative_height_m DOUBLE,
+ altitude_m DOUBLE,
+ speed_ms DOUBLE,
+ vertical_speed_ms DOUBLE,
+ battery_percent INT,
+ flying BOOLEAN,
+ flight_mode VARCHAR(64),
+ wind_speed_ms DOUBLE,
+ gps_count INT,
+ position_fixed BOOLEAN,
+ payload_json MEDIUMTEXT,
+ UNIQUE KEY uk_flight_report_event (event_key),
+ KEY ix_flight_report_records (workspace_id,run_id,observed_at,record_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

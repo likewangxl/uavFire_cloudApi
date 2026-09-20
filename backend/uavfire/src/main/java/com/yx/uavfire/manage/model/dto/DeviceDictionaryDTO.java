@@ -22,7 +22,9 @@ public class DeviceDictionaryDTO {
 
     private Integer subType;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceName;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceDesc;
 }

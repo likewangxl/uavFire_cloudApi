@@ -21,7 +21,7 @@ import java.io.Serializable;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@TableName("manage_device_dictionary")
+@TableName(value = "manage_device_dictionary", autoResultMap = true)
 public class DeviceDictionaryEntity implements Serializable {
 
     @TableId(type = IdType.AUTO)
@@ -36,10 +36,10 @@ public class DeviceDictionaryEntity implements Serializable {
     @TableField(value = "sub_type")
     private Integer subType;
 
-    @TableField(value = "device_name")
+    @TableField(value = "device_name", typeHandler = com.yx.uavfire.common.model.OfficialDeviceNameTypeHandler.class)
     private String deviceName;
 
-    @TableField(value = "device_desc")
+    @TableField(value = "device_desc", typeHandler = com.yx.uavfire.common.model.DeviceTextTypeHandler.class)
     private String deviceDesc;
 
 }

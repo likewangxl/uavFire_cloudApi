@@ -208,7 +208,7 @@ public class DeliveryController {
                 "offline",
                 null,
                 "delivery-platform",
-                "FC100 设备离线，未拉起直播"));
+                "DJI FlyCart 100 设备离线，未拉起直播"));
         }
 
         CachedDeviceLive cached = fc100BypassLiveCache.get(deviceSn);
@@ -227,7 +227,7 @@ public class DeliveryController {
             .build());
         String playUrl = buildFc100BypassPlaybackUrl(deviceSn, bypass);
         String status = playUrl == null ? "idle" : "running";
-        String message = "FC100 司运旁路推流已启动"
+        String message = "DJI FlyCart 100 司运旁路推流已启动"
             + "，状态 " + firstText(bypass == null ? null : bypass.getConverterState(), "--")
             + "，转换任务 " + firstText(bypass == null ? null : bypass.getConverterId(), "--");
 
@@ -254,7 +254,7 @@ public class DeliveryController {
     private String normalizeRtmpBaseUrl(String rtmpUrl) {
         if (rtmpUrl == null || rtmpUrl.isBlank()) {
             throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
-                "livestream.url.rtmp.url is required for FC100 bypass stream");
+                "livestream.url.rtmp.url is required for DJI FlyCart 100 bypass stream");
         }
         return rtmpUrl.replaceAll("/+$", "");
     }
@@ -351,7 +351,7 @@ public class DeliveryController {
             .missionId(waylineId)
             .taskName(p.getTaskName() != null && !p.getTaskName().isBlank()
                 ? p.getTaskName().trim()
-                : "FC100航线-" + waylineId)
+                : "DJI FlyCart 100航线-" + waylineId)
             .remark(p.getRemark())
             .build());
             recordDeliverySuccess(waylineId, "create-existing-wayline-task");
@@ -433,7 +433,7 @@ public class DeliveryController {
             });
         } catch (IOException e) {
             throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
-                "failed to normalize generated KMZ for FC100: " + e.getMessage());
+                "failed to normalize generated KMZ for DJI FlyCart 100: " + e.getMessage());
         }
     }
 
@@ -512,7 +512,7 @@ public class DeliveryController {
             });
         } catch (IOException e) {
             throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
-                "failed to normalize uploaded KMZ for FC100: " + e.getMessage());
+                "failed to normalize uploaded KMZ for DJI FlyCart 100: " + e.getMessage());
         }
     }
 
@@ -522,7 +522,7 @@ public class DeliveryController {
                                                          DeliveryWaylineImportResult wayline) {
         String actualMissionId = firstText(wayline == null ? null : wayline.getWaylineId(),
             planned.getPublishedWaylineId(), p.getPlannedWaylineId());
-        String actualTaskName = firstText(p.getTaskName(), planned.getName(), "FC100航线-" + actualMissionId);
+        String actualTaskName = firstText(p.getTaskName(), planned.getName(), "DJI FlyCart 100航线-" + actualMissionId);
         return adapter.createTask(CreateTaskRequest.builder()
             .workspaceId(workspaceId)
             .deviceSn(p.getDeviceSn().trim())
@@ -568,7 +568,7 @@ public class DeliveryController {
         String actualMissionId = firstText(importedWayline == null ? null : importedWayline.getWaylineId(), actualWaylineId);
         String actualTaskName = taskName != null && !taskName.isBlank()
             ? taskName.trim()
-            : "FC100航线-" + firstText(importedWayline == null ? null : importedWayline.getName(), routeFile.waylineName, actualMissionId);
+            : "DJI FlyCart 100航线-" + firstText(importedWayline == null ? null : importedWayline.getName(), routeFile.waylineName, actualMissionId);
 
         DeliveryTaskRef ref;
         try {
@@ -662,7 +662,7 @@ public class DeliveryController {
                 no, p.getOperatorId(), p.getTaskName(), p.getRemark(), p.getNotifies(), req));
         }
         throw new Fc100BusinessException(Fc100ErrorCode.INVALID_PARAM,
-            "mission status " + mission.getStatus() + " cannot prepare FC100 delivery task");
+            "mission status " + mission.getStatus() + " cannot prepare DJI FlyCart 100 delivery task");
     }
 
     @PostMapping("/missions/{no}/delivery/create-task")
@@ -911,7 +911,7 @@ public class DeliveryController {
                 applyDeliveryTaskStatus(mission, status);
             } catch (Exception e) {
                 recordDeliveryFailure(mission, "query-task-status", e);
-                log.warn("FC100 auto release polling failed mission={} task={}: {}",
+                log.warn("DJI FlyCart 100 auto release polling failed mission={} task={}: {}",
                     mission.getMissionNo(), mission.getDjiTaskId(), e.getMessage());
             }
         }
@@ -1006,7 +1006,7 @@ public class DeliveryController {
         boolean hovering = horizontalSpeed <= AUTO_RELEASE_HORIZONTAL_SPEED_MPS
             && verticalSpeed <= AUTO_RELEASE_VERTICAL_SPEED_MPS;
         if (distance <= AUTO_RELEASE_DROP_RADIUS_M && hovering) {
-            log.info("FC100 auto release at DROP waypoint mission={} distance={}m hSpeed={} vSpeed={}",
+            log.info("DJI FlyCart 100 auto release at DROP waypoint mission={} distance={}m hSpeed={} vSpeed={}",
                 mission.getMissionNo(), distance, horizontalSpeed, verticalSpeed);
             return true;
         }
@@ -1194,7 +1194,7 @@ public class DeliveryController {
 
     private boolean allowAutoReleaseByPolicy(FireMissionEntity mission) {
         if (releasePolicyService == null) {
-            log.warn("FC100 auto release skipped because release policy service is not wired mission={}",
+            log.warn("DJI FlyCart 100 auto release skipped because release policy service is not wired mission={}",
                 mission == null ? null : mission.getMissionNo());
             return false;
         }
@@ -1226,7 +1226,7 @@ public class DeliveryController {
             .status("preflight")
             .apiCode(0)
             .apiMessage("PRE_FLIGHT_CHECK_FAILED")
-            .displayMessage("FC100 开始执行航线前检查未通过：" + String.join("；", failures))
+            .displayMessage("DJI FlyCart 100 开始执行航线前检查未通过：" + String.join("；", failures))
             .build();
     }
 
@@ -1340,7 +1340,7 @@ public class DeliveryController {
     private DeliveryWaylineImportResult findExistingWaylineByName(String waylineName) {
         DeliveryWaylineDTO matched = findExistingWaylineDtoByName(waylineName)
             .orElseThrow(() -> new Fc100BusinessException(Fc100ErrorCode.DELIVERY_SYNC_BUSINESS,
-                "航线名称重复，但未能从司运航线列表找到同名航线：" + waylineName + "；请从 FC100 已有航线中选择后创建任务"));
+                "航线名称重复，但未能从司运航线列表找到同名航线：" + waylineName + "；请从 DJI FlyCart 100 已有航线中选择后创建任务"));
         return DeliveryWaylineImportResult.builder()
             .waylineId(matched.getWaylineId())
             .name(matched.getName())

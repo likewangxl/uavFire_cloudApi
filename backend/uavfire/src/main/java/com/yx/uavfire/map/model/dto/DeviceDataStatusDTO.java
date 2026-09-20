@@ -18,8 +18,10 @@ public class DeviceDataStatusDTO {
 
     private String deviceSn;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String nickname;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceName;
 
     private Boolean online;

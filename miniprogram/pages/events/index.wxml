@@ -1,0 +1,6 @@
+<import src="../../templates/list.wxml" />
+<view class="page-shell">
+  <view class="section-title page-heading">火情态势</view>
+  <template is="statusFilter" data="{{statusOptions, statusIndex, filterLabel, hasFilters}}" />
+  <template is="recordList" data="{{items, loading, error, authenticated, total, hasMore, hasLoaded, hasFilters}}" />
+</view>

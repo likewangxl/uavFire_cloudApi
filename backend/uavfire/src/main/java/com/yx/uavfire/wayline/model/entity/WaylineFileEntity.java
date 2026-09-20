@@ -14,7 +14,7 @@ import java.io.Serializable;
  * @date 2021/12/22
  */
 @Data
-@TableName("wayline_file")
+@TableName(value = "wayline_file", autoResultMap = true)
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
@@ -23,7 +23,7 @@ public class WaylineFileEntity implements Serializable {
     @TableId(type = IdType.AUTO)
     private Integer id;
 
-    @TableField("name")
+    @TableField(value = "name", typeHandler = com.yx.uavfire.common.model.DeviceTextTypeHandler.class)
     private String name;
 
     @TableField("wayline_id")

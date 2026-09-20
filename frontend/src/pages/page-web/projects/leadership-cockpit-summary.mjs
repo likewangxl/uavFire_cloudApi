@@ -169,7 +169,7 @@ export function buildCockpitSummary ({
         key: 'liveOnline',
         label: '直播在线',
         value: String(liveOnlineCount),
-        note: dualStreamError || liveCardNote || `${runningDualStream ? '监测直播在线' : '监测直播待接入'} / FC100 ${runningDeliveryTargets.length}`,
+        note: dualStreamError || liveCardNote || `${runningDualStream ? '监测直播在线' : '监测直播待接入'} / DJI FlyCart 100 ${runningDeliveryTargets.length}`,
         tone: liveOnlineCount > 0 ? 'safe' : 'default',
         source: 'dual-stream + delivery live',
         title: liveHoverTitle || 'dual-stream + delivery live'
@@ -192,7 +192,7 @@ export function buildCockpitSummary ({
         key: 'deliveryTasks',
         label: '投放任务',
         value: activeDeliveryTasks.length > 0 ? String(activeDeliveryTasks.length) : (deliveryTargetsLoading ? '同步中' : '待命'),
-        note: summarizeDeliveryTask(activeDeliveryTasks[0]) || `${deliveryTargets.length} 架 FC100 可选`,
+        note: summarizeDeliveryTask(activeDeliveryTasks[0]) || `${deliveryTargets.length} 架 DJI FlyCart 100 可选`,
         tone: activeDeliveryTasks.length > 0 ? 'default' : 'safe',
         source: '/api/fire/delivery/*'
       },
@@ -200,7 +200,7 @@ export function buildCockpitSummary ({
         key: 'minBattery',
         label: '最低电量',
         value: minBattery == null ? '--' : formatPercent(minBattery),
-        note: batteryCardNote || (minBattery == null ? '等待 OSD / FC100 属性' : '来自已接入飞机状态'),
+        note: batteryCardNote || (minBattery == null ? '等待 OSD / DJI FlyCart 100 属性' : '来自已接入飞机状态'),
         tone: minBattery != null && minBattery < 30 ? 'danger' : 'default',
         source: 'msdk devices + delivery properties',
         title: batteryHoverTitle || 'msdk devices + delivery properties'
@@ -320,7 +320,7 @@ function buildVisualInstrumentBelt ({
     const targetDevice = isDelivery ? deliveryTarget : monitorDevice
     const videoSignals = isDelivery
       ? [
-          { key: 'visible', label: 'FC100', status: deliveryLiveOnline ? 'online' : 'offline', detail: deliveryTarget?.primaryPlayUrl ? '直播地址已返回' : '等待平台地址' },
+          { key: 'visible', label: 'DJI FlyCart 100', status: deliveryLiveOnline ? 'online' : 'offline', detail: deliveryTarget?.primaryPlayUrl ? '直播地址已返回' : '等待平台地址' },
           { key: 'thermal', label: '平台', status: deliveryTarget?.online ? 'online' : 'offline', detail: deliveryTargetsLoading ? '同步中' : (deliveryTarget?.taskStatus || '等待任务') },
           { key: 'zlm', label: 'ZLM', status: deliveryLiveOnline ? 'online' : 'warning', detail: deliveryLiveOnline ? '播放链路可用' : '未验证播放' }
         ]
@@ -336,7 +336,7 @@ function buildVisualInstrumentBelt ({
           key: 'videoLink',
           title: '视频链路',
           summary: isDelivery
-            ? (deliveryLiveOnline ? 'FC100 直播在线' : '等待 FC100 直播')
+            ? (deliveryLiveOnline ? 'DJI FlyCart 100 直播在线' : '等待 DJI FlyCart 100 直播')
             : (dualStreamOnline ? '双光链路接入' : '双光待接入'),
           status: videoSignals.some(item => item.status === 'online') ? 'online' : 'warning',
           signals: videoSignals,
@@ -362,7 +362,7 @@ function buildVisualInstrumentBelt ({
           status: aiEventsError ? 'warning' : (aiEvents.length > 0 || deliveryTask ? 'online' : 'idle'),
           ticks: buildAiTicks(aiEvents),
           note: isDelivery
-            ? (deliveryTask?.displayMessage || deliveryTask?.message || deliveryTarget?.message || '等待 FC100 平台回执')
+            ? (deliveryTask?.displayMessage || deliveryTask?.message || deliveryTarget?.message || '等待 DJI FlyCart 100 平台回执')
             : (latestAiEvent ? `最新风险 ${normalizeLevel(latestAiEvent.riskLevel)}` : (aiEventsError || '识别任务待启动'))
         }
       ],
@@ -376,7 +376,7 @@ function buildVisualInstrumentBelt ({
         {
           key: 'thermal',
           time: formatTimeLabel(latestAiEvent?.eventTimestamp || latestAiEvent?.createTime),
-          label: isDelivery ? (deliveryLiveOnline ? 'FC100 直播在线' : 'FC100 直播待接入') : (thermalOnline ? '红外已接入' : '红外未接入'),
+          label: isDelivery ? (deliveryLiveOnline ? 'DJI FlyCart 100 直播在线' : 'DJI FlyCart 100 直播待接入') : (thermalOnline ? '红外已接入' : '红外未接入'),
           status: (isDelivery ? deliveryLiveOnline : thermalOnline) ? 'online' : 'warning'
         },
         {
@@ -455,15 +455,15 @@ function buildVisualContextMetrics ({
     'delivery-execution': [
       {
         key: 'deliveryTarget',
-        label: '当前 FC100',
-        value: deliveryTarget?.callsign || (deliveryTarget?.deviceSn ? `FC100 ${deliveryTarget.deviceSn.slice(-4)}` : '未选择'),
+        label: '当前 DJI FlyCart 100',
+        value: deliveryTarget?.callsign || (deliveryTarget?.deviceSn ? `DJI FlyCart 100 ${deliveryTarget.deviceSn.slice(-4)}` : '未选择'),
         note: deliveryTarget?.online ? (deliveryTarget?.streamStatus || '在线') : '等待投放机'
       },
       {
         key: 'liveSource',
         label: '直播来源',
         value: deliveryTarget?.primaryPlayUrl || deliveryTarget?.streamStatus === 'running' ? '在线' : '待接入',
-        note: deliveryTarget?.primaryPlayUrl || deliveryTarget?.message || '等待 FC100 平台返回地址'
+        note: deliveryTarget?.primaryPlayUrl || deliveryTarget?.message || '等待 DJI FlyCart 100 平台返回地址'
       },
       {
         key: 'taskPhase',
@@ -481,7 +481,7 @@ function buildVisualContextMetrics ({
         key: 'deliveryBattery',
         label: '电量/在线',
         value: deliveryTarget?.batteryPercent == null ? '--' : formatPercent(deliveryTarget.batteryPercent),
-        note: deliveryTarget?.online ? 'FC100 在线' : 'FC100 离线或未上报'
+        note: deliveryTarget?.online ? 'DJI FlyCart 100 在线' : 'DJI FlyCart 100 离线或未上报'
       }
     ]
   }
@@ -549,8 +549,8 @@ function buildEmptyStateHints ({
   return {
     aiRisk: aiEventsError || (aiEvents.length > 0 ? `已有 ${aiEvents.length} 条 AI 识别记录` : '未收到 AI 识别事件，可先选择监测机并启动火情识别。'),
     fireEvents: fireEventsError || (activeFireEvents.length > 0 ? `已有火情 ${activeFireEvents.length} 条，按风险等级排序。` : '暂无火情事件，等待 /api/fire/events 返回。'),
-    aircraft: msdkDevices.length + deliveryTargets.length > 0 ? `已接入 ${msdkDevices.length + deliveryTargets.length} 架飞机/投放设备。` : '未检测到飞机或 FC100 投放设备，请确认 MSDK Agent 与投放平台接入。',
-    deliveryTasks: activeDeliveryTasks.length > 0 ? `已有 ${activeDeliveryTasks.length} 个投放任务同步中。` : (deliveryTargetsLoading ? '投放任务同步中。' : '等待投放任务，创建或下发 FC100 任务后会在这里显示。')
+    aircraft: msdkDevices.length + deliveryTargets.length > 0 ? `已接入 ${msdkDevices.length + deliveryTargets.length} 架飞机/投放设备。` : '未检测到飞机或 DJI FlyCart 100 投放设备，请确认 MSDK Agent 与投放平台接入。',
+    deliveryTasks: activeDeliveryTasks.length > 0 ? `已有 ${activeDeliveryTasks.length} 个投放任务同步中。` : (deliveryTargetsLoading ? '投放任务同步中。' : '等待投放任务，创建或下发 DJI FlyCart 100 任务后会在这里显示。')
   }
 }
 
@@ -581,7 +581,7 @@ function buildAircraftGroups (aircraftRows) {
     {
       key: 'delivery',
       label: '投放设备',
-      rows: aircraftRows.filter(row => row.role === 'FC100 投放')
+      rows: aircraftRows.filter(row => row.role === 'DJI FlyCart 100 投放')
     }
   ].filter(group => group.rows.length > 0)
 }
@@ -697,11 +697,11 @@ function buildAircraftOnlinePopover ({
     subtitle: '监测机与投放机状态',
     statusLabel: totalCount === 0 ? '未接入' : `${onlineCount} 架在线`,
     statusTone: onlineCount > 0 ? 'safe' : 'danger',
-    emptyText: '暂无飞机或 FC100 投放设备',
+    emptyText: '暂无飞机或 DJI FlyCart 100 投放设备',
     stats: [
       { key: 'online', label: '在线/总数', value: `${onlineCount}/${totalCount}`, tone: onlineCount > 0 ? 'safe' : 'danger' },
       { key: 'monitor', label: '监测机', value: String(aircraftRows.filter(row => row.role === '火情监测').length), tone: 'default' },
-      { key: 'delivery', label: '投放机', value: String(aircraftRows.filter(row => row.role === 'FC100 投放').length), tone: 'default' },
+      { key: 'delivery', label: '投放机', value: String(aircraftRows.filter(row => row.role === 'DJI FlyCart 100 投放').length), tone: 'default' },
       { key: 'batteryKnown', label: '电量上报', value: String(aircraftRows.filter(row => Number.isFinite(Number(row.battery))).length), tone: 'default' }
     ],
     rows: aircraftRows.map(row => ({
@@ -887,7 +887,7 @@ function buildAircraftRows (msdkDevices, deliveryTargets) {
     })),
     ...deliveryTargets.map(target => ({
       key: `delivery:${target.deviceSn}`,
-      role: 'FC100 投放',
+      role: 'DJI FlyCart 100 投放',
       sn: target.deviceSn || '--',
       name: resolveDeliveryModel(target),
       online: Boolean(target.online),
@@ -947,8 +947,8 @@ function formatMonitorFocus (device) {
 }
 
 function formatDeliveryFocus (target) {
-  if (!target) return '未选择 FC100'
-  return target.callsign || (target.deviceSn ? `FC100 ${target.deviceSn.slice(-4)}` : 'FC100')
+  if (!target) return '未选择 DJI FlyCart 100'
+  return target.callsign || (target.deviceSn ? `DJI FlyCart 100 ${target.deviceSn.slice(-4)}` : 'DJI FlyCart 100')
 }
 
 function formatAircraftSignal (device) {
@@ -964,9 +964,9 @@ function buildMonitorNextAction ({ monitorDevice, visibleOnline, thermalOnline, 
 }
 
 function buildDeliveryNextAction ({ deliveryTarget, deliveryTask, deliveryTargetsLoading }) {
-  if (deliveryTargetsLoading) return '同步 FC100 平台'
-  if (!deliveryTarget) return '选择 FC100'
-  if (!deliveryTarget.online) return '检查 FC100 在线'
+  if (deliveryTargetsLoading) return '同步 DJI FlyCart 100 平台'
+  if (!deliveryTarget) return '选择 DJI FlyCart 100'
+  if (!deliveryTarget.online) return '检查 DJI FlyCart 100 在线'
   if (!deliveryTask) return '等待投放任务'
   if (deliveryTask.progressPercent == null) return '跟踪任务阶段'
   return Number(deliveryTask.progressPercent) >= 100 ? '等待结果回传' : '跟踪执行进度'

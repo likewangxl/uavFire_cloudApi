@@ -5,7 +5,7 @@
 
       <div class="delivery-live-badge" :class="{ idle: !playerState.playing }">
         <span class="live-dot"></span>
-        FC100 投放主画面
+        DJI FlyCart 100 投放主画面
       </div>
 
       <button
@@ -125,7 +125,7 @@ const targetTaskStatusText = computed(() => stringValue(targetRecord.value.taskS
 const livePlayUrl = computed(() => deviceLive.value?.playUrl || '')
 const liveTitle = computed(() => {
   const status = deviceLive.value?.streamStatus || 'running'
-  return `FC100 ${status}`
+  return `DJI FlyCart 100 ${status}`
 })
 const liveSource = computed(() => deviceLive.value?.source || '未上报')
 const liveUnavailableMessage = computed(() =>
@@ -136,7 +136,7 @@ const liveUnavailableMessage = computed(() =>
 const liveOverlayTitle = computed(() => {
   if (playerState.error) return '直播连接失败'
   if (errorMessage.value) return '直播不可用'
-  if (livePlayUrl.value && playerState.loading) return '正在连接 FC100 直播'
+  if (livePlayUrl.value && playerState.loading) return '正在连接 DJI FlyCart 100 直播'
   return '等待直播信号'
 })
 const liveOverlayMessage = computed(() => {
@@ -277,7 +277,7 @@ function buildZlmRtcApiUrl (streamUrl: string) {
   const url = new URL(streamUrl.replace(/^webrtc:\/\//, 'http://'))
   const segments = url.pathname.split('/').filter(Boolean)
   if (segments.length < 2) {
-    throw new Error(`FC100 直播地址格式不正确：${streamUrl}`)
+    throw new Error(`DJI FlyCart 100 直播地址格式不正确：${streamUrl}`)
   }
 
   const app = segments[segments.length - 2]

@@ -37,6 +37,8 @@ data class DjiTelemetry(
     val gpsCount: Int? = null,
     val rtkCount: Int? = null,
     val positionFixed: Boolean? = null,
+    val flying: Boolean? = null,
+    val flightMode: String? = null,
 )
 
 data class DjiFlightLimit(

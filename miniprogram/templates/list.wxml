@@ -1,0 +1,29 @@
+<template name="recordCard">
+  <view class="panel record-card" hover-class="card-pressed" aria-role="button" aria-label="{{item.displayName}}，查看详情" data-kind="{{item.kind}}" data-id="{{item.id}}" bindtap="openItem">
+    <view class="record-top"><text class="status-pill">{{item.statusLabel}}</text><text class="record-time">{{item.timeLabel}}</text></view>
+    <view class="item-title">{{item.displayName}}</view>
+    <view class="record-bottom"><text class="muted">{{item.modelLabel}}</text><text class="record-link">查看详情</text></view>
+  </view>
+</template>
+<template name="recordList">
+  <view wx:if="{{!authenticated}}" class="panel box">
+    <view class="section-title">登录后查看记录</view><view class="muted">{{error || '请先登录并完成账号绑定。'}}</view>
+    <view class="action-stack"><button class="primary-action" bindtap="login">前往登录</button></view>
+  </view>
+  <block wx:if="{{authenticated}}">
+    <view wx:if="{{error}}" class="notice notice-error"><view>{{error}}</view><view class="action-row"><button class="compact-button" bindtap="retry">重试</button></view></view>
+    <view wx:if="{{hasLoaded}}" class="list-meta">共 {{total}} 条，已显示 {{items.length}} 条</view>
+    <block wx:for="{{items}}" wx:key="id"><template is="recordCard" data="{{item}}" /></block>
+    <view wx:if="{{loading}}" class="empty">{{items.length ? '正在加载更多…' : '正在加载记录…'}}</view>
+    <view wx:if="{{hasLoaded && !loading && !error && !items.length}}" class="panel empty"><view class="empty-title">暂无匹配记录</view><view class="muted">可以调整筛选条件，或稍后下拉刷新。</view><button wx:if="{{hasFilters}}" class="compact-button" bindtap="resetFilters">重置筛选</button></view>
+    <view wx:if="{{items.length && !loading}}" class="list-footer"><button wx:if="{{hasMore}}" bindtap="loadMore">{{error ? '重试加载更多' : '加载更多'}}</button><text wx:else class="muted">已显示全部记录</text></view>
+  </block>
+</template>
+<template name="statusFilter">
+  <view class="filter-line">
+    <picker class="filter-picker" mode="selector" range="{{statusOptions}}" range-key="label" value="{{statusIndex}}" bindchange="selectStatus" aria-label="{{filterLabel}}">
+      <view class="picker-face"><text class="picker-label">{{filterLabel}}</text><text class="picker-value">{{statusOptions[statusIndex].label}}</text><text class="picker-hint">选择</text></view>
+    </picker>
+    <button wx:if="{{hasFilters}}" class="text-button" bindtap="resetFilters">重置</button>
+  </view>
+</template>

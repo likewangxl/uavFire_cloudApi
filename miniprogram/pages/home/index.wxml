@@ -1,61 +1,27 @@
+<import src="../../templates/list.wxml" />
 <view class="page-shell home-page">
-  <view class="topbar">
-    <view>
-      <text class="eyebrow">UAVFIRE MOBILE COMMAND</text>
-      <view class="product-title">无人机火情智巡</view>
-      <view class="workspace-name">{{workspaceName}}</view>
-    </view>
-    <text class="status-pill {{configured ? '' : 'warning'}}">{{statusLabel}}</text>
-  </view>
-
+  <view class="topbar"><view class="topbar-main"><view class="product-title">无人机火情智巡</view><view class="workspace-name">{{workspaceName || '巡护工作台'}}</view></view><text class="status-pill">{{authenticated ? '已登录' : '未登录'}}</text></view>
   <view class="panel situation-panel">
-    <text class="panel-kicker">今日态势</text>
-    <view class="headline">{{headline}}</view>
+    <text class="panel-kicker">今日巡护</text><view class="headline">{{headline}}</view>
     <view class="metric-grid">
-      <view class="metric-item">
-        <text class="metric-label">在线航空器</text>
-        <text class="metric-value">{{onlineAircraft}}</text>
-      </view>
-      <view class="metric-item">
-        <text class="metric-label">今日任务</text>
-        <text class="metric-value">{{todayTasks}}</text>
-      </view>
-      <view class="metric-item risk">
-        <text class="metric-label">紧急事件</text>
-        <text class="metric-value">{{urgentEvents}}</text>
-      </view>
+      <view class="metric-item" aria-role="button" aria-label="查看巡检任务" bindtap="openTasks"><text class="metric-label">今日执行任务</text><text class="metric-value">{{todayTasks}}</text></view>
+      <view class="metric-item" aria-role="button" aria-label="查看火情事件" bindtap="openEvents"><text class="metric-label">待复核事件</text><text class="metric-value">{{urgentEvents}}</text></view>
+      <view class="metric-item"><text class="metric-label">在线航空器</text><text class="metric-value">{{onlineAircraft}}</text></view>
     </view>
-    <view wx:if="{{warning}}" class="data-warning">{{warning}}</view>
+    <view wx:if="{{authenticated}}" class="summary-footer"><text class="muted">{{generatedAt ? '最后更新 ' + generatedAt : '正在读取数据'}}</text><text class="auto-refresh-label">每 5 秒自动更新</text></view>
+    <block wx:if="{{warning}}"><button class="text-button" bindtap="toggleWarnings">{{showWarnings ? '收起数据说明' : '查看数据说明'}}</button><view wx:if="{{showWarnings}}" class="data-warning">{{warning}}</view></block>
   </view>
-
-  <view class="section-title">工作入口</view>
-  <view class="entry-grid">
-    <button class="panel entry-card" bindtap="openTasks">
-      <text class="entry-index">01</text>
-      <text class="entry-title">巡检任务</text>
-      <text class="entry-note">查看航线、任务状态与执行进度</text>
-    </button>
-    <button class="panel entry-card" bindtap="openReports">
-      <text class="entry-index">02</text>
-      <text class="entry-title">巡检报告</text>
-      <text class="entry-note">查看生成状态、签阅与归档结果</text>
-    </button>
-    <button class="panel entry-card full" bindtap="openMine">
-      <text class="entry-index">03</text>
-      <text class="entry-title">账号与系统</text>
-      <text class="entry-note">查看账号绑定、服务状态和版本信息</text>
-    </button>
-  </view>
-
-  <view class="panel safety-panel">
-    <view class="safety-head">
-      <text>飞行操作安全状态</text>
-      <text class="status-pill warning">{{flightControlEnabled ? '受控开放' : '默认关闭'}}</text>
-    </view>
-    <text class="safety-copy">首阶段仅提供只读态势。航线执行必须完成持久化指令、二次确认、飞手现场确认，并通过对应飞机、控制端、负载和固件组合的真机实飞验收后才能灰度开放。</text>
-  </view>
-
-  <button wx:if="{{!authenticated}}" class="primary-action" disabled="{{!configured || loading}}" loading="{{loading}}" bindtap="handleLogin">
-    微信登录并进入
-  </button>
+  <view wx:if="{{error}}" class="notice notice-error">{{error}}</view>
+  <view wx:if="{{!authenticated}}" class="action-stack"><button class="primary-action" bindtap="handleLogin">微信登录并进入</button></view>
+  <block wx:if="{{authenticated && hasLoaded}}">
+    <view class="section-heading"><view class="section-title">待复核动态</view><button class="text-button" bindtap="openEvents">查看全部</button></view>
+    <block wx:for="{{urgentItems}}" wx:key="id"><template is="recordCard" data="{{item}}" /></block>
+    <view wx:if="{{!urgentItems.length}}" class="panel empty">暂无待复核事件</view>
+    <view class="section-heading"><view class="section-title">巡护进行时</view><button class="text-button" bindtap="openTasks">查看全部</button></view>
+    <block wx:for="{{activeTasks}}" wx:key="id"><template is="recordCard" data="{{item}}" /></block>
+    <view wx:if="{{!activeTasks.length}}" class="panel empty">暂无执行中的任务</view>
+    <view class="section-heading"><view class="section-title">最新执行报告</view><button class="text-button" bindtap="openReports">查看全部</button></view>
+    <block wx:for="{{reports}}" wx:key="id"><template is="recordCard" data="{{item}}" /></block>
+    <view wx:if="{{!reports.length}}" class="panel empty">暂无任务执行报告</view>
+  </block>
 </view>

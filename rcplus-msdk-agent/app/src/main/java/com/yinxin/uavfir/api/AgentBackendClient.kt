@@ -134,6 +134,8 @@ class AgentBackendClient(
         thermalSupported: Boolean = false,
         cameraCapability: CameraCapability? = null,
         updatedAt: Long = System.currentTimeMillis(),
+        flying: Boolean? = null,
+        flightMode: String? = null,
     ): MsdkDeviceStateRequest = MsdkDeviceStateRequest(
         gatewaySn = gatewaySn,
         aircraftSn = aircraftSn,
@@ -154,6 +156,8 @@ class AgentBackendClient(
         gpsCount = gpsCount,
         rtkCount = rtkCount,
         positionFixed = positionFixed,
+        flying = flying,
+        flightMode = flightMode,
         updatedAt = updatedAt,
         capabilities = mapOf(
             "takeoff" to false,

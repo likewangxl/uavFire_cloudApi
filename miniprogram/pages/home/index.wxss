@@ -1,161 +1,24 @@
-.topbar {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24rpx;
-  padding: 10rpx 2rpx 30rpx;
-}
-
-.eyebrow,
-.panel-kicker {
-  color: #45ddff;
-  font-size: 20rpx;
-  letter-spacing: 3rpx;
-}
-
-.product-title {
-  margin-top: 8rpx;
-  color: #f4f8ff;
-  font-size: 42rpx;
-  font-weight: 700;
-  letter-spacing: 1rpx;
-}
-
-.workspace-name {
-  margin-top: 8rpx;
-  color: #8fa6c1;
-  font-size: 24rpx;
-}
-
-.situation-panel {
-  padding: 30rpx;
-}
-
-.headline {
-  margin-top: 16rpx;
-  color: #e9fbff;
-  font-size: 36rpx;
-  font-weight: 650;
-  line-height: 1.4;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14rpx;
-  margin-top: 28rpx;
-}
-
-.metric-item {
-  min-width: 0;
-  padding: 22rpx 16rpx;
-  border: 1rpx solid rgba(103, 184, 255, 0.16);
-  border-radius: 14rpx;
-  background: rgba(103, 184, 255, 0.07);
-}
-
-.metric-item.risk {
-  border-color: rgba(255, 97, 114, 0.16);
-  background: rgba(255, 97, 114, 0.07);
-}
-
-.metric-label,
-.metric-value {
-  display: block;
-}
-
-.metric-label {
-  overflow: hidden;
-  color: #8fa6c1;
-  font-size: 21rpx;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metric-value {
-  margin-top: 10rpx;
-  color: #dff6ff;
-  font-size: 38rpx;
-  font-weight: 700;
-}
-
-.risk .metric-value {
-  color: #ffb3a3;
-}
-
-.data-warning {
-  margin-top: 22rpx;
-  padding-top: 20rpx;
-  border-top: 1rpx solid rgba(255, 191, 77, 0.14);
-  color: #ffd38a;
-  font-size: 22rpx;
-  line-height: 1.65;
-}
-
-.entry-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16rpx;
-}
-
-.entry-card {
-  min-height: 218rpx;
-  margin: 0;
-  padding: 24rpx;
-  text-align: left;
-  line-height: 1.4;
-}
-
-.entry-card.full {
-  grid-column: 1 / -1;
-  min-height: 164rpx;
-}
-
-.entry-index,
-.entry-title,
-.entry-note {
-  display: block;
-}
-
-.entry-index {
-  color: #45ddff;
-  font-size: 20rpx;
-  letter-spacing: 2rpx;
-}
-
-.entry-title {
-  margin-top: 18rpx;
-  color: #f4f8ff;
-  font-size: 30rpx;
-  font-weight: 650;
-}
-
-.entry-note {
-  margin-top: 10rpx;
-  color: #8fa6c1;
-  font-size: 22rpx;
-  line-height: 1.6;
-}
-
-.safety-panel {
-  margin-top: 30rpx;
-  padding: 26rpx;
-  border-color: rgba(255, 191, 77, 0.2);
-}
-
-.safety-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #f4f8ff;
-  font-size: 28rpx;
-  font-weight: 650;
-}
-
-.safety-copy {
-  display: block;
-  margin-top: 18rpx;
-  color: #9fb4ca;
-  font-size: 23rpx;
-  line-height: 1.7;
-}
+.topbar { display: flex; align-items: flex-start; gap: 20rpx; margin: 8rpx 0 22rpx; }
+.topbar-main { flex: 1; min-width: 0; }
+.product-title { color: #20242a; font-size: 34rpx; font-weight: 700; line-height: 1.5; word-break: break-all; }
+.workspace-name { margin-top: 8rpx; color: #626973; font-size: 25rpx; word-break: break-all; }
+.situation-panel { padding: 28rpx; background: #fafbfc; }
+.panel-kicker { color: #626973; font-size: 25rpx; }
+.headline { margin-top: 10rpx; color: #20242a; font-size: 36rpx; font-weight: 650; line-height: 1.5; word-break: break-all; }
+.metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14rpx; margin-top: 24rpx; }
+.metric-item { min-width: 0; padding: 18rpx 14rpx; border: 1rpx solid #e0e4e9; border-radius: 12rpx; background: #ffffff; }
+.metric-label { display: block; min-height: 68rpx; color: #626973; font-size: 24rpx; line-height: 1.5; white-space: normal; word-break: break-all; }
+.metric-value { display: block; margin-top: 8rpx; color: #20242a; font-size: 38rpx; font-weight: 650; line-height: 1.3; word-break: break-all; }
+.summary-footer { display: flex; align-items: center; justify-content: space-between; gap: 16rpx; margin-top: 20rpx; }
+.summary-footer .muted { flex: 1; min-width: 0; font-size: 24rpx; }
+.summary-footer { flex-wrap: wrap; }
+.situation-panel { background:#fff; }
+.product-title { font-size:40rpx; letter-spacing:-.5rpx; }
+.workspace-name { font-size:28rpx; color:#636366; }
+.headline { font-size:56rpx; font-weight:650; letter-spacing:-.7rpx; }
+.metric-grid { gap:0; background:#f2f2f7; border-radius:18rpx; padding:6rpx; }
+.metric-item { border:0; border-radius:0; background:transparent; padding:18rpx 14rpx; }
+.metric-item + .metric-item { border-left:1rpx solid #d9d9df; }
+.metric-label { font-size:24rpx; color:#636366; min-height:70rpx; }
+.metric-value { font-size:44rpx; font-weight:600; }
+.data-warning { margin: 12rpx 0 0; color: #565e69; font-size: 25rpx; line-height: 1.7; word-break: break-all; }

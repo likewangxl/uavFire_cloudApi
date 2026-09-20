@@ -1,21 +1,23 @@
 <view class="page-shell">
-  <view class="panel system-card">
-    <view class="system-row">
-      <text>后端 HTTPS 地址</text>
-      <text class="status-pill {{apiStatus === '已配置' ? '' : 'warning'}}">{{apiStatus}}</text>
+  <view class="account-heading"><view class="section-title">我的工作台</view><text class="status-pill">{{status}}</text></view>
+  <view wx:if="{{error}}" class="notice notice-error">{{error}}</view>
+  <block wx:if="{{!authenticated}}">
+    <view class="panel box"><view class="binding-title">{{status === '待审核' ? '申请已提交' : '微信账号登录'}}</view><view class="muted">{{status === '待审核' ? '管理员核实后即可访问所属工作空间。你可以刷新审核结果。' : '登录后绑定已有系统账号，查看获授权的任务与火情数据。'}}</view><view class="action-stack"><button class="primary-action" bindtap="login" loading="{{loading}}" disabled="{{loading}}">{{status === '待审核' ? '刷新审核结果' : status === '待绑定' ? '重新获取微信授权' : '微信登录'}}</button></view></view>
+    <view wx:if="{{status === '待绑定' && bindingTicket}}" class="panel box">
+      <view class="binding-title">绑定平台账号</view><view class="muted">填写电脑端火情平台的登录用户名。</view>
+      <view class="form-field"><label class="form-label" for="binding-username">已有系统账号</label><input id="binding-username" class="form-input {{fieldErrors.username ? 'invalid' : ''}}" data-field="username" value="{{username}}" bindinput="input" maxlength="128" cursor-spacing="24" placeholder="填写平台登录用户名" placeholder-style="color:#707782" /><text wx:if="{{fieldErrors.username}}" class="field-error">{{fieldErrors.username}}</text></view>
+      <view class="form-field"><label class="form-label" for="binding-name">姓名</label><input id="binding-name" class="form-input {{fieldErrors.displayName ? 'invalid' : ''}}" data-field="displayName" value="{{displayName}}" bindinput="input" maxlength="80" cursor-spacing="24" placeholder="填写真实姓名" placeholder-style="color:#707782" /><text wx:if="{{fieldErrors.displayName}}" class="field-error">{{fieldErrors.displayName}}</text></view>
+      <view class="form-field"><label class="form-label" for="binding-organization">所属单位</label><input id="binding-organization" class="form-input {{fieldErrors.organization ? 'invalid' : ''}}" data-field="organization" value="{{organization}}" bindinput="input" maxlength="160" cursor-spacing="24" confirm-type="done" placeholder="填写单位或部门名称" placeholder-style="color:#707782" /><text wx:if="{{fieldErrors.organization}}" class="field-error">{{fieldErrors.organization}}</text></view>
+      <view class="muted form-note">提交后等待审核，填写的账号不会自动获得授权。</view>
+      <view class="action-stack"><button class="primary-action" bindtap="bind" loading="{{loading}}" disabled="{{loading}}">提交绑定申请</button></view>
     </view>
-    <view class="system-row">
-      <text>微信账号</text>
-      <text class="muted">{{loginStatus}}</text>
-    </view>
-    <view class="system-row">
-      <text>客户端版本</text>
-      <text class="muted">{{clientVersion}}</text>
-    </view>
-    <view class="system-row">
-      <text>飞行控制</text>
-      <text class="status-pill warning">{{flightControlStatus}}</text>
-    </view>
-  </view>
-  <button class="secondary-action" bindtap="clearSession">清除本机登录凭证</button>
+  </block>
+  <block wx:if="{{authenticated}}">
+    <view wx:if="{{me}}" class="panel box"><view class="profile-name">{{me.user.displayName}}</view><view class="profile-workspace">{{me.workspace.name}}</view><text class="muted">账号已绑定 · 业务信息只读访问</text></view>
+    <view wx:else class="panel empty"><view>{{profileLoading ? '正在读取账号信息…' : '账号信息暂不可用'}}</view><button wx:if="{{!profileLoading}}" class="compact-button" bindtap="loadMe">重新加载</button></view>
+    <block wx:if="{{me}}"><view class="section-heading"><view class="section-title">通知偏好</view><text class="muted">{{preferenceSaving ? '保存中…' : ''}}</text></view>
+      <view class="panel box"><label class="preference-row"><text class="preference-label">紧急事件</text><switch color="#454d58" disabled="{{preferenceSaving || loading}}" checked="{{preferences.urgentEvents}}" aria-label="紧急事件" data-key="urgentEvents" bindchange="preference" /></label><label class="preference-row"><text class="preference-label">任务动态</text><switch color="#454d58" disabled="{{preferenceSaving || loading}}" checked="{{preferences.taskUpdates}}" aria-label="任务动态" data-key="taskUpdates" bindchange="preference" /></label><label class="preference-row"><text class="preference-label">报告完成</text><switch color="#454d58" disabled="{{preferenceSaving || loading}}" checked="{{preferences.reportReady}}" aria-label="报告完成" data-key="reportReady" bindchange="preference" /></label><view class="muted form-note">当前仅保存通知偏好，微信消息推送尚未开通。</view></view>
+    </block>
+    <view class="account-footer"><button class="secondary-action" bindtap="logout" loading="{{loading}}" disabled="{{loading || preferenceSaving}}">退出登录</button></view>
+  </block>
 </view>

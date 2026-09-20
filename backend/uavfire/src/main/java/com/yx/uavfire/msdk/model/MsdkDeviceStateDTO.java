@@ -20,11 +20,15 @@ public class MsdkDeviceStateDTO {
 
     private String connectionState;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceName;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String model;
 
     private String mode;
+    private Boolean flying;
+    private String flightMode;
 
     private Double latitude;
 
@@ -60,6 +64,7 @@ public class MsdkDeviceStateDTO {
 
     private Map<String, Boolean> capabilities;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String aircraftModelKey;
     private String controllerModelKey;
     private List<PayloadCapabilityDTO> payloads;

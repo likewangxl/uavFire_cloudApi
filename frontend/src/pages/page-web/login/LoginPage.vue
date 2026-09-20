@@ -1,10 +1,10 @@
 <template>
   <main class="login-page">
-    <img class="scene-background" src="/@/assets/login/fire-response-panorama-user-v9.png" alt="林区无人机消防合成场景：近景运载机通过长吊索悬挂红色封闭式灭火载荷，远处运载机吊挂红色灭火桶洒水，无现场人员" />
+    <img class="scene-background" :src="sceneBackgroundUrl" alt="林区无人机消防合成场景：近景运载机通过长吊索悬挂红色封闭式灭火载荷，远处运载机吊挂红色灭火桶洒水，无现场人员" />
     <div class="scene-shade" aria-hidden="true"></div>
     <div class="scene-aircraft-layer">
-      <img class="scene-recon-aircraft" src="/@/assets/login/matrice-4d-rear-transparent-v1.png" alt="远处的灰色 Matrice 4D 系列巡检无人机，侧后方视角，云台朝向远处" />
-      <img class="scene-recon-aircraft scene-recon-aircraft--firepoint" src="/@/assets/login/matrice-4d-rear-transparent-v1.png" alt="右侧火点上方的灰色 Matrice 4D 系列巡检无人机，侧后方视角，云台朝向远处" />
+      <img class="scene-recon-aircraft" :src="reconAircraftUrl" alt="远处的灰色 DJI Matrice 4D 系列巡检无人机，侧后方视角，云台朝向远处" />
+      <img class="scene-recon-aircraft scene-recon-aircraft--firepoint" :src="reconAircraftUrl" alt="右侧火点上方的灰色 DJI Matrice 4D 系列巡检无人机，侧后方视角，云台朝向远处" />
     </div>
     <div class="login-layout">
       <section class="login-story" aria-labelledby="platform-title">
@@ -29,6 +29,8 @@
 
 <script lang="ts" setup>
 import { ref, onMounted } from 'vue'
+import sceneBackgroundUrl from '/@/assets/login/fire-response-panorama-user-v9.png'
+import reconAircraftUrl from '/@/assets/login/matrice-4d-rear-transparent-v1.png'
 import LoginForm from './components/LoginForm.vue'
 import { useLogin } from './composables/use-login'
 

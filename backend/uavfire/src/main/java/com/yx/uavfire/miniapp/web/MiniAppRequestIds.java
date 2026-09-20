@@ -27,6 +27,7 @@ public final class MiniAppRequestIds {
     public static String apply(HttpServletRequest request, HttpServletResponse response) {
         String requestId = resolve(request);
         response.setHeader(HEADER, requestId);
+        response.setHeader("Cache-Control", "no-store");
         return requestId;
     }
 

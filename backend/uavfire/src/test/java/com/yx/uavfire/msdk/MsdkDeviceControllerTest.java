@@ -44,7 +44,7 @@ class MsdkDeviceControllerTest {
                 .andExpect(jsonPath("$.data[0].aircraftSn").value("AIR-1"))
                 .andExpect(jsonPath("$.data[0].gatewaySn").value("RC_PLUS_LOCAL"))
                 .andExpect(jsonPath("$.data[0].deviceName").value("DJI Matrice 4T"))
-                .andExpect(jsonPath("$.data[0].model").value("Matrice 4T"))
+                .andExpect(jsonPath("$.data[0].model").value("DJI Matrice 4T"))
                 .andExpect(jsonPath("$.data[0].latitude").value(34.1))
                 .andExpect(jsonPath("$.data[0].longitude").value(108.2))
                 .andExpect(jsonPath("$.data[0].batteryPercent").value(88));

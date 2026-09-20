@@ -22,6 +22,8 @@ data class MsdkDeviceStateRequest(
     val gpsCount: Int? = null,
     val rtkCount: Int? = null,
     val positionFixed: Boolean? = null,
+    val flying: Boolean? = null,
+    val flightMode: String? = null,
     val updatedAt: Long = System.currentTimeMillis(),
     val agentVersionName: String? = null,
     val agentVersionCode: Long? = null,

@@ -3,12 +3,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8')
 
 test('runtime feature flags keep flight control disabled', () => {
-  assert.match(read('config/runtime.js'), /flightControlEnabled:\s*false/)
+  const config = createRequire(import.meta.url)('../config/runtime.js').getRuntimeConfig()
+  assert.equal(config.flightControlEnabled, false)
+  assert.ok(Object.isFrozen(config))
 })
 
 test('HTTP client uses bearer header and never places the token in the URL', () => {
@@ -17,9 +20,10 @@ test('HTTP client uses bearer header and never places the token in the URL', () 
   assert.doesNotMatch(source, /[?&](token|accessToken)=/)
 })
 
-test('project configuration contains no production AppID', () => {
+test('project configuration accepts only tourist or a real AppID and never an AppSecret', () => {
   const config = JSON.parse(read('project.config.json'))
-  assert.equal(config.appid, 'touristappid')
+  assert.match(config.appid, /^(touristappid|wx[0-9a-f]{16})$/i)
+  assert.equal(config.appSecret, undefined)
 })
 
 test('home page labels unavailable metrics instead of inventing demo values', () => {

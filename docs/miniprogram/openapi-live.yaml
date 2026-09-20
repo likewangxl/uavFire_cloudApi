@@ -1,0 +1,402 @@
+openapi: 3.0.3
+info:
+  title: UAVFire 小程序当前实现接口
+  version: 0.2.0
+  description: |
+    仅描述当前代码，部署与微信真机验收状态见 08-live-auth-and-data.md。
+    所有业务读取以服务端批准绑定的工作空间为准，不接受客户端 workspaceId。
+    普通业务时间字段为 Unix 毫秒；generatedAt/serverTime 为 ISO 8601；令牌有效期单位为秒。
+    未实现正式 PDF、签阅、直播、通知发送、飞行控制或 HTTP 管理员审核接口。
+servers:
+  - url: /miniapp/api/v1
+security:
+  - MiniappBearer: []
+paths:
+  /auth/wechat/login:
+    post:
+      summary: 使用 wx.login 的临时 code 登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, deviceId, clientVersion]
+              properties:
+                code: {type: string, minLength: 1, maxLength: 256}
+                deviceId: {type: string, minLength: 8, maxLength: 128}
+                clientVersion: {type: string, minLength: 1, maxLength: 32}
+      responses:
+        '200':
+          description: 已批准返回业务会话；未批准仅返回申请票据，无业务权限
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Envelope'}
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - {$ref: '#/components/schemas/Session'}
+                          - {$ref: '#/components/schemas/BindingTicket'}
+        default: {$ref: '#/components/responses/Error'}
+  /auth/bindings:
+    post:
+      summary: 使用一次性 bindingTicket 提交账号绑定申请
+      description: 仅 UNBOUND 或 REJECTED 可申请；管理员通过服务端审核工具批准，用户重新微信登录。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bindingTicket, username, displayName, organization]
+              properties:
+                bindingTicket: {type: string, minLength: 16, maxLength: 256}
+                username: {type: string, minLength: 1, maxLength: 128}
+                displayName: {type: string, minLength: 1, maxLength: 80}
+                organization: {type: string, minLength: 1, maxLength: 160}
+      responses:
+        '200':
+          description: data 为 loginStatus=PENDING_APPROVAL、bindingStatus=PENDING，不签发业务令牌
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Envelope'}
+        default: {$ref: '#/components/responses/Error'}
+  /auth/refresh:
+    post:
+      summary: 同一设备轮换访问及刷新令牌
+      description: 会话绝对最长 7 天，刷新不延长会话寿命，旧访问和刷新令牌立即失效。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken, deviceId]
+              properties:
+                refreshToken: {type: string, minLength: 16, maxLength: 256}
+                deviceId: {type: string, minLength: 8, maxLength: 128}
+      responses:
+        '200':
+          description: data 为新的 Session
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Envelope'}
+                  - type: object
+                    properties:
+                      data: {$ref: '#/components/schemas/Session'}
+        default: {$ref: '#/components/responses/Error'}
+  /auth/logout:
+    post:
+      summary: 撤销当前会话（含刷新令牌）
+      responses:
+        '200':
+          description: data.loggedOut 为 true
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Envelope'}
+        default: {$ref: '#/components/responses/Error'}
+  /me:
+    get:
+      summary: 当前已批准用户、工作空间和已实现能力
+      description: data 包含 user、workspace、bindingStatus、capabilities；当前角色 VIEWER，飞行控制等后续能力为 false。
+      responses: &readResponses
+        '200': {$ref: '#/components/responses/Read'}
+        default: {$ref: '#/components/responses/Error'}
+  /dashboard/summary:
+    get:
+      summary: 所属工作空间首页摘要
+      description: |
+        data 包含 metrics(todayTasks,urgentEvents,onlineAircraft)、conclusion、activeTasks、urgentEvents、reports、warnings、partial、dataStatus、generatedAt。
+        今日任务按北京时间今日执行时间统计，待复核状态为 NEW/CANDIDATE/LOW_CONFIDENCE。
+        在线航空器仅计已绑定飞机；缺失、新鲜度不足或列表不完整时返回 null，不能据此推断离线。
+        当前 partial=true、dataStatus=PARTIAL；执行报告来源 TASK_RECORD。
+      responses: *readResponses
+  /inspection-tasks:
+    get:
+      summary: 巡检任务列表
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/Status'}
+        - name: keyword
+          in: query
+          schema: {type: string, maxLength: 128, default: ''}
+          description: 名称、任务 ID 或机型关键词，按字面搜索
+      responses: &pageResponses
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+  /inspection-tasks/{id}:
+    parameters: &idParameters
+      - {$ref: '#/components/parameters/Id'}
+    get:
+      summary: 任务详情、航点和已记录时间线
+      description: |
+        data 含 taskId,name,aircraftModelKey,aircraftSn,status,taskStatus,taskStatusReason,taskProgress,statusLabel,dataStatus,
+        lastProgressTime,executedTime,preparedTime,publishTime,createTime,updateTime,waypoints,defaultHeight,totalWaypoints,currentWaypointIndex,mediaCount,timeline。
+        源字段允许 null。执行中/暂停超过 60 秒未更新时 dataStatus=STALE，其他为 RECORDED。
+        waypoints 保留数据库 JSON 结构；解析失败为空数组并附 routeWarning。
+      responses: *readResponses
+  /inspection-tasks/{id}/timeline:
+    parameters: *idParameters
+    get:
+      summary: 任务已记录时间线
+      description: data 为数组，元素为 time(Unix 毫秒)、title；只包含现有任务的已记录时间点。
+      responses: *readResponses
+  /events:
+    get:
+      summary: 未删除火情列表
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/Status'}
+      responses: *pageResponses
+  /events/{id}:
+    parameters: *idParameters
+    get:
+      summary: 火情详情与历史
+      description: |
+        data 含 eventId,name,source,deviceSn,fireLevel,confidence,status,confirmedStatus,statusLabel,lat,lng,alt,
+        geoQuality,geoMethod,geoErrorRadiusM,geoSourceTs,eventTimestamp,createTime,updateTime,coordinateReference,positionNote,timeline,mediaStatus。
+        源字段允许 null。坐标标注 WGS84，不自动转换；媒体尚未集成，mediaStatus=NOT_INTEGRATED。
+      responses: *readResponses
+  /events/{id}/timeline:
+    parameters: *idParameters
+    get:
+      summary: 火情已记录历史（最多 200 条，时间升序）
+      description: data 为数组，元素为 action、decisionReason、time(Unix 毫秒)。
+      responses: *readResponses
+  /reports:
+    get:
+      summary: 有执行时间的任务记录报告
+      description: items 为任务列表字段加 reportId(等于 taskId)、source=TASK_RECORD；名称附执行记录标识，尚无正式 PDF。
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - name: savedOnly
+          in: query
+          schema: {type: boolean, default: false}
+      responses: *pageResponses
+  /reports/{id}:
+    parameters: *idParameters
+    get:
+      summary: 执行记录报告详情
+      description: 任务详情字段加 reportId、source=TASK_RECORD、reportNote、saved。无执行时间返回 404。没有签阅、归档或现场安全结论。
+      responses: *readResponses
+  /reports/{id}/bookmark:
+    parameters: *idParameters
+    put:
+      summary: 保存当前账号与工作空间的报告收藏状态
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [saved]
+              properties:
+                saved: {type: boolean}
+      responses:
+        '200':
+          description: data.saved 返回保存后的值
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Envelope'}
+        default: {$ref: '#/components/responses/Error'}
+  /devices:
+    get:
+      summary: 当前工作空间已绑定设备（按序最多 500 台）
+      description: |
+        data.items 含 deviceSn,deviceName,domain,dataStatus,online；有遥测时附 updatedAt,model,batteryPercent。
+        domain 沿用 SDK：0 飞机、1 负载、2 遥控器、3 机场。无状态 UNKNOWN，超过 30 秒 STALE，否则 FRESH。
+        online 及 batteryPercent 缺失或过期时为 null；仅绑定记录与遥测 SN 对应，绝不读取其他工作空间设备。
+      responses: *readResponses
+  /notification-preferences:
+    get:
+      summary: 当前账号通知偏好（尚未发送微信通知）
+      responses: &preferenceResponses
+        '200':
+          description: data 为偏好值，另有 wechatSubscriptionEnabled=false
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Envelope'}
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - {$ref: '#/components/schemas/Preferences'}
+                          - type: object
+                            properties:
+                              wechatSubscriptionEnabled: {type: boolean, enum: [false]}
+        default: {$ref: '#/components/responses/Error'}
+    put:
+      summary: 持久化账号偏好，不申请微信订阅授权
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Preferences'}
+      responses: *preferenceResponses
+  /inspection-tasks/{id}/flight-report:
+    get:
+      summary: 查看任务某次执行的飞行报告与分页原始记录
+      description: 只读取已批准工作空间。没有遥测时指标为 null，不使用计划值补算。时间为 Unix 毫秒，速度 m/s，高度和轨迹距离 m，电量消耗为百分点。
+      parameters:
+        - {$ref: '#/components/parameters/Id'}
+        - {name: runId, in: query, schema: {type: string}, description: 缺省选择最近一次执行}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, maximum: 100000, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: snapshotRecordId, in: query, schema: {type: integer, format: int64}, description: 后续记录页带上首屏返回的快照上限，避免实时新增数据导致翻页漂移}
+      responses:
+        '200':
+          description: data 为飞行报告；任务详情与报告详情也内嵌同一结构。
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Envelope'}
+                  - type: object
+                    properties:
+                      data: {$ref: '#/components/schemas/FlightReport'}
+        default: {$ref: '#/components/responses/Error'}
+  /inspection-tasks/{id}/flight-report/related:
+    get:
+      summary: 分页读取本次执行关联的全部火情或媒体元数据
+      description: 火情为同设备同记录时段的候选关联，不能当作确认的任务归属；媒体按执行编号匹配，不返回对象存储凭证。
+      parameters:
+        - {$ref: '#/components/parameters/Id'}
+        - {name: runId, in: query, required: true, schema: {type: string}}
+        - {name: kind, in: query, required: true, schema: {type: string, enum: [events, media]}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, maximum: 100000, default: 1}}
+        - {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: snapshotRecordId, in: query, schema: {type: integer, format: int64}}
+      responses:
+        '200': {$ref: '#/components/responses/Page'}
+        default: {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    MiniappBearer:
+      type: http
+      scheme: bearer
+      description: 服务端签发 mpa_ 前缀随机令牌。PC JWT 不可用于小程序。
+  parameters:
+    Id: {name: id, in: path, required: true, schema: {type: string}}
+    Page: {name: page, in: query, schema: {type: integer, minimum: 1, maximum: 10000, default: 1}}
+    PageSize: {name: pageSize, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+    Status:
+      name: status
+      in: query
+      schema: {type: string, maxLength: 128, default: ''}
+      description: 任务使用 task_status，缺失时使用 status；completed 同时匹配 completed/finished。火情 PENDING_REVIEW 匹配 NEW/CANDIDATE/LOW_CONFIDENCE；其他状态按原值精确匹配。
+  schemas:
+    FlightReport:
+      type: object
+      required: [taskId, aircraftName, planned, metrics, quality, records, timeline, relatedEvents, media]
+      properties:
+        taskId: {type: string}
+        taskName: {type: string}
+        aircraftName: {type: string, nullable: true, description: 官方完整机型名称}
+        aircraftSn: {type: string, nullable: true}
+        flightId: {type: string}
+        runId: {type: string}
+        runs: {type: array, items: {type: object}, description: 该任务已持久化的各次执行}
+        snapshotRecordId: {type: integer, format: int64}
+        plannedSource: {type: string, enum: [EXECUTION_SNAPSHOT, CURRENT_TASK]}
+        planned: {type: object, description: 执行开始时的计划快照；无执行快照时为当前任务设置，不是实测值}
+        metrics:
+          type: object
+          description: 起飞/返航/落地时间与电量、实际飞行时长、有效采样段的平均/最大速度、高度、风速、轨迹距离及记录数；缺少证据时值为 null。
+          additionalProperties: {nullable: true}
+        quality:
+          type: object
+          properties:
+            status: {type: string, enum: [NOT_RECORDED, PARTIAL, OBSERVED]}
+            recordCount: {type: integer}
+            gapCount: {type: integer}
+            missingFields: {type: array, items: {type: string}}
+            warnings: {type: array, items: {type: string}}
+        records: {$ref: '#/components/schemas/Page'}
+        recordedMilestones: {type: array, items: {type: object}, description: 保存于任务执行快照的创建/发布/准备/执行请求时间}
+        timeline: {type: array, items: {type: object}, description: 最多 200 条摘要，完整执行事件通过 records 分页访问}
+        series: {type: array, items: {type: object}, description: 最多 240 点的采样序列，不代替完整记录}
+        relatedEvents: {type: object, description: items/total/hasMore/available/association}
+        media: {type: object, description: items/total/hasMore/available/note，仅文件元数据}
+    Envelope:
+      type: object
+      required: [code, message, requestId, serverTime]
+      properties:
+        code: {type: string, description: 成功为 OK，失败为业务错误码}
+        message: {type: string}
+        requestId: {type: string}
+        serverTime: {type: string, format: date-time}
+        data: {nullable: true, description: 成功数据，错误时省略}
+    Session:
+      type: object
+      required: [loginStatus, bindingStatus, accessToken, refreshToken, tokenType, expiresIn, sessionId, accessTokenExpiresIn, refreshTokenExpiresIn]
+      properties:
+        loginStatus: {type: string, enum: [AUTHENTICATED]}
+        bindingStatus: {type: string, enum: [APPROVED]}
+        accessToken: {type: string}
+        refreshToken: {type: string}
+        tokenType: {type: string, enum: [Bearer]}
+        sessionId: {type: string}
+        expiresIn: {type: integer, description: 本次访问令牌有效秒数，与 accessTokenExpiresIn 一致}
+        accessTokenExpiresIn: {type: integer, maximum: 900}
+        refreshTokenExpiresIn: {type: integer, maximum: 604800}
+    BindingTicket:
+      type: object
+      required: [loginStatus, bindingStatus, bindingTicket, expiresIn]
+      properties:
+        loginStatus: {type: string, enum: [BINDING_REQUIRED, PENDING_APPROVAL]}
+        bindingStatus: {type: string, enum: [UNBOUND, REJECTED, PENDING]}
+        bindingTicket: {type: string, description: 仅可申请绑定，无业务权限}
+        expiresIn: {type: integer, enum: [600]}
+    Preferences:
+      type: object
+      description: PUT 只允许这三个键，可只提交部分字段；输出含全部偏好和订阅能力字段。
+      properties:
+        urgentEvents: {type: boolean}
+        taskUpdates: {type: boolean}
+        reportReady: {type: boolean}
+    Page:
+      type: object
+      required: [items, total, page, pageSize, hasMore]
+      properties:
+        items: {type: array, items: {type: object, additionalProperties: true}}
+        total: {type: integer, format: int64}
+        page: {type: integer}
+        pageSize: {type: integer}
+        hasMore: {type: boolean}
+  responses:
+    Read:
+      description: 成功，data 字段见对应接口说明。响应含 X-Request-Id 和 Cache-Control=no-store。
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Envelope'}
+    Page:
+      description: 真实数据分页，列表元素字段见详情接口说明（不含航点和时间线）。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - {$ref: '#/components/schemas/Envelope'}
+              - type: object
+                properties:
+                  data: {$ref: '#/components/schemas/Page'}
+    Error:
+      description: |
+        400 参数错误，401 凭证失效/微信 code 无效，403 未授权/停用，404 不存在或不属于当前工作空间，
+        409 绑定状态已变化，429 认证限流，503 开关关闭/微信配置缺失/上游或数据库不可用，500 未预期错误。
+        错误不返回微信上游响应、密钥、OpenID 或 SQL。
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Envelope'}

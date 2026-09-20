@@ -23,8 +23,10 @@ public class PlannedWaylineDTO {
 
     private String name;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String aircraftModelKey;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String payloadModelKey;
 
     private Integer payloadPositionIndex;

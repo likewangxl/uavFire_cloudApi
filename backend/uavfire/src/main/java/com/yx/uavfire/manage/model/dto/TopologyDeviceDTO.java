@@ -12,6 +12,7 @@ import com.dji.sdk.cloudapi.tsa.TopologyDeviceModel;
  */
 public class TopologyDeviceDTO extends DeviceTopology {
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String model;
 
     private Boolean boundStatus;

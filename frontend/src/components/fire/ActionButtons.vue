@@ -56,7 +56,7 @@ const labelMap: Record<string, { label: string; danger?: boolean; secondary?: bo
   APPROVE: { label: '审批' },
   REJECT: { label: '驳回', danger: true },
   CANCEL: { label: '取消', danger: true },
-  PREPARE_FC100_DELIVERY: { label: '生成航线并推送FC100' },
+  PREPARE_FC100_DELIVERY: { label: '生成航线并推送DJI FlyCart 100' },
   GEN_WP: { label: '生成航点' },
   EXP_KMZ: { label: '导出 KMZ' },
   CREATE_DELIVERY_TASK: { label: '推送 Delivery' },
@@ -94,8 +94,8 @@ const visibleActions = computed(() => {
 const canPrepareFc100Delivery = computed(() => props.actions.some(a => routePreparationActions.has(a)))
 const prepareFc100DeliveryTitle = computed(() =>
   canPrepareFc100Delivery.value
-    ? '生成航线并推送FC100，推送后仍需人工启动任务'
-    : '先审批任务，填写FC100、起飞点和风场参数',
+    ? '生成航线并推送DJI FlyCart 100，推送后仍需人工启动任务'
+    : '先审批任务，填写DJI FlyCart 100、起飞点和风场参数',
 )
 
 function actionClassName (action: string) {
@@ -171,7 +171,7 @@ async function handle (action: string) {
       break
 
     case 'PREPARE_FC100_DELIVERY':
-      await doSimple(() => deliveryApi.prepareFireMissionDeliveryTask(no, op), '生成航线并推送FC100')
+      await doSimple(() => deliveryApi.prepareFireMissionDeliveryTask(no, op), '生成航线并推送DJI FlyCart 100')
       break
 
     case 'EXP_KMZ':

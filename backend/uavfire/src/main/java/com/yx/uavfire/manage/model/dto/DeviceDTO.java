@@ -27,12 +27,14 @@ public class DeviceDTO {
 
     private String deviceSn;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceName;
 
     private String workspaceId;
 
     private ControlSourceEnum controlSource;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceDesc;
 
     private String childDeviceSn;
@@ -55,6 +57,7 @@ public class DeviceDTO {
 
     private LocalDateTime boundTime;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String nickname;
 
     private String userId;

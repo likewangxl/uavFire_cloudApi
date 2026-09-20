@@ -20,7 +20,7 @@ public class Fc100ExceptionHandler {
 
     @ExceptionHandler(Fc100BusinessException.class)
     public ResponseEntity<ApiResult<?>> handleBusiness(Fc100BusinessException ex) {
-        log.warn("fc100 business error: {} - {}", ex.getErrorCode(), ex.getMessage());
+        log.warn("DJI FlyCart 100 business error: {} - {}", ex.getErrorCode(), ex.getMessage());
         if (ex instanceof PreflightBlockedException) {
             return ResponseEntity.status(httpFor(ex.getErrorCode()))
                 .body(ApiResult.error(ex.getErrorCode(), ex.getMessage(),
@@ -42,7 +42,7 @@ public class Fc100ExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResult<?>> handleAll(Exception ex) {
-        log.error("fc100 unexpected error", ex);
+        log.error("DJI FlyCart 100 unexpected error", ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
             .body(ApiResult.error(Fc100ErrorCode.INTERNAL_ERROR, ex.getMessage()));
     }

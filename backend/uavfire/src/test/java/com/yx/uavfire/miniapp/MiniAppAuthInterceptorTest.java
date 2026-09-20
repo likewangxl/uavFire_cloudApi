@@ -23,7 +23,7 @@ class MiniAppAuthInterceptorTest {
 
     @Test
     void missingBearerTokenReturnsContractShapedUnauthorizedResponse() throws Exception {
-        MiniAppAuthInterceptor interceptor = new MiniAppAuthInterceptor(properties, new ObjectMapper());
+        MiniAppAuthInterceptor interceptor = new MiniAppAuthInterceptor(properties, new ObjectMapper(), org.mockito.Mockito.mock(com.yx.uavfire.miniapp.service.MiniAppSessionService.class));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/miniapp/api/v1/me");
         request.addHeader("X-Request-Id", "req-from-miniapp");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -38,7 +38,7 @@ class MiniAppAuthInterceptorTest {
     @Test
     void disabledMiniAppFailsClosedBeforeAuthentication() throws Exception {
         properties.setEnabled(false);
-        MiniAppAuthInterceptor interceptor = new MiniAppAuthInterceptor(properties, new ObjectMapper());
+        MiniAppAuthInterceptor interceptor = new MiniAppAuthInterceptor(properties, new ObjectMapper(), org.mockito.Mockito.mock(com.yx.uavfire.miniapp.service.MiniAppSessionService.class));
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/miniapp/api/v1/me");
         MockHttpServletResponse response = new MockHttpServletResponse();
 

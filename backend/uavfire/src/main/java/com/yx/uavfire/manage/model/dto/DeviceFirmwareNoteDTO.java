@@ -18,6 +18,7 @@ import java.time.LocalDate;
 @AllArgsConstructor
 public class DeviceFirmwareNoteDTO {
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceName;
 
     private String productVersion;

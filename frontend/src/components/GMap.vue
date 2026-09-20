@@ -43,10 +43,10 @@
       </div>
       <div style="height: 82%;">
         <div class="flex-column flex-align-center flex-justify-center" style="margin-top: -5px; padding-top: 25px; float: left; width: 60px; background: #2d2d2d;">
-          <a-tooltip :title="osdVisible.model">
+          <a-tooltip :title="deviceModelName(osdVisible.model)">
             <div style="width: 90%;" class="flex-column flex-align-center flex-justify-center">
               <span><a-image :src="M30" :preview="false"/></span>
-              <span>{{ osdVisible.model }}</span>
+              <span>{{ deviceModelName(osdVisible.model) }}</span>
             </div>
           </a-tooltip>
         </div>
@@ -164,7 +164,7 @@
         <!-- 机场 -->
       <div class ="flex-display" style="border-bottom: 1px solid #515151;">
         <div class="flex-column flex-align-stretch flex-justify-center" style="width: 60px; background: #2d2d2d;">
-          <a-tooltip :title="osdVisible.model">
+          <a-tooltip :title="deviceModelName(osdVisible.model)">
             <div class="flex-column  flex-align-center flex-justify-center" style="width: 90%;">
               <span><RobotFilled style="font-size: 48px;"/></span>
               <span class="mt10">Dock</span>
@@ -300,10 +300,10 @@
       <!--  飞机-->
       <div class ="flex-display">
         <div class="flex-column flex-align-stretch flex-justify-center" style="width: 60px;  background: #2d2d2d;">
-          <a-tooltip :title="osdVisible.model">
+          <a-tooltip :title="deviceModelName(osdVisible.model)">
             <div style="width: 90%;" class="flex-column flex-align-center flex-justify-center">
               <span><a-image :src="M30" :preview="false"/></span>
-              <span>M30</span>
+              <span>DJI Matrice 30</span>
             </div>
           </a-tooltip>
         </div>
@@ -445,6 +445,7 @@
 </template>
 
 <script lang="ts">
+import { deviceModelName } from '/@/utils/device-models.mjs'
 import { computed, defineComponent, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   generateLineContent,
@@ -947,6 +948,7 @@ export default defineComponent({
       drawVisible,
       livestreamOthersVisible,
       osdVisible,
+      deviceModelName,
       pin,
       state,
       M30,

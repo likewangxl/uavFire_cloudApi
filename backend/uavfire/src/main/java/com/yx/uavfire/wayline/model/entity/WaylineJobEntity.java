@@ -17,7 +17,7 @@ import java.io.Serializable;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@TableName("wayline_job")
+@TableName(value = "wayline_job", autoResultMap = true)
 public class WaylineJobEntity implements Serializable {
 
     @TableId(type = IdType.AUTO)
@@ -26,7 +26,7 @@ public class WaylineJobEntity implements Serializable {
     @TableField("job_id")
     private String jobId;
 
-    @TableField("name")
+    @TableField(value = "name", typeHandler = com.yx.uavfire.common.model.DeviceTextTypeHandler.class)
     private String name;
 
     @TableField("file_id")

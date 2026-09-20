@@ -2,7 +2,8 @@ package com.yx.uavfire.miniapp.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yx.uavfire.common.model.CustomClaim;
-import com.yx.uavfire.common.util.JwtUtil;
+import com.yx.uavfire.miniapp.service.MiniAppSessionService;
+import com.yx.uavfire.miniapp.web.MiniAppException;
 import com.yx.uavfire.component.AuthInterceptor;
 import com.yx.uavfire.miniapp.configuration.MiniAppProperties;
 import com.yx.uavfire.miniapp.web.MiniAppErrorCode;
@@ -25,10 +26,12 @@ public class MiniAppAuthInterceptor implements HandlerInterceptor {
 
     private final MiniAppProperties properties;
     private final ObjectMapper objectMapper;
+    private final MiniAppSessionService sessions;
 
-    public MiniAppAuthInterceptor(MiniAppProperties properties, ObjectMapper objectMapper) {
+    public MiniAppAuthInterceptor(MiniAppProperties properties, ObjectMapper objectMapper, MiniAppSessionService sessions) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.sessions = sessions;
     }
 
     @Override
@@ -59,11 +62,14 @@ public class MiniAppAuthInterceptor implements HandlerInterceptor {
 
         try {
             request.setAttribute(AuthInterceptor.TOKEN_CLAIM,
-                    new CustomClaim(JwtUtil.verifyToken(token).getClaims()));
+                    sessions.authenticate(token));
             return true;
+        } catch (MiniAppException exception) {
+            writeError(request, response, exception.getStatus(), exception.getCode(), exception.getMessage());
+            return false;
         } catch (Exception exception) {
-            writeError(request, response, HttpStatus.UNAUTHORIZED,
-                    MiniAppErrorCode.AUTH_TOKEN_EXPIRED, "登录凭证无效或已过期");
+            writeError(request, response, HttpStatus.SERVICE_UNAVAILABLE,
+                    MiniAppErrorCode.INTERNAL_ERROR, "登录服务暂不可用，请稍后重试");
             return false;
         }
     }

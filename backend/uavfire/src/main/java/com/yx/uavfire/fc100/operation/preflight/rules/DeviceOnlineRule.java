@@ -6,9 +6,9 @@ import com.yx.uavfire.fc100.operation.preflight.RuleCheckResult;
 
 public class DeviceOnlineRule extends AbstractPreflightRule implements PreflightRule {
     public String id() { return "R04"; }
-    public String description() { return "FC100 在线并已接入 Delivery Sync"; }
+    public String description() { return "DJI FlyCart 100 在线并已接入 Delivery Sync"; }
     public RuleCheckResult check(PreflightContext context) {
         return context.deviceProperties() != null && Boolean.TRUE.equals(context.deviceProperties().getOnlineStatus())
-            ? pass() : block("FC100 is offline or Delivery Sync properties are unavailable");
+            ? pass() : block("DJI FlyCart 100 is offline or Delivery Sync properties are unavailable");
     }
 }

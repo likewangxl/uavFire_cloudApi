@@ -22,19 +22,20 @@ public class MiniAppExceptionHandler {
                 .body(MiniAppResponse.error(requestId, exception.getCode(), exception.getMessage()));
     }
 
-    @ExceptionHandler(HttpMessageNotReadableException.class)
+    @ExceptionHandler({HttpMessageNotReadableException.class, org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
     public ResponseEntity<MiniAppResponse<Void>> handleUnreadableBody(
-            HttpMessageNotReadableException exception, HttpServletRequest request, HttpServletResponse response) {
+            Exception exception, HttpServletRequest request, HttpServletResponse response) {
         String requestId = MiniAppRequestIds.apply(request, response);
         return ResponseEntity.badRequest().body(MiniAppResponse.error(
-                requestId, MiniAppErrorCode.VALIDATION_ERROR, "请求体不是有效的 JSON"));
+                requestId, MiniAppErrorCode.VALIDATION_ERROR, "请求参数或 JSON 格式不正确"));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<MiniAppResponse<Void>> handleUnexpected(
             Exception exception, HttpServletRequest request, HttpServletResponse response) {
         String requestId = MiniAppRequestIds.apply(request, response);
-        log.error("Mini program request failed. requestId={}", requestId, exception);
+        // SQL / HTTP exceptions can embed identity, binding fields or credential-bearing URLs.
+        log.error("Mini program request failed. requestId={}, type={}", requestId, exception.getClass().getSimpleName());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(MiniAppResponse.error(
                 requestId, MiniAppErrorCode.INTERNAL_ERROR, "服务暂时不可用"));
     }

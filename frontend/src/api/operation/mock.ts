@@ -96,7 +96,7 @@ const timelineByIncident: Record<number, OperationTimelineItem[]> = {
   102: [
     statusLog('CREATE', undefined, 'CONFIRMED', 'ai-service', '由已确认火情创建事件', now - 1000 * 60 * 46),
     assignmentLog(assignments[2]),
-    statusLog('DISPATCH', 'CONFIRMED', 'DISPATCHING', 'commander-02', '派发给 FC100-DELIVERY-02', now - 1000 * 60 * 35),
+    statusLog('DISPATCH', 'CONFIRMED', 'DISPATCHING', 'commander-02', '派发给 DJI FlyCart 100-DELIVERY-02', now - 1000 * 60 * 35),
     statusLog('RESPOND', 'DISPATCHING', 'RESPONDING', 'system', '投送资源已响应', now - 1000 * 60 * 34),
   ],
   103: [

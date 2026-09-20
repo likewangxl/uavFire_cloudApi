@@ -14,7 +14,7 @@ public class PayloadConfirmReleaseParam {
 
     @NotBlank private String operatorId;
 
-    @AssertTrue(message = "must confirm FC100 arrived at drop point")
+    @AssertTrue(message = "must confirm DJI FlyCart 100 arrived at drop point")
     private Boolean confirmedArrival;
 
     @AssertTrue(message = "must confirm no people risk")

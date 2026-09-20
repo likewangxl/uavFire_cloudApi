@@ -4,9 +4,9 @@
   "scripts": {
     "serve": "vite",
     "build:test": "vite build --mode stag",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-login-assets.mjs",
     "preview": "vite preview",
-    "test:policies": "node scripts/run-policy-tests.mjs",
+    "test:policies": "node ../scripts/sync-device-models.mjs --check && node ../scripts/check-device-names.mjs && node scripts/run-policy-tests.mjs",
     "lint": "eslint --fix"
   },
   "dependencies": {

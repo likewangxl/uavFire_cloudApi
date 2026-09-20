@@ -1,0 +1,4 @@
+.detail-heading { margin-top: 8rpx; }
+.detail-title { margin: 18rpx 0 10rpx; color: #20242a; font-size: 34rpx; font-weight: 650; line-height: 1.6; word-break: break-all; overflow-wrap: anywhere; }
+.detail-actions { margin: 24rpx 0 12rpx; }
+.route-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12rpx; margin-bottom: 12rpx; }

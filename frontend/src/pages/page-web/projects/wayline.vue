@@ -221,7 +221,7 @@
                 style="width: 100%;"
                 v-model:value="savePlannedWaylineModal.aircraftModelKey">
                 <a-select-option v-for="model in PLANNED_WAYLINE_MODEL_OPTIONS" :key="model" :value="model">
-                  {{ model }}
+                  {{ deviceModelName(model) }}
                 </a-select-option>
               </a-select>
             </div>
@@ -234,7 +234,7 @@
             <div>
               <span class="planning-label">云台负载</span>
               <a-select size="small" style="width: 100%;" v-model:value="savePlannedWaylineModal.payloadModelKey">
-                <a-select-option v-for="payload in ZENMUSE_PAYLOAD_OPTIONS" :key="payload" :value="payload">{{ payload }}</a-select-option>
+                <a-select-option v-for="payload in ZENMUSE_PAYLOAD_OPTIONS" :key="payload" :value="payload">{{ deviceModelName(payload) }}</a-select-option>
               </a-select>
             </div>
             <div>
@@ -264,11 +264,12 @@
         title="规划航线详情"
         :footer="null">
         <div v-if="selectedPlannedWayline" class="planned-wayline-detail">
+          <FlightReportPanel :workspace-id="workspaceId" :task-id="selectedPlannedWayline.plannedWaylineId" />
           <div class="planned-wayline-detail-grid">
             <span>名称</span><strong>{{ selectedPlannedWayline.name }}</strong>
             <span>状态</span><strong>{{ formatPlannedWaylineStatus(selectedPlannedWayline) }}</strong>
-            <span>机型</span><strong>{{ selectedPlannedWayline.aircraftModelKey || '-' }}</strong>
-            <span>云台负载</span><strong>{{ selectedPlannedWayline.payloadModelKey || '-' }}</strong>
+            <span>机型</span><strong>{{ deviceModelName(selectedPlannedWayline.aircraftModelKey) }}</strong>
+            <span>云台负载</span><strong>{{ deviceModelName(selectedPlannedWayline.payloadModelKey) }}</strong>
             <span>安装位</span><strong>{{ formatPayloadPosition(selectedPlannedWayline.payloadPositionIndex) }}</strong>
             <span>飞行器</span><strong>{{ selectedPlannedWayline.aircraftSn || '-' }}</strong>
             <span>网关</span><strong>{{ selectedPlannedWayline.gatewaySn || '-' }}</strong>
@@ -349,7 +350,7 @@
                 v-for="aircraft in executeTargetOptions"
                 :key="aircraft.sn"
                 :value="aircraft.sn">
-                {{ aircraft.callsign || aircraft.sn }}<span v-if="aircraft.aircraftModelKey"> · {{ aircraft.aircraftModelKey }}</span>
+                {{ aircraft.callsign || aircraft.sn }}<span v-if="aircraft.aircraftModelKey"> · {{ deviceModelName(aircraft.aircraftModelKey) }}</span>
               </a-select-option>
             </a-select>
           </div>
@@ -471,7 +472,7 @@
               <span class="prepare-target-option">
                 <RocketOutlined class="prepare-target-option-icon" />
                 <span class="prepare-target-option-name">{{ aircraft.callsign || aircraft.sn }}</span>
-                <span v-if="aircraft.aircraftModelKey" class="prepare-target-option-model">{{ aircraft.aircraftModelKey }}</span>
+                <span v-if="aircraft.aircraftModelKey" class="prepare-target-option-model">{{ deviceModelName(aircraft.aircraftModelKey) }}</span>
               </span>
             </a-select-option>
           </a-select>
@@ -521,7 +522,7 @@
             size="large"
             option-label-prop="label"
             :value="deliveryTaskModal.deviceSn"
-            placeholder="请选择 FC100 投放飞行器"
+            placeholder="请选择 DJI FlyCart 100 投放飞行器"
             dropdown-class-name="prepare-target-dropdown"
             :get-popup-container="(node: any) => node.parentElement"
             @change="(sn: string) => deliveryTaskModal.deviceSn = sn">
@@ -543,7 +544,7 @@
             </a-select-option>
           </a-select>
           <div class="planning-empty" v-if="fc100AircraftDevices.length === 0">
-            未检测到 FC100 设备，请确认设备在线后重试（设备需在云端在线）。
+            未检测到 DJI FlyCart 100 设备，请确认设备在线后重试（设备需在云端在线）。
           </div>
           <!-- 任务执行后到点投放控制（原投放执行面板已并入此处） -->
           <div class="delivery-terminal" v-if="deliveryExistingTask">
@@ -581,6 +582,8 @@
 </template>
 
 <script lang="ts" setup>
+import { deviceModelName, deviceModelCode } from '/@/utils/device-models.mjs'
+import FlightReportPanel from '/@/components/wayline-planner/FlightReportPanel.vue'
 import { reactive } from '@vue/reactivity'
 import { message, Modal } from 'ant-design-vue'
 import { computed, nextTick, onMounted, onUnmounted, onUpdated, ref, watch } from 'vue'
@@ -814,7 +817,7 @@ const AIRCRAFT_MODEL_KEY_MAP: Record<string, string> = {
 const AIRCRAFT_MODEL_NAME_ORDER = ['M3TD', 'M30T', 'M4T', 'M3T', 'M350', 'M300', 'M30', 'M3E', 'M3D', 'M4E']
 const PLANNED_WAYLINE_MODEL_OPTIONS = ['M4T', 'M4E', 'M30T', 'M30', 'M3T', 'M3E', 'M3TD', 'M3D', 'M350', 'M300']
 const ZENMUSE_PAYLOAD_OPTIONS = ['H20', 'H20T', 'H30', 'H30T']
-const usesZenmusePayloadSelection = (model?: string) => ['M300', 'M350'].includes(String(model || '').toUpperCase())
+const usesZenmusePayloadSelection = (model?: string) => ['M300', 'M350'].includes(deviceModelCode(model).toUpperCase())
 const formatPayloadPosition = (value?: number) => ({ 0: '左/主云台', 1: '右云台', 2: '上云台' } as Record<number, string>)[Number(value)] || '-'
 
 watch(
@@ -837,7 +840,7 @@ watch(
 
 function normalizeAircraftModelKey (raw: any): string {
   if (raw === undefined || raw === null) return ''
-  const text = String(raw).trim()
+  const text = deviceModelCode(String(raw).trim())
   if (!text) return ''
   const upper = text.toUpperCase().replace(/\s+/g, '')
   return AIRCRAFT_MODEL_KEY_MAP[text] || AIRCRAFT_MODEL_KEY_MAP[upper] || ''
@@ -864,7 +867,7 @@ function inferAircraftModelKey (child: any): string {
   }
 
   const label = `${child?.device_name || ''} ${child?.nickname || ''} ${child?.callsign || ''}`.toUpperCase().replace(/\s+/g, '')
-  return AIRCRAFT_MODEL_NAME_ORDER.find(name => label.includes(name)) || ''
+  return AIRCRAFT_MODEL_NAME_ORDER.find(name => label.includes(name) || label.includes(deviceModelName(name).toUpperCase().replace(/\s+/g, ''))) || ''
 }
 
 function normalizePlannedWaylineModel (model: string): string {
@@ -1310,7 +1313,7 @@ function openSavePlannedWaylineModal (saveAs: boolean) {
   savePlannedWaylineModal.saveAs = saveAs
   savePlannedWaylineModal.name = defaultName
   savePlannedWaylineModal.aircraftModelKey = normalizePlannedWaylineModel(summary.aircraftModelKey)
-  savePlannedWaylineModal.payloadModelKey = editingRecord?.payloadModelKey || 'H20T'
+  savePlannedWaylineModal.payloadModelKey = deviceModelCode(editingRecord?.payloadModelKey) || 'H20T'
   savePlannedWaylineModal.payloadPositionIndex = editingRecord?.payloadPositionIndex ?? 0
   savePlannedWaylineModal.defaultHeight = planningState.defaultHeight
   savePlannedWaylineModal.maxSpeed = planningState.maxSpeed

@@ -40,7 +40,8 @@ public class FireGeoSnapshotDTO {
     @Accessors(chain = true)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class CameraModel {
-        private String model;
+        @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
+    private String model;
         private Double focalLengthMm;
         private Double horizontalFovDeg;
         private Double verticalFovDeg;

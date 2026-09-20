@@ -179,7 +179,7 @@
         <a-form-item label="飞机 SN">
           <a-select
             v-model:value="approveForm.aircraftSn"
-            placeholder="选择 FC100 飞机（起飞点取该机实时位置）"
+            placeholder="选择 DJI FlyCart 100 飞机（起飞点取该机实时位置）"
             allow-clear
             show-search
             style="width: 100%"

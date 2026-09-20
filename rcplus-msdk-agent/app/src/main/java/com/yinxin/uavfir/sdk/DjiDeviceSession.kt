@@ -46,16 +46,16 @@ class DjiDeviceSession(
 
     private fun loadTelemetry(): DjiTelemetry {
         val location: LocationCoordinate3D? = runCatching {
-            FlightControllerKey.KeyAircraftLocation3D.create().get(LocationCoordinate3D(0.0, 0.0, 0.0))
+            FlightControllerKey.KeyAircraftLocation3D.create().get()
         }.getOrNull()
         val velocity: Velocity3D? = runCatching {
-            FlightControllerKey.KeyAircraftVelocity.create().get(Velocity3D(0.0, 0.0, 0.0))
+            FlightControllerKey.KeyAircraftVelocity.create().get()
         }.getOrNull()
         val elevation: Double? = runCatching {
-            FlightControllerKey.KeyAltitude.create().get(0.0)
+            FlightControllerKey.KeyAltitude.create().get()
         }.getOrNull()
         val batteryPercent: Int? = runCatching {
-            BatteryKey.KeyChargeRemainingInPercent.create().get(0)
+            BatteryKey.KeyChargeRemainingInPercent.create().get()
         }.getOrNull()
         val gpsCount: Int? = runCatching {
             FlightControllerKey.KeyGPSSatelliteCount.create().get()
@@ -79,6 +79,8 @@ class DjiDeviceSession(
             gpsCount = gpsCount,
             rtkCount = rtkCount,
             positionFixed = positionFixed,
+            flying = runCatching { FlightControllerKey.KeyIsFlying.create().get() }.getOrNull(),
+            flightMode = runCatching { FlightControllerKey.KeyFlightMode.create().get()?.name }.getOrNull(),
         )
     }
 }

@@ -172,12 +172,12 @@ function getFc100WaylineFileTaskName (filename: string): string {
   const baseName = String(filename || '')
     .replace(/\.(kmz|kml)$/i, '')
     .trim()
-  return sanitizeDjiWaylineName(baseName || 'FC100航线', 'FC100航线')
+  return sanitizeDjiWaylineName(baseName || 'DJI FlyCart 100航线', 'DJI FlyCart 100航线')
 }
 
 export function beforeFc100WaylineUpload (file: FileItem) {
   if (!file.name || !/\.(kmz|kml)$/i.test(file.name)) {
-    message.error('文件格式错误，请选择 FC100 KMZ/KML 航线文件。')
+    message.error('文件格式错误，请选择 DJI FlyCart 100 KMZ/KML 航线文件。')
     return false
   }
   return true
@@ -186,13 +186,13 @@ export function beforeFc100WaylineUpload (file: FileItem) {
 export const uploadFc100WaylineFile = async (options?: { file?: FileItem; onSuccess?: (res: any) => void; onError?: (err: any) => void }) => {
   const file = options?.file
   if (!file) {
-    message.error('请选择 FC100 KMZ/KML 航线文件。')
+    message.error('请选择 DJI FlyCart 100 KMZ/KML 航线文件。')
     return
   }
   const deviceSn = getSelectedFc100DeviceSn()
   if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
-    options?.onError?.(new Error('FC100 device is required'))
+    message.warning('请先选择DJI FlyCart 100飞机设备。')
+    options?.onError?.(new Error('DJI FlyCart 100 device is required'))
     return
   }
   fc100PlanningState.selectedDeviceSn = deviceSn
@@ -200,25 +200,25 @@ export const uploadFc100WaylineFile = async (options?: { file?: FileItem; onSucc
   const fileData = new FormData()
   fileData.append('file', file, file.name)
   fileData.append('deviceSn', deviceSn)
-  fileData.append('taskName', sanitizeDjiWaylineName(getFc100WaylineFileTaskName(file.name), 'FC100航线'))
+  fileData.append('taskName', sanitizeDjiWaylineName(getFc100WaylineFileTaskName(file.name), 'DJI FlyCart 100航线'))
   fileData.append('operatorId', getFc100OperatorId())
-  fileData.append('remark', `created from uploaded fc100 wayline ${file.name}`)
+  fileData.append('remark', `created from uploaded DJI FlyCart 100 wayline ${file.name}`)
   try {
     const res = await deliveryApi.importCreateWaylineTask(fileData)
     const body = getFc100ApiBody(res)
     if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100导入航线文件并创建任务失败：${body.message || '接口返回异常'}`
-      options?.onError?.(new Error(body.message || 'FC100 direct wayline import failed'))
+      fc100PlanningState.lastResult = `DJI FlyCart 100导入航线文件并创建任务失败：${body.message || '接口返回异常'}`
+      options?.onError?.(new Error(body.message || 'DJI FlyCart 100 direct wayline import failed'))
       return
     }
     fc100PlanningState.taskId = body.data?.taskId || ''
     fc100PlanningState.taskStatus = null
     fc100PlanningState.selectedRecord = null
-    fc100PlanningState.lastResult = `FC100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
-    message.success('FC100航线文件已导入并创建任务')
+    fc100PlanningState.lastResult = `DJI FlyCart 100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
+    message.success('DJI FlyCart 100航线文件已导入并创建任务')
     options?.onSuccess?.(res)
   } catch (error) {
-    fc100PlanningState.lastResult = `FC100导入航线文件并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
+    fc100PlanningState.lastResult = `DJI FlyCart 100导入航线文件并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
     options?.onError?.(error)
   } finally {
     fc100PlanningState.loadingAction = ''
@@ -248,10 +248,10 @@ function isFc100HoveringEnough (props: DeliveryDeviceProperties | null): boolean
 }
 
 function getFc100TerminalControlBlockedReason (): string {
-  if (!fc100PlanningState.taskId) return '请先创建FC100航线任务'
+  if (!fc100PlanningState.taskId) return '请先创建DJI FlyCart 100航线任务'
   if (!isFc100TaskTerminal(fc100PlanningState.taskStatus)) return '等待航线完成'
-  if (!fc100PlanningState.selectedDeviceProps) return '请先刷新FC100状态'
-  if (fc100PlanningState.selectedDeviceProps.onlineStatus === false) return 'FC100设备离线'
+  if (!fc100PlanningState.selectedDeviceProps) return '请先刷新DJI FlyCart 100状态'
+  if (fc100PlanningState.selectedDeviceProps.onlineStatus === false) return 'DJI FlyCart 100设备离线'
   if (!isFc100HoveringEnough(fc100PlanningState.selectedDeviceProps)) return '等待飞机悬停稳定'
   return ''
 }
@@ -294,7 +294,7 @@ async function sendFc100TerminalCommand (
 ) {
   const deviceSn = getSelectedFc100DeviceSn()
   if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
+    message.warning('请先选择DJI FlyCart 100飞机设备。')
     return
   }
   if (loadingAction !== 'returnHome' && !canUseFc100TerminalControls()) {
@@ -349,7 +349,7 @@ export async function handleFc100RefreshDevices () {
     const res = await deliveryApi.listDevices(workspaceId())
     const body = getFc100ApiBody(res)
     if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100设备列表获取失败：${body.message || '接口返回异常'}`
+      fc100PlanningState.lastResult = `DJI FlyCart 100设备列表获取失败：${body.message || '接口返回异常'}`
       return
     }
     fc100PlanningState.devices = body.data || []
@@ -362,10 +362,10 @@ export async function handleFc100RefreshDevices () {
       await handleFc100SelectDevice(fc100PlanningState.selectedDeviceSn)
     } else {
       fc100PlanningState.selectedDeviceProps = null
-      fc100PlanningState.lastResult = 'FC100设备列表为空，请确认飞机已绑定到当前FC100 workspace/group。'
+      fc100PlanningState.lastResult = 'DJI FlyCart 100设备列表为空，请确认飞机已绑定到当前DJI FlyCart 100 workspace/group。'
     }
   } catch (error) {
-    fc100PlanningState.lastResult = `FC100设备列表获取失败：${getFc100ErrorText(error, '接口调用失败')}`
+    fc100PlanningState.lastResult = `DJI FlyCart 100设备列表获取失败：${getFc100ErrorText(error, '接口调用失败')}`
   } finally {
     fc100PlanningState.loadingAction = ''
   }
@@ -390,7 +390,7 @@ async function refreshFc100SelectedDeviceProps (deviceSn = fc100PlanningState.se
     const res = await deliveryApi.deviceProps(deviceSn)
     const body = getFc100ApiBody(res)
     if (!body || body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100设备物模型获取失败：${body?.message || '接口返回异常'}`
+      fc100PlanningState.lastResult = `DJI FlyCart 100设备物模型获取失败：${body?.message || '接口返回异常'}`
       return null
     }
     fc100PlanningState.selectedDeviceProps = body.data || null
@@ -399,7 +399,7 @@ async function refreshFc100SelectedDeviceProps (deviceSn = fc100PlanningState.se
     return fc100PlanningState.selectedDeviceProps
   } catch (error) {
     // 反显的持久化设备可能已失效/离线，轮询取物模型失败不应抛断轮询
-    fc100PlanningState.lastResult = `FC100设备物模型获取失败：${getFc100ErrorText(error, '接口调用失败')}`
+    fc100PlanningState.lastResult = `DJI FlyCart 100设备物模型获取失败：${getFc100ErrorText(error, '接口调用失败')}`
     return null
   }
 }
@@ -414,14 +414,14 @@ async function refreshFc100TaskStatus (showLoading = true) {
     const res = await deliveryApi.waylineTaskStatus(taskId)
     const body = getFc100ApiBody(res)
     if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100任务状态获取失败：${body.message || '接口返回异常'}`
+      fc100PlanningState.lastResult = `DJI FlyCart 100任务状态获取失败：${body.message || '接口返回异常'}`
       return null
     }
     fc100PlanningState.taskStatus = body.data || null
     fc100PlanningState.lastResult = formatFc100TaskStatus(fc100PlanningState.taskStatus)
     return fc100PlanningState.taskStatus
   } catch (error) {
-    fc100PlanningState.lastResult = `FC100任务状态获取失败：${getFc100ErrorText(error, '接口调用失败')}`
+    fc100PlanningState.lastResult = `DJI FlyCart 100任务状态获取失败：${getFc100ErrorText(error, '接口调用失败')}`
     return null
   } finally {
     if (showLoading) {
@@ -490,7 +490,7 @@ export function selectFc100GeneratedWayline (record: PlannedWaylineRecord) {
   fc100PlanningState.selectedRecord = record
   previewPlannedWayline(record)
   if (!record.kmzUrl) {
-    message.warning('请先生成航线文件后再创建FC100任务。')
+    message.warning('请先生成航线文件后再创建DJI FlyCart 100任务。')
   }
 }
 
@@ -500,12 +500,12 @@ export async function handleFc100ImportGeneratedWaylineTask (record = fc100Plann
     return
   }
   if (!record.kmzUrl) {
-    message.warning('请先生成航线文件后再导入FC100。')
+    message.warning('请先生成航线文件后再导入DJI FlyCart 100。')
     return
   }
   const deviceSn = getSelectedFc100DeviceSn()
   if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
+    message.warning('请先选择DJI FlyCart 100飞机设备。')
     return
   }
   fc100PlanningState.selectedRecord = record
@@ -516,21 +516,21 @@ export async function handleFc100ImportGeneratedWaylineTask (record = fc100Plann
       workspaceId: workspaceId(),
       plannedWaylineId: record.plannedWaylineId,
       deviceSn,
-      taskName: sanitizeDjiWaylineName(record.name || 'FC100规划航线'),
+      taskName: sanitizeDjiWaylineName(record.name || 'DJI FlyCart 100规划航线'),
       operatorId: localStorage.getItem(ELocalStorageKey.Username) || 'web',
       remark: `created from planned wayline ${record.plannedWaylineId}`,
     })
     const body = getFc100ApiBody(res)
     if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100导入生成KMZ并创建任务失败：${body.message || '接口返回异常'}`
+      fc100PlanningState.lastResult = `DJI FlyCart 100导入生成KMZ并创建任务失败：${body.message || '接口返回异常'}`
       return
     }
     fc100PlanningState.taskId = body.data?.taskId || ''
     fc100PlanningState.taskStatus = null
-    fc100PlanningState.lastResult = `FC100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
-    message.success('FC100航线任务已创建')
+    fc100PlanningState.lastResult = `DJI FlyCart 100任务已创建：${fc100PlanningState.taskId || '未返回任务ID'}`
+    message.success('DJI FlyCart 100航线任务已创建')
   } catch (error) {
-    fc100PlanningState.lastResult = `FC100导入生成KMZ并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
+    fc100PlanningState.lastResult = `DJI FlyCart 100导入生成KMZ并创建任务失败：${getFc100ErrorText(error, '接口调用失败')}`
   } finally {
     fc100PlanningState.loadingAction = ''
   }
@@ -539,12 +539,12 @@ export async function handleFc100ImportGeneratedWaylineTask (record = fc100Plann
 export async function handleFc100StartGeneratedWaylineTask () {
   const taskId = fc100PlanningState.taskId
   if (!taskId) {
-    message.warning('请先创建FC100任务。')
+    message.warning('请先创建DJI FlyCart 100任务。')
     return
   }
   const deviceSn = getSelectedFc100DeviceSn()
   if (!deviceSn) {
-    message.warning('请先选择FC100飞机设备。')
+    message.warning('请先选择DJI FlyCart 100飞机设备。')
     return
   }
   fc100PlanningState.loadingAction = 'start'
@@ -552,7 +552,7 @@ export async function handleFc100StartGeneratedWaylineTask () {
     const props = await refreshFc100SelectedDeviceProps(deviceSn)
     const warnings = buildFc100StartPreflightWarnings(props)
     if (warnings.length) {
-      const text = `FC100 开始执行航线前检查未通过：${warnings.join('；')}`
+      const text = `DJI FlyCart 100 开始执行航线前检查未通过：${warnings.join('；')}`
       fc100PlanningState.lastResult = text
       message.warning(text)
       return
@@ -560,19 +560,19 @@ export async function handleFc100StartGeneratedWaylineTask () {
     const res = await deliveryApi.startWaylineTask(taskId, deviceSn)
     const body = getFc100ApiBody(res)
     if (body.code !== 0) {
-      fc100PlanningState.lastResult = `FC100开始执行失败：${body.message || '接口返回异常'}`
+      fc100PlanningState.lastResult = `DJI FlyCart 100开始执行失败：${body.message || '接口返回异常'}`
       return
     }
     const operation = body.data as DeliveryTaskOperationResult | null
-    fc100PlanningState.lastResult = formatFc100OperationResult(operation, 'FC100开始执行航线指令已发送。')
+    fc100PlanningState.lastResult = formatFc100OperationResult(operation, 'DJI FlyCart 100开始执行航线指令已发送。')
     if (operation?.accepted === false) {
       message.warning(fc100PlanningState.lastResult)
     } else {
-      message.success('FC100开始执行航线指令已发送')
+      message.success('DJI FlyCart 100开始执行航线指令已发送')
     }
     await handleFc100GeneratedWaylineTaskStatus()
   } catch (error) {
-    fc100PlanningState.lastResult = `FC100开始执行失败：${getFc100ErrorText(error, '接口调用失败')}`
+    fc100PlanningState.lastResult = `DJI FlyCart 100开始执行失败：${getFc100ErrorText(error, '接口调用失败')}`
   } finally {
     fc100PlanningState.loadingAction = ''
   }
@@ -580,7 +580,7 @@ export async function handleFc100StartGeneratedWaylineTask () {
 
 export async function handleFc100GeneratedWaylineTaskStatus () {
   if (!fc100PlanningState.taskId) {
-    message.warning('请先创建FC100任务。')
+    message.warning('请先创建DJI FlyCart 100任务。')
     return
   }
   await refreshFc100TaskStatus(true)

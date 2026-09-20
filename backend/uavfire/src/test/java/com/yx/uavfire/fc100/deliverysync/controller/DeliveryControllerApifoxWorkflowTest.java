@@ -843,7 +843,7 @@ class DeliveryControllerApifoxWorkflowTest {
         verify(adapter).createTask(taskReq.capture());
         assertEquals("EXISTING-WAYLINE-UUID", taskReq.getValue().getMissionNo());
         assertEquals("EXISTING-WAYLINE-UUID", taskReq.getValue().getMissionId());
-        assertEquals("FC100航线-route-ROUTE-001", taskReq.getValue().getTaskName());
+        assertEquals("DJI FlyCart 100航线-route-ROUTE-001", taskReq.getValue().getTaskName());
     }
 
     @Test

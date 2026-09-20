@@ -20,6 +20,7 @@ public class DevicePayloadDTO {
 
     private String payloadSn;
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String payloadName;
 
     private Integer index;

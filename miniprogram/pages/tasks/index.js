@@ -1,5 +1,2 @@
-Page({
-  data: {
-    flightControlEnabled: false,
-  },
-})
+const { createListPage } = require('../../services/presentation')
+Page(createListPage('tasks'))

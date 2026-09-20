@@ -10,6 +10,7 @@ import lombok.Data;
 @Data
 public class DeviceFirmwareUpgradeDTO {
 
+    @com.fasterxml.jackson.databind.annotation.JsonSerialize(using = com.yx.uavfire.common.model.DeviceModelNameSerializer.class)
     private String deviceName;
 
     private String sn;

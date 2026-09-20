@@ -102,7 +102,7 @@ export function buildSituationLayers ({
     if (!point) continue
     aircraftMarkers.push(buildAircraftMarker({
       id: `aircraft:delivery:${target?.deviceSn || aircraftMarkers.length + 1}`,
-      role: 'FC100 投放',
+      role: 'DJI FlyCart 100 投放',
       name: target?.model || target?.displayName || target?.callsign || 'DJI Flycart100',
       sn: target?.deviceSn,
       online: Boolean(target?.online),

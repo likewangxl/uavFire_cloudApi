@@ -15,6 +15,8 @@ import java.util.List;
 public class MsdkDeviceController {
 
     private final MsdkDeviceStateService stateService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.yx.uavfire.flightreport.FlightRecordWriter flightRecords;
 
     public MsdkDeviceController(MsdkDeviceStateService stateService) {
         this.stateService = stateService;
@@ -22,6 +24,7 @@ public class MsdkDeviceController {
 
     @PostMapping("/state")
     public HttpResultResponse<Void> upsertState(@RequestBody MsdkDeviceStateDTO state) {
+        if (flightRecords != null) flightRecords.captureState(state);
         stateService.upsert(state);
         return HttpResultResponse.success();
     }

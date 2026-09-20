@@ -1,8 +1,9 @@
 {
   "name": "uavfire-leadership-miniapp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node ../scripts/sync-device-models.mjs --check && node ../scripts/check-device-names.mjs && node --test tests/*.test.mjs",
+    "preview": "node preview/server.mjs"
   }
 }

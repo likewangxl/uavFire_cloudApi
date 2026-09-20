@@ -47,7 +47,7 @@ class GlobalMVCConfigurerTest {
         ReflectionTestUtils.setField(configurer, "authInterceptor", new AuthInterceptor());
         ReflectionTestUtils.setField(configurer, "waylineAgentAuthInterceptor", new WaylineAgentAuthInterceptor());
         ReflectionTestUtils.setField(configurer, "miniAppAuthInterceptor",
-                new MiniAppAuthInterceptor(new MiniAppProperties(), new ObjectMapper()));
+                new MiniAppAuthInterceptor(new MiniAppProperties(), new ObjectMapper(), org.mockito.Mockito.mock(com.yx.uavfire.miniapp.service.MiniAppSessionService.class)));
         ReflectionTestUtils.setField(configurer, "managePrefix", "manage/api");
         ReflectionTestUtils.setField(configurer, "manageVersion", "/v1");
         ReflectionTestUtils.setField(configurer, "waylineAgentPrefix", "wayline-agent");

@@ -107,7 +107,7 @@ onMounted(refresh)
             v-model:checked="checklist.arrival"
             @change="check('arrival')"
           >
-            ① 我已确认 FC100 到达投放等待点
+            ① 我已确认 DJI FlyCart 100 到达投放等待点
           </a-checkbox>
 
           <a-checkbox

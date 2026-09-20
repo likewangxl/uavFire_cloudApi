@@ -55,6 +55,8 @@ public class WaylineAgentEventListener {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private FireDetectionService fireDetectionService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.yx.uavfire.flightreport.FlightRecordWriter flightRecords;
 
     @ServiceActivator(inputChannel = WaylineAgentMqttChannel.INBOUND)
     public void onEvent(Message<byte[]> message) {
@@ -124,6 +126,8 @@ public class WaylineAgentEventListener {
                 .setReceivedAt(System.currentTimeMillis())
                 .setData(decoded);
         eventStore.append(record);
+        if (flightRecords != null) flightRecords.captureAgent(droneSn, missionId, method, dataNode,
+                root.path("tid").asText(null), root.path("timestamp").isNumber() ? root.path("timestamp").longValue() : null);
         log.debug("wayline-agent event stored drone={} method={} mission={}", droneSn, method, missionId);
 
         if (decoded instanceof WaylineStateChangeDTO && StringUtils.hasText(missionId)) {

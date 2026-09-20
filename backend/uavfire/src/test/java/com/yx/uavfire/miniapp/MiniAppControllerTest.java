@@ -3,110 +3,57 @@ package com.yx.uavfire.miniapp;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yx.uavfire.common.model.CustomClaim;
 import com.yx.uavfire.component.AuthInterceptor;
-import com.yx.uavfire.miniapp.aircraft.AircraftCapabilityProfileResolver;
-import com.yx.uavfire.miniapp.configuration.MiniAppProperties;
-import com.yx.uavfire.miniapp.controller.MiniAppDashboardController;
-import com.yx.uavfire.miniapp.controller.MiniAppMeController;
-import com.yx.uavfire.miniapp.controller.MiniAppWechatAuthController;
+import com.yx.uavfire.miniapp.controller.*;
+import com.yx.uavfire.miniapp.service.*;
+import com.yx.uavfire.miniapp.security.*;
 import com.yx.uavfire.miniapp.web.MiniAppExceptionHandler;
-import com.yx.uavfire.msdk.model.MsdkDeviceStateDTO;
 import com.yx.uavfire.msdk.service.MsdkDeviceStateService;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import java.util.Map;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 class MiniAppControllerTest {
-
-    private MiniAppProperties properties;
-    private MsdkDeviceStateService deviceStateService;
-    private MockMvc mockMvc;
-
-    @BeforeEach
-    void setUp() {
-        properties = new MiniAppProperties();
-        properties.setEnabled(true);
-        properties.getFlightControl().setEnabled(false);
-        properties.getDashboard().setLiveDeviceSummaryEnabled(true);
-        deviceStateService = new MsdkDeviceStateService(() -> 1_000_000L);
-        AircraftCapabilityProfileResolver capabilityProfileResolver =
-                new AircraftCapabilityProfileResolver(properties);
-
-        mockMvc = MockMvcBuilders.standaloneSetup(
-                        new MiniAppMeController(properties),
-                        new MiniAppDashboardController(properties, deviceStateService, capabilityProfileResolver),
-                        new MiniAppWechatAuthController(properties))
-                .setControllerAdvice(new MiniAppExceptionHandler())
-                .setMessageConverters(new MappingJackson2HttpMessageConverter(new ObjectMapper()))
-                .build();
+    MiniAppTestDatabase db; MockMvc mvc;
+    @BeforeEach void setup() throws Exception {
+        db=new MiniAppTestDatabase(); ObjectMapper mapper=new ObjectMapper();
+        MiniAppReadService reads=new MiniAppReadService(db.jdbc,mapper,new MsdkDeviceStateService(System::currentTimeMillis));
+        mvc=MockMvcBuilders.standaloneSetup(new MiniAppMeController(db.properties,reads),new MiniAppDashboardController(db.properties,reads),
+                new MiniAppWechatAuthController(db.properties,new WechatHttpGateway(db.properties,mapper),db.sessions,new MiniAppLoginLimiter()),new MiniAppBusinessController(reads))
+            .addInterceptors(new MiniAppAuthInterceptor(db.properties,mapper,db.sessions) {
+                @Override public boolean preHandle(javax.servlet.http.HttpServletRequest r,javax.servlet.http.HttpServletResponse s,Object h) throws Exception {
+                    if (r.getRequestURI().equals("/miniapp/api/v1/auth/wechat/login")) return true;
+                    return super.preHandle(r,s,h);
+                }
+            }).setControllerAdvice(new MiniAppExceptionHandler()).setMessageConverters(new MappingJackson2HttpMessageConverter(mapper)).build();
     }
-
-    @Test
-    void meReturnsLegacyIdentityWithoutGrantingFlightControl() throws Exception {
-        CustomClaim claim = new CustomClaim("user-1", "leader.zhang", 1, "workspace-1");
-
-        mockMvc.perform(get("/miniapp/api/v1/me")
-                        .requestAttr(AuthInterceptor.TOKEN_CLAIM, claim)
-                        .header("X-Request-Id", "req-me-1"))
-                .andExpect(status().isOk())
-                .andExpect(header().string("X-Request-Id", "req-me-1"))
-                .andExpect(jsonPath("$.code").value("OK"))
-                .andExpect(jsonPath("$.data.user.userId").value("user-1"))
-                .andExpect(jsonPath("$.data.user.displayName").value("leader.zhang"))
-                .andExpect(jsonPath("$.data.user.roles[0]").value("WEB"))
-                .andExpect(jsonPath("$.data.workspace.workspaceId").value("workspace-1"))
-                .andExpect(jsonPath("$.data.capabilities.flightControlEnabled").value(false));
+    String token() {
+        db.sessions.login("openid-a","device-12345");db.approve("openid-a");return (String)db.sessions.login("openid-a","device-12345").get("accessToken");
     }
-
-    @Test
-    void dashboardUsesFreshMsdkStateAndMarksUnwiredAggregatesPartial() throws Exception {
-        deviceStateService.upsert(new MsdkDeviceStateDTO()
-                .setAircraftSn("AIR-M300-1")
-                .setOnline(true)
-                .setConnectionState("CONNECTED")
-                .setModel("M300 RTK")
-                .setAircraftModelKey("M300")
-                .setBatteryPercent(82)
-                .setUpdatedAt(1_000_000L));
-
-        mockMvc.perform(get("/miniapp/api/v1/dashboard/summary")
-                        .requestAttr(AuthInterceptor.TOKEN_CLAIM,
-                                new CustomClaim("user-1", "leader.zhang", 1, "workspace-1")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.metrics.onlineAircraft").value(1))
-                .andExpect(jsonPath("$.data.metrics.recognizedAircraft").value(1))
-                .andExpect(jsonPath("$.data.metrics.unknownAircraft").value(0))
-                .andExpect(jsonPath("$.data.metrics.controlEligibleAircraft").value(0))
-                .andExpect(jsonPath("$.data.metrics.modelFamilies.MATRICE_300").value(1))
-                .andExpect(jsonPath("$.data.dataStatus").value("FRESH"))
-                .andExpect(jsonPath("$.data.partial").value(true))
-                .andExpect(jsonPath("$.data.activeTasks").isArray())
-                .andExpect(jsonPath("$.data.warnings[0]").isNotEmpty());
+    @Test void meUsesApprovedAccountAndWorkspace() throws Exception {
+        mvc.perform(get("/miniapp/api/v1/me").header("Authorization","Bearer "+token()).header("X-Request-Id","req-me-1"))
+            .andExpect(status().isOk()).andExpect(header().string("X-Request-Id","req-me-1"))
+            .andExpect(jsonPath("$.data.user.userId").value("user-a")).andExpect(jsonPath("$.data.workspace.name").value("林区 A"))
+            .andExpect(jsonPath("$.data.capabilities.flightControlEnabled").value(false));
     }
-
-    @Test
-    void wechatLoginRejectsMissingFieldsWithStableErrorCode() throws Exception {
-        mockMvc.perform(post("/miniapp/api/v1/auth/wechat/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    @Test void dashboardReadsRealEmptyTablesWithoutInventedCounts() throws Exception {
+        mvc.perform(get("/miniapp/api/v1/dashboard/summary").header("Authorization","Bearer "+token()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.data.metrics.todayTasks").value(0))
+            .andExpect(jsonPath("$.data.metrics.urgentEvents").value(0)).andExpect(jsonPath("$.data.partial").value(true));
     }
-
-    @Test
-    void wechatLoginFailsClosedUntilServerSideAdapterIsConfigured() throws Exception {
-        mockMvc.perform(post("/miniapp/api/v1/auth/wechat/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"wx-code\",\"deviceId\":\"device-123456\",\"clientVersion\":\"0.1.0\"}"))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value("WECHAT_API_UNAVAILABLE"));
+    @Test void protectedReadsRejectAnonymousAndForeignIds() throws Exception {
+        mvc.perform(get("/miniapp/api/v1/inspection-tasks")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/miniapp/api/v1/events/foreign").header("Authorization","Bearer "+token())).andExpect(status().isNotFound());
+    }
+    @Test void missingWechatFieldsAndMissingServerConfigurationFailClosed() throws Exception {
+        mvc.perform(post("/miniapp/api/v1/auth/wechat/login").contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"\"}"))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+        mvc.perform(post("/miniapp/api/v1/auth/wechat/login").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"code\":\"one-time-code\",\"deviceId\":\"device-12345\",\"clientVersion\":\"0.2.0\"}"))
+            .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("WECHAT_API_UNAVAILABLE"));
     }
 }

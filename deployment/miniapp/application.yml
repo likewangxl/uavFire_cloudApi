@@ -1,0 +1,44 @@
+# Standalone mobile API. Use this file explicitly; do not load the main flight backend's application.yml.
+server:
+  address: 0.0.0.0
+  port: 8090
+  error:
+    include-message: never
+    include-stacktrace: never
+spring:
+  application:
+    name: uavfire-miniapp
+  datasource:
+    url: ${MINIAPP_DB_JDBC_URL}
+    username: ${MINIAPP_DB_USER}
+    password: ${MINIAPP_DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    druid:
+      initial-size: 1
+      min-idle: 1
+      max-active: 8
+      stat-view-servlet:
+        enabled: false
+      web-stat-filter:
+        enabled: false
+miniapp:
+  enabled: ${MINIAPP_ENABLED:false}
+  wechat:
+    enabled: ${MINIAPP_WECHAT_ENABLED:false}
+    app-id: ${MINIAPP_WECHAT_APP_ID:}
+    app-secret: ${MINIAPP_WECHAT_APP_SECRET:}
+  flight-control:
+    enabled: false
+logging:
+  level:
+    root: INFO
+    org.springframework.jdbc: WARN
+    org.springframework.web: INFO
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+management:
+  endpoints:
+    enabled-by-default: false

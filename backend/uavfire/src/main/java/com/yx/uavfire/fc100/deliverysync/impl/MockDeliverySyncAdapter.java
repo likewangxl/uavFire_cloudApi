@@ -100,7 +100,7 @@ public class MockDeliverySyncAdapter implements DeliverySyncAdapter {
         long t0 = System.currentTimeMillis();
         var waylines = List.of(DeliveryWaylineDTO.builder()
             .waylineId("MOCK-WAYLINE-001")
-            .name("Mock FC100 航线")
+            .name("Mock DJI FlyCart 100 航线")
             .waylineType("waypoint")
             .distance(120.0)
             .duration(12)

@@ -17,7 +17,7 @@ import java.io.Serializable;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@TableName("manage_device_firmware")
+@TableName(value = "manage_device_firmware", autoResultMap = true)
 public class DeviceFirmwareEntity implements Serializable {
 
     private static final long serialVersionUID = -12L;

@@ -672,7 +672,7 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
                 ref.setAccepted(false);
                 ref.setApiCode(apiCode);
                 ref.setApiMessage(apiMessage);
-                ref.setDisplayMessage(textOr(apiMessage, "FC100 创建任务未返回任务数据"));
+                ref.setDisplayMessage(textOr(apiMessage, "DJI FlyCart 100 创建任务未返回任务数据"));
                 return ref;
             }
             DjiCreateTaskResponse.DjiCreateTaskData data = resp.getData();
@@ -681,8 +681,8 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
             ref.setApiCode(apiCode);
             ref.setApiMessage(apiMessage);
             ref.setDisplayMessage((apiCode != null && apiCode != 0)
-                ? textOr(apiMessage, "FC100 创建任务失败")
-                : "FC100 创建任务成功：任务 " + textOr(data.getId(), "--"));
+                ? textOr(apiMessage, "DJI FlyCart 100 创建任务失败")
+                : "DJI FlyCart 100 创建任务成功：任务 " + textOr(data.getId(), "--"));
             ref.setDeviceSn(data.getDeviceSn());
             ref.setMissionId(data.getMissionId());
             ref.setTaskName(data.getTaskName());
@@ -702,8 +702,8 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
                 .apiCode(apiCode)
                 .apiMessage(apiMessage)
                 .displayMessage(accepted
-                    ? "FC100 开始执行航线已受理：任务 " + textOr(taskId, "--")
-                    : textOr(apiMessage, "FC100 开始执行航线失败"))
+                    ? "DJI FlyCart 100 开始执行航线已受理：任务 " + textOr(taskId, "--")
+                    : textOr(apiMessage, "DJI FlyCart 100 开始执行航线失败"))
                 .build();
         }
 
@@ -715,7 +715,7 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
             s.setApiMessage(resp == null ? null : resp.getMessage());
             if (resp == null || resp.getData() == null || resp.getData().getList() == null) {
                 s.setStatus("UNKNOWN");
-                s.setDisplayMessage("FC100 任务状态未知：未返回任务列表");
+                s.setDisplayMessage("DJI FlyCart 100 任务状态未知：未返回任务列表");
                 return s;
             }
             Arrays.stream(resp.getData().getList())
@@ -735,7 +735,7 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
                     s.setTaskName(item.getTaskName());
                     s.setPhase(toTaskPhase(item));
                     String taskHint = textOr(item.getReason(), textOr(taskCodeMessage(item.getCode()), textOr(resp.getMessage(), "OK")));
-                    s.setDisplayMessage("FC100 航线任务" + toTaskStatusLabel(item)
+                    s.setDisplayMessage("DJI FlyCart 100 航线任务" + toTaskStatusLabel(item)
                         + "：任务 " + textOr(item.getId(), "--")
                         + "，状态 " + textOr(s.getStatus(), "--")
                         + "，结果码 " + textOr(item.getCode(), "--")
@@ -743,7 +743,7 @@ public class HttpDeliverySyncAdapter implements DeliverySyncAdapter {
                 }, () -> {
                     s.setStatus("NOT_FOUND");
                     s.setAccepted(false);
-                    s.setDisplayMessage("FC100 未查询到任务：" + taskId);
+                    s.setDisplayMessage("DJI FlyCart 100 未查询到任务：" + taskId);
                 });
             return s;
         }

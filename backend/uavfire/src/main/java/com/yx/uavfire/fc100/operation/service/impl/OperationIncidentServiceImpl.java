@@ -240,7 +240,7 @@ public class OperationIncidentServiceImpl implements OperationIncidentService {
             item.setFromStatus(log.getFromStatus());
             item.setToStatus(log.getToStatus());
             item.setOperatorId(log.getOperatorId());
-            item.setDescription("FC100 mission status: " + log.getAction()
+            item.setDescription("DJI FlyCart 100 mission status: " + log.getAction()
                 + (log.getRemark() == null ? "" : "; " + log.getRemark()));
             item.setCreateTime(log.getCreateTime());
             items.add(item);

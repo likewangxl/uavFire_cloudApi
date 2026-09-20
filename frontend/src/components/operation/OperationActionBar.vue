@@ -69,7 +69,7 @@
                   <strong>{{ device.displayName || device.resourceSn }}</strong>
                   <a-tag :color="onlineTagColor(device)">{{ device.onlineLabel || onlineLabel(device) }}</a-tag>
                 </div>
-                <small>{{ device.resourceSn }}{{ device.model ? ` · ${device.model}` : '' }}</small>
+                <small>{{ device.resourceSn }}{{ device.model ? ` · ${deviceModelName(device.model)}` : '' }}</small>
                 <div class="operation-device-metrics">
                   <span>电量 {{ formatBattery(device.batteryPercent) }}</span>
                   <span>RTK {{ formatRtk(device) }}</span>
@@ -83,7 +83,7 @@
             正在刷新设备状态...
           </div>
           <div v-else-if="!currentDeviceOptions.length" class="operation-form-hint">
-            暂无可选{{ assignKind === 'DELIVERY' ? 'FC100 投送设备' : '巡检机' }}
+            暂无可选{{ assignKind === 'DELIVERY' ? 'DJI FlyCart 100 投送设备' : '巡检机' }}
           </div>
           <div v-else-if="recentSn" class="operation-form-hint">
             最近使用：<a-button type="link" size="small" @click="assignForm.resourceSn = recentSn">{{ recentSn }}</a-button>
@@ -113,6 +113,7 @@
 </template>
 
 <script setup lang="ts">
+import { deviceModelName } from '/@/utils/device-models.mjs'
 import { computed, reactive, ref } from 'vue'
 import type { OperationAssignmentDTO, OperationIncidentDTO } from '/@/types/operation/incident'
 import type { AssignableDeviceOption } from '/@/types/operation/resource'
@@ -180,11 +181,11 @@ const confirmOkButtonProps = computed(() => ({
 }))
 
 const assignTitle = computed(() =>
-  assignKind.value === 'DELIVERY' ? '分配 FC100' : '分配巡检机',
+  assignKind.value === 'DELIVERY' ? '分配 DJI FlyCart 100' : '分配巡检机',
 )
 
 const assignSnPlaceholder = computed(() =>
-  assignKind.value === 'DELIVERY' ? '选择 FC100 投送设备' : '选择 DJI 巡检设备',
+  assignKind.value === 'DELIVERY' ? '选择 DJI FlyCart 100 投送设备' : '选择 DJI 巡检设备',
 )
 
 const currentDeviceOptions = computed(() =>

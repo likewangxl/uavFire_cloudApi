@@ -2,15 +2,45 @@
   "pages": [
     "pages/home/index",
     "pages/tasks/index",
+    "pages/events/index",
     "pages/reports/index",
-    "pages/mine/index"
+    "pages/mine/index",
+    "pages/detail/index"
   ],
   "window": {
     "navigationBarTitleText": "无人机火情智巡",
-    "navigationBarBackgroundColor": "#06111f",
-    "navigationBarTextStyle": "white",
-    "backgroundColor": "#02070d",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#ffffff",
     "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#8e8e93",
+    "selectedColor": "#007aff",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/tasks/index",
+        "text": "任务"
+      },
+      {
+        "pagePath": "pages/events/index",
+        "text": "态势"
+      },
+      {
+        "pagePath": "pages/reports/index",
+        "text": "报告"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的"
+      }
+    ]
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"

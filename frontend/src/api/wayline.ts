@@ -1,3 +1,4 @@
+import { deviceModelCode } from '/@/utils/device-models.mjs'
 import { message } from 'ant-design-vue'
 import request, { IPage, IWorkspaceResponse, IListWorkspaceResponse } from '/@/api/http/request'
 import { TaskType, TaskStatus, OutOfControlAction } from '/@/types/task'
@@ -62,17 +63,17 @@ function validatePlannedWaylineBody<T extends CreatePlannedWaylineBody | UpdateP
     message.error('规划航线参数不完整，请确认航线名称和航点。')
     throw new Error('planned wayline payload incomplete')
   }
-  const aircraftModelKey = body.aircraftModelKey?.trim()
+  const aircraftModelKey = deviceModelCode(body.aircraftModelKey?.trim())
   if (!aircraftModelKey) {
     message.error('无法读取当前飞行器机型，请重新连接设备后再保存航线。')
     throw new Error('planned wayline aircraft model is required')
   }
   if (['M300', 'M350'].includes(aircraftModelKey)) {
     const supportedPayloads = ['H20', 'H20T', 'H30', 'H30T']
-    if (!body.payloadModelKey || !supportedPayloads.includes(body.payloadModelKey) ||
+    if (!body.payloadModelKey || !supportedPayloads.includes(deviceModelCode(body.payloadModelKey)) ||
       ![0, 1, 2].includes(Number(body.payloadPositionIndex))) {
-      message.error('M300/M350 航线必须选择 H20/H20T/H30/H30T 负载和云台安装位。')
-      throw new Error('M300/M350 payload model and position are required')
+      message.error('DJI Matrice 300 RTK/DJI Matrice 350 RTK 航线必须选择 DJI Zenmuse H20/DJI Zenmuse H20T/DJI Zenmuse H30/DJI Zenmuse H30T 负载和云台安装位。')
+      throw new Error('DJI Matrice 300 RTK/DJI Matrice 350 RTK payload model and position are required')
     }
   }
   if (body.routeKind === 'area' && (!Array.isArray(body.areaPolygon) || body.areaPolygon.length < 3)) {

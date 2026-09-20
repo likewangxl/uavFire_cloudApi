@@ -17,7 +17,7 @@ import java.io.Serializable;
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@TableName(value = "manage_device_payload")
+@TableName(value = "manage_device_payload", autoResultMap = true)
 public class DevicePayloadEntity implements Serializable {
 
     @TableId(type = IdType.AUTO)
@@ -26,7 +26,7 @@ public class DevicePayloadEntity implements Serializable {
     @TableField(value = "payload_sn")
     private String payloadSn;
 
-    @TableField(value = "payload_name")
+    @TableField(value = "payload_name", typeHandler = com.yx.uavfire.common.model.OfficialDeviceNameTypeHandler.class)
     private String payloadName;
 
     @TableField(value = "payload_type")
@@ -50,7 +50,7 @@ public class DevicePayloadEntity implements Serializable {
     @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
     private Long updateTime;
 
-    @TableField(value = "payload_desc")
+    @TableField(value = "payload_desc", typeHandler = com.yx.uavfire.common.model.DeviceTextTypeHandler.class)
     private String payloadDesc;
 
     @TableField(value = "control_source")

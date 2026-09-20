@@ -13,7 +13,7 @@
         <a-collapse-panel key="fc100-delivery" header="投放设备" style="border-bottom: 1px solid #26364a;">
           <div class="fc100-cloud-panel">
             <div class="fc100-cloud-header">
-              <div class="fc100-cloud-title">FC100 云端设备</div>
+              <div class="fc100-cloud-title">DJI FlyCart 100 云端设备</div>
               <a-button
                 size="small"
                 type="primary"
@@ -23,7 +23,7 @@
               </a-button>
             </div>
         <div v-if="fc100DeliveryFormState.devices.length === 0" class="fc100-cloud-empty">
-          暂无 FC100 云端设备
+          暂无 DJI FlyCart 100 云端设备
         </div>
         <div v-else class="fc100-device-list">
           <div
@@ -688,7 +688,7 @@
                 </div>
 
                 <div class="aircraft-action-section fc100-delivery-section">
-                  <div class="aircraft-action-section-title">FC100 火情任务</div>
+                  <div class="aircraft-action-section-title">DJI FlyCart 100 火情任务</div>
                   <div class="fc100-delivery-form">
                     <a-input
                       v-model:value="fc100DeliveryFormState.missionNo"
@@ -739,7 +739,7 @@
                       :loading="actionLoading[device.gateway.sn] === 'fc100EmergencyStop'"
                       :disabled="!fc100DeliveryFormState.missionNo"
                       @click="handleFc100EmergencyStop(device)">
-                      FC100 急停
+                      DJI FlyCart 100 急停
                     </a-button>
                     <a-button
                       size="small"
@@ -748,7 +748,7 @@
                       :loading="actionLoading[device.gateway.sn] === 'fc100ReturnHome'"
                       :disabled="!fc100DeliveryFormState.missionNo"
                       @click="handleFc100ReturnHome(device)">
-                      FC100 返航
+                      DJI FlyCart 100 返航
                     </a-button>
                     <a-button
                       size="small"
@@ -756,7 +756,7 @@
                       :loading="actionLoading[device.gateway.sn] === 'fc100Land'"
                       :disabled="!fc100DeliveryFormState.missionNo"
                       @click="handleFc100Land(device)">
-                      FC100 降落
+                      DJI FlyCart 100 降落
                     </a-button>
                     <a-button
                       size="small"
@@ -781,6 +781,7 @@
 </template>
 
 <script lang="ts" setup>
+import { deviceModelName } from '/@/utils/device-models.mjs'
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { EDeviceTypeName, ELocalStorageKey, EBizCode } from '/@/types'
 import noData from '/@/assets/icons/no-data.png'
@@ -1567,7 +1568,7 @@ function formatFc100DeviceModel (device: DeliveryDeviceDTO) {
   const modelClass = String(device.bindStatus || '').toLowerCase()
   if (modelKey.includes('fc100') || modelClass === 'drone') return 'DJI FlyCart 100'
   if (modelClass === 'rc') return 'DJI RC Plus'
-  return device.deviceType || '--'
+  return deviceModelName(device.model || device.deviceType)
 }
 
 function normalizeMonitoringModelName (model?: string) {
@@ -1577,7 +1578,7 @@ function normalizeMonitoringModelName (model?: string) {
   if (/m4t/i.test(value)) return 'DJI Matrice 4T'
   if (/flycart[_\s-]*100/i.test(value)) return 'DJI FlyCart 100'
   if (/fc100/i.test(value)) return 'DJI FlyCart 100'
-  return value
+  return deviceModelName(value)
 }
 
 function optionalMonitoringValue (value: number | null | undefined, empty = '') {
@@ -1702,14 +1703,14 @@ async function handleFc100RefreshDevices () {
     const res = await deliveryApi.listDevices(workspaceId.value)
     const body = unwrapFc100Response(res)
     if (!Array.isArray(body?.data)) {
-      const failText = `FC100 设备列表获取失败：${getFc100BodyDisplayText(body, '未返回设备列表')}`
+      const failText = `DJI FlyCart 100 设备列表获取失败：${getFc100BodyDisplayText(body, '未返回设备列表')}`
       fc100DeliveryFormState.lastResult = failText
       message.warning(failText)
       return
     }
     fc100DeliveryFormState.devices = sortDevicesOnlineFirst(body.data || []) as DeliveryDeviceDTO[]
     if (!fc100DeliveryFormState.devices.length) {
-      fc100DeliveryFormState.lastResult = 'FC100 设备列表为空：请确认飞机/遥控器已绑定到当前 FC100 workspace/group。'
+      fc100DeliveryFormState.lastResult = 'DJI FlyCart 100 设备列表为空：请确认飞机/遥控器已绑定到当前 DJI FlyCart 100 workspace/group。'
     }
     if (!fc100DeliveryFormState.devices.length) {
       fc100DeliveryFormState.selectedDeviceSn = ''
@@ -1725,7 +1726,7 @@ async function handleFc100RefreshDevices () {
       await handleFc100SelectDevice(nextSelectedDeviceSn)
     }
   } catch (error: any) {
-    const failText = `FC100 设备列表获取失败：${getFc100ErrorText(error, '接口调用失败')}`
+    const failText = `DJI FlyCart 100 设备列表获取失败：${getFc100ErrorText(error, '接口调用失败')}`
     fc100DeliveryFormState.lastResult = failText
     message.error(failText)
   } finally {
@@ -1741,14 +1742,14 @@ async function handleFc100SelectDevice (deviceSn: string) {
     const res = await deliveryApi.deviceProps(deviceSn)
     const body = unwrapFc100Response(res)
     if (!body?.data || typeof body.data !== 'object') {
-      const failText = `FC100 设备物模型获取失败：${getFc100BodyDisplayText(body, '未返回设备物模型')}`
+      const failText = `DJI FlyCart 100 设备物模型获取失败：${getFc100BodyDisplayText(body, '未返回设备物模型')}`
       fc100DeliveryFormState.lastResult = failText
       message.warning(failText)
       return
     }
     fc100DeliveryFormState.selectedDeviceProps = body.data || null
   } catch (error: any) {
-    const failText = `FC100 设备物模型获取失败：${getFc100ErrorText(error, '接口调用失败')}`
+    const failText = `DJI FlyCart 100 设备物模型获取失败：${getFc100ErrorText(error, '接口调用失败')}`
     fc100DeliveryFormState.lastResult = failText
     message.error(failText)
   } finally {
@@ -1790,7 +1791,7 @@ async function withFc100DeliveryAction (
     }
     return body
   } catch (error: any) {
-    const failText = getFc100ErrorText(error, 'FC100 接口调用失败。')
+    const failText = getFc100ErrorText(error, 'DJI FlyCart 100 接口调用失败。')
     fc100DeliveryFormState.lastResult = failText
     message.error(failText)
   } finally {
@@ -1803,9 +1804,9 @@ async function handleFc100CreateTask (device: OnlineDevice) {
     return await deliveryApi.createTask(missionNo, {
       operatorId: getFc100OperatorId(),
       taskName: `火情任务-${missionNo}`,
-      remark: `前端验证 FC100 航线任务 ${missionNo}`,
+      remark: `前端验证 DJI FlyCart 100 航线任务 ${missionNo}`,
     })
-  }, 'FC100 航线任务已创建。')
+  }, 'DJI FlyCart 100 航线任务已创建。')
 }
 
 async function handleFc100StartTask (device: OnlineDevice) {
@@ -1813,13 +1814,13 @@ async function handleFc100StartTask (device: OnlineDevice) {
     return await deliveryApi.startTask(missionNo, {
       operatorId: getFc100OperatorId(),
     })
-  }, 'FC100 开始航线指令已发送。')
+  }, 'DJI FlyCart 100 开始航线指令已发送。')
 }
 
 async function handleFc100TaskStatus (device: OnlineDevice) {
   await withFc100DeliveryAction(device, 'fc100TaskStatus', async (missionNo) => {
     return await deliveryApi.status(missionNo)
-  }, 'FC100 任务状态已刷新。', {
+  }, 'DJI FlyCart 100 任务状态已刷新。', {
     resultText: (res) => {
       const data = res?.data
       if (!data) return '任务状态：暂无数据'
@@ -1835,14 +1836,14 @@ async function confirmFc100DangerAction (device: OnlineDevice, action: string, l
     title: `确认对任务 ${getFc100MissionNo()} 执行 ${label} 吗？`,
     gatewaySn: device.gateway.sn,
     action,
-    subtitle: `${device.callsign} · FC100 Delivery Sync`,
+    subtitle: `${device.callsign} · DJI FlyCart 100 Delivery Sync`,
     summary: [
       { label: '任务编号', value: getFc100MissionNo() || '--' },
       { label: '目标飞机', value: device.callsign },
       { label: '控制动作', value: label },
     ],
     notice: [
-      '该动作会调用 FC100 云端互联远程命令接口。',
+      '该动作会调用 DJI FlyCart 100 云端互联远程命令接口。',
     ],
     warning: [
       '请确认现场飞行状态后再执行。',
@@ -1858,7 +1859,7 @@ async function handleFc100EmergencyStop (device: OnlineDevice) {
     return await deliveryApi.emergencyStop(missionNo, {
       operatorId: getFc100OperatorId(),
     })
-  }, 'FC100 急停指令已发送。')
+  }, 'DJI FlyCart 100 急停指令已发送。')
 }
 
 async function handleFc100ReturnHome (device: OnlineDevice) {
@@ -1867,7 +1868,7 @@ async function handleFc100ReturnHome (device: OnlineDevice) {
     return await deliveryApi.returnHome(missionNo, {
       operatorId: getFc100OperatorId(),
     })
-  }, 'FC100 返航指令已发送。')
+  }, 'DJI FlyCart 100 返航指令已发送。')
 }
 
 async function handleFc100ReleaseHook (device: OnlineDevice) {
@@ -1876,7 +1877,7 @@ async function handleFc100ReleaseHook (device: OnlineDevice) {
     return await deliveryApi.releaseHook(missionNo, {
       operatorId: getFc100OperatorId(),
     })
-  }, 'FC100 开钩投放指令已发送。')
+  }, 'DJI FlyCart 100 开钩投放指令已发送。')
 }
 
 async function handleFc100Land (device: OnlineDevice) {
@@ -1885,13 +1886,13 @@ async function handleFc100Land (device: OnlineDevice) {
     return await deliveryApi.land(missionNo, {
       operatorId: getFc100OperatorId(),
     })
-  }, 'FC100 降落指令已发送。')
+  }, 'DJI FlyCart 100 降落指令已发送。')
 }
 
 async function handleFc100CommandStatus (device: OnlineDevice) {
   await withFc100DeliveryAction(device, 'fc100CommandStatus', async (missionNo) => {
     return await deliveryApi.commandStatus(missionNo)
-  }, 'FC100 命令状态已刷新。', {
+  }, 'DJI FlyCart 100 命令状态已刷新。', {
     resultText: (res) => `命令状态：${JSON.stringify(res?.data?.services || {})}`,
   })
 }
