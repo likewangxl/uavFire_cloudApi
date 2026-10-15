@@ -76,7 +76,7 @@
             查看历史
           </a-button>
           <a-button
-            v-if="missionForEvent(record)?.status === 'WAITING_REVIEW'"
+            v-if="canApproveMission(record)"
             size="small"
             @click="openApprove(record)"
           >
@@ -242,6 +242,11 @@ const loading = ref(false)
 
 function missionForEvent (record: FireEventDTO): FireMissionDTO | undefined {
   return missionsByEventId.value[record.id]
+}
+
+function canApproveMission (record: FireEventDTO): boolean {
+  const status = missionForEvent(record)?.status
+  return status === 'WAITING_REVIEW' || status === 'CREATED'
 }
 
 // ---- 就地审批弹窗 ----

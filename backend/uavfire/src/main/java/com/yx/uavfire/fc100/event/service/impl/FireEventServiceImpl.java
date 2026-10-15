@@ -1200,7 +1200,7 @@ public class FireEventServiceImpl implements FireEventService {
         draft.setFireEventId(event.getId());
         draft.setIncidentId(incidentId);
         draft.setAttemptIndex(1);
-        draft.setStatus(FireMissionStatus.CREATED.name());
+        draft.setStatus(FireMissionStatus.WAITING_REVIEW.name());
         draft.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         draft.setReleaseExecutionMode(ReleaseExecutionMode.OFFICIAL_HOOK_MANUAL.name());
         draft.setVersion(0L);
