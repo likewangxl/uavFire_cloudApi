@@ -30,6 +30,7 @@ public final class TransitionTable {
         new EnumMap<>(FireMissionStatus.class);
 
     static {
+        put(CREATED, APPROVE, APPROVED);
         put(CREATED, CANCEL, CANCELLED);
         put(CREATED, FORCE_FAIL, FAILED);
 
@@ -56,11 +57,14 @@ public final class TransitionTable {
 
         put(SENT_TO_DELIVERY, CANCEL, CANCELLED);
         put(SENT_TO_DELIVERY, CREATE_DELIVERY_TASK, SENT_TO_DELIVERY); // 司运侧任务失效时允许重新推送
+        put(SENT_TO_DELIVERY, PILOT_ACCEPT, ACCEPTED_BY_PILOT);
         put(SENT_TO_DELIVERY, START_DELIVERY, IN_PROGRESS);
         put(SENT_TO_DELIVERY, TAKEOVER, MANUAL_TAKEOVER);
         put(SENT_TO_DELIVERY, FORCE_FAIL, FAILED);
 
         put(ACCEPTED_BY_PILOT, START_DELIVERY, IN_PROGRESS);
+        put(ACCEPTED_BY_PILOT, CANCEL, CANCELLED);
+        put(ACCEPTED_BY_PILOT, TAKEOVER, MANUAL_TAKEOVER);
         put(ACCEPTED_BY_PILOT, FORCE_FAIL, FAILED);
 
         put(IN_PROGRESS, MARK_RELEASE_PENDING, PAYLOAD_RELEASE_PENDING);

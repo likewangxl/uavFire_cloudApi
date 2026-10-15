@@ -28,6 +28,8 @@ public class FireMissionEntity {
     private Double windSpeedAtApproval;
     private Double windDirectionDeg;
     private String djiTaskId;
+    private String deliveryIntentId;
+    private String deliveryIntentStatus;
     private Long latestRouteFileId;
     private String releasePolicy;
     private String releaseExecutionMode;

@@ -7,6 +7,7 @@ import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.common.idempotency.Idempotent;
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
+import com.yx.uavfire.fc100.deliverysync.HookCommandGuard;
 import com.yx.uavfire.fc100.deliverysync.DeliveryTaskStatusMapper;
 import com.yx.uavfire.fc100.deliverysync.config.DeliverySyncProperties;
 import com.yx.uavfire.fc100.deliverysync.model.dto.DeliveryBypassStreamDTO;
@@ -31,6 +32,7 @@ import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
 import com.yx.uavfire.fc100.mission.model.enums.ReleaseExecutionMode;
+import com.yx.uavfire.fc100.mission.service.Fc100OperatorResolver;
 import com.yx.uavfire.fc100.mission.service.MissionStateMachine;
 import com.yx.uavfire.fc100.mission.service.TransitCommand;
 import com.yx.uavfire.fc100.operation.command.CommandQueueService;
@@ -107,6 +109,7 @@ public class DeliveryController {
     private final SafetyCheckService safetyCheckService;
     private final PayloadReleasePolicyService releasePolicyService;
     private final CommandQueueService commandQueueService;
+    private Fc100OperatorResolver operatorResolver;
     private final ConcurrentHashMap<String, CachedDeviceLive> fc100BypassLiveCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Integer> deliveryFailureCounts = new ConcurrentHashMap<>();
 
@@ -179,6 +182,11 @@ public class DeliveryController {
         this.safetyCheckService = safetyCheckService;
         this.releasePolicyService = releasePolicyService;
         this.commandQueueService = commandQueueService;
+    }
+
+    @Autowired(required = false)
+    public void setOperatorResolver(Fc100OperatorResolver operatorResolver) {
+        this.operatorResolver = operatorResolver;
     }
 
     @GetMapping("/delivery/devices")
@@ -696,6 +704,18 @@ public class DeliveryController {
             actualWaylineId,
             null);
         String actualMissionId = firstText(importedWayline == null ? null : importedWayline.getWaylineId(), actualWaylineId);
+        String resolvedOperator = resolveOperator(req, operatorId);
+
+        if ("LOCAL_COMMIT_FAILED".equals(m.getDeliveryIntentStatus()) && m.getDjiTaskId() != null) {
+            transitDeliveryTask(m, resolvedOperator, req);
+            markDeliveryIntent(m.getId(), m.getDeliveryIntentId(), "EXTERNAL_CREATED", m.getDjiTaskId());
+            DeliveryTaskRef existing = new DeliveryTaskRef();
+            existing.setTaskId(m.getDjiTaskId());
+            return existing;
+        }
+
+        String intentId = UUID.randomUUID().toString();
+        markDeliveryIntent(m.getId(), intentId, "PENDING", null);
 
         DeliveryTaskRef ref;
         try {
@@ -712,22 +732,47 @@ public class DeliveryController {
                 .build());
             recordDeliverySuccess(m.getMissionNo(), "create-task");
         } catch (RuntimeException e) {
+            markDeliveryIntent(m.getId(), intentId, "FAILED", null);
             recordDeliveryFailure(m, "create-task", e);
             throw e;
         }
 
-        sm.transit(TransitCommand.builder()
-            .missionNo(no).event(FireMissionEvent.CREATE_DELIVERY_TASK)
-            .operatorId(operatorId)
-            .clientIp(req.getRemoteAddr())
-            .requestId(req.getHeader("X-Request-Id"))
-            .idempotencyKey(req.getHeader("X-Idempotency-Key"))
-            .build());
-
-        missionMapper.update(null, new UpdateWrapper<FireMissionEntity>()
-            .eq("id", m.getId()).set("dji_task_id", ref.getTaskId()));
-
+        markDeliveryIntent(m.getId(), intentId, "EXTERNAL_CREATED", ref.getTaskId());
+        try {
+            transitDeliveryTask(m, resolvedOperator, req);
+        } catch (RuntimeException e) {
+            markDeliveryIntent(m.getId(), intentId, "LOCAL_COMMIT_FAILED", ref.getTaskId());
+            throw e;
+        }
         return ref;
+    }
+
+    private void transitDeliveryTask(FireMissionEntity mission, String operatorId, HttpServletRequest req) {
+        sm.transit(TransitCommand.builder()
+            .missionNo(mission.getMissionNo()).event(FireMissionEvent.CREATE_DELIVERY_TASK)
+            .operatorId(operatorId)
+            .clientIp(req == null ? null : req.getRemoteAddr())
+            .requestId(req == null ? null : req.getHeader("X-Request-Id"))
+            .idempotencyKey(req == null ? null : req.getHeader("X-Idempotency-Key"))
+            .build());
+    }
+
+    private void markDeliveryIntent(Long missionId, String intentId, String status, String taskId) {
+        UpdateWrapper<FireMissionEntity> update = new UpdateWrapper<FireMissionEntity>()
+            .eq("id", missionId)
+            .set("delivery_intent_id", intentId)
+            .set("delivery_intent_status", status);
+        if (taskId != null) {
+            update.set("dji_task_id", taskId);
+        }
+        missionMapper.update(null, update);
+    }
+
+    private String resolveOperator(HttpServletRequest req, String bodyOperatorId) {
+        if (operatorResolver == null) {
+            return bodyOperatorId;
+        }
+        return operatorResolver.requireOperatorId(req, bodyOperatorId);
     }
 
     private void requireFireMissionDeliveryAutomationDependencies() {
@@ -1058,6 +1103,12 @@ public class DeliveryController {
                                                       @RequestBody(required = false) DeviceCommandParam p,
                                                       HttpServletRequest req) {
         FireMissionEntity mission = findMission(no);
+        if (p != null && operatorResolver != null) {
+            Fc100OperatorResolver.ResolvedOperator operator = operatorResolver.resolve(req, p.getOperatorId());
+            if (operator.authenticated) {
+                p.setOperatorId(operator.operatorId);
+            }
+        }
         PayloadReleasePolicyService.ReleasePolicyDecision decision =
             requireReleasePolicyService().validateReleaseRequest(mission,
                 PayloadReleasePolicyService.ReleaseRequest.builder()
@@ -1080,7 +1131,7 @@ public class DeliveryController {
         command.setOperatorId(p.getOperatorId());
         command.setData(Map.of("mode", 1));
         return ApiResult.success(sendDeviceCommand(mission.getAircraftSn(), "hoist_hook_control", command, no,
-            req == null ? null : req.getHeader("X-Idempotency-Key")));
+            req == null ? null : req.getHeader("X-Idempotency-Key"), true));
     }
 
     public ApiResult<DeliveryCommandRef> releaseHook(String no, DeviceCommandParam p) {
@@ -1091,7 +1142,10 @@ public class DeliveryController {
     @Idempotent("delivery.command.custom")
     public ApiResult<DeliveryCommandRef> command(@PathVariable("no") String no,
                                                   @PathVariable("method") String method,
-                                                  @Valid @RequestBody DeviceCommandParam p) {
+                                                  @Valid @RequestBody DeviceCommandParam p,
+                                                  HttpServletRequest req) {
+        HookCommandGuard.rejectUnlessAuthorized(method, false);
+        stampOperator(req, p);
         return ApiResult.success(sendMissionCommand(no, method, p));
     }
 
@@ -1128,7 +1182,10 @@ public class DeliveryController {
     @Idempotent("delivery.device-command.custom")
     public ApiResult<DeliveryCommandRef> directCommand(@PathVariable("sn") String sn,
                                                         @PathVariable("method") String method,
-                                                        @Valid @RequestBody DeviceCommandParam p) {
+                                                        @Valid @RequestBody DeviceCommandParam p,
+                                                        HttpServletRequest req) {
+        HookCommandGuard.rejectUnlessAuthorized(method, false);
+        stampOperator(req, p);
         return ApiResult.success(sendDeviceCommand(sn, method, p));
     }
 
@@ -1154,15 +1211,24 @@ public class DeliveryController {
 
     private DeliveryCommandRef sendDeviceCommand(String deviceSn, String method, DeviceCommandParam p,
                                                  String missionNo, String idempotencyKey) {
+        return sendDeviceCommand(deviceSn, method, p, missionNo, idempotencyKey, false);
+    }
+
+    private DeliveryCommandRef sendDeviceCommand(String deviceSn, String method, DeviceCommandParam p,
+                                                 String missionNo, String idempotencyKey, boolean releaseAuthorized) {
+        HookCommandGuard.rejectUnlessAuthorized(method, releaseAuthorized);
         Map<String, Object> data = p == null || p.getData() == null ? Map.of() : p.getData();
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("missionNo", missionNo);
+        payload.put("deviceSn", deviceSn);
+        payload.put("deviceCmdMethod", method);
+        payload.put("deviceCmdData", data);
+        if (releaseAuthorized) {
+            payload.put(HookCommandGuard.RELEASE_AUTHORIZED, true);
+        }
         if (commandQueueService != null) {
             OperationCommandEventEntity event = commandQueueService.enqueue(deviceSn, method,
-                Map.of(
-                    "missionNo", missionNo,
-                    "deviceSn", deviceSn,
-                    "deviceCmdMethod", method,
-                    "deviceCmdData", data
-                ),
+                payload,
                 idempotencyKey,
                 p == null ? null : p.getOperatorId());
             return toQueuedCommandRef(event);
@@ -1173,6 +1239,16 @@ public class DeliveryController {
             .deviceCmdMethod(method)
             .deviceCmdData(data)
             .build());
+    }
+
+    private void stampOperator(HttpServletRequest req, DeviceCommandParam p) {
+        if (operatorResolver == null || p == null) {
+            return;
+        }
+        Fc100OperatorResolver.ResolvedOperator operator = operatorResolver.resolve(req, p.getOperatorId());
+        if (operator.authenticated) {
+            p.setOperatorId(operator.operatorId);
+        }
     }
 
     private DeliveryCommandRef toQueuedCommandRef(OperationCommandEventEntity event) {

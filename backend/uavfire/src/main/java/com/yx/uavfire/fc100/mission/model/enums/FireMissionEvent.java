@@ -10,6 +10,7 @@ public enum FireMissionEvent {
     GEN_WP,
     EXP_KMZ,
     CREATE_DELIVERY_TASK,
+    PILOT_ACCEPT,
     START_DELIVERY,
     MARK_RELEASE_PENDING,
     CONFIRM_RELEASE,

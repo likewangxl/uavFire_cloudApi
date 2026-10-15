@@ -71,7 +71,8 @@ class FireEventServiceImplDecisionTest {
         verify(f.missions).insert(argThat(mission ->
             Long.valueOf(10L).equals(mission.getFireEventId())
                 && Long.valueOf(501L).equals(mission.getIncidentId())
-                && FireMissionStatus.CREATED.name().equals(mission.getStatus())));
+                && FireMissionStatus.WAITING_REVIEW.name().equals(mission.getStatus())
+                && "commander-1".equals(mission.getCreatedBy())));
         verify(f.histories).insert(argThat(history ->
             "CONFIRMED".equals(history.getAction())
                 && "commander-1".equals(history.getSourceEventId())));

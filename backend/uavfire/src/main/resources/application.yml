@@ -51,7 +51,8 @@ spring:
 jwt:
   issuer: DJI
   subject: CloudApiSample
-  secret: CloudApiSample
+  secret: ${JWT_SECRET:}
+  allow-insecure-secret: ${JWT_ALLOW_INSECURE_SECRET:false}
   age: 86400
 
 # Leadership WeChat Mini Program BFF. Every capability is fail-closed by default.
@@ -284,6 +285,7 @@ fc100:
     retry-backoff: ${FC100_COMMAND_QUEUE_RETRY_BACKOFF:5s}
     dispatch-batch-size: ${FC100_COMMAND_QUEUE_DISPATCH_BATCH_SIZE:20}
   preflight:
+    block-when-uom-missing: ${FC100_PREFLIGHT_BLOCK_WHEN_UOM_MISSING:true}
     min-battery-pct: ${FC100_PREFLIGHT_MIN_BATTERY_PCT:30}
     max-wind-mps: ${FC100_PREFLIGHT_MAX_WIND_MPS:12}
     max-total-weight-kg: ${FC100_PREFLIGHT_MAX_TOTAL_WEIGHT_KG:85}
@@ -312,6 +314,7 @@ fc100:
       safety-reserve-ratio: ${FC100_PREFLIGHT_TIME_BUDGET_SAFETY_RESERVE_RATIO:0.2}
   delivery-sync:
     mode: mock                # mock | http
+    allow-mock: ${FC100_DELIVERY_SYNC_ALLOW_MOCK:false}
     base-url: https://ta-api.dji.com
     ak: ${FC100_DELIVERY_SYNC_AK:}
     sk: ${FC100_DELIVERY_SYNC_SK:}
@@ -323,7 +326,7 @@ fc100:
       max-attempts: 3
       backoff-ms: [500, 1500, 4500]
   safety:
-    four-eyes-enabled: false
+    four-eyes-enabled: ${FC100_FOUR_EYES_ENABLED:true}
     wind-speed-error-threshold: 10
     wind-speed-warn-threshold: 6
     payload-weight-max-kg: 82
@@ -349,5 +352,16 @@ fc100:
 # DEM 地形高程（Copernicus GLO-30 转 .hgt，见 scripts/fetch-dem.sh）。
 # 配置 dem-dir 后 HgtTerrainElevationService 生效；不配置则回落 MissingTerrainElevationService。
 uavfire:
+  env: ${UAVFIRE_ENV:}
+  trial:
+    mode: ${UAVFIRE_TRIAL_MODE:off}
+    expires-at: ${UAVFIRE_TRIAL_EXPIRES_AT:2026-10-01T00:00:00+08:00}
+    allow-unlimited: ${UAVFIRE_TRIAL_ALLOW_UNLIMITED:false}
+  auth:
+    demo-login-enabled: ${UAVFIRE_DEMO_LOGIN_ENABLED:false}
+    admin-usernames: ${UAVFIRE_ADMIN_USERNAMES:}
+  msdk:
+    device-token: ${UAVFIRE_MSDK_DEVICE_TOKEN:}
+    command-dispatch-ttl-ms: ${UAVFIRE_MSDK_COMMAND_DISPATCH_TTL_MS:15000}
   terrain:
     dem-dir: ${UAVFIRE_DEM_DIR:data/dem}

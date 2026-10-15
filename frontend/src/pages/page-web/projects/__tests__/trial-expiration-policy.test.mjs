@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   isTrialExpired,
+  resolveTrialDecision,
   TRIAL_EXPIRES_AT_DISPLAY,
   TRIAL_EXPIRES_AT_EPOCH_MS,
   TRIAL_EXPIRES_AT_ISO,
@@ -21,4 +22,9 @@ test('trial remains usable immediately before cutoff', () => {
 test('trial is disabled at and after cutoff', () => {
   assert.equal(isTrialExpired(TRIAL_EXPIRES_AT_EPOCH_MS), true)
   assert.equal(isTrialExpired(TRIAL_EXPIRES_AT_EPOCH_MS + 1), true)
+})
+
+test('mode off does not expire and until without a date keeps the historical cutoff', () => {
+  assert.equal(resolveTrialDecision({ mode: 'off' }, TRIAL_EXPIRES_AT_EPOCH_MS + 1).expired, false)
+  assert.equal(resolveTrialDecision({ mode: 'until' }, TRIAL_EXPIRES_AT_EPOCH_MS).expired, true)
 })

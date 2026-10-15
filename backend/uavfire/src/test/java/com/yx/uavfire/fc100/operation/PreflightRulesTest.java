@@ -83,6 +83,13 @@ class PreflightRulesTest {
     }
 
     @Test
+    void r09BlocksMissingUomWhenConfiguredAndJavaDefaultStaysWarn() {
+        assertEquals(false, new PreflightProperties().isBlockWhenUomMissing());
+        assertBlocked(new BoundaryRule(true).check(ctx(c -> c.boundaryCheck(BoundaryCheckResult.noReferenceLayer()))));
+        assertPassed(new BoundaryRule(true).check(ctx(c -> c.boundaryCheck(BoundaryCheckResult.inside()))));
+    }
+
+    @Test
     void r10BlocksWithoutOperatorConfirmationAndPassesConfirmedOperator() {
         assertBlocked(new OperatorConfirmationRule().check(ctx(c -> c.takeoffConfirmations(List.of()))));
         assertPassed(new OperatorConfirmationRule().check(ctx()));

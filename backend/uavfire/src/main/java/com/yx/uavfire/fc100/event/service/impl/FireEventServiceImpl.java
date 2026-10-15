@@ -193,7 +193,7 @@ public class FireEventServiceImpl implements FireEventService {
         String draftMissionNo = existingDraft == null ? null : existingDraft.getMissionNo();
         if (isPrecise(event)) {
             if (existingDraft == null) {
-                FireMissionEntity draft = createDraftMission(event, incident.getId(), now);
+                FireMissionEntity draft = createDraftMission(event, incident.getId(), param.getOperatorId(), now);
                 draftCreated = true;
                 draftMissionNo = draft.getMissionNo();
             } else if (existingDraft.getIncidentId() == null) {
@@ -1075,7 +1075,21 @@ public class FireEventServiceImpl implements FireEventService {
      * OSD 也查不到则抛 MISSING_DEVICE_POSITION (HTTP 400),不持久化半残事件。
      */
     private void fillPositionFromOsdIfMissing(FireEventCreateParam param) {
-        if (param.getLat() != null && param.getLng() != null) {
+        boolean unlocated = GEO_QUALITY_UNLOCATED.equalsIgnoreCase(param.getGeoQuality());
+        if (unlocated) {
+            if (param.getAircraftLat() == null) {
+                param.setAircraftLat(param.getLat());
+            }
+            if (param.getAircraftLng() == null) {
+                param.setAircraftLng(param.getLng());
+            }
+            param.setLat(null);
+            param.setLng(null);
+            param.setAlt(null);
+            if (param.getAircraftLat() != null && param.getAircraftLng() != null) {
+                return;
+            }
+        } else if (param.getLat() != null && param.getLng() != null) {
             return;
         }
         String sn = param.getDeviceSn();
@@ -1109,6 +1123,9 @@ public class FireEventServiceImpl implements FireEventService {
             }
         }
         if (lat == null || lng == null) {
+            if (unlocated) {
+                return;
+            }
             FireEventEntity latest = latestKnownPosition(sn);
             if (latest != null) {
                 lat = latest.getLat().floatValue();
@@ -1123,10 +1140,12 @@ public class FireEventServiceImpl implements FireEventService {
                     "OSD has no latitude/longitude for device: " + sn);
             }
         }
-        if (param.getLat() == null) param.setLat(lat.doubleValue());
-        if (param.getLng() == null) param.setLng(lng.doubleValue());
-        if (param.getAlt() == null && height != null) {
-            param.setAlt(height.doubleValue());
+        if (!unlocated) {
+            if (param.getLat() == null) param.setLat(lat.doubleValue());
+            if (param.getLng() == null) param.setLng(lng.doubleValue());
+            if (param.getAlt() == null && height != null) {
+                param.setAlt(height.doubleValue());
+            }
         }
         if (param.getAircraftLat() == null) param.setAircraftLat(lat.doubleValue());
         if (param.getAircraftLng() == null) param.setAircraftLng(lng.doubleValue());
@@ -1193,14 +1212,15 @@ public class FireEventServiceImpl implements FireEventService {
         return list == null || list.isEmpty() ? null : list.get(0);
     }
 
-    private FireMissionEntity createDraftMission(FireEventEntity event, Long incidentId, long now) {
+    private FireMissionEntity createDraftMission(FireEventEntity event, Long incidentId, String operatorId, long now) {
         FireMissionEntity draft = new FireMissionEntity();
         draft.setMissionNo(noGen.next());
         draft.setWorkspaceId(event.getWorkspaceId());
         draft.setFireEventId(event.getId());
         draft.setIncidentId(incidentId);
         draft.setAttemptIndex(1);
-        draft.setStatus(FireMissionStatus.CREATED.name());
+        draft.setStatus(FireMissionStatus.WAITING_REVIEW.name());
+        draft.setCreatedBy(operatorId);
         draft.setReleasePolicy(ReleasePolicy.MANUAL_CONFIRM.name());
         draft.setReleaseExecutionMode(ReleaseExecutionMode.OFFICIAL_HOOK_MANUAL.name());
         draft.setVersion(0L);

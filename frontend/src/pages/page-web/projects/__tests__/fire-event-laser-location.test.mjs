@@ -18,6 +18,8 @@ test('pending and failed laser events never expose provisional aircraft coordina
     '激光定位失败'
   )
   assert.equal(isUsableFireLocation({ lat: 34.9, lng: 109.3, geoQuality: 'LASER_LOCATING' }), false)
+  assert.equal(formatFireLocation({ lat: 34.9, lng: 109.3, geoQuality: 'UNLOCATED' }), '火点未定位')
+  assert.equal(isUsableFireLocation({ lat: 34.9, lng: 109.3, geoQuality: 'UNLOCATED' }), false)
 })
 
 test('pending laser events are excluded while precise laser events are placed', () => {

@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @Data
 @ConfigurationProperties(prefix = "fc100.safety")
 public class Fc100SafetyProperties {
-    private boolean fourEyesEnabled = false;
+    private boolean fourEyesEnabled = true;
     private double windSpeedErrorThreshold = 10.0;
     private double windSpeedWarnThreshold = 6.0;
     private double payloadWeightMaxKg = 82.0;

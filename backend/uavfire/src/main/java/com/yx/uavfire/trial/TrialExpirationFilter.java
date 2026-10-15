@@ -1,5 +1,6 @@
 package com.yx.uavfire.trial;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -19,10 +20,12 @@ public final class TrialExpirationFilter extends OncePerRequestFilter {
 
     private final TrialExpirationPolicy policy;
 
-    public TrialExpirationFilter() {
-        this(Clock.systemUTC());
+    @Autowired
+    public TrialExpirationFilter(TrialLicense trialLicense) {
+        this.policy = trialLicense.policy();
     }
 
+    /** Fixed historical cutoff, used by the filter unit test. */
     TrialExpirationFilter(Clock clock) {
         this.policy = new TrialExpirationPolicy(clock);
     }
@@ -41,6 +44,6 @@ public final class TrialExpirationFilter extends OncePerRequestFilter {
         response.setCharacterEncoding("UTF-8");
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write(
-                "{\"code\":403,\"message\":\"" + TrialExpirationPolicy.EXPIRED_MESSAGE + "\"}");
+                "{\"code\":403,\"message\":\"" + policy.expiredMessage() + "\"}");
     }
 }

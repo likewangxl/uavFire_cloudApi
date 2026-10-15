@@ -35,10 +35,18 @@ public class SafetyCheckServiceImpl implements SafetyCheckService {
             throw new Fc100BusinessException(Fc100ErrorCode.MISSION_NOT_FOUND, missionNo);
         }
 
+        return check(phase, m);
+    }
+
+    @Override
+    public SafetyCheckResult check(SafetyCheckPhase phase, FireMissionEntity mission) {
+        if (mission == null) {
+            throw new Fc100BusinessException(Fc100ErrorCode.MISSION_NOT_FOUND, "mission");
+        }
         List<SafetyCheckIssue> issues = new ArrayList<>();
         for (SafetyCheck c : checks) {
             if (!c.appliesTo(phase)) continue;
-            c.evaluate(m).ifPresent(issues::add);
+            c.evaluate(mission).ifPresent(issues::add);
         }
         SafetyCheckResult r = new SafetyCheckResult();
         boolean anyError = issues.stream().anyMatch(i -> i.getLevel() == SafetyCheckLevel.ERROR);

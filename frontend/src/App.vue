@@ -17,48 +17,69 @@
 
 <script lang="ts">
 import { defineComponent, onBeforeUnmount, onMounted, ref } from 'vue'
-import {
-  isTrialExpired,
-  TRIAL_EXPIRES_AT_DISPLAY,
-  TRIAL_EXPIRES_AT_EPOCH_MS,
-} from '/@/trial/trial-expiration-policy.mjs'
+import { CURRENT_CONFIG } from '/@/api/http/config'
+import { resolveTrialDecision } from '/@/trial/trial-expiration-policy.mjs'
 
 export default defineComponent({
   name: 'App',
 
   setup () {
-    const trialExpired = ref(isTrialExpired())
+    const trialExpired = ref(false)
+    const trialExpiresAtDisplay = ref('正在确认试用授权')
     let expirationTimer: number | undefined
+    let expiresAtMs: number | null = null
 
-    const refreshTrialState = () => {
-      trialExpired.value = isTrialExpired()
+    const applyDecision = (decision: { expired: boolean, display: string, expiresAtMs: number | null }) => {
+      trialExpired.value = decision.expired
+      trialExpiresAtDisplay.value = decision.display
+      expiresAtMs = decision.expiresAtMs
     }
 
-    const scheduleExpirationCheck = () => {
-      refreshTrialState()
-      if (trialExpired.value) return
-      const remainingMs = TRIAL_EXPIRES_AT_EPOCH_MS - Date.now()
+    const refreshTrialState = async () => {
+      try {
+        const response = await fetch(`${CURRENT_CONFIG.baseURL}manage/api/v1/trial-status`)
+        if (!response.ok) {
+          throw new Error('trial status unavailable')
+        }
+        const body = await response.json()
+        applyDecision(resolveTrialDecision(body.data || body))
+      } catch (error) {
+        if (import.meta.env.PROD) {
+          applyDecision({ expired: true, display: '无法确认试用授权，已停止服务', expiresAtMs: null })
+        } else {
+          applyDecision({ expired: false, display: '开发环境未连接到试用授权接口', expiresAtMs: null })
+        }
+      }
+    }
+
+    const scheduleExpirationCheck = async () => {
+      await refreshTrialState()
+      if (trialExpired.value || expiresAtMs == null) return
+      const remainingMs = expiresAtMs - Date.now()
       expirationTimer = window.setTimeout(
-        scheduleExpirationCheck,
+        () => { scheduleExpirationCheck() },
         Math.min(Math.max(remainingMs, 1), 60 * 60 * 1000),
       )
     }
 
+    const onFocus = () => { refreshTrialState() }
+    const onVisibility = () => { refreshTrialState() }
+
     onMounted(() => {
       scheduleExpirationCheck()
-      window.addEventListener('focus', refreshTrialState)
-      document.addEventListener('visibilitychange', refreshTrialState)
+      window.addEventListener('focus', onFocus)
+      document.addEventListener('visibilitychange', onVisibility)
     })
 
     onBeforeUnmount(() => {
       if (expirationTimer !== undefined) window.clearTimeout(expirationTimer)
-      window.removeEventListener('focus', refreshTrialState)
-      document.removeEventListener('visibilitychange', refreshTrialState)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
     })
 
     return {
       trialExpired,
-      trialExpiresAtDisplay: TRIAL_EXPIRES_AT_DISPLAY,
+      trialExpiresAtDisplay,
     }
   }
 })

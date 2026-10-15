@@ -52,6 +52,7 @@ public class GlobalMVCConfigurer implements WebMvcConfigurer {
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/token/refresh");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/captcha");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/demo-login");
+        EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/trial-status");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/agents/**");
         EXCLUDE_PATHS.add("/" + managePrefix + manageVersion + "/dual-stream/tasks/*/events");
         EXCLUDE_PATHS.add(agentFireEventPath);

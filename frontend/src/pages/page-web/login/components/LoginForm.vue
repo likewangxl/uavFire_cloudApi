@@ -45,6 +45,7 @@
       >登录系统</a-button>
 
       <a-button
+        v-if="demoLoginEnabled"
         size="large"
         block
         :loading="demoLoading"
@@ -83,6 +84,7 @@ const form = reactive<FormState>({
 
 const submitting = ref(false)
 const demoLoading = ref(false)
+const demoLoginEnabled = import.meta.env.VITE_DEMO_LOGIN === 'true'
 const forgotOpen = ref(false)
 const captchaRef = ref<{ refresh:() => void } | null>(null)
 

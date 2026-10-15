@@ -1,15 +1,12 @@
 package com.yx.uavfire.fc100.mission.controller;
 
 import com.yx.uavfire.fc100.common.ApiResult;
-import com.yx.uavfire.fc100.common.Fc100BusinessException;
-import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.common.idempotency.Idempotent;
 import com.yx.uavfire.fc100.mission.model.dto.FireMissionDTO;
 import com.yx.uavfire.fc100.mission.model.dto.MissionLogDTO;
+import com.yx.uavfire.fc100.mission.service.Fc100OperatorResolver;
+import com.yx.uavfire.fc100.mission.service.MissionApprovalService;
 import com.yx.uavfire.fc100.mission.service.MissionLogService;
-import com.yx.uavfire.fc100.safety.model.dto.SafetyCheckResult;
-import com.yx.uavfire.fc100.safety.model.enums.SafetyCheckPhase;
-import com.yx.uavfire.fc100.safety.service.SafetyCheckService;
 import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionEvent;
 import com.yx.uavfire.fc100.mission.model.enums.FireMissionStatus;
@@ -42,15 +39,18 @@ public class FireMissionController {
 
     private final MissionStateMachine sm;
     private final FireMissionService missionService;
-    private final SafetyCheckService safety;
     private final MissionLogService missionLogService;
+    private final MissionApprovalService approvalService;
+    private final Fc100OperatorResolver operators;
 
     public FireMissionController(MissionStateMachine sm, FireMissionService ms,
-                                  SafetyCheckService safety, MissionLogService missionLogService) {
+                                  MissionLogService missionLogService,
+                                  MissionApprovalService approvalService, Fc100OperatorResolver operators) {
         this.sm = sm;
         this.missionService = ms;
-        this.safety = safety;
         this.missionLogService = missionLogService;
+        this.approvalService = approvalService;
+        this.operators = operators;
     }
 
     // ============= 查询 =============
@@ -82,21 +82,9 @@ public class FireMissionController {
     public ApiResult<FireMissionEntity> approve(@PathVariable("no") String no,
                                                  @Valid @RequestBody MissionApproveParam p,
                                                  HttpServletRequest req) {
-        // 第一步：将审批参数写入 mission（这样 SafetyCheck 才能看到 windSpeed 等）
-        FireMissionEntity result = sm.transit(cmd(no, FireMissionEvent.APPROVE, p.getOperatorId(), req)
-            .expectedFrom(FireMissionStatus.WAITING_REVIEW)
-            .payload(buildApprovePayload(p))
-            .remark(p.getRemark())
-            .build());
-
-        // 第二步：审批后立即跑 BEFORE_APPROVE 安全校验（事后校验：风速 11 这种参数已落库）
-        // 任何 ERROR 立即抛 → 用户会看到 mission 已是 APPROVED 但收到 SAFETY_CHECK_FAILED
-        SafetyCheckResult sc = safety.check(SafetyCheckPhase.BEFORE_APPROVE, no);
-        if (!sc.isPassed()) {
-            throw new Fc100BusinessException(Fc100ErrorCode.SAFETY_CHECK_FAILED,
-                "safety check failed: " + sc.getIssues().toString());
-        }
-        return ApiResult.success(result);
+        Fc100OperatorResolver.ResolvedOperator operator = operators.resolve(req, p.getOperatorId());
+        return ApiResult.success(approvalService.approve(
+                no, p, operator.operatorId, operator.role, req));
     }
 
     @PostMapping("/{no}/reject")
@@ -133,9 +121,19 @@ public class FireMissionController {
     public ApiResult<FireMissionEntity> forceFail(@PathVariable("no") String no,
                                                    @Valid @RequestBody SimpleOperatorParam p,
                                                    HttpServletRequest req) {
+        operators.requireForceFail(req);
         return ApiResult.success(sm.transit(cmd(no, FireMissionEvent.FORCE_FAIL, p.getOperatorId(), req)
-            .operatorRole("ADMIN")
             .payload(Map.of("reason", p.getReason() != null ? p.getReason() : ""))
+            .build()));
+    }
+
+    @PostMapping("/{no}/pilot-accept")
+    @Idempotent("mission.pilot-accept")
+    public ApiResult<FireMissionEntity> pilotAccept(@PathVariable("no") String no,
+                                                     @Valid @RequestBody SimpleOperatorParam p,
+                                                     HttpServletRequest req) {
+        return ApiResult.success(sm.transit(cmd(no, FireMissionEvent.PILOT_ACCEPT, p.getOperatorId(), req)
+            .expectedFrom(FireMissionStatus.SENT_TO_DELIVERY)
             .build()));
     }
 
@@ -195,26 +193,14 @@ public class FireMissionController {
 
     private TransitCommand.TransitCommandBuilder cmd(String missionNo, FireMissionEvent ev,
                                                       String operatorId, HttpServletRequest req) {
+        Fc100OperatorResolver.ResolvedOperator operator = operators.resolve(req, operatorId);
         return TransitCommand.builder()
             .missionNo(missionNo)
             .event(ev)
-            .operatorId(operatorId)
+            .operatorId(operator.operatorId)
+            .operatorRole(operator.role)
             .clientIp(req.getRemoteAddr())
             .requestId(req.getHeader("X-Request-Id"))
             .idempotencyKey(req.getHeader("X-Idempotency-Key"));
-    }
-
-    private Map<String, Object> buildApprovePayload(MissionApproveParam p) {
-        // 不能用 Map.entry —— null value 会立刻 NPE。手工 HashMap + 仅放非空。
-        java.util.Map<String, Object> m = new java.util.HashMap<>();
-        if (p.getAircraftSn() != null)        m.put("aircraftSn", p.getAircraftSn());
-        if (p.getPayloadId() != null)         m.put("payloadId", p.getPayloadId());
-        if (p.getWaterLoadLiters() != null)   m.put("waterLoadLiters", p.getWaterLoadLiters());
-        if (p.getTakeoffLat() != null)        m.put("takeoffLat", p.getTakeoffLat());
-        if (p.getTakeoffLng() != null)        m.put("takeoffLng", p.getTakeoffLng());
-        if (p.getTakeoffAlt() != null)        m.put("takeoffAlt", p.getTakeoffAlt());
-        if (p.getWindSpeed() != null)         m.put("windSpeed", p.getWindSpeed());
-        if (p.getWindDirectionDeg() != null)  m.put("windDirectionDeg", p.getWindDirectionDeg());
-        return m;
     }
 }

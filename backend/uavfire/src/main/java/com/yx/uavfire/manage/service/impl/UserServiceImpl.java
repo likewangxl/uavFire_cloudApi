@@ -6,6 +6,8 @@ import com.auth0.jwt.interfaces.DecodedJWT;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import org.springframework.beans.factory.annotation.Value;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yx.uavfire.common.model.CustomClaim;
 import com.yx.uavfire.common.util.JwtUtil;
@@ -48,6 +50,11 @@ public class UserServiceImpl implements IUserService {
 
     @Autowired
     private IWorkspaceService workspaceService;
+
+    private final PasswordHasher passwordHasher = new PasswordHasher();
+
+    @Value("${uavfire.auth.demo-login-enabled:false}")
+    private boolean demoLoginEnabled;
 
     @Autowired
     private ICaptchaService captchaService;
@@ -99,11 +106,12 @@ public class UserServiceImpl implements IUserService {
         if (flag.intValue() != userEntity.getUserType().intValue()) {
             return HttpResultResponse.error("The account type does not match.");
         }
-        if (!password.equals(userEntity.getPassword())) {
+        if (!passwordHasher.matches(password, userEntity.getPassword())) {
             return new HttpResultResponse()
                     .setCode(HttpStatus.UNAUTHORIZED.value())
                     .setMessage("invalid password");
         }
+        upgradePlaintextPassword(userEntity, password);
 
         Optional<WorkspaceDTO> workspaceOpt = workspaceService.getWorkspaceByWorkspaceId(userEntity.getWorkspaceId());
         if (workspaceOpt.isEmpty()) {
@@ -117,6 +125,11 @@ public class UserServiceImpl implements IUserService {
 
     @Override
     public HttpResultResponse demoLogin() {
+        if (!demoLoginEnabled) {
+            return new HttpResultResponse()
+                    .setCode(HttpStatus.FORBIDDEN.value())
+                    .setMessage("演示登录未启用");
+        }
         UserEntity userEntity = this.getUserByUsername("adminPC");
         if (userEntity == null) {
             return new HttpResultResponse()
@@ -132,6 +145,17 @@ public class UserServiceImpl implements IUserService {
         }
 
         return signAndPack(userEntity, workspaceOpt.get());
+    }
+
+    private void upgradePlaintextPassword(UserEntity userEntity, String rawPassword) {
+        if (userEntity == null || passwordHasher.isHashed(userEntity.getPassword())) {
+            return;
+        }
+        String hashed = passwordHasher.hash(rawPassword);
+        userEntity.setPassword(hashed);
+        mapper.update(null, new UpdateWrapper<UserEntity>()
+                .eq("username", userEntity.getUsername())
+                .set("password", hashed));
     }
 
     /**
