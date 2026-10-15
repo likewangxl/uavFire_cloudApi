@@ -30,6 +30,7 @@ public final class TransitionTable {
         new EnumMap<>(FireMissionStatus.class);
 
     static {
+        put(CREATED, APPROVE, APPROVED);
         put(CREATED, CANCEL, CANCELLED);
         put(CREATED, FORCE_FAIL, FAILED);
 

@@ -139,7 +139,7 @@ class EndToEndMockDrillTest {
         FireEventDecisionResult confirmed = f.fireEventService.confirm("S8-EVT-001", f.fireAction("commander-1"), f.request("REQ-CONFIRM"));
         assertEquals(OperationIncidentStatus.CONFIRMED.name(), confirmed.getIncident().getStatus());
         FireMissionEntity mission = f.onlyMission();
-        assertEquals(FireMissionStatus.CREATED.name(), mission.getStatus());
+        assertEquals(FireMissionStatus.WAITING_REVIEW.name(), mission.getStatus());
         assertEquals(confirmed.getIncident().getId(), mission.getIncidentId());
 
         OperationAssignmentEntity assignment = f.incidentService.assignDelivery(confirmed.getIncident().getId(),

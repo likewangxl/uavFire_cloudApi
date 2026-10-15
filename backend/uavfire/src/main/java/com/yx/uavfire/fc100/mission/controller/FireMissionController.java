@@ -82,9 +82,9 @@ public class FireMissionController {
     public ApiResult<FireMissionEntity> approve(@PathVariable("no") String no,
                                                  @Valid @RequestBody MissionApproveParam p,
                                                  HttpServletRequest req) {
-        // 第一步：将审批参数写入 mission（这样 SafetyCheck 才能看到 windSpeed 等）
+        // 确认火情生成的草稿历史上停在 CREATED，审批入口又只写了 WAITING_REVIEW，
+        // 两边对不上时任务无法进入 APPROVED。两种状态都允许审批，由转移表兜住其它状态。
         FireMissionEntity result = sm.transit(cmd(no, FireMissionEvent.APPROVE, p.getOperatorId(), req)
-            .expectedFrom(FireMissionStatus.WAITING_REVIEW)
             .payload(buildApprovePayload(p))
             .remark(p.getRemark())
             .build());
