@@ -42,13 +42,16 @@ public class JwtUtil {
         JwtUtil.age = age * 1000;
     }
 
-    @Value("${jwt.secret: CloudApiSample}")
+    @Value("${jwt.secret:}")
     private void setSecret(String secret) {
-        JwtUtil.secret = secret;
-        setAlgorithm();
+        if (secret == null || secret.isBlank() || JwtSecretGuard.SAMPLE_SECRET.equals(secret)) {
+            return;
+        }
+        applySecret(secret);
     }
 
-    private void setAlgorithm() {
+    public static void applySecret(String secret) {
+        JwtUtil.secret = secret;
         JwtUtil.algorithm = Algorithm.HMAC256(secret);
     }
 

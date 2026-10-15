@@ -25,7 +25,7 @@ public class PreflightRuleEngine {
             new WindLimitRule(),
             new PayloadLimitRule(),
             new LocationQualityRule(),
-            new BoundaryRule(),
+            new BoundaryRule(properties.isBlockWhenUomMissing()),
             new OperatorConfirmationRule(),
             new ResourceLeaseConflictRule(),
             new DangerousCommandQueueRule(),

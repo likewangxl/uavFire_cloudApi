@@ -70,6 +70,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -116,7 +117,8 @@ class DeliveryControllerApifoxWorkflowTest {
 
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(approved, routeGenerated, routeExported);
         when(eventMapper.selectById(99L)).thenReturn(event);
-        when(safety.check(any(), any())).thenReturn(safe);
+        when(safety.check(any(), any(String.class))).thenReturn(safe);
+        when(safety.check(any(), any(FireMissionEntity.class))).thenReturn(safe);
         when(planner.plan(any(WaypointGenerateParam.class))).thenReturn(List.of(wp));
         when(routeService.exportKmz("M-AUTO-001", "operator-1", "127.0.0.1", "REQ-001")).thenReturn(route);
         when(routeService.getLatest("M-AUTO-001")).thenReturn(route);
@@ -190,7 +192,8 @@ class DeliveryControllerApifoxWorkflowTest {
 
         when(missionMapper.selectOne(any(Wrapper.class))).thenReturn(approved, routeGenerated, routeExported);
         when(eventMapper.selectById(99L)).thenReturn(event);
-        when(safety.check(any(), any())).thenReturn(safe);
+        when(safety.check(any(), any(String.class))).thenReturn(safe);
+        when(safety.check(any(), any(FireMissionEntity.class))).thenReturn(safe);
         when(planner.plan(any(WaypointGenerateParam.class))).thenReturn(List.of(wp));
         when(routeService.exportKmz("M-LASER-001", "operator-1", "127.0.0.1", "REQ-001")).thenReturn(route);
         when(routeService.getLatest("M-LASER-001")).thenReturn(route);
@@ -288,7 +291,7 @@ class DeliveryControllerApifoxWorkflowTest {
         assertEquals("NEW-TASK-001", result.getData().getTaskId());
         verify(adapter).importWayline(any(WaylineImportRequest.class));
         verify(adapter).createTask(any(CreateTaskRequest.class));
-        verify(missionMapper).update(any(), any(UpdateWrapper.class));
+        verify(missionMapper, atLeastOnce()).update(any(), any(UpdateWrapper.class));
         ArgumentCaptor<TransitCommand> transit = ArgumentCaptor.forClass(TransitCommand.class);
         verify(stateMachine).transit(transit.capture());
         assertEquals(FireMissionEvent.CREATE_DELIVERY_TASK, transit.getValue().getEvent());

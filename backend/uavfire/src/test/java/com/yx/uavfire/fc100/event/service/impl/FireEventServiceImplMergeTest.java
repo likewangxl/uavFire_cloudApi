@@ -870,6 +870,32 @@ class FireEventServiceImplMergeTest {
     }
 
     @Test
+    void unlocatedCreate_keepsAircraftPositionOutOfFirePointFields() {
+        FireEventCreateParam unlocated = param(
+            "agent-visible-unlocated-coords", 34.9607, 109.3163, "HIGH", "0.81", 1779163440000L);
+        unlocated.setGeoQuality("UNLOCATED");
+        unlocated.setAlt(120.0);
+        when(events.selectOne(any(QueryWrapper.class))).thenReturn(null);
+        when(events.insert(any(FireEventEntity.class))).thenAnswer(inv -> {
+            FireEventEntity e = inv.getArgument(0);
+            e.setId(11L);
+            return 1;
+        });
+
+        build().create(unlocated);
+
+        ArgumentCaptor<FireEventEntity> inserted = ArgumentCaptor.forClass(FireEventEntity.class);
+        verify(events).insert(inserted.capture());
+        assertNull(inserted.getValue().getLat());
+        assertNull(inserted.getValue().getLng());
+        assertNull(inserted.getValue().getAlt());
+        assertEquals(34.9607, inserted.getValue().getAircraftLat(), 1e-6);
+        assertEquals(109.3163, inserted.getValue().getAircraftLng(), 1e-6);
+        assertEquals("UNLOCATED", inserted.getValue().getGeoQuality());
+        verify(events, never()).selectList(any(QueryWrapper.class));
+    }
+
+    @Test
     void thermal_event_without_geo_uses_existing_resolution() {
         FireGeoLocationService geoService = mock(FireGeoLocationService.class);
         FireGeoSnapshotDTO snapshot = new FireGeoSnapshotDTO().setSourceTs(1779163439000L);

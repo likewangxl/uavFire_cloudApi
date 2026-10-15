@@ -2,6 +2,7 @@ package com.yx.uavfire.manage.service.impl;
 
 import com.auth0.jwt.algorithms.Algorithm;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.yx.uavfire.common.util.JwtUtil;
 import com.yx.uavfire.manage.dao.IUserMapper;
 import com.yx.uavfire.manage.model.dto.WorkspaceDTO;
@@ -14,15 +15,19 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -106,6 +111,28 @@ class UserServiceImplLoginTest {
     }
 
     @Test
+    void userLogin_upgradesPlaintextPasswordToBcrypt() {
+        when(captchaService.verifyAndConsume("tok", "ABCD")).thenReturn(true);
+        when(mapper.selectOne(any(QueryWrapper.class))).thenReturn(adminPC);
+        when(workspaceService.getWorkspaceByWorkspaceId("ws-1")).thenReturn(Optional.of(workspace));
+
+        UserServiceImpl spySvc = spy(service);
+        doReturn("tcp://test:1883").when(spySvc).resolveMqttAddress();
+
+        HttpResultResponse r = spySvc.userLogin("adminPC", "adminPC", 1, "ABCD", "tok");
+
+        assertEquals(0, r.getCode());
+        assertTrue(adminPC.getPassword().startsWith("{bcrypt}"));
+        ArgumentCaptor<UpdateWrapper<UserEntity>> update = ArgumentCaptor.forClass(UpdateWrapper.class);
+        verify(mapper).update(isNull(), update.capture());
+        String sql = String.valueOf(update.getValue().getSqlSegment()) + update.getValue().getSqlSet();
+        assertTrue(sql.contains("username"));
+        assertTrue(sql.contains("password"));
+        assertTrue(update.getValue().getParamNameValuePairs().values().stream()
+                .anyMatch(value -> value instanceof String && ((String) value).startsWith("{bcrypt}")));
+    }
+
+    @Test
     void userLogin_skipsCaptchaForPilotLogin() {
         when(mapper.selectOne(any(QueryWrapper.class))).thenReturn(pilot);
         when(workspaceService.getWorkspaceByWorkspaceId("ws-1")).thenReturn(Optional.of(workspace));
@@ -125,7 +152,16 @@ class UserServiceImplLoginTest {
     }
 
     @Test
+    void demoLogin_isRejectedWhenDisabled() {
+        HttpResultResponse r = service.demoLogin();
+
+        assertEquals(HttpStatus.FORBIDDEN.value(), r.getCode());
+        verifyNoInteractions(mapper);
+    }
+
+    @Test
     void demoLogin_returnsSuccessForAdminPC() {
+        ReflectionTestUtils.setField(service, "demoLoginEnabled", true);
         when(mapper.selectOne(any(QueryWrapper.class))).thenReturn(adminPC);
         when(workspaceService.getWorkspaceByWorkspaceId("ws-1")).thenReturn(Optional.of(workspace));
 
@@ -140,6 +176,7 @@ class UserServiceImplLoginTest {
 
     @Test
     void demoLogin_failsWhenAdminPCMissing() {
+        ReflectionTestUtils.setField(service, "demoLoginEnabled", true);
         when(mapper.selectOne(any(QueryWrapper.class))).thenReturn(null);
 
         HttpResultResponse r = service.demoLogin();

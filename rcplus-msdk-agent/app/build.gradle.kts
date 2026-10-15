@@ -23,6 +23,10 @@ val agentFireOnnxEnabled = providers.gradleProperty("agentFireOnnxEnabled").orEl
 val agentFireModelProfile = providers.gradleProperty("agentFireModelProfile").orElse("legacy416")
 val agentFireIntraOpThreads = providers.gradleProperty("agentFireIntraOpThreads").orElse("4")
 val agentFireInterOpThreads = providers.gradleProperty("agentFireInterOpThreads").orElse("1")
+val agentMsdkDeviceToken = providers.gradleProperty("agentMsdkDeviceToken").orElse("")
+val trialMode = providers.gradleProperty("uavfire.trial.mode").orElse("off")
+val trialExpiresAtEpochMs = providers.gradleProperty("uavfire.trial.expiresAtEpochMs").orElse("1790784000000")
+val trialAllowUnlimited = providers.gradleProperty("uavfire.trial.allowUnlimited").orElse("false")
 
 android {
     namespace = "com.yinxin.uavfir"
@@ -61,9 +65,21 @@ android {
         buildConfigField("String", "AGENT_FIRE_MODEL_PROFILE", "\"${agentFireModelProfile.get()}\"")
         buildConfigField("int", "AGENT_FIRE_INTRA_OP_THREADS", agentFireIntraOpThreads.get())
         buildConfigField("int", "AGENT_FIRE_INTER_OP_THREADS", agentFireInterOpThreads.get())
-        buildConfigField("long", "TRIAL_EXPIRES_AT_EPOCH_MS", "1790784000000L")
+        buildConfigField("String", "AGENT_MSDK_DEVICE_TOKEN", "\"${agentMsdkDeviceToken.get()}\"")
+        buildConfigField("String", "TRIAL_MODE", "\"${trialMode.get()}\"")
+        buildConfigField("long", "TRIAL_EXPIRES_AT_EPOCH_MS", "${trialExpiresAtEpochMs.get()}L")
+        buildConfigField("boolean", "TRIAL_ALLOW_UNLIMITED", trialAllowUnlimited.get())
         ndk {
             abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    buildTypes {
+        debug {
+            buildConfigField("boolean", "TRIAL_RELEASE_BUILD", "false")
+        }
+        release {
+            buildConfigField("boolean", "TRIAL_RELEASE_BUILD", "true")
         }
     }
 

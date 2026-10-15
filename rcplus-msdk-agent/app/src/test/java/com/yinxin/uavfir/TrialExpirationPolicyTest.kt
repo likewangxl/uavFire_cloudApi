@@ -12,7 +12,7 @@ class TrialExpirationPolicyTest {
 
     @Test
     fun remainsUsableImmediatelyBeforeCutoff() {
-        val policy = TrialExpirationPolicy { BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS - 1L }
+        val policy = untilPolicy(BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS - 1L)
 
         assertEquals(false, policy.isExpired())
         assertEquals(1L, policy.remainingMs())
@@ -20,13 +20,26 @@ class TrialExpirationPolicyTest {
 
     @Test
     fun expiresAtAndAfterCutoff() {
-        assertEquals(
-            true,
-            TrialExpirationPolicy { BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS }.isExpired(),
-        )
-        assertEquals(
-            true,
-            TrialExpirationPolicy { BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS + 1L }.isExpired(),
-        )
+        assertEquals(true, untilPolicy(BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS).isExpired())
+        assertEquals(true, untilPolicy(BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS + 1L).isExpired())
     }
+
+    @Test
+    fun debugOffModeDoesNotExpireAndReleaseOffModeFailsClosed() {
+        val now = BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS + 1L
+        assertEquals(false, policy(now, mode = "off", releaseBuild = false, allowUnlimited = false).isExpired())
+        assertEquals(true, policy(now, mode = "off", releaseBuild = true, allowUnlimited = false).isExpired())
+        assertEquals(false, policy(now, mode = "off", releaseBuild = true, allowUnlimited = true).isExpired())
+    }
+
+    private fun untilPolicy(now: Long) = policy(now, mode = "until", releaseBuild = false, allowUnlimited = false)
+
+    private fun policy(now: Long, mode: String, releaseBuild: Boolean, allowUnlimited: Boolean) =
+        TrialExpirationPolicy(
+            nowMs = { now },
+            mode = mode,
+            expiresAtEpochMs = BuildConfig.TRIAL_EXPIRES_AT_EPOCH_MS,
+            releaseBuild = releaseBuild,
+            allowUnlimited = allowUnlimited,
+        )
 }

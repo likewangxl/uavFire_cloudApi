@@ -4,6 +4,7 @@ package com.yx.uavfire.fc100.mission.model.enums;
 public enum OperatorRole {
     DISPATCHER,
     APPROVER,
+    COMMANDER,
     OPERATOR,
     REVIEWER,
     ADMIN

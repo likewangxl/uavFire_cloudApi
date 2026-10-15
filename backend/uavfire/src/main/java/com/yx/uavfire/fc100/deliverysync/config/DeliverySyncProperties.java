@@ -18,6 +18,8 @@ public class DeliverySyncProperties {
     private int connectTimeoutMs = 5000;
     private int readTimeoutMs = 15000;
     private int manualTakeoverFailureThreshold = 3;
+    /** Production refuses mock unless this is explicitly true. */
+    private boolean allowMock = false;
     private Retry retry = new Retry();
 
     @Data

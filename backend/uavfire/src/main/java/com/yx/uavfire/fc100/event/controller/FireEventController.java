@@ -13,6 +13,7 @@ import com.yx.uavfire.fc100.event.model.param.FireEventActionParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventCreateParam;
 import com.yx.uavfire.fc100.event.model.param.FireEventRecheckResultParam;
 import com.yx.uavfire.fc100.event.service.FireEventService;
+import com.yx.uavfire.fc100.mission.service.Fc100OperatorResolver;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -30,9 +31,11 @@ import java.util.List;
 public class FireEventController {
 
     private final FireEventService service;
+    private final Fc100OperatorResolver operators;
 
-    public FireEventController(FireEventService s) {
+    public FireEventController(FireEventService s, Fc100OperatorResolver operators) {
         this.service = s;
+        this.operators = operators;
     }
 
     @GetMapping
@@ -54,6 +57,7 @@ public class FireEventController {
             @PathVariable String eventId,
             @Valid @RequestBody FireEventActionParam param,
             HttpServletRequest request) {
+        stampOperator(request, param);
         return ApiResult.success(service.confirm(eventId, param, request));
     }
 
@@ -63,6 +67,7 @@ public class FireEventController {
             @PathVariable String eventId,
             @Valid @RequestBody FireEventActionParam param,
             HttpServletRequest request) {
+        stampOperator(request, param);
         return ApiResult.success(service.reject(eventId, param, request));
     }
 
@@ -90,5 +95,15 @@ public class FireEventController {
             @PathVariable String eventId,
             @RequestParam(defaultValue = "100") int limit) {
         return ApiResult.success(service.listHistory(eventId, limit));
+    }
+
+    private void stampOperator(HttpServletRequest request, FireEventActionParam param) {
+        if (param == null) {
+            return;
+        }
+        Fc100OperatorResolver.ResolvedOperator operator = operators.resolve(request, param.getOperatorId());
+        if (operator.authenticated) {
+            param.setOperatorId(operator.operatorId);
+        }
     }
 }

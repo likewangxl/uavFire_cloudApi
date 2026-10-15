@@ -76,7 +76,7 @@
             查看历史
           </a-button>
           <a-button
-            v-if="missionForEvent(record)?.status === 'WAITING_REVIEW'"
+            v-if="missionForEvent(record)?.status === 'WAITING_REVIEW' || missionForEvent(record)?.status === 'CREATED'"
             size="small"
             @click="openApprove(record)"
           >

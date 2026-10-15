@@ -3,6 +3,7 @@ package com.yinxin.uavfir.api
 import com.google.gson.FieldNamingPolicy
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -18,11 +19,20 @@ object AgentBackendApiFactory {
     }
 
     private fun retrofit(config: AgentBackendConfig): Retrofit {
-        val client = OkHttpClient.Builder()
+        val clientBuilder = OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
-            .build()
+        if (config.deviceToken.isNotBlank()) {
+            clientBuilder.addInterceptor(Interceptor { chain ->
+                chain.proceed(
+                    chain.request().newBuilder()
+                        .header("X-Msdk-Device-Token", config.deviceToken)
+                        .build()
+                )
+            })
+        }
+        val client = clientBuilder.build()
 
         return Retrofit.Builder()
             .baseUrl(config.baseUrl)

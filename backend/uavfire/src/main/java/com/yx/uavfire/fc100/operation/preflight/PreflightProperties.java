@@ -16,6 +16,8 @@ public class PreflightProperties {
     private double maxWindMps = 12.0;
     private double maxTotalWeightKg = 85.0;
     private double maxNetPayloadKg = 35.0;
+    /** Java default stays warn-only so in-memory drills keep working. application.yml turns this on. */
+    private boolean blockWhenUomMissing = false;
     private Map<String, Boolean> rules = new HashMap<>();
     private TimeBudget timeBudget = new TimeBudget();
 

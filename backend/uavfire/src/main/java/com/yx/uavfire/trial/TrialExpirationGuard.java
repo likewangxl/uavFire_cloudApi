@@ -6,15 +6,13 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PreDestroy;
-import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Refuses to create an expired backend and closes a running Spring context at
- * the exact cutoff. Closing the context also tears down HTTP, WebSocket, MQTT,
- * scheduled jobs and database pools owned by this process.
+ * Refuses to create an expired backend and, when a cutoff is configured, closes
+ * the Spring context at that instant.
  */
 @Component
 public final class TrialExpirationGuard {
@@ -22,13 +20,18 @@ public final class TrialExpirationGuard {
     private static final Logger log = LoggerFactory.getLogger(TrialExpirationGuard.class);
 
     private final ConfigurableApplicationContext applicationContext;
+    private final TrialExpirationPolicy policy;
     private final ScheduledExecutorService scheduler;
 
-    public TrialExpirationGuard(ConfigurableApplicationContext applicationContext) {
+    public TrialExpirationGuard(ConfigurableApplicationContext applicationContext, TrialLicense trialLicense) {
         this.applicationContext = applicationContext;
-        TrialExpirationPolicy policy = TrialExpirationPolicy.systemClock();
-        if (policy.isExpired()) {
-            throw new IllegalStateException(TrialExpirationPolicy.EXPIRED_MESSAGE);
+        this.policy = trialLicense.policy();
+        policy.assertCanStart();
+        if (!policy.schedulesShutdown()) {
+            this.scheduler = null;
+            log.info("Trial cutoff disabled for this process; mode={} display={}",
+                    policy.modeName(), policy.display());
+            return;
         }
 
         scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -36,18 +39,19 @@ public final class TrialExpirationGuard {
             thread.setDaemon(true);
             return thread;
         });
-        Duration remaining = policy.remaining();
-        scheduler.schedule(this::expireApplication, remaining.toMillis(), TimeUnit.MILLISECONDS);
-        log.warn("Trial build enabled; backend expires at {}", TrialExpirationPolicy.EXPIRES_AT_DISPLAY);
+        scheduler.schedule(this::expireApplication, policy.remaining().toMillis(), TimeUnit.MILLISECONDS);
+        log.warn("Trial cutoff enabled; backend expires at {}", policy.display());
     }
 
     private void expireApplication() {
-        log.error("{}; shutting down backend", TrialExpirationPolicy.EXPIRED_MESSAGE);
+        log.error("{}; shutting down backend", policy.expiredMessage());
         applicationContext.close();
     }
 
     @PreDestroy
     public void destroy() {
-        scheduler.shutdownNow();
+        if (scheduler != null) {
+            scheduler.shutdownNow();
+        }
     }
 }

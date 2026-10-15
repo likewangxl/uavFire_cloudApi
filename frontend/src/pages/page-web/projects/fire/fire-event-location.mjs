@@ -1,10 +1,11 @@
-const UNUSABLE_LASER_QUALITY = new Set(['LASER_LOCATING', 'LASER_FAILED'])
+const UNUSABLE_LASER_QUALITY = new Set(['LASER_LOCATING', 'LASER_FAILED', 'UNLOCATED'])
 const ROUTE_READY_QUALITY = new Set(['AUTO_WAYPOINT_READY', 'READY', 'OK', 'PRECISE'])
 
 export function formatFireLocation (event, digits = 5, missing = '位置未返回') {
   const quality = normalizeGeoQuality(event)
   if (quality === 'LASER_LOCATING') return '正在精确定位'
   if (quality === 'LASER_FAILED') return '激光定位失败'
+  if (quality === 'UNLOCATED') return '火点未定位'
   const lat = Number(event?.lat ?? event?.latitude)
   const lng = Number(event?.lng ?? event?.longitude)
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return missing

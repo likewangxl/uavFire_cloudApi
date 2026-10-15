@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yx.uavfire.fc100.common.Fc100BusinessException;
 import com.yx.uavfire.fc100.common.Fc100ErrorCode;
 import com.yx.uavfire.fc100.deliverysync.DeliverySyncAdapter;
+import com.yx.uavfire.fc100.deliverysync.HookCommandGuard;
 import com.yx.uavfire.fc100.deliverysync.model.param.DeviceCommandRequest;
 import com.yx.uavfire.fc100.operation.command.CommandExecutor;
 import com.yx.uavfire.fc100.operation.model.entity.OperationCommandEventEntity;
@@ -48,6 +49,12 @@ public class DeliverySyncCommandExecutor implements CommandExecutor {
             String missionNo = text(payload, "missionNo");
             String deviceSn = text(payload, "deviceSn");
             String method = text(payload, "deviceCmdMethod");
+            if (method == null) {
+                method = command.getCommandType();
+            }
+            boolean releaseAuthorized = payload.has(HookCommandGuard.RELEASE_AUTHORIZED)
+                && payload.get(HookCommandGuard.RELEASE_AUTHORIZED).asBoolean(false);
+            HookCommandGuard.rejectUnlessAuthorized(method, releaseAuthorized);
             JsonNode dataNode = payload.get("deviceCmdData");
             Map<String, Object> data = dataNode == null || dataNode.isNull()
                 ? Map.of()

@@ -1,5 +1,6 @@
 package com.yx.uavfire.fc100.safety.service;
 
+import com.yx.uavfire.fc100.mission.model.entity.FireMissionEntity;
 import com.yx.uavfire.fc100.safety.model.dto.SafetyCheckResult;
 import com.yx.uavfire.fc100.safety.model.enums.SafetyCheckPhase;
 
@@ -9,4 +10,7 @@ public interface SafetyCheckService {
      * @return passed=true 表示无 ERROR；issues 列出全部 WARN/ERROR。
      */
     SafetyCheckResult check(SafetyCheckPhase phase, String missionNo);
+
+    /** Same checks against an in-memory mission, used before approval is persisted. */
+    SafetyCheckResult check(SafetyCheckPhase phase, FireMissionEntity mission);
 }

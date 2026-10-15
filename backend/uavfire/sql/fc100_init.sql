@@ -129,6 +129,8 @@ CREATE TABLE `fc100_fire_mission` (
   `wind_speed_at_approval` double DEFAULT NULL,
   `wind_direction_deg` double DEFAULT NULL COMMENT 'meteorological: 风从哪边来 [0,360)',
   `dji_task_id` varchar(128) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL,
+  `delivery_intent_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT 'local id written before an external delivery create',
+  `delivery_intent_status` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT 'PENDING / FAILED / EXTERNAL_CREATED / LOCAL_COMMIT_FAILED',
   `latest_route_file_id` bigint unsigned DEFAULT NULL,
   `release_policy` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT 'MANUAL_CONFIRM' COMMENT 'MANUAL_CONFIRM / DRY_RUN / CONTROLLED_TEST_AUTO',
   `release_execution_mode` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT 'OFFICIAL_HOOK_MANUAL' COMMENT 'OFFICIAL_HOOK_MANUAL / DELIVERY_SYNC_REMOTE / PSDK_RELEASE',
